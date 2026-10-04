@@ -1,0 +1,39 @@
+{
+  "_note": "SAMPLE HEADLINES written for offline demos. They are not real news. Every item is loaded with is_sample = true. days_ago is relative to load time.",
+  "copper": [
+    {"title": "Workers at a large Chilean copper mine vote to strike over wage offer", "days_ago": 1, "is_sample": true},
+    {"title": "Copper smelter in Zambia restarts after maintenance shutdown", "days_ago": 2, "is_sample": true},
+    {"title": "Peru road blockades disrupt copper concentrate shipments", "days_ago": 3, "is_sample": true},
+    {"title": "Chinese copper demand slump weighs on refined cathode premiums", "days_ago": 4, "is_sample": true},
+    {"title": "Exchange copper inventory build continues for third week", "days_ago": 5, "is_sample": true},
+    {"title": "Indonesia export restriction on copper concentrate extended", "days_ago": 6, "is_sample": true},
+    {"title": "Analysts see copper market broadly balanced next quarter", "days_ago": 8, "is_sample": true},
+    {"title": "Flood forces temporary closure at African copper mine", "days_ago": 10, "is_sample": true},
+    {"title": "Copper mine restart in Panama under discussion", "days_ago": 12, "is_sample": true},
+    {"title": "Smelter outage in India tightens local copper supply", "days_ago": 13, "is_sample": true}
+  ],
+  "aluminium": [
+    {"title": "Power shortage forces aluminium smelter cutbacks in southern China", "days_ago": 1, "is_sample": true},
+    {"title": "Aluminium surplus expected as new capacity comes online", "days_ago": 2, "is_sample": true},
+    {"title": "Bauxite export ban talk resurfaces in Guinea", "days_ago": 4, "is_sample": true},
+    {"title": "Aluminum inventory build at exchange warehouses", "days_ago": 5, "is_sample": true},
+    {"title": "Tariff cut on aluminium scrap imports announced", "days_ago": 6, "is_sample": true},
+    {"title": "Alumina refinery outage after equipment failure", "days_ago": 7, "is_sample": true},
+    {"title": "Aluminium demand from auto sector holds steady", "days_ago": 9, "is_sample": true},
+    {"title": "Sanctions risk on aluminium supply debated by traders", "days_ago": 10, "is_sample": true},
+    {"title": "Aluminium oversupply concerns weigh on prices", "days_ago": 12, "is_sample": true},
+    {"title": "Smelter in the Middle East completes expansion", "days_ago": 13, "is_sample": true}
+  ],
+  "iron_ore": [
+    {"title": "Iron ore port shipments hit by cyclone in Western Australia", "days_ago": 1, "is_sample": true},
+    {"title": "Chinese steel output cut signals iron ore demand slump", "days_ago": 2, "is_sample": true},
+    {"title": "Iron ore inventory build at Chinese ports", "days_ago": 3, "is_sample": true},
+    {"title": "Brazil iron ore mine closure after dam safety review", "days_ago": 5, "is_sample": true},
+    {"title": "Steelmaker margins improve as iron ore supply rises", "days_ago": 6, "is_sample": true},
+    {"title": "India considers export restriction on iron ore fines", "days_ago": 7, "is_sample": true},
+    {"title": "Iron ore oversupply expected as new mine ramps up", "days_ago": 9, "is_sample": true},
+    {"title": "Rail strike in iron ore region delays deliveries", "days_ago": 10, "is_sample": true},
+    {"title": "Iron ore market steady ahead of holiday season", "days_ago": 11, "is_sample": true},
+    {"title": "Mine restart lifts iron ore supply outlook", "days_ago": 13, "is_sample": true}
+  ]
+}

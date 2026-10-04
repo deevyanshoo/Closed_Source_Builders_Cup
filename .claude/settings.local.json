@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(brew --prefix libomp)",
+      "Bash(.venv/bin/python -c \"import duckdb, lightgbm, statsmodels, streamlit, fastapi, google.genai; print\\('ok', lightgbm.__version__\\)\")",
+      "Bash(.venv/bin/python -c \"import duckdb, statsmodels, streamlit, fastapi, google.genai, sklearn, httpx, plotly, openpyxl, yaml, pydantic_settings; print\\('ok'\\)\")",
+      "Bash(.venv/bin/pip freeze *)",
+      "Bash(.venv/bin/python -)"
+    ]
+  }
+}

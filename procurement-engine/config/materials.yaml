@@ -1,0 +1,35 @@
+# Materials supported by the procurement engine.
+# Add a new material by adding a block here. The source_series must match a
+# column header in the World Bank Pink Sheet "Monthly Prices" sheet.
+materials:
+  copper:
+    display_name: Copper
+    source_series: Copper
+    source_unit: USD per metric tonne
+    kg_per_unit: 1000
+    keywords: [copper, cathode]
+    gdelt_query: "(copper OR smelter) (strike OR ban OR shortage OR tariff OR outage OR supply)"
+    rss_query: "copper (strike OR ban OR shortage OR tariff OR outage OR smelter OR surplus OR supply)"
+    synthetic: {start: 7400, low: 6000, high: 10500, monthly_vol: 0.06}
+  aluminium:
+    display_name: Aluminium
+    source_series: Aluminum
+    source_unit: USD per metric tonne
+    kg_per_unit: 1000
+    keywords: [aluminium, aluminum, alumina, bauxite]
+    gdelt_query: "(aluminium OR aluminum OR alumina OR bauxite) (strike OR ban OR shortage OR tariff OR outage OR supply)"
+    rss_query: "(aluminium OR aluminum) (strike OR ban OR shortage OR tariff OR outage OR smelter OR surplus OR supply)"
+    synthetic: {start: 2200, low: 1600, high: 3000, monthly_vol: 0.05}
+  iron_ore:
+    display_name: Iron ore (steel input proxy)
+    source_series: Iron ore, cfr spot
+    source_unit: USD per dry metric tonne
+    kg_per_unit: 1000
+    keywords: [iron ore, steel, steelmaker, blast furnace, pellet]
+    gdelt_query: "(\"iron ore\" OR steelmaker) (strike OR ban OR shortage OR tariff OR outage OR supply)"
+    rss_query: "\"iron ore\" (strike OR ban OR shortage OR tariff OR outage OR surplus OR supply OR export)"
+    synthetic: {start: 130, low: 60, high: 200, monthly_vol: 0.09}
+
+fx:
+  pair: USDINR
+  synthetic: {start: 45.0, end: 85.0, monthly_vol: 0.015}

@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+data/app.duckdb*
+data/app.sqlite
+data/raw/*
+!data/raw/sample_news.json
+*.egg-info/

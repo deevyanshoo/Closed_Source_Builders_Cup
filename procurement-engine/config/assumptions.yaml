@@ -1,0 +1,52 @@
+# Business and model assumptions. Edit freely.
+# Duty and freight values are demo assumptions, not official rates.
+
+landed_cost:
+  holding_cost_pct_per_month: 0.01   # demo assumption, not an official rate (capital plus storage, per month)
+  materials:
+    copper:
+      duty_pct: 0.05                  # demo assumption, not an official rate
+      freight_inr_per_kg: 6.0         # demo assumption, not an official rate
+    aluminium:
+      duty_pct: 0.075                 # demo assumption, not an official rate
+      freight_inr_per_kg: 5.0         # demo assumption, not an official rate
+    iron_ore:
+      duty_pct: 0.0                   # demo assumption, not an official rate
+      freight_inr_per_kg: 1.5         # demo assumption, not an official rate
+
+risk:
+  # Risk term in score = E[cost] + lambda * risk + stockout_penalty.
+  #   regret:    risk = P90 of (plan cost minus the cheapest single-month plan on that path, in hindsight)
+  #   overshoot: risk = P90[cost] - E[cost]  (literal spec formula; tends to give all-or-nothing plans)
+  measure: regret
+  lambda: {low: 1.0, medium: 0.5, high: 0.15}
+  stockout_penalty_multiplier: 10.0   # penalty per kg short, as a multiple of the current landed price
+  price_rise_threshold: 0.05          # used for the "price weather" line
+
+news:
+  max_news_drift: 0.02                # heuristic: max monthly drift shift from news (2%)
+  vol_widen_factor: 0.5               # heuristic: volatility multiplied by 1 + factor * abs(index)
+  half_life_days: 7
+  index_scale: 3.0                    # index = tanh(weighted sum / index_scale)
+  cache_hours: 6
+  gemini_model: gemini-2.5-flash
+
+simulation:
+  n_paths: 2000
+  seed: 42
+  horizon: 6
+
+forecast:
+  history_start: "2010-01-01"
+  eval_months: 36
+  min_improvement_vs_naive: 0.02      # a model must beat naive MAPE by 2% (relative) to be used
+  gbm_refit_every: 6                  # walk-forward refit frequency for the quantile GBM
+
+backtest:
+  months: 36
+  quantity_kg: 100000
+  need_by_month: 3
+  lead_time_months: 1
+  current_stock_kg: 60000
+  monthly_consumption_kg: 20000
+  risk_appetite: medium

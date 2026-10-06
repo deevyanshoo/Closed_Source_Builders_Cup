@@ -68,7 +68,8 @@ def headline_as_item(material: str, headline: str, sig: HeadlineSignal) -> dict:
 
 
 def build_context(material: str, extra_items: list[dict] | None = None, use_news: bool = True,
-                  series: pd.DataFrame | None = None, model: str | None = None) -> MarketContext:
+                  series: pd.DataFrame | None = None, model: str | None = None,
+                  planning_month: pd.Timestamp | None = None) -> MarketContext:
     """Assemble everything the decision engine needs for one material."""
     df = series if series is not None else load_series(material)
     sel = get_selection(material)
@@ -77,6 +78,7 @@ def build_context(material: str, extra_items: list[dict] | None = None, use_news
         items = list(extra_items) + items
     idx, scored = news_index(items) if use_news else (0.0, [])
     horizon = news_horizon_of(scored)
+    planning_month = (pd.Timestamp.today() if planning_month is None else pd.Timestamp(planning_month))
     sim = simulate(df, material, model or sel["selected_model"], news_index=idx, news_horizon=horizon,
-                   residual_scale=float(sel.get("residual_scale") or 1.0))
+                   residual_scale=float(sel.get("residual_scale") or 1.0), planning_month=planning_month)
     return MarketContext(material, df, sel, items, idx, horizon, scored, sim, provenance())

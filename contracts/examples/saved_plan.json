@@ -1,0 +1,126 @@
+{
+  "contract_version": "0.2.0",
+  "plan": {
+    "saved_plan_id": "11111111111111111111111111111111",
+    "workspace_id": "local-workspace",
+    "revision": 1,
+    "snapshot": {
+      "contract_version": "0.1.0",
+      "status": "ready",
+      "availability": {
+        "code": "available",
+        "reason": "Synthetic fixture only"
+      },
+      "request": {
+        "contract_version": "0.1.0",
+        "workspace_id": "local-workspace",
+        "buyer": {
+          "id": "synthetic-buyer",
+          "destination_country": "IN"
+        },
+        "material": "copper",
+        "quantity": {
+          "amount": "50000",
+          "unit": "kg"
+        },
+        "current_stock": {
+          "amount": "20000",
+          "unit": "kg"
+        },
+        "monthly_consumption": {
+          "amount": "15000",
+          "unit": "kg"
+        },
+        "need_by_month": 3,
+        "lead_time_months": 1,
+        "quote_currency": "USD",
+        "settlement_currency": "INR",
+        "reporting_currency": "INR",
+        "risk_appetite": "medium"
+      },
+      "plan": {
+        "plan_id": "synthetic-plan",
+        "plan_version": "synthetic-version-1",
+        "computation_only": true,
+        "action": "SPLIT BUY",
+        "summary": "Buy 60% now and 40% in 2 months",
+        "current_price": {
+          "money": {
+            "amount": "800.123456789012345678",
+            "currency": "INR"
+          },
+          "per_unit": "kg"
+        },
+        "schedule": [
+          {
+            "purchase_month": 0,
+            "calendar_month": "Oct 2026",
+            "quantity": {
+              "amount": "30000",
+              "unit": "kg"
+            },
+            "percent": "60",
+            "expected_unit_price": {
+              "money": {
+                "amount": "846.12",
+                "currency": "INR"
+              },
+              "per_unit": "kg"
+            }
+          },
+          {
+            "purchase_month": 2,
+            "calendar_month": "Dec 2026",
+            "quantity": {
+              "amount": "20000",
+              "unit": "kg"
+            },
+            "percent": "40",
+            "expected_unit_price": {
+              "money": {
+                "amount": "837.15",
+                "currency": "INR"
+              },
+              "per_unit": "kg"
+            }
+          }
+        ],
+        "comparisons": [
+          {
+            "name": "Recommended",
+            "schedule": "Synthetic split",
+            "expected_cost": {
+              "amount": "42123456.123456789012345678",
+              "currency": "INR"
+            },
+            "p90_cost": {
+              "amount": "45000000.00",
+              "currency": "INR"
+            },
+            "stockout_penalty": {
+              "amount": "0",
+              "currency": "INR"
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "source": "prices",
+            "used": "synthetic",
+            "status": "fixture",
+            "retrieved_at": "2026-10-06T00:00:00Z",
+            "observation_end": "2026-09-01",
+            "basis": "Synthetic contract fixture, not a supplier quote"
+          }
+        ],
+        "legacy_recommendation_id": null,
+        "precision": "legacy_float_rounded"
+      },
+      "warnings": [
+        "Synthetic contract example; no connected computation or inventory feasibility proof."
+      ]
+    },
+    "created_at": "2026-10-07T00:00:00Z",
+    "updated_at": "2026-10-07T00:00:00Z"
+  }
+}

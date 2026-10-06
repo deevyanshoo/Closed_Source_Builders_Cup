@@ -1,0 +1,7 @@
+{
+  "contract_version": "0.2.0",
+  "principal_id": "local-editor",
+  "workspace_id": "local-workspace",
+  "role": "editor",
+  "development_only": true
+}

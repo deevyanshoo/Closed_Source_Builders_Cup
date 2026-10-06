@@ -164,3 +164,149 @@ type ShipmentExample struct {
   EventType string `json:"event_type"`
   AssumedDelayDays int `json:"assumed_delay_days"`
 }
+
+type SessionResponse struct {
+  ContractVersion string `json:"contract_version"`
+  PrincipalId string `json:"principal_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Role string `json:"role"`
+  DevelopmentOnly bool `json:"development_only"`
+}
+
+type ReadinessResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Process string `json:"process"`
+  Database string `json:"database"`
+  Identity string `json:"identity"`
+  Provider string `json:"provider"`
+}
+
+type CreateSavedPlanRequest struct {
+  ContractVersion string `json:"contract_version"`
+  PlanningRequest PlanningRequest `json:"planning_request"`
+}
+
+type ReviseSavedPlanRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ExpectedRevision int `json:"expected_revision"`
+  PlanningRequest PlanningRequest `json:"planning_request"`
+}
+
+type SavedPlan struct {
+  SavedPlanId string `json:"saved_plan_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Revision int `json:"revision"`
+  Snapshot PlanResponse `json:"snapshot"`
+  CreatedAt string `json:"created_at"`
+  UpdatedAt string `json:"updated_at"`
+}
+
+type SavedPlanResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Plan SavedPlan `json:"plan"`
+}
+
+type SavedPlansResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Plans []SavedPlan `json:"plans"`
+}
+
+type RfqDraftArguments struct {
+  BuyerId string `json:"buyer_id"`
+  Material string `json:"material"`
+  Quantity Quantity `json:"quantity"`
+  DestinationCountry string `json:"destination_country"`
+  QuoteCurrency string `json:"quote_currency"`
+  SettlementCurrency string `json:"settlement_currency"`
+  ReportingCurrency string `json:"reporting_currency"`
+}
+
+type ConfirmActionRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ExpectedRevision int `json:"expected_revision"`
+  ExpectedPlanVersion string `json:"expected_plan_version"`
+  ActionKind string `json:"action_kind"`
+  Arguments RfqDraftArguments `json:"arguments"`
+}
+
+type ActionApproval struct {
+  ApprovalId string `json:"approval_id"`
+  WorkspaceId string `json:"workspace_id"`
+  SavedPlanId string `json:"saved_plan_id"`
+  Revision int `json:"revision"`
+  PlanVersion string `json:"plan_version"`
+  ActionKind string `json:"action_kind"`
+  Arguments RfqDraftArguments `json:"arguments"`
+  ApprovedBy string `json:"approved_by"`
+  CreatedAt string `json:"created_at"`
+  Status string `json:"status"`
+  ReceiptId *string `json:"receipt_id"`
+}
+
+type ApprovalResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Approval ActionApproval `json:"approval"`
+}
+
+type ApprovalsResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Approvals []ActionApproval `json:"approvals"`
+}
+
+type ExecuteActionRequest struct {
+  ContractVersion string `json:"contract_version"`
+  WorkspaceId string `json:"workspace_id"`
+  SavedPlanId string `json:"saved_plan_id"`
+  ExpectedRevision int `json:"expected_revision"`
+  ExpectedPlanVersion string `json:"expected_plan_version"`
+  ApprovalId string `json:"approval_id"`
+  ActionKind string `json:"action_kind"`
+  Arguments RfqDraftArguments `json:"arguments"`
+  IdempotencyKey string `json:"idempotency_key"`
+}
+
+type ActionReceipt struct {
+  ReceiptId string `json:"receipt_id"`
+  WorkspaceId string `json:"workspace_id"`
+  SavedPlanId string `json:"saved_plan_id"`
+  Revision int `json:"revision"`
+  PlanVersion string `json:"plan_version"`
+  ApprovalId string `json:"approval_id"`
+  ActionKind string `json:"action_kind"`
+  Arguments RfqDraftArguments `json:"arguments"`
+  PreparedBy string `json:"prepared_by"`
+  CreatedAt string `json:"created_at"`
+  Status string `json:"status"`
+  SupplierCommunication bool `json:"supplier_communication"`
+}
+
+type ActionReceiptResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Receipt ActionReceipt `json:"receipt"`
+}
+
+type ActionReceiptsResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Receipts []ActionReceipt `json:"receipts"`
+}
+
+type AuditEvent struct {
+  AuditId string `json:"audit_id"`
+  WorkspaceId string `json:"workspace_id"`
+  SavedPlanId string `json:"saved_plan_id"`
+  Revision int `json:"revision"`
+  EventType string `json:"event_type"`
+  PrincipalId string `json:"principal_id"`
+  CreatedAt string `json:"created_at"`
+  ReceiptId *string `json:"receipt_id"`
+}
+
+type AuditResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Events []AuditEvent `json:"events"`
+}
+
+type StateErrorResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Error SemanticError `json:"error"`
+}

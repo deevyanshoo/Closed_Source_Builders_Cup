@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from procure.decision import (PurchaseRequest, ScoreInputs, action_label, choose, enumerate_schedules,
-                              feasible_months, recommend)
+                              feasible_months, recommend, stockout_penalty, unmet_demand_kg)
 from procure.landed_cost import LandedAssumptions
 
 A = LandedAssumptions(duty_pct=0.05, freight_inr_per_kg=6.0, holding_cost_pct_per_month=0.01)
@@ -58,6 +58,36 @@ def test_stockout_forces_buying_now():
     assert action_label(fr, inp.feasible_months) != "WAIT"
 
 
+@pytest.mark.parametrize(
+    ("stock", "lead", "fractions", "shortfall"),
+    [
+        (0, 0, [0.2, 0, 0.8, 0], 2000),  # 800, 1000, 200 kg unmet in periods 0, 1, 2
+        (2000, 0, [0.2, 0, 0.8, 0], 0),
+        (0, 1, [1, 0, 0], 2000),  # month 0 demand precedes month 1 arrival
+        (0, 0, [1, 0, 0, 0], 2000),  # too little supply across the horizon
+    ],
+)
+def test_stockout_penalty_tracks_each_demand_period(stock, lead, fractions, shortfall):
+    inp = inputs(paths(0, n=1), need_by=3, lead=lead, stock=stock)
+    inp.quantity_kg = 1000
+    inp.stockout_multiplier = 1
+    assert stockout_penalty(np.array([fractions]), inp)[0] == pytest.approx(shortfall * 111)
+
+
+def test_late_split_cannot_cure_earlier_shortages_even_with_enough_total_supply():
+    inp = inputs(paths(0, n=1), need_by=3, lead=0, stock=0)
+    inp.quantity_kg = 3000
+    schedules = np.array([[0.2, 0, 0.8, 0], [1, 0, 0, 0], [1/3, 1/3, 1/3, 0]])
+    np.testing.assert_allclose(unmet_demand_kg(schedules, inp), [1400, 0, 0])
+
+
+def test_impossible_lead_reports_selected_schedule_shortage():
+    inp = inputs(paths(0, n=1), need_by=1, lead=3, stock=0)
+    inp.quantity_kg = 3000
+    res = choose(inp)
+    assert res["warnings"] and "1,000 kg" in res["warnings"][0]
+
+
 def test_flat_prices_without_stock_pressure_wait_for_holding_cost():
     fr = best_fractions(inputs(paths(0.0)))
     assert fr[-1] == pytest.approx(1.0)
@@ -103,3 +133,12 @@ def test_recommend_end_to_end(seeded_db):
     # offline test data is synthetic, so confidence must be LOW
     assert rec["confidence"]["level"] == "LOW"
     assert rec["id"]
+
+
+def test_recommend_explains_full_horizon_shortage(seeded_db):
+    rec = recommend(PurchaseRequest(material="copper", quantity_kg=1000, need_by_month=3,
+                                    current_stock_kg=0, monthly_consumption_kg=1000,
+                                    supplier_lead_time_months=0), store=False)
+    assert any("2,000 kg" in warning for warning in rec["warnings"])
+    runway = next(item for item in rec["why"] if item["signal"] == "Stock runway")
+    assert "2,000 kg of demand is unmet" in runway["detail"]

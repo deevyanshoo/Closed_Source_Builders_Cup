@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import itertools
 import json
+from copy import copy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 from . import db
 from .features import fx_trend, volatility_summary
 from .landed_cost import LandedAssumptions, get_landed_assumptions, landed_inr_per_kg
+from .forecast.simulate import PlanningCalendarUnavailable, SimResult, month_start
 from .settings import assumptions, material_cfg
 
 RiskAppetite = Literal["low", "medium", "high"]
@@ -212,17 +214,66 @@ def score_inputs_for(req: PurchaseRequest, paths: np.ndarray) -> tuple[ScoreInpu
     return inp, warn
 
 
+def _align_context(ctx, planning: pd.Timestamp, required_horizon: int):
+    """Slice only real dated path columns; an old path cannot be relabelled as current."""
+    try:
+        observation = month_start(ctx.series.index[-1])
+        raw_months = [pd.Timestamp(value) for value in ctx.sim.months]
+        values = np.asarray(ctx.sim.inr_paths)
+        if not raw_months or values.ndim != 2 or values.shape[0] == 0 or values.shape[1] != len(raw_months):
+            raise ValueError("path and date axes differ")
+        if any(month != month_start(month) for month in raw_months):
+            raise ValueError("path dates must be month starts")
+        if any(right != left + pd.DateOffset(months=1) for left, right in zip(raw_months, raw_months[1:])):
+            raise ValueError("path dates are not consecutive")
+        if not np.isfinite(values).all() or (values <= 0).any():
+            raise ValueError("path prices must be positive and finite")
+    except (AttributeError, IndexError, TypeError, ValueError) as exc:
+        raise PlanningCalendarUnavailable("Malformed dated planning paths") from exc
+    bridge = (planning.year - observation.year) * 12 + planning.month - observation.month
+    if bridge < 0:
+        raise PlanningCalendarUnavailable("Planning month precedes the last observation")
+    if raw_months[0] == observation:
+        offset = bridge
+    elif raw_months[0] == planning and ctx.sim.meta.get("observation_end") == observation.strftime("%Y-%m-%d") \
+            and ctx.sim.meta.get("planning_month") == planning.strftime("%Y-%m-%d") \
+            and ctx.sim.meta.get("bridge_months") == bridge:
+        offset = 0
+    else:
+        raise PlanningCalendarUnavailable("Planning path does not align with observed data")
+    if offset >= len(raw_months) or len(raw_months) - offset <= required_horizon:
+        raise PlanningCalendarUnavailable("Planning path does not cover the requested horizon")
+    if raw_months[offset] != planning:
+        raise PlanningCalendarUnavailable("Planning month is absent from dated paths")
+    meta = dict(ctx.sim.meta)
+    meta.update(observation_end=observation.strftime("%Y-%m-%d"),
+                planning_month=planning.strftime("%Y-%m-%d"), bridge_months=bridge,
+                planning_offset_zero_basis="observed" if bridge == 0 else "forecast",
+                publication_at=None,
+                calibration_limit="Forecast horizons beyond 1-6 months from observation are not covered by the current walk-forward calibration.")
+    aligned = copy(ctx)
+    aligned.sim = SimResult(values[:, offset:], raw_months[offset:], ctx.sim.model, ctx.sim.news_index, meta)
+    return aligned
+
+
 def recommend(req: PurchaseRequest, ctx=None, extra_items: list[dict] | None = None, store: bool = True,
-              kind: str = "recommend") -> dict:
+              kind: str = "recommend", planning_month: pd.Timestamp | None = None) -> dict:
     """Full recommendation with baselines, price weather, why-panel and confidence."""
     from .market import build_context
 
     material_cfg(req.material)  # validates the key
-    ctx = ctx or build_context(req.material, extra_items=extra_items)
+    planning = month_start(pd.Timestamp.today() if planning_month is None else planning_month)
+    ctx = ctx or build_context(req.material, extra_items=extra_items, planning_month=planning)
+    ctx = _align_context(ctx, planning, req.need_by_month)
     paths = ctx.sim.inr_paths
     inp, warn = score_inputs_for(req, paths)
     res = choose(inp, req.max_budget_inr)
     warnings = ([warn] if warn else []) + res["warnings"]
+    bridge = ctx.sim.meta["bridge_months"]
+    if bridge:
+        warnings.append(f"Last observed price is {ctx.series.index[-1]:%b %Y}; planning starts "
+                        f"{ctx.sim.months[0]:%b %Y}. The {bridge} intervening month(s) and "
+                        "planning-month price are forecasts with uncertainty; publication date is unknown.")
     months = inp.feasible_months
     sc, sched = res["scores"], res["schedules"]
     b = res["best"]
@@ -238,7 +289,7 @@ def recommend(req: PurchaseRequest, ctx=None, extra_items: list[dict] | None = N
         held = max(jit_month - m, 0)
         schedule.append({
             "month": m, "month_label": _month_label(m),
-            "calendar_month": (pd.Timestamp.today().normalize().replace(day=1) + pd.DateOffset(months=m)).strftime("%b %Y"),
+            "calendar_month": ctx.sim.months[m].strftime("%b %Y"),
             "percent": round(float(f) * 100, 1), "kg": round(float(f) * req.quantity_kg, 1),
             "expected_inr_per_kg": round(float(mean_p[m]), 2),
             "expected_landed_inr_per_kg": round(float(landed_inr_per_kg(mean_p[m], held, inp.landed)), 2),
@@ -292,7 +343,9 @@ def forecast_payload(ctx) -> dict:
             "p10": np.round(q10, 2).tolist(), "p50": np.round(q50, 2).tolist(), "p90": np.round(q90, 2).tolist(),
             "mean": np.round(ctx.sim.inr_paths.mean(axis=0), 2).tolist(),
             "history_months": [m.strftime("%Y-%m-%d") for m in hist.index],
-            "history_inr_per_kg": np.round(hist.values, 2).tolist(), "model": ctx.sim.model}
+            "history_inr_per_kg": np.round(hist.values, 2).tolist(), "model": ctx.sim.model,
+            **{key: ctx.sim.meta.get(key) for key in ("observation_end", "planning_month", "bridge_months",
+                                                      "planning_offset_zero_basis", "publication_at", "calibration_limit")}}
 
 
 MODEL_NAMES = {"naive": "Naive random walk", "ets": "Exponential smoothing (ETS)", "gbm": "Quantile gradient boosting"}
@@ -328,7 +381,10 @@ def why_panel(req: PurchaseRequest, ctx, inp: ScoreInputs, best: dict, weather: 
                     + ("It beats naive by at least 2%, so it is used." if sel["beats_naive"] else
                        "No model beat naive by 2%, so the honest random walk is used: no price direction is assumed."))},
         {"signal": "Forecast band reliability", "value": f"{coverage * 100:.0f}% of past outcomes inside P10 to P90",
-         "detail": f"Target is about 80%. Measured on horizons 1 to {req.need_by_month} months, residual scale {sel['residual_scale']:.2f}."},
+         "detail": f"Target is about 80%. Measured on horizons 1 to {req.need_by_month} months from the last observation, "
+                   f"residual scale {sel['residual_scale']:.2f}."
+                   + (" These historical metrics have not validated the bridged planning horizon."
+                      if ctx.sim.meta.get("bridge_months", 0) else "")},
         {"signal": "Price volatility (12 month, annualised)", "value": f"{vol['current_annual_vol'] * 100:.1f}%",
          "detail": f"5-year average {vol['avg_5y_annual_vol'] * 100:.1f}% (now {vol['ratio']:.2f}x the average)."},
         {"signal": "Rupee trend (USD/INR, 3 months)", "value": f"{fx3 * 100:+.2f}%",
@@ -360,6 +416,8 @@ def why_panel(req: PurchaseRequest, ctx, inp: ScoreInputs, best: dict, weather: 
         reasons.append("No forecast model beats the naive random walk, so price direction is not predicted.")
     if synthetic:
         reasons.append("Synthetic data in use.")
+    if ctx.sim.meta.get("bridge_months", 0):
+        reasons.append("The planning bridge and its longer observation-to-target horizons are not calibrated by the historical 1-6 month metrics.")
     if reasons:
         level = "LOW"
     elif 0.7 <= coverage <= 0.9:
@@ -418,8 +476,10 @@ def headline_impact(headline: str, req: PurchaseRequest, material: str | None = 
     if sig.material is None or (material and sig.material != material):
         sig = sig.model_copy(update={"material": mat})
     req = req.model_copy(update={"material": mat})
-    before = recommend(req, ctx=build_context(mat), store=False)
-    after = recommend(req, ctx=build_context(mat, extra_items=[headline_as_item(mat, headline, sig)]), store=False)
+    planning = month_start(pd.Timestamp.today())
+    before = recommend(req, ctx=build_context(mat, planning_month=planning), store=False, planning_month=planning)
+    after = recommend(req, ctx=build_context(mat, extra_items=[headline_as_item(mat, headline, sig)],
+                                           planning_month=planning), store=False, planning_month=planning)
     signal = sig.model_dump()
     out = {"headline": headline, "material": mat, "signal": signal, "before": before, "after": after,
            "diff": impact_diff(before, after, signal),

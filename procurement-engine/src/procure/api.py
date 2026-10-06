@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from . import actions as act
@@ -16,6 +17,7 @@ from .backtest import run_backtest
 from .decision import PurchaseRequest, headline_impact, price_weather, recommend
 from .features import load_series
 from .forecast.models import GBM_BACKEND
+from .forecast.simulate import PlanningCalendarUnavailable
 from .forecast.select import evaluate_all, get_metrics, get_selection
 from .ingest.refresh import refresh_all
 from .market import build_context, provenance
@@ -109,6 +111,12 @@ class ForecastResponse(BaseModel):
     points: list[ForecastPoint]
     metrics: list[MetricRow]
     note: str
+    observation_end: str
+    planning_month: str
+    bridge_months: int
+    planning_offset_zero_basis: str
+    publication_at: str | None
+    calibration_limit: str
 
 
 class NewsItemOut(BaseModel):
@@ -314,6 +322,12 @@ app = FastAPI(title="AI Procurement Engine", version="0.1.0", lifespan=lifespan,
               description="When to buy imported raw materials, how much, and why. Prototype.")
 
 
+@app.exception_handler(PlanningCalendarUnavailable)
+async def planning_calendar_unavailable(_request, exc: PlanningCalendarUnavailable):
+    return JSONResponse(status_code=503, content={"detail": {"code": "planning_calendar_unavailable",
+                                                            "message": str(exc)}})
+
+
 def _check_material(material: str) -> None:
     try:
         material_cfg(material)
@@ -394,7 +408,9 @@ def forecast(material: str, horizon: int = Query(6, ge=1, le=6), include_news: b
         note += f" A heuristic news overlay (index {ctx.news_index:+.2f}) is applied."
     return ForecastResponse(material=material, model_used=sel["selected_model"], beats_naive=bool(sel["beats_naive"]),
                             selection=sel, news_index_applied=round(ctx.news_index if include_news else 0.0, 4),
-                            points=pts, metrics=rows, note=note)
+                            points=pts, metrics=rows, note=note,
+                            **{key: ctx.sim.meta[key] for key in ("observation_end", "planning_month", "bridge_months",
+                                                              "planning_offset_zero_basis", "publication_at", "calibration_limit")})
 
 
 @app.get("/news/{material}", response_model=NewsResponse)

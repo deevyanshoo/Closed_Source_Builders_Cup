@@ -6,6 +6,7 @@ The news overlay is off: there is no historical news archive in this prototype.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 
 import numpy as np
@@ -13,7 +14,8 @@ import pandas as pd
 
 from .decision import PurchaseRequest, choose, describe_schedule, score_inputs_for
 from .features import load_series
-from .forecast.select import get_selection
+from .forecast.models import clear_cache as clear_model_cache
+from .forecast.select import select_on_history
 from .forecast.simulate import simulate
 from .landed_cost import landed_inr_per_kg
 from .settings import assumptions
@@ -53,22 +55,29 @@ def realised_cost(fractions: np.ndarray, actual_prices: np.ndarray, req: Purchas
 def run_backtest(material: str, model: str = "selected", months: int | None = None,
                  risk_measure: str | None = None) -> dict:
     df = load_series(material)
-    sel = get_selection(material)
-    use_model = sel["selected_model"] if model == "selected" else model
     months = int(months or assumptions()["backtest"]["months"])
     req = standard_request(material, risk_measure)
-    key = (material, use_model, months, req.risk_measure, df.index[-1], len(df), float(df["inr_per_kg"].iloc[-1]))
+    data_hash = hashlib.blake2b(pd.util.hash_pandas_object(df, index=True).values.tobytes(),
+                                digest_size=16).hexdigest()
+    key = (material, model, months, req.model_dump_json(), data_hash, repr(assumptions()))
     if key in _CACHE:
         return _CACHE[key]
 
     t0 = time.perf_counter()
+    # fit_series/GBM memoization keys do not cover every interior observation.
+    # A changed historical input must not reuse a fit from an earlier replay.
+    clear_model_cache()
     last_buy = req.need_by_month - req.supplier_lead_time_months
     n = len(df)
     origins = list(range(max(60, n - 1 - last_buy - months + 1), n - last_buy))
     prices = df["inr_per_kg"].values
     rows = []
+    selected_models = []
     for t in origins:
-        d = decide_at(df, t, req, use_model, float(sel.get("residual_scale") or 1.0))
+        sel, _ = select_on_history(df.iloc[: t + 1], material)
+        use_model = sel["selected_model"] if model == "selected" else model
+        selected_models.append(use_model)
+        d = decide_at(df, t, req, use_model, float(sel["residual_scale"]))
         assert d["data_end"] == df.index[t], "leakage guard: engine saw data beyond the origin"
         inp, res = d["inputs"], d["result"]
         actual = prices[t: t + last_buy + 1]
@@ -105,7 +114,9 @@ def run_backtest(material: str, model: str = "selected", months: int | None = No
     worst = per.loc[per["saving_vs_jit"].idxmin()]
     best = per.loc[per["saving_vs_jit"].idxmax()]
     out = {
-        "material": material, "model": use_model, "risk_measure": req.risk_measure or assumptions()["risk"]["measure"],
+        "material": material, "model": model if model != "selected" else
+        (selected_models[0] if len(set(selected_models)) == 1 else "selected"),
+        "risk_measure": req.risk_measure or assumptions()["risk"]["measure"],
         "months": len(per), "period": f"{per['origin'].iloc[0]} to {per['origin'].iloc[-1]}",
         "request": req.model_dump(),
         "summary": {
@@ -127,7 +138,8 @@ def run_backtest(material: str, model: str = "selected", months: int | None = No
         },
         "rows": per.to_dict(orient="records"),
         "notes": ["News overlay is off in backtests because there is no historical news archive.",
-                  "Each month the engine sees only data up to that month (asserted in code and tests).",
+                  "Each month's model selection, calibration and decision use data through that origin only.",
+                  "Source publication lags and revisions are not available in this replay; dated values may differ from what was published then.",
                   f"Standard request: {req.quantity_kg:,.0f} kg needed {req.need_by_month} months ahead, "
                   f"lead time {req.supplier_lead_time_months} month, {req.risk_appetite} risk."],
         "seconds": round(time.perf_counter() - t0, 2),

@@ -96,13 +96,28 @@ def month_costs(inp: ScoreInputs) -> np.ndarray:
     return np.column_stack(cols)
 
 
+def unmet_demand_kg(schedules: np.ndarray, inp: ScoreInputs) -> np.ndarray:
+    """Unmet demand over periods [0, need_by), with arrivals before each period's demand.
+
+    Month 0 purchases with zero lead arrive before period 0 demand. Purchases
+    arriving in month need_by are too late for this horizon's consumption.
+    Unmet demand does not create a backlog or negative inventory.
+    """
+    stock = np.full(len(schedules), inp.current_stock_kg, dtype=float)
+    unmet = np.zeros(len(schedules), dtype=float)
+    for period in range(inp.need_by_month):
+        for col, buy_month in enumerate(inp.feasible_months):
+            if buy_month + inp.lead_time == period:
+                stock += schedules[:, col] * inp.quantity_kg
+        shortage = np.maximum(inp.monthly_consumption_kg - stock, 0.0)
+        unmet += shortage
+        stock = np.maximum(stock - inp.monthly_consumption_kg, 0.0)
+    return unmet
+
+
 def stockout_penalty(schedules: np.ndarray, inp: ScoreInputs) -> np.ndarray:
-    """Penalty if stock runs out before the first delivery arrives."""
-    runway = inp.current_stock_kg / inp.monthly_consumption_kg
-    months = np.array(inp.feasible_months)
-    first_buy = np.array([months[np.argmax(s > 1e-9)] for s in schedules])
-    gap = np.maximum(first_buy + inp.lead_time - runway, 0.0)
-    shortfall_kg = gap * inp.monthly_consumption_kg
+    """Penalise unmet demand across all consumption periods."""
+    shortfall_kg = unmet_demand_kg(schedules, inp)
     ref_price = float(landed_inr_per_kg(inp.paths[:, 0].mean(), 0, inp.landed))
     return shortfall_kg * ref_price * inp.stockout_multiplier
 
@@ -145,6 +160,10 @@ def choose(inp: ScoreInputs, max_budget: float | None = None) -> dict:
     s[~eligible] = np.inf
     s[len(cands):] = np.inf  # pick among the 20% grid; baselines are reported separately
     best = int(np.argmin(s))
+    unmet = unmet_demand_kg(all_s[[best]], inp)[0]
+    if unmet > 1e-9:
+        warnings.append(f"Recommended schedule leaves {unmet:,.0f} kg of demand unmet before month "
+                        f"{inp.need_by_month}; this schedule's stock and arrivals do not cover every period.")
     base_idx = {name: len(cands) + i for i, name in enumerate(base)}
     return {"schedules": all_s, "scores": scores, "best": best, "baselines": base_idx, "warnings": warnings}
 
@@ -291,6 +310,8 @@ def why_panel(req: PurchaseRequest, ctx, inp: ScoreInputs, best: dict, weather: 
     fx3 = fx_trend(ctx.series, 3)
     runway = req.current_stock_kg / req.monthly_consumption_kg
     first_delivery = min(s for s in [m for m, f in zip(inp.feasible_months, best["percents"]) if f > 0]) + inp.lead_time
+    best_fractions = np.array(best["percents"], dtype=float)[None, :] / 100
+    unmet = unmet_demand_kg(best_fractions, inp)[0]
     distinct = [s for s in ctx.news_scored if not s.get("duplicate_of_story")]
     top = [{"title": s["title"], "direction": s["direction"], "severity": s["severity"],
             "age_days": s["age_days"], "contribution": s["contribution"], "is_sample": bool(s.get("is_sample")),
@@ -320,7 +341,8 @@ def why_panel(req: PurchaseRequest, ctx, inp: ScoreInputs, best: dict, weather: 
          "detail": weather["text"] + " (INR price, from 2,000 simulated paths)."},
         {"signal": "Stock runway", "value": f"{runway:.1f} months",
          "detail": f"First delivery of this plan arrives in month {first_delivery}. "
-                   + ("Stock lasts until then." if runway >= first_delivery else "Stock runs out before it arrives.")},
+                   + (f"Across periods 0 to {req.need_by_month - 1}, {unmet:,.0f} kg of demand is unmet."
+                      if unmet > 1e-9 else "All demand periods are covered by stock and arrivals.")},
         {"signal": "Expected saving vs just in time", "value": f"INR {best['saving_vs_jit_inr']:,.0f}",
          "detail": f"{best['saving_vs_jit_pct']:+.2f}% of expected landed cost. P90 cost INR {best['p90_cost_inr']:,.0f}."},
         {"signal": "Assumptions used", "value": f"duty {a.duty_pct * 100:.1f}%, freight INR {a.freight_inr_per_kg:.2f}/kg",

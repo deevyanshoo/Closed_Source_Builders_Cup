@@ -83,11 +83,10 @@ def calibrate_scale(df: pd.DataFrame, material: str, eval_months: int, horizon: 
     return best
 
 
-def evaluate_material(material: str, calibrate: bool = True) -> dict:
+def select_on_history(df: pd.DataFrame, material: str, calibrate: bool = True) -> tuple[dict, pd.DataFrame]:
+    """Select and calibrate from this history only, without changing stored latest results."""
     cfg = assumptions()["forecast"]
     horizon = assumptions()["simulation"]["horizon"]
-    df = load_series(material)
-    t0 = time.perf_counter()
     scale = calibrate_scale(df, material, cfg["eval_months"], horizon) if calibrate else 1.0
     now = db.now_iso()
     all_metrics = []
@@ -99,9 +98,6 @@ def evaluate_material(material: str, calibrate: bool = True) -> dict:
         m["evaluated_at"] = now
         all_metrics.append(m)
     metrics = pd.concat(all_metrics, ignore_index=True)
-    db.replace_rows("model_metrics", metrics[["material", "model", "horizon", "mape", "directional_acc",
-                                              "coverage", "n_obs", "evaluated_at"]],
-                    "material = ?", [material])
     avg = metrics.groupby("model")["mape"].mean()
     naive_mape = float(avg["naive"])
     challengers = avg.drop("naive")
@@ -112,6 +108,15 @@ def evaluate_material(material: str, calibrate: bool = True) -> dict:
     sel = {"material": material, "selected_model": best_model if beats else "naive", "best_model": best_model,
            "naive_mape": naive_mape, "best_mape": best_mape, "improvement": improvement,
            "beats_naive": bool(beats), "residual_scale": scale, "evaluated_at": now}
+    return sel, metrics
+
+
+def evaluate_material(material: str, calibrate: bool = True) -> dict:
+    t0 = time.perf_counter()
+    sel, metrics = select_on_history(load_series(material), material, calibrate=calibrate)
+    db.replace_rows("model_metrics", metrics[["material", "model", "horizon", "mape", "directional_acc",
+                                              "coverage", "n_obs", "evaluated_at"]],
+                    "material = ?", [material])
     db.replace_rows("model_selection", pd.DataFrame([sel]), "material = ?", [material])
     sel["seconds"] = round(time.perf_counter() - t0, 1)
     log.info("Model selection %s: %s", material, sel)

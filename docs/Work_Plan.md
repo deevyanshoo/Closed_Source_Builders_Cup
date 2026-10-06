@@ -10,7 +10,7 @@
 
 **Spec:** [Product design, revision 2](Product_Design.md).
 
-Revision 2, October 6, 2026. Approved for team publication and implementation on October 6, 2026. Ownership describes product domains, with both engineers responsible for implementation, tests, UI and documentation. Availability is not confirmed; these are aggressive integration targets. Start the bounded packages below; coordinate actual work blocks in their issues and adjust expansion breadth when evidence gates slip.
+Revision 3, October 6, 2026. Ownership updated following team review. Approved for team publication and implementation on October 6, 2026. Ownership describes product domains, with both engineers responsible for implementation, tests, UI and documentation. Availability is not confirmed; these are aggressive integration targets. Start the bounded packages below; coordinate actual work blocks in their issues and adjust expansion breadth when evidence gates slip.
 
 ## Global constraints
 
@@ -38,8 +38,9 @@ Revision 2, October 6, 2026. Approved for team publication and implementation on
 | Platform and workspace | Divyanshu | Shared contracts, Go core, identity/persistence, React shell, GCP delivery and integration |
 | Market and planning intelligence | Divyanshu | Currency/coverage, dated forecasting, sourcing optimization, production planning, export economics and carbon comparisons |
 | Quote intelligence | Taher | Document/spreadsheet ingestion, Gemini extraction, evidence/conflict review, offer lifecycle and React workflow |
-| Conversational operations | Taher | Speech integration, voice sessions, intent/tool bridge, transcripts, spoken results and evaluation |
-| Shipment and dispatch intelligence | Taher | Event ingestion/replay, disruption mapping, dispatch/recovery interface and route/document evidence |
+| Conversational operations | Divyanshu | Speech integration, voice session/stream lifecycle, Gemini tool bridge, confirmations, interruption/reconnect and evaluation |
+| Operational propagation | Divyanshu | Event state/deduplication, affected-order graph, arrival/inventory/BOM/capacity propagation, recovery feasibility and plan application |
+| Shipment workspace and route evidence | Taher | Milestone/source ingestion and normalization, shipment/dispatch React workflow, route/document evidence and reviewable alternatives |
 | Release and demonstration | Both | Cross-review, integrated scenarios, benchmark claims, rehearsals and submission checks |
 
 Each lead owns features from implementation through demonstration. Pair on shared contracts and blocked integrations; cross-review feature branches. Do not edit shared contracts or migrations concurrently.
@@ -49,12 +50,12 @@ Each lead owns features from implementation through demonstration. Pair on share
 | Date | Divyanshu | Taher | End-of-day acceptance |
 |---|---|---|---|
 | Oct 6 | Run/preserve baseline; revise architecture, stack and roadmap | Existing prototype provides the baseline | Design and roadmap approved for team publication; implementation kickoff follows. Existing evidence: 62 tests pass; offline smoke passes; live smoke unchanged-plan failure documented |
-| Oct 7 | Repair inventory/evaluation/date defects; agree `/v2` contracts; build Go/React foundation and action boundaries | Build quote extraction vertical with page/cell evidence; speech access/quality spike | React reads baseline recommendations through Go; money/currency round trips pass; reviewable extracted offer; real Google AI/speech calls verified or explicit fallback recorded |
-| Oct 8 | Global currencies/coverage and multi-supplier allocation with cash/arrival constraints; first hosted React workflow | Complete offer correction/save and RFQ flow; microphone → transcript → scenario tool → spoken result | Hosted upload → reviewed offers → feasible sourcing plan → draft RFQ. Push-to-talk works through validated commands; unavailable inputs explicit |
-| Oct 9 | Dated history and managed TimesFM/baselines; delay-to-inventory/production replan; persistent plan state | Streamed voice, interruption/reconnect, critical-field confirmation; shipment event ingestion/affected-order view | Hosted core: quote → plan → spoken disruption → changed plan or infeasibility → evidence → draft. Real model/tool traces and measured voice latency |
-| Oct 10 | Production/BOM, capacity and maintenance-window scheduling; joint commodity/FX risk | Dispatch milestones, alternative delivery scenarios and port-delay replay | Delay/downtime consistently changes purchase, stock, production and dispatch; duplicate event cannot mutate twice |
+| Oct 7 | Repair inventory/evaluation/date defects; agree `/v2` contracts; build Go/React foundation; prove speech access and validated tool boundaries | Build quote extraction vertical with page/cell evidence, typed offer lifecycle and injection/conflict regressions | React reads baseline recommendations through Go; money/currency round trips pass; reviewable extracted offer; real Google AI/speech calls verified or explicit fallback recorded |
+| Oct 8 | Global currency/allocation with cash/arrivals; first hosted React workflow; integrate push-to-talk → scenario tool → spoken result | Complete offer correction/save, validity/payment review and RFQ flow; held-out extraction/error cases | Hosted upload → reviewed offers → feasible sourcing plan → draft RFQ. Push-to-talk works through validated commands; unavailable inputs explicit |
+| Oct 9 | Past-only history/TimesFM baselines; delay-to-inventory/production replan; persistent plan state; streaming voice, interruption/reconnect and confirmations | Shipment milestone/source ingestion and normalization; affected-shipment workspace, dispatch views and evidence review against agreed fixtures | Hosted core: quote → plan → spoken disruption → changed plan or infeasibility → evidence → draft. Real model/tool traces and measured voice latency |
+| Oct 10 | Production/BOM/capacity/maintenance scheduling; joint commodity/FX risk; event deduplication and recovery consistency across periods | Dispatch milestone workflow, land-route comparison inputs, alternative-delivery review and port-delay replay with error/empty states | Delay/downtime consistently changes purchase, stock, production and dispatch; duplicate event cannot mutate twice |
 | Oct 11 | Broad catalog discovery; Comtrade export ranking and attainable margin/capacity scenarios; verify team formation | Route/document evidence review, expiry/payment scenarios and discovery/sourcing integration | Dated export evidence distinguished from confirmed demand; uncapped catalog with explicit eligibility; team completion verified before cutoff |
-| Oct 12 | Carbon comparison with sourced factors; historical forecast/policy evaluation | Route document checklist; multilingual/noisy voice refinement; held-out extraction evaluation | Auditable carbon assumptions, missing/conflicting requirements, measured voice/extraction results; no synthetic customer claims |
+| Oct 12 | Carbon comparison and forecast/policy evaluation; multilingual/noisy voice and action reliability | Route/document checks and held-out quote extraction evaluation; cross-review spoken workflow and shipment/evidence usability | Auditable carbon assumptions, missing/conflicting requirements, measured voice/extraction results; no synthetic customer claims |
 | Oct 13 | Integrate accepted modules; profile performance; optional model/Rust experiment only for a measured bottleneck | Cross-module walkthrough; action/event/voice concurrency and provider failure checks | Close expansion. Connected sourcing/production/dispatch/markets/evidence flow works; incomplete branches excluded from release claims |
 | Oct 14 | Release candidate: identity/state/reliability review, benchmark ledger, architecture/cost evidence | Independent complete workflow, report exports, accessibility and laptop/mobile review | New tester completes hero flow unaided; no critical correctness/security blockers; revision and rollback recorded |
 | Oct 15 | Fix candidate findings; business positioning, deck and brief from measured results | Rehearsals/capture; reproducible scenarios and README/setup | Claims match verified capabilities; Google AI contribution clear; signed-out demo and private-workspace checks pass |
@@ -71,8 +72,9 @@ Paths below are proposed relative to the repository root; new routes/files do no
 | Platform | Divyanshu: `contracts/`, `services/gateway/cmd/server/`, `services/gateway/internal/api/`, `internal/workflow/`, `apps/web/app/root.tsx`, `routes.ts`, `components/` | Existing `/recommend` plus `/v2`; decimal strings and explicit units/currencies. Verify round trips, permissions, stale-plan rejection, repeated-action idempotency |
 | Numerical/markets | Divyanshu: `procurement-engine/src/procure/decision.py`, `backtest.py`, `forecast/`, new currency/inventory/production/markets/evaluation modules; `apps/web/app/features/planning/`, `markets/`, `production/` | PlanningRequest → PlanResult with inventory/cash/arrivals/production. Hand-solvable cases, MOQ/capacity/payment limits, late-arrival infeasibility, past-only model selection |
 | Quote intelligence | Taher: `procurement-engine/src/procure/offers/`, `documents/`, `tests/fixtures/offers/`, `tests/test_offer_extraction.py`, `apps/web/app/features/offers/` | `/v2/offers/extractions` → evidence/conflicts → reviewed SupplierOffer. PDF/CSV/XLSX page/cell references, exact unit normalization, expiry/conflicts blocked, document instructions ignored, held-out evaluation |
-| Voice | Taher: `services/gateway/internal/voice/`, `procurement-engine/src/procure/agents/voice_tools.py`, `apps/web/app/features/voice/`, `tests/fixtures/voice/` | `/v2/voice/sessions` and stream; VoiceTurn; tools inspect/explain/propose scenario/prepare RFQ. Real speech, number/currency clarification, cancelled playback, stale result rejection, reconnect without duplicate effects |
-| Shipment/dispatch | Taher: `procurement-engine/src/procure/events/`, `dispatch/`, `tests/test_event_replay.py`, `apps/web/app/features/dispatch/` | `/v2/events` → affected orders → revised planning constraints. IDs deduplicated, observed/occurred times distinct, correct impacted orders and infeasible shipping commitments |
+| Voice | Divyanshu: `services/gateway/internal/voice/`, `procurement-engine/src/procure/agents/voice_tools.py`, `apps/web/app/features/voice/`, `tests/fixtures/voice/` | `/v2/voice/sessions` and stream; VoiceTurn; tools inspect/explain/propose scenario/prepare RFQ. Real speech, number/currency clarification, cancelled playback, stale result rejection, reconnect without duplicate effects |
+| Event propagation and recovery | Divyanshu: `procurement-engine/src/procure/events/propagation/`, event state/application and planning integration tests | `/v2/events` → affected orders → revised arrival/inventory/production/dispatch constraints. Deduplication, out-of-order/stale events and infeasible commitments verified |
+| Shipment workspace | Taher: `procurement-engine/src/procure/events/ingest/`, `dispatch/` milestone/read-model modules, ingestion/workflow tests, `apps/web/app/features/dispatch/` | Normalize provider/scenario milestones into the agreed event envelope; review affected shipments and recovery alternatives supplied by the planning service. Evidence/source/error states and replay workflow verified |
 | Sustainability/evidence | Divyanshu: `procurement-engine/src/procure/sustainability/`; Taher: `route_evidence/`, `tests/test_route_evidence.py`, `apps/web/app/features/evidence/` | Source-versioned emissions scenarios and route/material/date requirements. Unit/factor boundaries, authoritative dated links, missing/conflicting evidence, no certification claim |
 
 Every feature ticket specifies its failing behavioral case, exact interface, allowed files and verification command. Use focused Python tests, Go tests and browser workflow checks; preserve baseline tests as an integration gate. Mocked contracts enable parallel development but never count as connected evidence.
@@ -81,9 +83,24 @@ Every feature ticket specifies its failing behavioral case, exact interface, all
 
 - [ ] **Platform/planning:** Divyanshu agrees contracts with Taher, repairs inventory/evaluation, connects React → Go → Python recommendations, and supplies a global plan fixture plus an infeasible alternative.
 - [ ] **Quote intelligence:** Taher builds extraction through review/save and evidence UI. Include international fixed/index-linked offers, mixed units/currencies, partial shipments, capacity/MOQ, validity and payment terms.
-- [ ] **Voice operations:** Taher selects the speech path and proves a spoken delay invokes validated tools and is explained aloud. Pair on stream/authorization contracts before effects are implemented.
+- [ ] **Voice operations:** Divyanshu selects the speech path and proves a spoken delay invokes validated tools and is explained aloud. Keep voice/session/action contracts under the platform lead; Taher cross-reviews the quote/dispatch commands and user workflow.
 
 The primary speech path is Google Chirp 3 STT → Gemini reasoning/tools → Google TTS. Start with push-to-talk; add streaming and interruption. If streaming TTS Preview is unavailable, use ordinary Cloud TTS responses while keeping STT and tool behavior. Gemini Live and Fish Audio are alternatives behind adapters, not parallel required implementations. [Voice research](Voice_Architecture.md).
+
+## Current ticket map
+
+| Ticket | Lead | Outcome |
+|---|---|---|
+| [#1](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/1) | Divyanshu | Inventory feasibility and past-only policy evaluation |
+| [#2](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/2) | Divyanshu | React/Go/Python platform and shared contracts |
+| [#3](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/3) | Taher | Quote intelligence, evidence review and offer lifecycle |
+| [#4](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/4) | Divyanshu | Voice engineering and validated conversational actions |
+| [#5](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/5) | Taher | Shipment ingestion/workspace, dispatch workflow and route evidence |
+| [#6](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/6) | Divyanshu | Connected event-to-inventory/BOM/production/dispatch recovery |
+| [#7](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/7) | Divyanshu | FX/commodity evaluation, sourcing risk and HS export economics |
+| [#8](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/8) | Divyanshu | Persistence, service identity, provider evidence and release/rollback |
+
+Operational propagation, market intelligence and cloud delivery have linked issues in the repository. Both leads retain implementation, tests, interfaces and cross-review in their domains. Core numerical repairs already underway remain unchanged.
 
 ## Gates and coordination
 

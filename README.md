@@ -13,7 +13,7 @@ The project starts from Taher Afsar's procurement prototype. Its history is pres
 - [Implementation tickets](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues)
 - [Existing engine setup and reference interface](procurement-engine/README.md)
 
-Divyanshu leads platform, markets, planning and cloud integration. Taher leads quote intelligence, conversational operations, shipment/dispatch workflows and route evidence. Both own complete features, tests, interfaces and cross-review.
+Divyanshu leads platform, markets, planning, voice engineering, operational propagation and cloud integration. Taher leads quote intelligence, shipment ingestion and dispatch workflows, and route evidence. Both own complete features, tests, interfaces and cross-review.
 
 ## Current status
 

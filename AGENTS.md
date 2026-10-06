@@ -13,3 +13,5 @@ Give workers one outcome, exact files, contracts, tests and a stop condition. In
 No hard-coded country/currency caps. Keep decimal money, units and source provenance explicit. Keep synthetic fixtures, observed data, forecasts and provider-unavailable states separate. Voice and UI share validated action boundaries; repeated events/approvals cannot duplicate effects.
 
 Never commit secrets or private documents. Do not send messages, create paid plans, change billing/security, expose the repository publicly or make the final hackathon submission without explicit authorization for that action. The reviewed team plan is approved for implementation and publication in this repository.
+
+Before committing, verify the local Git author/committer identity matches the engineer operating the branch; never infer it from the Mac account name. Preserve other contributors' authorship. The coordinator owns voice/session/actions and operational propagation; Taher owns quote intelligence and shipment/evidence workflows. Do not rewrite published history to change attribution.

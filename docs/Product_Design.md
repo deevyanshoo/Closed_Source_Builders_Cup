@@ -1,6 +1,6 @@
 # Closed Source product design
 
-Revision 2, October 6, 2026. Closed Source is an AI manufacturing and global trade control room: connect sourcing, market risk, production, shipments, exports and sustainability around the same orders and evidence. Taher's working procurement engine is its starting point. Approved for team publication and implementation on October 6, 2026.
+Revision 3, October 6, 2026. Closed Source is an AI manufacturing and global trade control room: connect sourcing, market risk, production, shipments, exports and sustainability around the same orders and evidence. Taher's working procurement engine is its starting point. Approved for team publication and implementation on October 6, 2026.
 
 ## Approved architecture and delivery decisions
 
@@ -8,7 +8,7 @@ Revision 2, October 6, 2026. Closed Source is an AI manufacturing and global tra
 - Preserve Taher's Python FastAPI backend, ingestion adapters, model interfaces, schedule comparisons, provenance, headline comparison flow, RFQ drafts, tests and audit history. Repair numerical correctness before adding predictive sophistication.
 - Expand the central workflow to documents → comparable supplier offers → market exposure → inventory-feasible sourcing plan → disruption replan → human approval and exported RFQ.
 - React and TypeScript become the product frontend. Use React Router with Vite in SPA mode, a Go API/workflow and voice-streaming gateway, and the preserved Python numerical/Google AI service. Rust is eligible for a measured bottleneck; it is not a required fourth language.
-- Divyanshu owns platform/contracts, market forecasting, sourcing/production optimization, cloud integration and the shared workspace. Taher owns quote intelligence, conversational voice, shipment/dispatch event workflows and their interfaces and evaluations. Both own features from implementation through demonstration and review each other's integrations.
+- Divyanshu owns platform/contracts, market forecasting, sourcing/production optimization, voice engineering, operational event propagation, cloud integration and the shared workspace. Taher owns quote intelligence, shipment ingestion and dispatch workflows, route/document evidence and their interfaces and evaluations. Both own features from implementation through demonstration and review each other's integrations.
 - Bring the working core forward to October 9, expand connected operational modules October 10–13, reach a release candidate October 14 and freeze October 16. These are delivery targets with daily evidence gates, not claims that all modules already exist.
 - Use GPT 6.1 Sol High as the Antigravity Codex coordinator, smaller capable workers for bounded tasks, and Jev for useful advisory task routing on non-sensitive normalized inputs. Use Google models for the product's AI core; Jev is development support, not a dependency of the deployed procurement product.
 

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Closed Source local foundation",
-    "version": "0.1.0",
-    "description": "Uncapped domain schemas, constrained legacy adapter. Proposed consumer examples do not advertise working modules."
+    "version": "0.2.0",
+    "description": "Additive persistent local plan/action boundary; legacy preview/consumer schemas remain version0.1.0. Only prepare_rfq creates a local draft effect, never a supplier communication."
   },
   "servers": [
     {
@@ -151,6 +151,948 @@
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "readiness",
+        "description": "Process/database/schema/identity readiness only; provider/model remains not_verified.",
+        "responses": {
+          "200": {
+            "description": "Ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database or development identity unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/session": {
+      "get": {
+        "operationId": "session",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/workspaces/{workspace_id}/plans": {
+      "parameters": [
+        {
+          "name": "workspace_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      ],
+      "get": {
+        "operationId": "savedPlans",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedPlansResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "savePlan",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Persisted local result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSavedPlanRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/plans/{saved_plan_id}": {
+      "parameters": [
+        {
+          "name": "saved_plan_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      ],
+      "get": {
+        "operationId": "savedPlan",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "revisePlan",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted local result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedPlanResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseSavedPlanRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/plans/{saved_plan_id}/approvals": {
+      "parameters": [
+        {
+          "name": "saved_plan_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      ],
+      "get": {
+        "operationId": "approvals",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "confirmAction",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Persisted local result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmActionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/plans/{saved_plan_id}/receipts": {
+      "parameters": [
+        {
+          "name": "saved_plan_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      ],
+      "get": {
+        "operationId": "receipts",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionReceiptsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/plans/{saved_plan_id}/audit": {
+      "parameters": [
+        {
+          "name": "saved_plan_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      ],
+      "get": {
+        "operationId": "audit",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read-only local state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/actions/prepare_rfq": {
+      "post": {
+        "operationId": "prepareRfq",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Persisted local result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionReceiptResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Semantic state/auth/availability error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteActionRequest"
               }
             }
           }
@@ -895,14 +1837,665 @@
           "event_type",
           "assumed_delay_days"
         ]
+      },
+      "SessionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "principal_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "viewer"
+            ]
+          },
+          "development_only": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "contract_version",
+          "principal_id",
+          "workspace_id",
+          "role",
+          "development_only"
+        ]
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "process": {
+            "type": "string",
+            "const": "ready"
+          },
+          "database": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "unavailable",
+              "not_configured"
+            ]
+          },
+          "identity": {
+            "type": "string",
+            "enum": [
+              "development",
+              "unavailable"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "const": "not_verified"
+          }
+        },
+        "required": [
+          "contract_version",
+          "process",
+          "database",
+          "identity",
+          "provider"
+        ]
+      },
+      "CreateSavedPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "planning_request": {
+            "$ref": "#/components/schemas/PlanningRequest"
+          }
+        },
+        "required": [
+          "contract_version",
+          "planning_request"
+        ]
+      },
+      "ReviseSavedPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "planning_request": {
+            "$ref": "#/components/schemas/PlanningRequest"
+          }
+        },
+        "required": [
+          "contract_version",
+          "expected_revision",
+          "planning_request"
+        ]
+      },
+      "SavedPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "saved_plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/PlanResponse"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "saved_plan_id",
+          "workspace_id",
+          "revision",
+          "snapshot",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "SavedPlanResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/SavedPlan"
+          }
+        },
+        "required": [
+          "contract_version",
+          "plan"
+        ]
+      },
+      "SavedPlansResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SavedPlan"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "plans"
+        ]
+      },
+      "RfqDraftArguments": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "buyer_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "material": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "destination_country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "quote_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "settlement_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "reporting_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "buyer_id",
+          "material",
+          "quantity",
+          "destination_country",
+          "quote_currency",
+          "settlement_currency",
+          "reporting_currency"
+        ]
+      },
+      "ConfirmActionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "action_kind": {
+            "type": "string",
+            "const": "prepare_rfq"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/RfqDraftArguments"
+          }
+        },
+        "required": [
+          "contract_version",
+          "expected_revision",
+          "expected_plan_version",
+          "action_kind",
+          "arguments"
+        ]
+      },
+      "ActionApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "saved_plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "action_kind": {
+            "type": "string",
+            "const": "prepare_rfq"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/RfqDraftArguments"
+          },
+          "approved_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "executed"
+            ]
+          },
+          "receipt_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "approval_id",
+          "workspace_id",
+          "saved_plan_id",
+          "revision",
+          "plan_version",
+          "action_kind",
+          "arguments",
+          "approved_by",
+          "created_at",
+          "status",
+          "receipt_id"
+        ]
+      },
+      "ApprovalResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "approval": {
+            "$ref": "#/components/schemas/ActionApproval"
+          }
+        },
+        "required": [
+          "contract_version",
+          "approval"
+        ]
+      },
+      "ApprovalsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionApproval"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "approvals"
+        ]
+      },
+      "ExecuteActionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "saved_plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "approval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "action_kind": {
+            "type": "string",
+            "const": "prepare_rfq"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/RfqDraftArguments"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "contract_version",
+          "workspace_id",
+          "saved_plan_id",
+          "expected_revision",
+          "expected_plan_version",
+          "approval_id",
+          "action_kind",
+          "arguments",
+          "idempotency_key"
+        ]
+      },
+      "ActionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "saved_plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "approval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "action_kind": {
+            "type": "string",
+            "const": "prepare_rfq"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/RfqDraftArguments"
+          },
+          "prepared_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "const": "draft_prepared"
+          },
+          "supplier_communication": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "receipt_id",
+          "workspace_id",
+          "saved_plan_id",
+          "revision",
+          "plan_version",
+          "approval_id",
+          "action_kind",
+          "arguments",
+          "prepared_by",
+          "created_at",
+          "status",
+          "supplier_communication"
+        ]
+      },
+      "ActionReceiptResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/ActionReceipt"
+          }
+        },
+        "required": [
+          "contract_version",
+          "receipt"
+        ]
+      },
+      "ActionReceiptsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionReceipt"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "receipts"
+        ]
+      },
+      "AuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "audit_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "saved_plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "plan_saved",
+              "plan_revised",
+              "action_confirmed",
+              "rfq_prepared"
+            ]
+          },
+          "principal_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receipt_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "audit_id",
+          "workspace_id",
+          "saved_plan_id",
+          "revision",
+          "event_type",
+          "principal_id",
+          "created_at",
+          "receipt_id"
+        ]
+      },
+      "AuditResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "events"
+        ]
+      },
+      "StateErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "error": {
+            "$ref": "#/components/schemas/SemanticError"
+          }
+        },
+        "required": [
+          "contract_version",
+          "error"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "developmentBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Temporary server-configured loopback development credentials. Browser receives no token; a loopback Vite proxy supplies its server-side development identity. Not OAuth/Google/production authentication."
       }
     }
   },
   "x-proposed-action-boundary": {
-    "schema": {
-      "$ref": "#/components/schemas/ProposedAction"
-    },
-    "implementation": "not_implemented",
-    "response": "Any /v2/actions request returns HTTP501 not_implemented. No state or permission proof."
+    "implemented": [
+      "prepare_rfq: local draft receipt only with PostgreSQL approval/version/idempotency enforcement when state and development auth are configured"
+    ],
+    "proposed": [
+      "voice/offer/shipment fixtures remain unimplemented consumers"
+    ],
+    "limitations": "No supplier communications, orders, production authentication or cloud deployment. Other actions remain501."
   }
 }

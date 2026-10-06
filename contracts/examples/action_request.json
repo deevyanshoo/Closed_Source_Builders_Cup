@@ -1,0 +1,22 @@
+{
+  "contract_version": "0.2.0",
+  "workspace_id": "local-workspace",
+  "saved_plan_id": "11111111111111111111111111111111",
+  "expected_revision": 1,
+  "expected_plan_version": "synthetic-version-1",
+  "approval_id": "22222222222222222222222222222222",
+  "action_kind": "prepare_rfq",
+  "arguments": {
+    "buyer_id": "synthetic-buyer",
+    "material": "copper",
+    "quantity": {
+      "amount": "50000",
+      "unit": "kg"
+    },
+    "destination_country": "IN",
+    "quote_currency": "USD",
+    "settlement_currency": "INR",
+    "reporting_currency": "INR"
+  },
+  "idempotency_key": "synthetic-request-1"
+}

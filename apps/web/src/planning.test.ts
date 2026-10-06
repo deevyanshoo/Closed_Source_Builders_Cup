@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createPlanningRequest, fetchMaterials, fetchPlan, formatDecimal, initialDraft, responseState, validateDraft } from './planning';
+import { createPlanningRequest, draftFromRequest, fetchMaterials, fetchPlan, formatDecimal, initialDraft, responseState, validateDraft } from './planning';
 import type { PlanResponse } from '../../../contracts/generated/types';
 
 describe('planning request', () => {
+  it('loads a saved request into editable fields without changing decimal text', () => {
+    const request = createPlanningRequest({ ...initialDraft, workspaceId: 'w', buyerId: 'b', material: 'steel', quantity: '9007199254740993.123456789', budget: '1200.00' });
+    expect(draftFromRequest(request)).toMatchObject({ workspaceId: 'w', buyerId: 'b', material: 'steel', quantity: '9007199254740993.123456789', budget: '1200.00' });
+  });
   it('preserves exact decimal spellings through JSON serialization', () => {
     const draft = { ...initialDraft, quantity: '9007199254740993.123456789012345678', budget: '12345678901234567890.123456789012345678' };
     const json = JSON.stringify(createPlanningRequest(draft));

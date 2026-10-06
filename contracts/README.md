@@ -13,3 +13,13 @@ Money and quantities cross browser/Go as decimal strings and are echoed exactly.
 Main now includes issue 1's inventory/backtest corrections from PR #9 and this foundation from PR #10. Inventory shortages are scored with a soft penalty rather than forbidden, so a recommendation still does not certify stock feasibility. Every legacy plan must retain that limitation and distinguish observed market sources from synthetic/sample provenance. Publication/vintage limits remain.
 
 Legacy price observation periods are represented by the first day of the reported month. That ISO date is a month marker, not a publication day or proof of source availability on that day. Schedule amounts and shares are rounded upstream; the gateway validates their totals with the documented per-row rounding allowance, independently of inventory feasibility.
+
+## Additive persistent boundary 0.2.0
+
+Legacy preview requests/responses and proposed offer/voice/shipment fixtures retain 0.1.0. New state/session/action envelopes use 0.2.0. The gateway computes saved snapshots server-side from PlanningRequest; it does not accept client-supplied recommendations. A saved plan has a resource ID, monotonic revision and the immutable computational snapshot/version. Editing inputs produces a temporary preview; saving or revising requires the development editor identity.
+
+Confirmation persists an approval bound to workspace, saved plan, revision, snapshot version, principal and exact reviewed arguments. Execution atomically consumes that approval and creates one local prepare_rfq receipt plus audit record. Concurrent identical requests replay the same receipt; a changed request under the same workspace idempotency key conflicts. A changed plan rejects an unused old approval. Previously committed receipts can be replayed after a plan changes, with no new effect. A consumed approval cannot create another receipt under a different key.
+
+Only local RFQ draft preparation is implemented. There is no sending, ordering, offer lifecycle, voice or shipment implementation. Unknown action kinds remain unavailable. Production identity is not implemented: temporary server-configured bearer identities authorize one workspace/role each. Browser input, actor/role headers and JSON assertions cannot grant permission. The loopback development proxy supplies its configured identity server-side; do not expose this development server or treat it as OAuth. Process health, database/schema readiness and provider/model verification remain separate.
+
+The five new examples are synthetic protocol examples, not proof of persisted state or effects. Real PostgreSQL tests and actual browser receipts supply implementation evidence.

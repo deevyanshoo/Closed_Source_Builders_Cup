@@ -79,6 +79,17 @@ export function createPlanningRequest(draft: PlanningDraft): PlanningRequest {
   return request;
 }
 
+export function draftFromRequest(request: PlanningRequest): PlanningDraft {
+  return {
+    workspaceId: request.workspace_id, buyerId: request.buyer.id, destinationCountry: request.buyer.destination_country,
+    material: request.material, unit: request.quantity.unit, quantity: request.quantity.amount,
+    currentStock: request.current_stock.amount, monthlyConsumption: request.monthly_consumption.amount,
+    needByMonth: String(request.need_by_month), leadTimeMonths: String(request.lead_time_months),
+    quoteCurrency: request.quote_currency, settlementCurrency: request.settlement_currency,
+    reportingCurrency: request.reporting_currency, riskAppetite: request.risk_appetite, budget: request.budget?.amount ?? '',
+  };
+}
+
 export function formatDecimal(value: string): string {
   const match = /^(-?)(\d+)(\.\d+)?$/.exec(value);
   if (!match) return value;

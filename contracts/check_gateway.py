@@ -65,10 +65,10 @@ def main():
         error = call('/v2/plans/recommendations', request, 422)
         validate(error, 'ErrorResponse')
         assert error['error']['code'] == expected_code, name
-    error = call('/v2/actions/prepare_rfq', {}, 501)
+    error = call('/v2/actions/not_supported', {}, 501)
     validate(error, 'ErrorResponse')
     assert error['error']['code'] == 'not_implemented'
-    print('7 exact HTTP fixtures, unsupported context, precision/unit/currency semantics and disabled actions passed')
+    print('7 exact HTTP fixtures, unsupported context, precision/unit/currency semantics and unsupported actions passed')
     if args.connected:
         catalog = call('/v2/materials')
         validate(catalog, 'MaterialsResponse')

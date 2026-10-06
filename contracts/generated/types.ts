@@ -163,3 +163,149 @@ export interface ShipmentExample {
   event_type: "delay";
   assumed_delay_days: number;
 }
+
+export interface SessionResponse {
+  contract_version: "0.2.0";
+  principal_id: string;
+  workspace_id: string;
+  role: "editor" | "viewer";
+  development_only: true;
+}
+
+export interface ReadinessResponse {
+  contract_version: "0.2.0";
+  process: "ready";
+  database: "ready" | "unavailable" | "not_configured";
+  identity: "development" | "unavailable";
+  provider: "not_verified";
+}
+
+export interface CreateSavedPlanRequest {
+  contract_version: "0.2.0";
+  planning_request: PlanningRequest;
+}
+
+export interface ReviseSavedPlanRequest {
+  contract_version: "0.2.0";
+  expected_revision: number;
+  planning_request: PlanningRequest;
+}
+
+export interface SavedPlan {
+  saved_plan_id: string;
+  workspace_id: string;
+  revision: number;
+  snapshot: PlanResponse;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedPlanResponse {
+  contract_version: "0.2.0";
+  plan: SavedPlan;
+}
+
+export interface SavedPlansResponse {
+  contract_version: "0.2.0";
+  plans: (SavedPlan)[];
+}
+
+export interface RfqDraftArguments {
+  buyer_id: string;
+  material: string;
+  quantity: Quantity;
+  destination_country: string;
+  quote_currency: string;
+  settlement_currency: string;
+  reporting_currency: string;
+}
+
+export interface ConfirmActionRequest {
+  contract_version: "0.2.0";
+  expected_revision: number;
+  expected_plan_version: string;
+  action_kind: "prepare_rfq";
+  arguments: RfqDraftArguments;
+}
+
+export interface ActionApproval {
+  approval_id: string;
+  workspace_id: string;
+  saved_plan_id: string;
+  revision: number;
+  plan_version: string;
+  action_kind: "prepare_rfq";
+  arguments: RfqDraftArguments;
+  approved_by: string;
+  created_at: string;
+  status: "confirmed" | "executed";
+  receipt_id: string | null;
+}
+
+export interface ApprovalResponse {
+  contract_version: "0.2.0";
+  approval: ActionApproval;
+}
+
+export interface ApprovalsResponse {
+  contract_version: "0.2.0";
+  approvals: (ActionApproval)[];
+}
+
+export interface ExecuteActionRequest {
+  contract_version: "0.2.0";
+  workspace_id: string;
+  saved_plan_id: string;
+  expected_revision: number;
+  expected_plan_version: string;
+  approval_id: string;
+  action_kind: "prepare_rfq";
+  arguments: RfqDraftArguments;
+  idempotency_key: string;
+}
+
+export interface ActionReceipt {
+  receipt_id: string;
+  workspace_id: string;
+  saved_plan_id: string;
+  revision: number;
+  plan_version: string;
+  approval_id: string;
+  action_kind: "prepare_rfq";
+  arguments: RfqDraftArguments;
+  prepared_by: string;
+  created_at: string;
+  status: "draft_prepared";
+  supplier_communication: false;
+}
+
+export interface ActionReceiptResponse {
+  contract_version: "0.2.0";
+  receipt: ActionReceipt;
+}
+
+export interface ActionReceiptsResponse {
+  contract_version: "0.2.0";
+  receipts: (ActionReceipt)[];
+}
+
+export interface AuditEvent {
+  audit_id: string;
+  workspace_id: string;
+  saved_plan_id: string;
+  revision: number;
+  event_type: "plan_saved" | "plan_revised" | "action_confirmed" | "rfq_prepared";
+  principal_id: string;
+  created_at: string;
+  receipt_id: string | null;
+}
+
+export interface AuditResponse {
+  contract_version: "0.2.0";
+  events: (AuditEvent)[];
+}
+
+export interface StateErrorResponse {
+  contract_version: "0.2.0";
+  error: SemanticError;
+}

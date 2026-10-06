@@ -43,7 +43,7 @@ func (s *stateServer) plans(w http.ResponseWriter, r *http.Request, ctx context.
 			invalid(w, "Invalid saved plan request")
 			return
 		}
-		snapshot, status, msg := s.computedSnapshot(q.PlanningRequest)
+		snapshot, status, msg := s.computedSnapshot(ctx, q.PlanningRequest)
 		if status != 0 {
 			stateError(w, status, "invalid_snapshot", msg)
 			return
@@ -129,7 +129,7 @@ func (s *stateServer) plan(w http.ResponseWriter, r *http.Request, ctx context.C
 			notFound(w)
 			return
 		}
-		snapshot, status, msg := s.computedSnapshot(q.PlanningRequest)
+		snapshot, status, msg := s.computedSnapshot(ctx, q.PlanningRequest)
 		if status != 0 {
 			stateError(w, status, "invalid_snapshot", msg)
 			return

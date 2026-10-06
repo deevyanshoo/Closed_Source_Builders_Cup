@@ -1,0 +1,14 @@
+# Prepared packaging only. Build context is repository root.
+FROM python:3.14-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/src
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY procurement-engine/requirements-service.txt /app/requirements-service.txt
+RUN pip install --no-cache-dir -r /app/requirements-service.txt
+COPY procurement-engine/src /app/src
+COPY procurement-engine/config /app/config
+ENV PROCURE_CONFIG_DIR=/app/config
+USER 10001:10001
+EXPOSE 8080
+CMD ["python", "-m", "procure.service_app"]

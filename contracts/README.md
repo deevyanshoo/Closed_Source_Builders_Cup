@@ -23,3 +23,7 @@ Confirmation persists an approval bound to workspace, saved plan, revision, snap
 Only local RFQ draft preparation is implemented. There is no sending, ordering, offer lifecycle, voice or shipment implementation. Unknown action kinds remain unavailable. Production identity is not implemented: temporary server-configured bearer identities authorize one workspace/role each. Browser input, actor/role headers and JSON assertions cannot grant permission. The loopback development proxy supplies its configured identity server-side; do not expose this development server or treat it as OAuth. Process health, database/schema readiness and provider/model verification remain separate.
 
 The five new examples are synthetic protocol examples, not proof of persisted state or effects. Real PostgreSQL tests and actual browser receipts supply implementation evidence.
+
+## Restricted private staging session
+
+`SessionResponse` v0.2 adds optional `identity_mode`. Legacy `development_only: true` responses remain valid. `development_only: false` requires `identity_mode: private_machine`; it describes a verified allowlisted service caller with server-derived workspace/role, not interactive end-user sign-in. `session_private.json` is a synthetic example. Readiness may report identity `private_machine`, while provider remains `not_verified`. No persistent schema/action semantics change. Ordinary browser staging requires a later reviewed user-auth flow; credentials must never enter built assets or browser storage. Run `check_cloud_foundation.py` for negative mode semantics.

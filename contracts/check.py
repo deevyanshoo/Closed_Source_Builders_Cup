@@ -10,7 +10,7 @@ mapping = {'request': 'PlanningRequest', 'precision': 'PlanningRequest', 'succes
            'unsupported': 'PlanResponse', 'offer': 'OfferExample', 'voice': 'VoiceExample',
            'shipment': 'ShipmentExample', 'saved_plan': 'SavedPlanResponse',
            'approval': 'ApprovalResponse', 'action_request': 'ExecuteActionRequest',
-           'action_receipt': 'ActionReceiptResponse', 'session': 'SessionResponse'}
+           'action_receipt': 'ActionReceiptResponse', 'session': 'SessionResponse', 'session_private': 'SessionResponse'}
 for name, schema in mapping.items():
     value = json.loads((ROOT / 'examples' / (name + '.json')).read_text())
     validator = Draft202012Validator({'$ref': '#/components/schemas/' + schema,

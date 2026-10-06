@@ -171,6 +171,7 @@ type SessionResponse struct {
   WorkspaceId string `json:"workspace_id"`
   Role string `json:"role"`
   DevelopmentOnly bool `json:"development_only"`
+  IdentityMode *string `json:"identity_mode,omitempty"`
 }
 
 type ReadinessResponse struct {

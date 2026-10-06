@@ -50,7 +50,7 @@ export async function fetchSession(signal?: AbortSignal): Promise<SessionRespons
   let data: unknown;
   try { data = await response.json(); } catch { throw new StateError('The session response is unreadable.', response.status, 'invalid_response'); }
   if (!response.ok) { const problem = object(data) && object(data.error) ? data.error : {}; throw new StateError(string(problem.message) ? problem.message : 'Session unavailable.', response.status, string(problem.code) ? problem.code : 'session_unavailable'); }
-  if (!object(data) || data.contract_version !== '0.2.0' || !string(data.principal_id) || !string(data.workspace_id) || (data.role !== 'editor' && data.role !== 'viewer') || data.development_only !== true) throw new StateError('The gateway returned an invalid session.', response.status, 'invalid_response');
+  if (!object(data) || data.contract_version !== '0.2.0' || !string(data.principal_id) || !string(data.workspace_id) || (data.role !== 'editor' && data.role !== 'viewer') || !((data.development_only === true && (data.identity_mode === undefined || data.identity_mode === 'development')) || (data.development_only === false && data.identity_mode === 'private_machine'))) throw new StateError('The gateway returned an invalid session.', response.status, 'invalid_response');
   return data as unknown as SessionResponse;
 }
 export const listPlans = (workspaceId: string, signal?: AbortSignal) => stateRequest<SavedPlansResponse>(`/v2/workspaces/${enc(workspaceId)}/plans`, 'plans', { signal });

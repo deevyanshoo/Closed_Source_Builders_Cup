@@ -1,0 +1,17 @@
+{
+  "contract_version": "0.1.0",
+  "implementation": "proposed",
+  "synthetic": true,
+  "session_id": "synthetic-session",
+  "turn_id": "turn-1",
+  "transcript": "Prepare an RFQ for this plan",
+  "proposed_action": {
+    "implementation": "proposed",
+    "workspace_id": "local-workspace",
+    "plan_id": "synthetic-plan",
+    "expected_plan_version": "synthetic-version-1",
+    "idempotency_key": "synthetic-key",
+    "action": "prepare_rfq"
+  },
+  "confirmation_state": "requires_review"
+}

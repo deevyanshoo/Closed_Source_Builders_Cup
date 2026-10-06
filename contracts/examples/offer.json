@@ -1,0 +1,20 @@
+{
+  "contract_version": "0.1.0",
+  "implementation": "proposed",
+  "synthetic": true,
+  "offer_id": "synthetic-offer-1",
+  "supplier_id": "synthetic-supplier-1",
+  "material": "copper",
+  "quantity": {
+    "amount": "50.125",
+    "unit": "tonne"
+  },
+  "price": {
+    "amount": "9123.123456789012345678",
+    "currency": "USD"
+  },
+  "settlement_currency": "EUR",
+  "origin_country": "CL",
+  "destination_country": "DE",
+  "evidence_locator": "synthetic-sheet:Offers!C7"
+}

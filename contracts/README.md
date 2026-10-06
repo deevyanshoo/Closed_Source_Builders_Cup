@@ -10,6 +10,6 @@ Money and quantities cross browser/Go as decimal strings and are echoed exactly.
 
 `examples/precision.json` exercises exact browser/Go round trips with deliberately unsupported legacy precision. Offer, voice and shipment examples are synthetic proposed consumer contracts only; their domains are not implemented. The proposed action envelope binds workspace, plan ID/version and idempotency key, but no enforcement is claimed. These examples unblock development; they are not provider or permission evidence.
 
-Issue 1 remains unmerged draft PR #9. This base does not contain its inventory/backtest corrections. Every legacy plan must warn that inventory feasibility is unverified, and must distinguish observed market sources from synthetic/sample provenance. Publication/vintage limits remain.
+Main now includes issue 1's inventory/backtest corrections from PR #9 and this foundation from PR #10. Inventory shortages are scored with a soft penalty rather than forbidden, so a recommendation still does not certify stock feasibility. Every legacy plan must retain that limitation and distinguish observed market sources from synthetic/sample provenance. Publication/vintage limits remain.
 
 Legacy price observation periods are represented by the first day of the reported month. That ISO date is a month marker, not a publication day or proof of source availability on that day. Schedule amounts and shares are rounded upstream; the gateway validates their totals with the documented per-row rounding allowance, independently of inventory feasibility.

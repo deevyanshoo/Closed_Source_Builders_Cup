@@ -4,6 +4,8 @@ The [daily plan](docs/Work_Plan.md) defines domain ownership and daily acceptanc
 
 Shared contracts and migrations have one integration owner. Coordinate changes before implementation; use agreed examples to develop independently. Never force-push shared branches. Preserve the original prototype and its commit history.
 
+`main` is the shared source of the latest verified work. The coordinator is authorized to merge reviewed increments from the approved project plan after their acceptance checks and relevant combined integration checks pass. Keep incomplete work on feature branches. Verify the remote merge and record its revision; preserve contributor commits and do not bypass repository protections. Start each new task by updating local `main` with `git pull --ff-only origin main`, then create the task branch. If local changes or divergence prevent that update, reconcile them without resetting or force-pushing.
+
 Each pull request describes the user-visible change, relevant tests, source/data assumptions and remaining limitations. Add meaningful regression tests for substantive behavior changes. Verify numerical constraints with hand-solvable cases and interfaces with actual workflow checks. Keep provider-mocked tests separate from successful real-provider calls.
 
 Use synthetic fixtures for quotes, suppliers, plants and shipments until authorized customer data exists. Label them in the UI and exports. Never commit credentials, private documents, local databases, raw user logs or machine-specific paths.

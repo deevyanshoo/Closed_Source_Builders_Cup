@@ -53,6 +53,6 @@ Consumer examples are synthetic/proposed. The exact high-precision values in `pr
 
 The schema permits arbitrary ISO-shaped currency/country codes; compatibility coverage currently supports IN buyer destination, USD commodity quote, INR settlement/reporting and kg quantities. Unsupported contexts stay visible and unavailable. Unknown material/provider failures must not yield fake recommendations.
 
-PR #9 remains unmerged at the task base. Its full-horizon inventory and backtest fixes were not copied here. Plan snapshots are advisory legacy comparisons, not verified feasible allocations or executable supplier quotes. Source observation dates differ from publication dates; unavailable dates must remain explicit. Google model/speech/provider calls are not verified by this foundation.
+PR #9's full-horizon inventory and backtest fixes and PR #10's foundation are integrated into `main`. The foundation was developed separately from those numerical fixes, then the combined tree passed integration checks. Shortages remain a soft scoring penalty: plan snapshots are advisory comparisons, not certified feasible allocations or executable supplier quotes. Source observation dates differ from publication dates; unavailable dates must remain explicit. Google model/speech/provider calls are not verified by this foundation.
 
 `/v2/actions` is not implemented and returns a semantic HTTP 501 error. No stale-plan, idempotency, permission, persistent-state or cloud claim is made. These remain later issue-2 packages. This draft should not close the complete issue.

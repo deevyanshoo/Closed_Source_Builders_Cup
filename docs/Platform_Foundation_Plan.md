@@ -1,6 +1,6 @@
 # Local platform foundation implementation plan
 
-Spec: approved issue-2 package in platform-kickoff.md, Product_Design/Work_Plan revision 3. Base f4a8ee9, feature/platform-foundation. Coordinator owns contracts and integration; consumers receive frozen schemas before writing. No numerical or domain code changes; PR9 stays unmerged.
+Spec: approved issue-2 package in platform-kickoff.md, Product_Design/Work_Plan revision 3. Base f4a8ee9, feature/platform-foundation. Coordinator owns contracts and integration; consumers receive frozen schemas before writing. This package made no numerical or domain code changes and kept PR #9 separate during development. PR #9 and PR #10 were subsequently integrated into `main` after combined checks under the user's standing merge authorization.
 
 ## Design and contract decisions
 
@@ -30,4 +30,4 @@ Coordinator verifies one gateway/frontend server on unused loopback ports 8816/5
 
 ## Review focus
 
-Semantic 200 errors and invalid source responses; decimal loss or unsafe legacy precision; mismatched currencies/units and uncapped unsupported codes; stale displayed results after edits/failure; accurate provenance and unmerged numerical limitation. User supplies approval to continue this bounded design; no additional design approval gate.
+Semantic 200 errors and invalid source responses; decimal loss or unsafe legacy precision; mismatched currencies/units and uncapped unsupported codes; stale displayed results after edits/failure; accurate provenance and remaining numerical limitations. User supplies approval to continue this bounded design; no additional design approval gate.

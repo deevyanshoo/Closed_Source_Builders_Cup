@@ -61,6 +61,22 @@
           },
           "per_unit": "kg"
         }
+      },
+      {
+        "purchase_month": 2,
+        "calendar_month": "Dec 2026",
+        "quantity": {
+          "amount": "20000",
+          "unit": "kg"
+        },
+        "percent": "40",
+        "expected_unit_price": {
+          "money": {
+            "amount": "837.15",
+            "currency": "INR"
+          },
+          "per_unit": "kg"
+        }
       }
     ],
     "comparisons": [

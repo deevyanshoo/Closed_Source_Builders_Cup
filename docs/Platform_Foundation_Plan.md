@@ -11,7 +11,7 @@ Design direction: industrial UI skill, Swiss print light palette, flat divided w
 ## Task 1: Coordinator contracts
 
 - [x] Publish OpenAPI, examples, generation/check scripts and precision/coverage limitations locally.
-- [ ] Generate TypeScript/Go wire types; validate fixtures; freeze consumer interface.
+- [x] Generate TypeScript/Go wire types; validate fixtures; freeze consumer interface.
 
 ## Task 2: Go consumer
 

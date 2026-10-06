@@ -103,6 +103,16 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "Request body exceeds the local gateway size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -334,13 +344,16 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "format": "date-time"
           },
           "observation_end": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "format": "date",
+            "description": "Reported observation period. Legacy monthly prices use day 1 as a month marker, not a publication date."
           },
           "basis": {
             "type": "string",

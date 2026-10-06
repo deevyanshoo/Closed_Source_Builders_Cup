@@ -169,14 +169,15 @@ export interface SessionResponse {
   principal_id: string;
   workspace_id: string;
   role: "editor" | "viewer";
-  development_only: true;
+  development_only: boolean;
+  identity_mode?: "development" | "private_machine";
 }
 
 export interface ReadinessResponse {
   contract_version: "0.2.0";
   process: "ready";
   database: "ready" | "unavailable" | "not_configured";
-  identity: "development" | "unavailable";
+  identity: "development" | "unavailable" | "private_machine";
   provider: "not_verified";
 }
 

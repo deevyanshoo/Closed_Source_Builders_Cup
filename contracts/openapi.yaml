@@ -1865,7 +1865,15 @@
           },
           "development_only": {
             "type": "boolean",
-            "const": true
+            "description": "True only for local development identities. False requires explicit private_machine mode; it does not prove end-user sign-in."
+          },
+          "identity_mode": {
+            "type": "string",
+            "enum": [
+              "development",
+              "private_machine"
+            ],
+            "description": "Server-derived session class; omitted by compatible legacy development responses."
           }
         },
         "required": [
@@ -1874,6 +1882,37 @@
           "workspace_id",
           "role",
           "development_only"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "development_only": {
+                  "const": false
+                }
+              },
+              "required": [
+                "development_only"
+              ]
+            },
+            "then": {
+              "required": [
+                "identity_mode"
+              ],
+              "properties": {
+                "identity_mode": {
+                  "const": "private_machine"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "identity_mode": {
+                  "const": "development"
+                }
+              }
+            }
+          }
         ]
       },
       "ReadinessResponse": {
@@ -1900,7 +1939,8 @@
             "type": "string",
             "enum": [
               "development",
-              "unavailable"
+              "unavailable",
+              "private_machine"
             ]
           },
           "provider": {

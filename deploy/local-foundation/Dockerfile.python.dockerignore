@@ -1,0 +1,12 @@
+.git
+**/.env
+**/.env.*
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.duckdb
+**/*.duckdb.*
+**/data/raw
+**/dist
+**/.cache
+**/.local-tools

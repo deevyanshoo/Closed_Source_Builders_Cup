@@ -1,6 +1,6 @@
 # Run the local recommendation workspace
 
-This package adds a loopback React/Go workspace on top of the existing Python API. It does not start or replace that API, deploy cloud resources, or implement authentication/actions. Keep these services local; do not expose them to untrusted networks.
+The initial foundation adds a loopback React/Go workspace on top of the existing Python API. The subsequent saved-plan and local action increment is documented in [Plan_Actions_Setup.md](Plan_Actions_Setup.md). Neither starts or replaces the Python API or deploys cloud resources. Keep these services local; do not expose them to untrusted networks.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ Open `http://127.0.0.1:5316/planning`. Vite proxies relative `/v2` requests to t
 
 ## Contracts and fixtures
 
-Run `python3 contracts/generate.py` to regenerate wire types, or add `--check` to detect drift. `contracts/check.py` requires Python `jsonschema` and validates all seven fixtures against OpenAPI; the existing Python virtualenv already supplies it. Use that environment read-only with `PYTHONDONTWRITEBYTECODE=1`, or use a separate local validation environment.
+Run `python3 contracts/generate.py` to regenerate wire types, or add `--check` to detect drift. `contracts/check.py` requires Python `jsonschema` and validates all current fixtures against OpenAPI; the existing Python virtualenv already supplies it. Use that environment read-only with `PYTHONDONTWRITEBYTECODE=1`, or use a separate local validation environment.
 
 Run `contracts/check_gateway.py` with the same validation environment against the local gateway for HTTP fixtures and semantic errors. Add `--connected` to validate one actual legacy catalog/recommendation; this can create the existing Python audit record.
 
@@ -55,4 +55,4 @@ The schema permits arbitrary ISO-shaped currency/country codes; compatibility co
 
 PR #9's full-horizon inventory and backtest fixes and PR #10's foundation are integrated into `main`. The foundation was developed separately from those numerical fixes, then the combined tree passed integration checks. Shortages remain a soft scoring penalty: plan snapshots are advisory comparisons, not certified feasible allocations or executable supplier quotes. Source observation dates differ from publication dates; unavailable dates must remain explicit. Google model/speech/provider calls are not verified by this foundation.
 
-`/v2/actions` is not implemented and returns a semantic HTTP 501 error. No stale-plan, idempotency, permission, persistent-state or cloud claim is made. These remain later issue-2 packages. This draft should not close the complete issue.
+`/v2/actions` and unsupported action names return a semantic HTTP 501 error. The additive local `prepare_rfq` boundary and persistence checks are described in [Plan_Actions_Setup.md](Plan_Actions_Setup.md). It prepares a local draft receipt and does not send to a supplier. Production authentication, cloud deployment and other domains remain later packages; this increment does not close the full issue.

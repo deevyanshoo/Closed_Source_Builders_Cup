@@ -50,7 +50,12 @@ func main() {
 	if e != nil || u.Scheme != "http" || u.Host == "" || u.User != nil {
 		log.Fatal("invalid PYTHON_SERVICE_URL")
 	}
-	log.Fatal(http.ListenAndServe(addr, newHandler(strings.TrimRight(upstream, "/"), examples)))
+	log.Fatal(http.ListenAndServe(addr, newStateHandler(stateConfig{
+		DBURLFile:      os.Getenv("DATABASE_URL_FILE"),
+		IdentitiesFile: os.Getenv("DEV_IDENTITIES_FILE"),
+		AllowedOrigin:  os.Getenv("DEV_ALLOWED_ORIGIN"),
+		Upstream:       strings.TrimRight(upstream, "/"), Examples: examples,
+	})))
 }
 
 func newHandler(upstream, examples string) http.Handler {
@@ -61,7 +66,7 @@ func newHandler(upstream, examples string) http.Handler {
 			http.Error(w, "method not allowed", 405)
 			return
 		}
-		write(w, 200, map[string]string{"status": "ok", "scope": "local_compute_only"})
+		write(w, 200, map[string]string{"status": "ok", "scope": "process_only"})
 	})
 	m.HandleFunc("/v2/actions", notImplemented)
 	m.HandleFunc("/v2/actions/", notImplemented)
@@ -206,7 +211,7 @@ func precision(s string) bool {
 func required(raw map[string]json.RawMessage, keys ...string) bool {
 	for _, k := range keys {
 		v, ok := raw[k]
-		if !ok || string(v) == "null" {
+		if !ok || string(bytes.TrimSpace(v)) == "null" {
 			return false
 		}
 	}

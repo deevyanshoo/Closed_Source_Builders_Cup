@@ -1,0 +1,14 @@
+{
+  "contract_version": "0.1.0",
+  "implementation": "proposed",
+  "synthetic": true,
+  "event_id": "synthetic-delay",
+  "workspace_id": "local-workspace",
+  "plan_id": "synthetic-plan",
+  "plan_version": "synthetic-version-1",
+  "occurred_at": "2026-10-06T00:00:00Z",
+  "observed_at": "2026-10-06T00:10:00Z",
+  "shipment_id": "synthetic-shipment",
+  "event_type": "delay",
+  "assumed_delay_days": 3
+}

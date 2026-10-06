@@ -1,0 +1,7 @@
+.local-tools/
+node_modules/
+dist/
+.vite/
+playwright-report/
+test-results/
+.DS_Store

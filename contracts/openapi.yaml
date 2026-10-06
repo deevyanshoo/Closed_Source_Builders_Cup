@@ -1,0 +1,895 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Closed Source local foundation",
+    "version": "0.1.0",
+    "description": "Uncapped domain schemas, constrained legacy adapter. Proposed consumer examples do not advertise working modules."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8816"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "description": "Local gateway health only, not provider health or authentication proof.",
+        "responses": {
+          "200": {
+            "description": "Gateway running"
+          }
+        }
+      }
+    },
+    "/v2/materials": {
+      "get": {
+        "operationId": "materials",
+        "responses": {
+          "200": {
+            "description": "Catalog or explicit unavailable/empty state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialsResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Invalid upstream catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/plans/recommendations": {
+      "post": {
+        "operationId": "recommend",
+        "description": "Compute-only snapshot. Legacy Python may write its existing audit record. No apply/approval/permissions/idempotency enforcement.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanningRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recommendation snapshot or explicit unavailable/empty state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Semantic validation, mismatch or legacy precision limitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Malformed or semantically invalid upstream response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Provider/service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/contracts/examples/{name}": {
+      "get": {
+        "operationId": "example",
+        "description": "Read-only synthetic consumer fixtures, never an execution result.",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "request",
+                "precision",
+                "success",
+                "unsupported",
+                "offer",
+                "voice",
+                "shipment"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact JSON fixture; schemas vary by named example."
+          },
+          "404": {
+            "description": "Unknown fixture",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Money": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "maxLength": 120
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ]
+      },
+      "Quantity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "maxLength": 120
+          },
+          "unit": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_/-]{0,31}$"
+          }
+        },
+        "required": [
+          "amount",
+          "unit"
+        ]
+      },
+      "Buyer": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "destination_country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "required": [
+          "id",
+          "destination_country"
+        ]
+      },
+      "PlanningRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/Buyer"
+          },
+          "material": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "current_stock": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "monthly_consumption": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "need_by_month": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+          },
+          "lead_time_months": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "quote_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "settlement_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "reporting_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "risk_appetite": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "contract_version",
+          "workspace_id",
+          "buyer",
+          "material",
+          "quantity",
+          "current_stock",
+          "monthly_consumption",
+          "need_by_month",
+          "lead_time_months",
+          "quote_currency",
+          "settlement_currency",
+          "reporting_currency",
+          "risk_appetite"
+        ]
+      },
+      "Availability": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unsupported_context",
+              "unsupported_material",
+              "provider_unavailable",
+              "empty_result"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "code",
+          "reason"
+        ]
+      },
+      "SourceEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "used": {
+            "type": "string",
+            "enum": [
+              "live",
+              "cache",
+              "synthetic",
+              "sample",
+              "unknown"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retrieved_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observation_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "basis": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source",
+          "used",
+          "status",
+          "retrieved_at",
+          "observation_end",
+          "basis"
+        ]
+      },
+      "UnitPrice": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "money": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "per_unit": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_/-]{0,31}$"
+          }
+        },
+        "required": [
+          "money",
+          "per_unit"
+        ]
+      },
+      "PurchaseLine": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "purchase_month": {
+            "type": "integer"
+          },
+          "calendar_month": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "percent": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "maxLength": 120
+          },
+          "expected_unit_price": {
+            "$ref": "#/components/schemas/UnitPrice"
+          }
+        },
+        "required": [
+          "purchase_month",
+          "calendar_month",
+          "quantity",
+          "percent",
+          "expected_unit_price"
+        ]
+      },
+      "Comparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "schedule": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expected_cost": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "p90_cost": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "stockout_penalty": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "name",
+          "schedule",
+          "expected_cost",
+          "p90_cost",
+          "stockout_penalty"
+        ]
+      },
+      "LegacyPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "computation_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "BUY NOW",
+              "SPLIT BUY",
+              "WAIT"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "current_price": {
+            "$ref": "#/components/schemas/UnitPrice"
+          },
+          "schedule": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PurchaseLine"
+            }
+          },
+          "comparisons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Comparison"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceEvidence"
+            }
+          },
+          "legacy_recommendation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string",
+            "enum": [
+              "legacy_float_rounded"
+            ]
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_version",
+          "computation_only",
+          "action",
+          "summary",
+          "current_price",
+          "schedule",
+          "comparisons",
+          "evidence",
+          "legacy_recommendation_id",
+          "precision"
+        ]
+      },
+      "PlanResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "unavailable",
+              "empty"
+            ]
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "request": {
+            "$ref": "#/components/schemas/PlanningRequest"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "status",
+          "availability",
+          "request",
+          "plan",
+          "warnings"
+        ]
+      },
+      "Material": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "display_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_series": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_unit": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "key",
+          "display_name",
+          "source_series",
+          "source_unit"
+        ]
+      },
+      "MaterialsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Material"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "availability",
+          "materials"
+        ]
+      },
+      "SemanticError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "error": {
+            "$ref": "#/components/schemas/SemanticError"
+          }
+        },
+        "required": [
+          "contract_version",
+          "error"
+        ]
+      },
+      "OfferExample": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "implementation": {
+            "type": "string",
+            "enum": [
+              "proposed"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "offer_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "supplier_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "material": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "settlement_currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "origin_country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "destination_country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "evidence_locator": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "contract_version",
+          "implementation",
+          "synthetic",
+          "offer_id",
+          "supplier_id",
+          "material",
+          "quantity",
+          "price",
+          "settlement_currency",
+          "origin_country",
+          "destination_country",
+          "evidence_locator"
+        ]
+      },
+      "ProposedAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "implementation": {
+            "type": "string",
+            "enum": [
+              "proposed"
+            ]
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plan_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "prepare_rfq"
+            ]
+          }
+        },
+        "required": [
+          "implementation",
+          "workspace_id",
+          "plan_id",
+          "expected_plan_version",
+          "idempotency_key",
+          "action"
+        ]
+      },
+      "VoiceExample": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "implementation": {
+            "type": "string",
+            "enum": [
+              "proposed"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transcript": {
+            "type": "string",
+            "minLength": 1
+          },
+          "proposed_action": {
+            "$ref": "#/components/schemas/ProposedAction"
+          },
+          "confirmation_state": {
+            "type": "string",
+            "enum": [
+              "requires_review"
+            ]
+          }
+        },
+        "required": [
+          "contract_version",
+          "implementation",
+          "synthetic",
+          "session_id",
+          "turn_id",
+          "transcript",
+          "proposed_action",
+          "confirmation_state"
+        ]
+      },
+      "ShipmentExample": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.1.0"
+          },
+          "implementation": {
+            "type": "string",
+            "enum": [
+              "proposed"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plan_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "shipment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "delay"
+            ]
+          },
+          "assumed_delay_days": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "contract_version",
+          "implementation",
+          "synthetic",
+          "event_id",
+          "workspace_id",
+          "plan_id",
+          "plan_version",
+          "occurred_at",
+          "observed_at",
+          "shipment_id",
+          "event_type",
+          "assumed_delay_days"
+        ]
+      }
+    }
+  },
+  "x-proposed-action-boundary": {
+    "schema": {
+      "$ref": "#/components/schemas/ProposedAction"
+    },
+    "implementation": "not_implemented",
+    "response": "Any /v2/actions request returns HTTP501 not_implemented. No state or permission proof."
+  }
+}

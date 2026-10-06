@@ -1,0 +1,31 @@
+{
+  "contract_version": "0.1.0",
+  "workspace_id": "local-workspace",
+  "buyer": {
+    "id": "synthetic-buyer",
+    "destination_country": "IN"
+  },
+  "material": "copper",
+  "quantity": {
+    "amount": "9007199254740993.123456789012345678",
+    "unit": "kg"
+  },
+  "current_stock": {
+    "amount": "20000",
+    "unit": "kg"
+  },
+  "monthly_consumption": {
+    "amount": "15000",
+    "unit": "kg"
+  },
+  "need_by_month": 3,
+  "lead_time_months": 1,
+  "quote_currency": "USD",
+  "settlement_currency": "INR",
+  "reporting_currency": "INR",
+  "risk_appetite": "medium",
+  "budget": {
+    "amount": "12345678901234567890.123456789012345678",
+    "currency": "INR"
+  }
+}

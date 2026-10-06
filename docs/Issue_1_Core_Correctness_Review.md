@@ -26,7 +26,9 @@ The replay result cache uses the full frame content and configuration, and uncac
 - Inventory red: three parameter cases failed because first-arrival scoring missed subsequent demand.
 - Replay red: actual `run_backtest` regression failed on present-day persisted selection access.
 - Inventory focused green initially: 15 passed. Additional sufficient-total, timely split, late-arrival and recommendation explanation cases were then added.
-- Full preserved offline Python suite after production repairs: 70 passed in about 37 seconds; tightened regression passed separately in 17.3 seconds; final full suite after the tightened regression: 70 passed in about 36.5 seconds. Only the existing Starlette/httpx TestClient deprecation warning remains. `git diff --check` passed. Bounded review follows this verification.
+- Full preserved offline Python suite after production repairs: 70 passed in about 37 seconds; tightened regression passed separately in 17.3 seconds; final full suite after the tightened regression: 70 passed in about 36.5 seconds. Only the existing Starlette/httpx TestClient deprecation warning remains. `git diff --check` passed.
+- Bounded task/whole-branch review of numerical commit `e13804a`: spec compliance and code quality approved; no Critical or Important findings. A synthetic serial changed-prefix probe confirmed two replay misses cleared production fit caches and cached residuals matched a fresh fit, without database or provider use.
+- Minor (deferred): the suffix-poisoning regression manually clears fit caches, so it does not directly protect the production cache-clear safeguard. Current behavior passed the independent probe; add a warm-cache changed-prefix regression when next editing these tests. Concurrent cache invalidation was not proved by the serial probe.
 
 Tests use the existing virtualenv read-only with `PYTHONPATH` pointing at this worktree's `procurement-engine/src`, `PYTHONDONTWRITEBYTECODE=1`, and the existing isolated temporary fixture database. Reference servers and provider/network smoke were not exercised.
 

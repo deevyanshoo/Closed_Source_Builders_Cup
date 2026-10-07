@@ -16,11 +16,12 @@ import datetime as dt
 import hashlib
 import json
 import math
-from decimal import Decimal
+from contextlib import contextmanager
 
 from .. import db
 from ..documents import Document, DocumentReadError, Segment, read_document
 from . import lifecycle as lc
+from . import normalize as nz
 from .evidence import check_candidate
 from .extraction import extract_offer
 from .lifecycle import OfferError
@@ -43,6 +44,11 @@ SCHEMA = [
 LEGACY_BUYER_INPUTS = ("need_by_month", "current_stock_kg", "monthly_consumption_kg")
 
 
+def _today() -> dt.date:
+    """Server clock for mutations; store callers may inject a date in local tests."""
+    return dt.date.today()
+
+
 def ensure_schema() -> None:
     for stmt in SCHEMA:
         db.execute(stmt)
@@ -53,9 +59,24 @@ def _rows(sql: str, params=None) -> list[dict]:
     return df.astype(object).where(df.notna(), None).to_dict(orient="records")
 
 
+@contextmanager
+def _transaction():
+    """Use the locked DuckDB connection for all writes in one local operation."""
+    if db.ENGINE != "duckdb":
+        raise OfferError("invalid_request", "atomic offer mutations require DuckDB")
+    con = db._connect()
+    con.execute("BEGIN TRANSACTION")
+    try:
+        yield
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+
+
 # ---------- idempotency ----------
 
-def _idempotent(action: str, scope: dict, key: str, fn) -> dict:
+def _idempotent(action: str, scope: dict, key: str, fn, *, expire_ids=(), today: dt.date) -> dict:
     if not isinstance(key, str) or not 8 <= len(key) <= 128:
         raise OfferError("invalid_request", "idempotency_key must be 8 to 128 characters")
     request_hash = hashlib.sha256(json.dumps({"action": action, **scope}, sort_keys=True, default=str)
@@ -67,9 +88,14 @@ def _idempotent(action: str, scope: dict, key: str, fn) -> dict:
             if seen[0]["request_hash"] != request_hash or seen[0]["action"] != action:
                 raise OfferError("idempotency_conflict", "this idempotency_key was already used for a different request")
             return {**json.loads(seen[0]["response_json"]), "replayed": True}
-        result = fn()
-        db.insert_row("offer_requests", {"idempotency_key": key, "action": action, "request_hash": request_hash,
-                                         "response_json": json.dumps(result, default=str), "created_at": db.now_iso()})
+        # Expiry is a separate authoritative system effect, never part of a caller's failed mutation.
+        for offer_id in dict.fromkeys(expire_ids):
+            _expire_due_locked(offer_id, today)
+        with _transaction():
+            result = fn()
+            db.insert_row("offer_requests", {"idempotency_key": key, "action": action, "request_hash": request_hash,
+                                             "response_json": json.dumps(result, default=str, allow_nan=False),
+                                             "created_at": db.now_iso()})
         return {**result, "replayed": False}
 
 
@@ -99,27 +125,38 @@ def _write(row: dict, payload: dict, status: str) -> int:
     return version
 
 
-def _refresh_expiry(row: dict, payload: dict, today: dt.date) -> dict:
-    """Move an active offer whose validity date has passed to `expired` (system event)."""
+def _expire_due_locked(offer_id: str, today: dt.date) -> None:
+    """Persist one due expiry under the lock, independently of any requested mutation."""
+    row, payload = _load(offer_id)
     sources, target = lc.TRANSITIONS["expire"]
-    if row["status"] in sources and any(r["code"] == "expired" for r in lc.blocking_reasons(payload, today)):
-        with db._LOCK:
-            row["version"] = _write(row, payload, target)
-            _event(row["id"], actor="system", action="expire", from_status=row["status"], to_status=target,
-                   new={"valid_until": lc.usable(payload["fields"]["valid_until"]), "checked_on": today.isoformat()})
-            row["status"] = target
-    return row
+    if row["status"] not in sources or not any(r["code"] == "expired" for r in lc.blocking_reasons(payload, today)):
+        return
+    with _transaction():
+        _write(row, payload, target)
+        _event(row["id"], actor="system", action="expire", from_status=row["status"], to_status=target,
+               new={"valid_until": lc.usable(payload["fields"]["valid_until"]), "checked_on": today.isoformat()})
+
+
+def expire_due(offer_id: str, *, today: dt.date | None = None) -> dict:
+    """Internal system transition; GET and list paths only preview expiry."""
+    today = today or _today()
+    with db._LOCK:
+        _expire_due_locked(offer_id, today)
+        row, payload = _load(offer_id)
+        return _view(row, payload, today)
 
 
 def _view(row: dict, payload: dict, today: dt.date, events: list | None = None) -> dict:
     reasons = lc.blocking_reasons(payload, today)
-    out = {"offer_id": row["id"], "status": row["status"], "version": int(row["version"]),
+    status = ("expired" if row["status"] in lc.TRANSITIONS["expire"][0]
+              and any(r["code"] == "expired" for r in reasons) else row["status"])
+    out = {"offer_id": row["id"], "status": status, "version": int(row["version"]),
            "synthetic": bool(row["synthetic"]), "extraction_id": row["extraction_id"],
            "document": payload["document"], "extractor": payload["extractor"],
            "extractor_detail": payload.get("extractor_detail"), "as_of": payload.get("as_of"),
            "fields": payload["fields"], "items": payload["items"], "review_flags": payload["review_flags"],
            "normalized": payload["normalized"], "blocking_reasons": reasons,
-           "allowed_actions": lc.allowed_actions(row["status"], reasons),
+           "allowed_actions": lc.allowed_actions(status, reasons),
            "created_at": row["created_at"], "updated_at": row["updated_at"]}
     if events is not None:
         out["events"] = events
@@ -183,34 +220,35 @@ def create_from_upload(data: bytes, filename: str, *, mode: str = "auto", as_of:
     status = lc.initial_status(payload, today)
     now = db.now_iso()
     with db._LOCK:
-        if not _rows("SELECT document_id FROM offer_documents WHERE document_id = ?", [doc.document_id]):
-            db.insert_row("offer_documents", {
-                "document_id": doc.document_id, "filename": doc.filename, "media_type": doc.media_type,
-                "byte_size": doc.byte_size, "segments_json": json.dumps([dataclasses.asdict(s) for s in doc.segments]),
-                "warnings_json": json.dumps([dataclasses.asdict(w) for w in doc.warnings]),
-                "metadata_json": json.dumps(doc.metadata, default=str), "created_at": now})
-        extraction_id, offer_id = db.new_id(), db.new_id()
-        db.insert_row("offer_extractions", {"id": extraction_id, "document_id": doc.document_id,
-                                            "extractor": extraction.extractor, "payload_json": json.dumps(ex),
-                                            "created_at": now})
-        db.insert_row("offers", {"id": offer_id, "extraction_id": extraction_id, "document_id": doc.document_id,
-                                 "status": status, "version": 1, "synthetic": extraction.synthetic,
-                                 "payload_json": json.dumps(payload), "created_at": now, "updated_at": now})
-        _event(offer_id, actor=actor, action="created", from_status=None, to_status=status,
-               new={"extraction_id": extraction_id, "extractor": extraction.extractor,
-                    "call": extraction.extractor_detail.get("call")})
+        with _transaction():
+            if not _rows("SELECT document_id FROM offer_documents WHERE document_id = ?", [doc.document_id]):
+                db.insert_row("offer_documents", {
+                    "document_id": doc.document_id, "filename": doc.filename, "media_type": doc.media_type,
+                    "byte_size": doc.byte_size, "segments_json": json.dumps([dataclasses.asdict(s) for s in doc.segments]),
+                    "warnings_json": json.dumps([dataclasses.asdict(w) for w in doc.warnings]),
+                    "metadata_json": json.dumps(doc.metadata, default=str), "created_at": now})
+            extraction_id, offer_id = db.new_id(), db.new_id()
+            db.insert_row("offer_extractions", {"id": extraction_id, "document_id": doc.document_id,
+                                                "extractor": extraction.extractor, "payload_json": json.dumps(ex),
+                                                "created_at": now})
+            db.insert_row("offers", {"id": offer_id, "extraction_id": extraction_id, "document_id": doc.document_id,
+                                     "status": status, "version": 1, "synthetic": extraction.synthetic,
+                                     "payload_json": json.dumps(payload), "created_at": now, "updated_at": now})
+            _event(offer_id, actor=actor, action="created", from_status=None, to_status=status,
+                   new={"extraction_id": extraction_id, "extractor": extraction.extractor,
+                        "call": extraction.extractor_detail.get("call")})
     return {"offer": get_offer(offer_id, today=today), "extraction_id": extraction_id, "deduplicated": False}
 
 
 def get_offer(offer_id: str, *, include_events: bool = False, today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
-    row, payload = _load(offer_id)
-    row = _refresh_expiry(row, payload, today)
-    return _view(row, payload, today, _events(offer_id) if include_events else None)
+    today = today or _today()
+    with db._LOCK:
+        row, payload = _load(offer_id)
+        return _view(row, payload, today, _events(offer_id) if include_events else None)
 
 
 def list_offers(*, status: str | None = None, today: dt.date | None = None) -> list[dict]:
-    today = today or dt.date.today()
+    today = today or _today()
     ensure_schema()
     out = []
     for r in _rows("SELECT id FROM offers ORDER BY created_at DESC"):
@@ -239,8 +277,8 @@ def get_extraction(extraction_id: str) -> dict:
 
 def correct_field(offer_id: str, *, field: str, value, evidence: list | None, expected_version: int, actor: str,
                   idempotency_key: str, today: dt.date | None = None, reason: str | None = None) -> dict:
-    today = today or dt.date.today()
-    scope = {"offer_id": offer_id, "field": field, "value": value, "evidence": evidence,
+    today = today or _today()
+    scope = {"offer_id": offer_id, "actor": actor, "field": field, "value": value, "evidence": evidence,
              "expected_version": expected_version, "reason": reason}
 
     def apply():
@@ -250,7 +288,6 @@ def correct_field(offer_id: str, *, field: str, value, evidence: list | None, ex
         problems = lc.value_problems(kind, value, field)
         if problems:
             raise OfferError("invalid_value", f"{field}: " + "; ".join(problems), field=field, problems=problems)
-        row = _refresh_expiry(row, payload, today)
         target = _check_transition(row, payload, "correct", today)
         _check_version(row, expected_version)
         refs, evidence_status = [], "user_entered_without_document_evidence"
@@ -273,16 +310,15 @@ def correct_field(offer_id: str, *, field: str, value, evidence: list | None, ex
         row["status"] = target
         return _view({**row, "updated_at": db.now_iso()}, payload, today)
 
-    return _idempotent("correct", scope, idempotency_key, apply)
+    return _idempotent("correct", scope, idempotency_key, apply, expire_ids=[offer_id], today=today)
 
 
 def save_offer(offer_id: str, *, expected_version: int, actor: str, idempotency_key: str,
                today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
+    today = today or _today()
 
     def apply():
         row, payload = _load(offer_id)
-        row = _refresh_expiry(row, payload, today)
         target = _check_transition(row, payload, "save", today)
         _check_version(row, expected_version)
         reasons = lc.blocking_reasons(payload, today)
@@ -294,12 +330,13 @@ def save_offer(offer_id: str, *, expected_version: int, actor: str, idempotency_
         row["status"] = target
         return _view({**row, "updated_at": db.now_iso()}, payload, today)
 
-    return _idempotent("save", {"offer_id": offer_id, "expected_version": expected_version}, idempotency_key, apply)
+    return _idempotent("save", {"offer_id": offer_id, "actor": actor, "expected_version": expected_version},
+                       idempotency_key, apply, expire_ids=[offer_id], today=today)
 
 
 def reject_offer(offer_id: str, *, expected_version: int, actor: str, reason: str, idempotency_key: str,
                  today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
+    today = today or _today()
     if not isinstance(reason, str) or not reason.strip():
         raise OfferError("invalid_request", "a rejection reason is required")
 
@@ -313,8 +350,8 @@ def reject_offer(offer_id: str, *, expected_version: int, actor: str, reason: st
         row["status"] = target
         return _view({**row, "updated_at": db.now_iso()}, payload, today)
 
-    scope = {"offer_id": offer_id, "expected_version": expected_version, "reason": reason}
-    return _idempotent("reject", scope, idempotency_key, apply)
+    scope = {"offer_id": offer_id, "actor": actor, "expected_version": expected_version, "reason": reason}
+    return _idempotent("reject", scope, idempotency_key, apply, expire_ids=[offer_id], today=today)
 
 
 # ---------- planning input and RFQ draft ----------
@@ -331,11 +368,20 @@ def _plan_entry(row: dict, payload: dict, today: dt.date) -> dict:
         elif p and p.get("type") == "index_linked" and p.get("status") == "ok":
             price = {"type": "index_linked", "index": p["index"], "averaging_period": p["averaging_period"],
                      "premium_per_kg": p["premium_per_kg"], "reporting": p["reporting"]}
+            price.update({key: p["original"][key] for key in ("fx_basis", "fx_terms", "fx_conversion", "quotational_period")
+                          if key in p["original"]})
         items.append({"index": i, "material": lc.usable(item["material"]),
                       "description": lc.usable(item["description"]), "grade": lc.usable(item["grade"]),
                       "quantity_kg": q["kg"] if q else None, "price": price})
     evidence = [{"field": name, "locator": e["locator"], "text_sha256": e["text_sha256"]}
                 for name, f in lc.all_fields(payload) if f["status"] in lc.USABLE for e in f.get("evidence") or []]
+    provenance = {}
+    for name, f in lc.all_fields(payload):
+        refs = [{"locator": e["locator"], "text_sha256": e["text_sha256"]} for e in f.get("evidence") or []]
+        provenance[name] = {"status": f["status"], "source": f.get("source"),
+                            "evidence_status": f.get("evidence_status") or (
+                                "verified_against_document" if f["status"] == "extracted" and refs else "unverified"),
+                            "corrected_by": f.get("corrected_by"), "evidence_refs": refs}
     capacity = norm["capacity"]
     return {"offer_id": row["id"], "version": int(row["version"]), "synthetic": bool(row["synthetic"]),
             "document_id": payload["document"]["document_id"],
@@ -347,7 +393,37 @@ def _plan_entry(row: dict, payload: dict, today: dt.date) -> dict:
             "min_order_kg": norm["min_order"]["kg"] if norm["min_order"] else None,
             "capacity": ({"kg": capacity["kg"], "period": (lc.usable(fields["capacity"]) or {}).get("period")}
                          if capacity else None),
-            "shipments": lc.usable(fields["shipments"]), "items": items, "evidence_refs": evidence}
+            "shipments": lc.usable(fields["shipments"]), "items": items, "evidence_refs": evidence,
+            "field_provenance": provenance}
+
+
+def _legacy_float(value, field: str, *, positive: bool) -> float:
+    number = nz._bounded_decimal(value, allow_negative=False)
+    if number is None or (positive and number <= 0):
+        raise OfferError("invalid_value", f"{field} must be a finite {'positive' if positive else 'nonnegative'} decimal",
+                         field=field)
+    converted = float(number)
+    if not math.isfinite(converted) or (positive and converted <= 0):
+        raise OfferError("invalid_value", f"{field} cannot be represented by the legacy planner", field=field)
+    return converted
+
+
+def _validate_buyer(buyer: dict) -> None:
+    if not isinstance(buyer, dict):
+        raise OfferError("invalid_request", "buyer must be an object")
+    try:
+        json.dumps(buyer, allow_nan=False)
+    except (TypeError, ValueError):
+        raise OfferError("invalid_value", "buyer must contain finite JSON values") from None
+    for field, positive in (("current_stock_kg", False), ("monthly_consumption_kg", True)):
+        if buyer.get(field) not in (None, ""):
+            _legacy_float(buyer[field], field, positive=positive)
+    need = buyer.get("need_by_month")
+    if need not in (None, "") and (isinstance(need, bool) or not str(need).isdigit() or not 1 <= int(need) <= 6):
+        raise OfferError("invalid_value", "need_by_month must be 1 to 6", field="need_by_month")
+    risk = buyer.get("risk_appetite")
+    if risk not in (None, "", "low", "medium", "high"):
+        raise OfferError("invalid_value", "risk_appetite must be low, medium or high", field="risk_appetite")
 
 
 def _legacy_request(entry: dict, item: dict, buyer: dict) -> dict:
@@ -369,9 +445,12 @@ def _legacy_request(entry: dict, item: dict, buyer: dict) -> dict:
     base = {"offer_id": entry["offer_id"], "item_index": item["index"]}
     if reasons:
         return {**base, "status": "unavailable", "reason": "; ".join(reasons), "request": None, "assumptions": []}
-    request = {"material": item["material"], "quantity_kg": float(Decimal(item["quantity_kg"])),
-               "need_by_month": int(need), "current_stock_kg": float(Decimal(str(buyer["current_stock_kg"]))),
-               "monthly_consumption_kg": float(Decimal(str(buyer["monthly_consumption_kg"]))),
+    request = {"material": item["material"],
+               "quantity_kg": _legacy_float(item["quantity_kg"], "quantity_kg", positive=True),
+               "need_by_month": int(need),
+               "current_stock_kg": _legacy_float(buyer["current_stock_kg"], "current_stock_kg", positive=False),
+               "monthly_consumption_kg": _legacy_float(buyer["monthly_consumption_kg"],
+                                                       "monthly_consumption_kg", positive=True),
                "supplier_lead_time_months": months, "risk_appetite": buyer.get("risk_appetite") or "medium"}
     assumptions = [f"lead_time_days={lead} rounded up to whole months ({months}) for the legacy monthly engine",
                    "the legacy engine works in float kilograms and INR market price paths; the offer price is shown "
@@ -384,15 +463,17 @@ def _legacy_request(entry: dict, item: dict, buyer: dict) -> dict:
 def planning_input(offer_ids: list[str], *, buyer: dict, actor: str, idempotency_key: str,
                    today: dt.date | None = None) -> dict:
     """Saved offers as a planning input (decimal strings, units, evidence) and mark them used_in_plan."""
-    today = today or dt.date.today()
-    if not offer_ids or not isinstance(offer_ids, list):
+    today = today or _today()
+    if not isinstance(offer_ids, list) or not offer_ids or any(not isinstance(i, str) or not i for i in offer_ids):
         raise OfferError("invalid_request", "offer_ids must be a non-empty list")
+    if len(set(offer_ids)) != len(offer_ids):
+        raise OfferError("invalid_request", "offer_ids must not repeat an offer")
+    _validate_buyer(buyer)
 
     def apply():
         loaded = []
         for offer_id in offer_ids:
             row, payload = _load(offer_id)
-            row = _refresh_expiry(row, payload, today)
             _check_transition(row, payload, "use_in_plan", today)
             loaded.append((row, payload))
         entries, legacy = [], []
@@ -411,8 +492,8 @@ def planning_input(offer_ids: list[str], *, buyer: dict, actor: str, idempotency
                                 "/recommend engine; a multi-supplier allocation needs the planning service's "
                                 "PlanningRequest (see CONTRACT_PROPOSAL.md)."]}
 
-    scope = {"offer_ids": offer_ids, "buyer": buyer}
-    return _idempotent("planning_input", scope, idempotency_key, apply)
+    scope = {"offer_ids": offer_ids, "buyer": buyer, "actor": actor}
+    return _idempotent("planning_input", scope, idempotency_key, apply, expire_ids=offer_ids, today=today)
 
 
 def draft_rfq(offer_id: str, *, buyer: dict, actor: str, idempotency_key: str, item_index: int = 0,
@@ -421,11 +502,11 @@ def draft_rfq(offer_id: str, *, buyer: dict, actor: str, idempotency_key: str, i
     from .. import actions
     from ..decision import PurchaseRequest, recommend
 
-    today = today or dt.date.today()
+    today = today or _today()
+    _validate_buyer(buyer)
 
     def apply():
         row, payload = _load(offer_id)
-        row = _refresh_expiry(row, payload, today)
         target = _check_transition(row, payload, "draft_rfq", today)
         entry = _plan_entry(row, payload, today)
         if not 0 <= item_index < len(entry["items"]):
@@ -444,5 +525,5 @@ def draft_rfq(offer_id: str, *, buyer: dict, actor: str, idempotency_key: str, i
                         "body": action["payload"]["body"]},
                 "sent": False, "note": "Local draft only. No message is sent and no order is placed."}
 
-    scope = {"offer_id": offer_id, "buyer": buyer, "item_index": item_index}
-    return _idempotent("draft_rfq", scope, idempotency_key, apply)
+    scope = {"offer_id": offer_id, "buyer": buyer, "actor": actor, "item_index": item_index}
+    return _idempotent("draft_rfq", scope, idempotency_key, apply, expire_ids=[offer_id], today=today)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import threading
 from pathlib import Path
@@ -115,3 +116,45 @@ def test_missing_idempotency_key_is_rejected(client):
 def test_existing_routes_are_unchanged(client):
     assert client.get("/health").status_code == 200
     assert [m["key"] for m in client.get("/materials").json()] == ["copper", "aluminium", "iron_ore"]
+
+
+def test_future_and_past_get_are_preview_only(client):
+    offer = upload(client, "Q01").json()["offer"]
+    oid = offer["offer_id"]
+    future = client.get(f"/offers/{oid}?as_of=2099-01-01&include_events=true").json()
+    assert future["status"] == "expired" and future["version"] == 1
+    assert [e["action"] for e in future["events"]] == ["created"]
+    past = client.get(f"/offers/{oid}?as_of={AS_OF}&include_events=true").json()
+    assert past["status"] == "needs_review" and past["version"] == 1
+    assert [e["action"] for e in past["events"]] == ["created"]
+
+
+def test_mutation_body_as_of_cannot_expire_an_offer(client, monkeypatch):
+    from procure.offers import store
+
+    monkeypatch.setattr(store, "_today", lambda: dt.date.fromisoformat(AS_OF), raising=False)
+    offer = upload(client, "Q01").json()["offer"]
+    oid = offer["offer_id"]
+    corrected = client.post(f"/offers/{oid}/corrections", json={
+        "field": "settlement_currency", "value": "USD", "expected_version": 1,
+        "actor": "reviewer", "idempotency_key": key(), "as_of": "2099-01-01"})
+    assert corrected.status_code == 200 and corrected.json()["status"] == "corrected"
+    saved = client.post(f"/offers/{oid}/save", json={
+        "expected_version": 2, "actor": "reviewer", "idempotency_key": key(), "as_of": "2099-01-01"})
+    assert saved.status_code == 200 and saved.json()["status"] == "saved"
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "1e400"])
+def test_nonfinite_buyer_returns_structured_error_without_mutation(client, bad):
+    offer = upload(client, "Q01").json()["offer"]
+    oid = offer["offer_id"]
+    corrected = client.post(f"/offers/{oid}/corrections", json={
+        "field": "settlement_currency", "value": "USD", "expected_version": 1,
+        "actor": "reviewer", "idempotency_key": key()}).json()
+    client.post(f"/offers/{oid}/save", json={"expected_version": corrected["version"],
+             "actor": "reviewer", "idempotency_key": key()})
+    response = client.post("/offers/planning-input", json={
+        "offer_ids": [oid], "buyer": {**BUYER, "current_stock_kg": bad},
+        "actor": "planner", "idempotency_key": key()})
+    assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_value"
+    assert client.get(f"/offers/{oid}").json()["status"] == "saved"

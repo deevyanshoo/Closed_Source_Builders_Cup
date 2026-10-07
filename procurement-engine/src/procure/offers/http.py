@@ -116,7 +116,7 @@ def list_offers(status: str | None = None, as_of: dt.date | None = Query(None)):
 @router.post("/planning-input")
 def planning_input(body: PlanningIn, idempotency_key: str | None = Header(None)):
     return _call(store.planning_input, body.offer_ids, buyer=body.buyer, actor=body.actor,
-                 idempotency_key=_key(body.idempotency_key, idempotency_key), today=body.as_of)
+                 idempotency_key=_key(body.idempotency_key, idempotency_key))
 
 
 @router.get("/{offer_id}")
@@ -129,22 +129,22 @@ def correct(offer_id: str, body: CorrectionIn, idempotency_key: str | None = Hea
     evidence = [e.model_dump(exclude_none=True) for e in body.evidence] if body.evidence else None
     return _call(store.correct_field, offer_id, field=body.field, value=body.value, evidence=evidence,
                  expected_version=body.expected_version, actor=body.actor, reason=body.reason,
-                 idempotency_key=_key(body.idempotency_key, idempotency_key), today=body.as_of)
+                 idempotency_key=_key(body.idempotency_key, idempotency_key))
 
 
 @router.post("/{offer_id}/save")
 def save(offer_id: str, body: Mutation, idempotency_key: str | None = Header(None)):
     return _call(store.save_offer, offer_id, expected_version=body.expected_version, actor=body.actor,
-                 idempotency_key=_key(body.idempotency_key, idempotency_key), today=body.as_of)
+                 idempotency_key=_key(body.idempotency_key, idempotency_key))
 
 
 @router.post("/{offer_id}/reject")
 def reject(offer_id: str, body: RejectIn, idempotency_key: str | None = Header(None)):
     return _call(store.reject_offer, offer_id, expected_version=body.expected_version, actor=body.actor,
-                 reason=body.reason, idempotency_key=_key(body.idempotency_key, idempotency_key), today=body.as_of)
+                 reason=body.reason, idempotency_key=_key(body.idempotency_key, idempotency_key))
 
 
 @router.post("/{offer_id}/rfq-draft")
 def rfq_draft(offer_id: str, body: RfqIn, idempotency_key: str | None = Header(None)):
     return _call(store.draft_rfq, offer_id, buyer=body.buyer, actor=body.actor, item_index=body.item_index,
-                 idempotency_key=_key(body.idempotency_key, idempotency_key), today=body.as_of)
+                 idempotency_key=_key(body.idempotency_key, idempotency_key))

@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from procure.documents import read_document
 from procure.offers import scoring
@@ -72,3 +75,58 @@ def test_synthetic_label_is_not_part_of_the_supplier_name():
     ex = rules("Q01")
     ex.fields["supplier_name"].value = "Atacama Red Metals SpA"
     assert by_name(scoring.score_quote(ex, QUOTES["Q01"]))["supplier_name"]["correct"] is True
+
+
+@pytest.mark.parametrize("change", [
+    {"index": "LME Aluminium official cash settlement"},
+    {"averaging_period": "daily cash settlement on the invoice date"},
+    {"fx_basis": "ECB reference rate on the invoice date"},
+    {"premium": {"amount": "95.00", "currency": "EUR"}},
+    {"per_unit": "kg"},
+])
+def test_q10_rejects_changed_index_linked_commercial_terms(change):
+    ex = rules("Q10")
+    ex.items[0]["pricing"].value.update(change)
+    result = by_name(scoring.score_quote(ex, QUOTES["Q10"]))["items[0].pricing"]
+    assert (result["correct"], result["error"]) == (False, "wrong_value")
+
+
+def test_q10_accepts_complete_equivalent_index_price():
+    ex = rules("Q10")
+    pricing = ex.items[0]["pricing"].value
+    pricing["index"] = "  lme   copper grade a official cash settlement  "
+    pricing["averaging_period"] = "Monthly   average of the month following shipment (M+1)"
+    pricing["premium"]["amount"] = "95"
+    assert by_name(scoring.score_quote(ex, QUOTES["Q10"]))["items[0].pricing"]["correct"] is True
+
+
+def test_q14_wrong_fx_clause_cannot_hide_in_index_or_averaging_window():
+    ex = rules("Q14")
+    result = by_name(scoring.score_quote(ex, QUOTES["Q14"]))["items[0].pricing"]
+    assert (result["correct"], result["error"]) == (False, "wrong_value")
+
+
+def test_explicit_fx_basis_must_match_when_key_contains_it():
+    entry = deepcopy(QUOTES["Q10"])
+    entry["expected"]["items"][0]["pricing"]["value"]["fx_basis"] = "ECB reference rate on invoice date"
+    ex = rules("Q10")
+    ex.items[0]["pricing"].value["fx_basis"] = "ECB reference rate on invoice date"
+    assert by_name(scoring.score_quote(ex, entry))["items[0].pricing"]["correct"] is True
+    ex.items[0]["pricing"].value["fx_basis"] = "ECB reference rate on shipment date"
+    assert by_name(scoring.score_quote(ex, entry))["items[0].pricing"]["correct"] is False
+
+
+def test_extra_invented_item_fails_whole_quote_while_field_accuracy_keeps_its_denominator():
+    ex = rules("Q01")
+    ex.items.append(deepcopy(ex.items[0]))
+    score = scoring.score_quote(ex, QUOTES["Q01"])
+    assert (score["accuracy"], score["correct"], score["total"], score["extra_items"]) == (1.0, 15, 15, 1)
+    assert score["quote_correct"] is False
+    summary = scoring.summarize([scoring.score_quote(rules("Q01"), QUOTES["Q01"]), score])
+    assert (summary["quotes_correct"], summary["quotes"], summary["quote_accuracy"]) == (1, 2, 0.5)
+
+
+def test_missing_item_fails_whole_quote():
+    ex = rules("Q01")
+    ex.items.clear()
+    assert scoring.score_quote(ex, QUOTES["Q01"])["quote_correct"] is False

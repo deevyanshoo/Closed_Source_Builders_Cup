@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -25,7 +26,10 @@ import (
 const stateVersion = "0.2.0"
 
 type stateConfig struct {
-	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema string
+	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
+	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string
+	Verifier                                                                machineVerifier
+	OutboundTokenSource                                                     outboundTokenSource
 }
 type principal struct{ ID, Workspace, Role string }
 
@@ -49,9 +53,41 @@ type stateServer struct {
 	identityReady bool
 	legacy        http.Handler
 	auth          Authenticator
+	outbound      *http.Client
+	assets        http.Handler
 }
 
 func newStateHandler(cfg stateConfig) http.Handler {
+	if cfg.Mode == "private_machine" {
+		h, err := newPrivateStateHandler(cfg)
+		if err != nil {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				stateError(w, 503, "service_unavailable", "Gateway configuration unavailable")
+			})
+		}
+		return h
+	}
+	if cfg.Mode != "" && cfg.Mode != "local" {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			stateError(w, 503, "service_unavailable", "Gateway configuration unavailable")
+		})
+	}
+	s := newLocalStateServer(cfg)
+	if cfg.AssetsDir != "" {
+		root, err := filepath.Abs(cfg.AssetsDir)
+		if err == nil {
+			s.assets, err = newAssetsHandler(root)
+		}
+		if err != nil {
+			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				stateError(w, 503, "service_unavailable", "Gateway configuration unavailable")
+			})
+		}
+	}
+	return s
+}
+
+func newLocalStateServer(cfg stateConfig) *stateServer {
 	if cfg.Schema == "" {
 		cfg.Schema = "cs_plan_actions"
 	}
@@ -61,9 +97,17 @@ func newStateHandler(cfg stateConfig) http.Handler {
 	if cfg.Examples == "" {
 		cfg.Examples = "../../contracts/examples"
 	}
-	s := &stateServer{cfg: cfg, legacy: newHandler(cfg.Upstream, cfg.Examples)}
+	client := &http.Client{Timeout: 8 * time.Second}
+	s := &stateServer{cfg: cfg, outbound: client, legacy: newHandlerWithClient(cfg.Upstream, cfg.Examples, client)}
 	s.auth = s
-	if b, e := os.ReadFile(cfg.DBURLFile); e == nil && len(bytes.TrimSpace(b)) > 0 {
+	var dbURL []byte
+	var dbErr error
+	if cfg.Mode == "private_machine" {
+		dbURL, dbErr = restrictedFile(cfg.DBURLFile)
+	} else {
+		dbURL, dbErr = os.ReadFile(cfg.DBURLFile)
+	}
+	if b, e := dbURL, dbErr; e == nil && len(bytes.TrimSpace(b)) > 0 {
 		if parsed, e := pgx.ParseConfig(string(bytes.TrimSpace(b))); e == nil {
 			s.db = parsed
 		}
@@ -93,11 +137,36 @@ func newStateHandler(cfg stateConfig) http.Handler {
 }
 
 func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var machine principal
+	if s.cfg.Mode == "private_machine" && r.URL.Path != "/health" {
+		p, ok := s.auth.Authenticate(w, r)
+		if !ok {
+			return
+		}
+		machine = p
+		r = r.WithContext(context.WithValue(r.Context(), machinePrincipalKey{}, p))
+	}
 	if r.URL.Path == "/ready" {
 		s.ready(w, r)
 		return
 	}
+	if r.URL.Path == recoveryPath {
+		s.recoveryComparison(w, r)
+		return
+	}
 	if r.URL.Path == "/v2/plans/recommendations" {
+		if s.cfg.Mode == "private_machine" && r.Method == "POST" {
+			body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+			if err != nil {
+				stateError(w, 422, "invalid_request", "Cannot read request")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			if q, code, _ := validate(body); code == "" && q.WorkspaceId != machine.Workspace {
+				stateError(w, 403, "forbidden", "Workspace access denied")
+				return
+			}
+		}
 		s.legacy.ServeHTTP(w, r)
 		return
 	}
@@ -105,8 +174,14 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.stateRoute(w, r)
 		return
 	}
+	if s.assets != nil && !strings.HasPrefix(r.URL.Path, "/v2/") && r.URL.Path != "/health" {
+		s.assets.ServeHTTP(w, r)
+		return
+	}
 	s.legacy.ServeHTTP(w, r)
 }
+
+type machinePrincipalKey struct{}
 
 func stateError(w http.ResponseWriter, status int, code, msg string) {
 	write(w, status, contract.StateErrorResponse{ContractVersion: stateVersion, Error: contract.SemanticError{Code: code, Message: msg}})
@@ -143,16 +218,24 @@ func (s *stateServer) Authenticate(w http.ResponseWriter, r *http.Request) (prin
 	return p, false
 }
 func (s *stateServer) stateRoute(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.auth.Authenticate(w, r)
+	p, ok := r.Context().Value(machinePrincipalKey{}).(principal)
 	if !ok {
-		return
+		p, ok = s.auth.Authenticate(w, r)
+		if !ok {
+			return
+		}
 	}
 	if r.URL.Path == "/v2/session" {
 		if r.Method != "GET" {
 			stateError(w, 405, "method_not_allowed", "Method not allowed")
 			return
 		}
-		write(w, 200, contract.SessionResponse{ContractVersion: stateVersion, PrincipalId: p.ID, WorkspaceId: p.Workspace, Role: p.Role, DevelopmentOnly: true})
+		session := contract.SessionResponse{ContractVersion: stateVersion, PrincipalId: p.ID, WorkspaceId: p.Workspace, Role: p.Role, DevelopmentOnly: s.cfg.Mode != "private_machine"}
+		if s.cfg.Mode == "private_machine" {
+			mode := "private_machine"
+			session.IdentityMode = &mode
+		}
+		write(w, 200, session)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/v2/workspaces/") {
@@ -233,9 +316,12 @@ func (s *stateServer) ready(w http.ResponseWriter, r *http.Request) {
 	identity := "unavailable"
 	if s.identityReady {
 		identity = "development"
+		if s.cfg.Mode == "private_machine" {
+			identity = "private_machine"
+		}
 	}
 	status := 200
-	if database != "ready" || identity != "development" {
+	if database != "ready" || identity == "unavailable" {
 		status = 503
 	}
 	write(w, status, contract.ReadinessResponse{ContractVersion: stateVersion, Process: "ready", Database: database, Identity: identity, Provider: "not_verified"})
@@ -271,11 +357,11 @@ func newID() string {
 }
 func now() string          { return time.Now().UTC().Format(time.RFC3339Nano) }
 func marshal(v any) []byte { b, _ := json.Marshal(v); return b }
-func (s *stateServer) computedSnapshot(q contract.PlanningRequest) (contract.PlanResponse, int, string) {
+func (s *stateServer) computedSnapshot(ctx context.Context, q contract.PlanningRequest) (contract.PlanResponse, int, string) {
 	b := marshal(q)
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/v2/plans/recommendations", bytes.NewReader(b))
-	recommend(w, r, &http.Client{Timeout: 5 * time.Second}, s.cfg.Upstream)
+	r := httptest.NewRequest("POST", "/v2/plans/recommendations", bytes.NewReader(b)).WithContext(ctx)
+	recommend(w, r, s.outbound, s.cfg.Upstream)
 	if w.Code != 200 {
 		if w.Code == 422 {
 			return contract.PlanResponse{}, 422, "Invalid planning request"

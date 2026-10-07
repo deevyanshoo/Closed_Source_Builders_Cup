@@ -1,0 +1,22 @@
+# Local production schedule screen
+
+`screen_production_schedules(snapshot, alternative)` is a pure comparison of two complete, caller-supplied assignments. It returns a synthetic, modeled screen. It does not select a schedule, infer an executable start, dispatch work, or promise production.
+
+Both inputs are mappings. The snapshot requires `workspace_id`, `plan_version`, `snapshot_id`, `as_of`, `synthetic: true`, and explicit arrays `inventory`, `products`, `routings`, `resources`, `periods`, `maintenance`, `receipts`, `orders`, `baseline_assignments`. The alternative requires the same `workspace_id`, matching `expected_plan_version` and `source_snapshot_id`, `scenario_id`, `synthetic: true`, and a complete `assignments` array. Every declared row is checked, including unused products and routings. Identical duplicate rows are accepted; conflicting duplicates and undeclared constraints are unsupported. Empty maintenance and receipts are valid. The screen does not infer missing numbers or edges.
+
+- Inventory rows: `{component_id, unit, starting_stock, stock_as_of}` with `stock_as_of == as_of`.
+- Product rows: `{product_id, output_unit, bom:[{component_id, unit, quantity_per_output_unit}]}`. The one-level BOM must name declared components and matching units.
+- Routing rows: `{product_id, resource_id, output_unit, run_seconds_per_output_unit}`. Resources are `{resource_id, capacity_model:"single_machine"}`.
+- Periods and maintenance: `{period_id|maintenance_id, resource_id, start, end}`. Periods for a resource cannot overlap. Maintenance is unioned and clipped against each half-open period; endpoint contact contributes zero blocked time.
+- Receipts: `{receipt_id, component_id, unit, quantity, arrival_at}`. Arrivals before `as_of` are unsupported.
+- Orders: `{order_id, product_id, output_unit, output_quantity, resource_id, due_at}`. Each baseline and alternative assignment has `{order_id, period_id}`; each declared order must appear and its period must belong to its resource.
+
+All times are timezone-aware ISO instants with seconds and at most six fractional digits, normalized to UTC. Plain nonnegative decimal strings are required for quantities; output quantity, BOM rate, and runtime must be positive. Each input quantity has at most 1024 decimal digits. Exact arithmetic bounds numerator and denominator to 4096 digits, and serialized decimal coefficient and scale to 2048 digits. Exceeding these bounds returns `unsupported` with `invalid_quantity`, without rounding or a partial numeric screen. Units remain per component; there is no mixed-unit total.
+
+The result has `status: "screened"`, source/scope identifiers, `modeled_checks`, `unmodeled_constraints`, and `baseline` and `alternative` schedules with the same shape. Each schedule has `orders`, `capacity`, `material_balances`, `material_balance_end_at`, `modeled_checks_pass`, and `failed_checks`. An unsupported input returns only `status`, a reason code, and generic details, without numeric schedules or caller identifiers in diagnostics.
+
+Material accounting processes receipts at or before a period start, then all assigned order demands at that start in order ID order. For **every** supplied order it reserves up to available stock for each component, even when another component is short. A shortfall does not release already reserved components for later orders. Ending balances include all receipts and assigned-start demands; `material_balance_end_at` identifies the latest receipt or assigned start represented, not production completion. A receipt later than an assigned start cannot cure its earlier shortfall.
+
+Capacity independently sums every assigned order's output quantity times its routing seconds against the period's nominal duration less unioned maintenance. Due checks independently compare the modeled period end with the order's due instant. Material or due failure does not suppress scheduled workload, and capacity or due failure does not release component reservations. This makes failures visible without treating an unsupported schedule as executable.
+
+The screen does not model setup/changeover, intra-period sequencing, work in process, parallel lanes beyond each declared single-machine resource, multistage BOM/routing, cash, alternate supply, optimization, dispatch, customer promises, ingestion, permissions, persisted approval, or replay. These missing constraints mean a passing modeled check is not a feasibility or production commitment.

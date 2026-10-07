@@ -169,14 +169,15 @@ export interface SessionResponse {
   principal_id: string;
   workspace_id: string;
   role: "editor" | "viewer";
-  development_only: true;
+  development_only: boolean;
+  identity_mode?: "development" | "private_machine";
 }
 
 export interface ReadinessResponse {
   contract_version: "0.2.0";
   process: "ready";
   database: "ready" | "unavailable" | "not_configured";
-  identity: "development" | "unavailable";
+  identity: "development" | "unavailable" | "private_machine";
   provider: "not_verified";
 }
 
@@ -308,4 +309,209 @@ export interface AuditResponse {
 export interface StateErrorResponse {
   contract_version: "0.2.0";
   error: SemanticError;
+}
+
+export interface ProductionInventoryComponent {
+  component_id: string;
+  unit: string;
+  starting_stock: string;
+  stock_as_of: string;
+}
+
+export interface ProductionBomComponent {
+  component_id: string;
+  unit: string;
+  quantity_per_output_unit: string;
+}
+
+export interface ProductionProduct {
+  product_id: string;
+  output_unit: string;
+  bom: (ProductionBomComponent)[];
+}
+
+export interface ProductionRouting {
+  product_id: string;
+  resource_id: string;
+  output_unit: string;
+  run_seconds_per_output_unit: string;
+}
+
+export interface ProductionResource {
+  resource_id: string;
+  capacity_model: "single_machine";
+}
+
+export interface ProductionPeriod {
+  period_id: string;
+  resource_id: string;
+  start: string;
+  end: string;
+}
+
+export interface ProductionMaintenance {
+  maintenance_id: string;
+  resource_id: string;
+  start: string;
+  end: string;
+}
+
+export interface ProductionReceipt {
+  receipt_id: string;
+  component_id: string;
+  unit: string;
+  quantity: string;
+  arrival_at: string;
+}
+
+export interface ProductionOrder {
+  order_id: string;
+  product_id: string;
+  output_unit: string;
+  output_quantity: string;
+  resource_id: string;
+  due_at: string;
+}
+
+export interface ProductionAssignment {
+  order_id: string;
+  period_id: string;
+}
+
+export interface ProductionSnapshot {
+  workspace_id: string;
+  plan_version: string;
+  snapshot_id: string;
+  as_of: string;
+  synthetic: true;
+  inventory: (ProductionInventoryComponent)[];
+  products: (ProductionProduct)[];
+  routings: (ProductionRouting)[];
+  resources: (ProductionResource)[];
+  periods: (ProductionPeriod)[];
+  maintenance: (ProductionMaintenance)[];
+  receipts: (ProductionReceipt)[];
+  orders: (ProductionOrder)[];
+  baseline_assignments: (ProductionAssignment)[];
+}
+
+export interface ReceiptArrivalReplacement {
+  receipt_id: string;
+  expected_arrival_at: string;
+  arrival_at: string;
+}
+
+export interface ReceiptArrivalScenario {
+  workspace_id: string;
+  expected_plan_version: string;
+  source_snapshot_id: string;
+  scenario_id: string;
+  synthetic: true;
+  arrival_replacements: (ReceiptArrivalReplacement)[];
+}
+
+export interface RecoveryAssignment {
+  workspace_id: string;
+  expected_plan_version: string;
+  source_snapshot_id: string;
+  scenario_id: string;
+  synthetic: true;
+  assignments: (ProductionAssignment)[];
+}
+
+export interface RecoveryComparisonRequest {
+  contract_version: "0.2.0";
+  snapshot: ProductionSnapshot;
+  scenario: ReceiptArrivalScenario;
+  recovery: RecoveryAssignment;
+}
+
+export interface ProductionMaterialDemand {
+  component_id: string;
+  unit: string;
+  quantity: string;
+  used: string;
+  shortfall: string;
+  remaining_stock: string;
+}
+
+export interface ProductionOrderScreen {
+  order_id: string;
+  product_id: string;
+  output_unit: string;
+  output_quantity: string;
+  resource_id: string;
+  period_id: string;
+  material_required_at: string;
+  modeled_completion_at: string;
+  due_at: string;
+  demands: (ProductionMaterialDemand)[];
+  material_pass: boolean;
+  modeled_due_pass: boolean;
+  late_by_seconds: string;
+}
+
+export interface ProductionCapacityScreen {
+  resource_id: string;
+  period_id: string;
+  nominal_seconds: string;
+  blocked_seconds: string;
+  available_seconds: string;
+  workload_seconds: string;
+  excess_seconds: string;
+  remaining_seconds: string;
+  capacity_pass: boolean;
+}
+
+export interface ProductionMaterialBalance {
+  component_id: string;
+  unit: string;
+  starting_stock: string;
+  ending_stock: string;
+}
+
+export interface ProductionScheduleScreen {
+  orders: (ProductionOrderScreen)[];
+  capacity: (ProductionCapacityScreen)[];
+  material_balances: (ProductionMaterialBalance)[];
+  material_balance_end_at: string;
+  modeled_checks_pass: boolean;
+  failed_checks: (string)[];
+}
+
+export interface ReceiptArrivalChange {
+  receipt_id: string;
+  before_arrival_at: string;
+  after_arrival_at: string;
+}
+
+export interface ReceiptRecoveryComparison {
+  status: "compared";
+  synthetic: true;
+  workspace_id: string;
+  plan_version: string;
+  snapshot_id: string;
+  scenario_id: string;
+  as_of: string;
+  modeled_checks: ("material_at_period_start" | "aggregate_single_machine_capacity" | "modeled_period_end_due")[];
+  unmodeled_constraints: (string)[];
+  original_baseline: ProductionScheduleScreen;
+  disrupted_baseline: ProductionScheduleScreen;
+  recovery: ProductionScheduleScreen;
+  receipt_changes: (ReceiptArrivalChange)[];
+  potentially_exposed_order_ids: (string)[];
+  disruption_changed_order_ids: (string)[];
+  recovery_changed_order_ids: (string)[];
+}
+
+export interface RecoveryComparisonResponse {
+  contract_version: "0.2.0";
+  comparison: ReceiptRecoveryComparison;
+}
+
+export interface RecoveryComparisonUnsupportedResponse {
+  contract_version: "0.2.0";
+  status: "unsupported";
+  reason: "invalid_quantity" | "invalid_timestamp" | "incomplete_snapshot" | "incomplete_assignment" | "unsupported_constraint" | "conflicting_snapshot" | "invalid_scope" | "incomplete_inventory" | "invalid_snapshot" | "incomplete_bom" | "incompatible_unit" | "incomplete_resource" | "incomplete_routing" | "incomplete_period" | "pre_as_of" | "invalid_period" | "overlapping_periods" | "incomplete_maintenance" | "incomplete_receipt" | "incomplete_order" | "resource_mismatch" | "workspace_mismatch" | "stale_plan_version" | "snapshot_mismatch" | "invalid_scenario" | "invalid_recovery" | "invalid_replacement" | "duplicate_replacement" | "unknown_receipt" | "stale_receipt";
+  details: (string)[];
 }

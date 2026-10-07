@@ -92,6 +92,20 @@ def _decimal(value: Any) -> Decimal | None:
     return number if number.is_finite() else None
 
 
+def _exact_sum_matches(target: Decimal, values: list[Decimal]) -> bool:
+    """Compare bounded decimal coefficients as integers, without context rounding."""
+    if not values or len(values) > 256:
+        return False
+    parts = [number.as_tuple() for number in [target, *values]]
+    if any(len(part.digits) > 256 or abs(part.exponent) > 256 for part in parts):
+        return False
+    exponent = min(part.exponent for part in parts)
+    def scaled(part):
+        coefficient = int("".join(map(str, part.digits)))
+        return (-1 if part.sign else 1) * coefficient * 10 ** (part.exponent - exponent)
+    return scaled(parts[0]) == sum(scaled(part) for part in parts[1:])
+
+
 def _amount_problem(amount: Any, texts: list[str]) -> str | None:
     target = _decimal(amount)
     if target is None:
@@ -103,27 +117,107 @@ def _amount_problem(amount: Any, texts: list[str]) -> str | None:
     # interpreting an ambiguous separator in two styles at once.
     cells = [nz.numbers_in(text, decimal_comma=style) for text in texts
              if re.fullmatch(r"[\d.,]+", text.strip())]
-    if len(cells) > 1 and all(len(cell) == 1 for cell in cells) and sum(next(iter(cell)) for cell in cells) == target:
+    if len(cells) > 1 and all(len(cell) == 1 for cell in cells) and _exact_sum_matches(
+            target, [next(iter(cell)) for cell in cells]):
         return None
     if style is None and any(nz.ambiguous_number_in(text) for text in texts):
         return "ambiguous_number"
     return "amount"
 
 
-def _related_cells(first: str, second: str, unit_text: str) -> bool:
+_RELATIVE_DATE_ANCHOR = re.compile(
+    r"\b\d+\s+(?:(?:calendar|business|working)\s+)?"
+    r"(?:days?|weeks?|months?)\s+(?:from|after|following)\b", re.I)
+_EXPLICIT_DATE_END = re.compile(r"\b(?:valid\s+(?:until|through|to)|expires?|expiry(?:\s+date)?|end\s+date)\b", re.I)
+
+
+def _date_problem(value: Any, refs: list[EvidenceRef]) -> str | None:
+    if not isinstance(value, str):
+        return "date"
+    separate_matches = []
+    has_relative_anchor = False
+    for ref in refs:
+        # Inspect the full source segment, never a model's shortened quoted excerpt.
+        for clause in re.split(r"[;\n]", ref.segment_text):
+            if _RELATIVE_DATE_ANCHOR.search(clause):
+                has_relative_anchor = True
+                continue
+            if value in nz.dates_in(clause):
+                separate_matches.append(clause)
+    if not separate_matches:
+        return "date"
+    if has_relative_anchor and not any(_EXPLICIT_DATE_END.search(clause) for clause in separate_matches):
+        return "date_anchor"
+    return None
+
+
+def _cell_parts(locator: str) -> tuple[str, int, int] | None:
+    csv = re.fullmatch(r"r(\d+):c(\d+)", locator)
+    if csv:
+        return "csv", int(csv.group(1)), int(csv.group(2))
+    xlsx = re.fullmatch(r"(.+)!([A-Z]+)(\d+)", locator)
+    if xlsx:
+        column = 0
+        for letter in xlsx.group(2):
+            column = column * 26 + ord(letter) - ord("A") + 1
+        return xlsx.group(1), int(xlsx.group(3)), column
+    return None
+
+
+def _cell_locator(sheet: str, row: int, column: int) -> str:
+    if sheet == "csv":
+        return f"r{row}:c{column}"
+    letters = ""
+    while column:
+        column, remainder = divmod(column - 1, 26)
+        letters = chr(ord("A") + remainder) + letters
+    return f"{sheet}!{letters}{row}"
+
+
+def _header_reaches(amount_ref: EvidenceRef, header_ref: EvidenceRef, doc: Document,
+                    unit_data: bool = False) -> bool:
+    amount, header = _cell_parts(amount_ref.locator), _cell_parts(header_ref.locator)
+    if not amount or not header or amount[0] != header[0] or amount[2] != header[2]:
+        return False
+    if not 0 < amount[1] - header[1] <= 7:
+        return False
+    # The first nonnumeric visible cell above the data row is its header. A
+    # second table, hidden cell, or intervening prose cannot be skipped over.
+    for row in range(amount[1] - 1, header[1], -1):
+        segment = doc.segment(_cell_locator(amount[0], row, amount[2]))
+        data_text = segment.text.strip() if segment else ""
+        if segment and (HIDDEN_FLAGS.intersection(segment.flags)
+                        or "formula_without_cached_value" in segment.flags
+                        or (data_text and not re.fullmatch(r"[\d.,]+", data_text)
+                            and not (unit_data and re.fullmatch(r"(?:t|MT|tonnes?|kgs?|kilograms?|lbs?|pounds?)",
+                                                             data_text, re.I)))):
+            return False
+    return True
+
+
+def _related_cells(first: str, second: str, unit_text: str, doc: Document | None = None) -> bool:
     csv_a, csv_b = re.fullmatch(r"r(\d+):c(\d+)", first), re.fullmatch(r"r(\d+):c(\d+)", second)
     if csv_a and csv_b:
         same_row = csv_a.group(1) == csv_b.group(1) and int(csv_b.group(2)) == int(csv_a.group(2)) + 1
         header = csv_a.group(2) == csv_b.group(2) and int(csv_a.group(1)) == int(csv_b.group(1)) + 1
-        return (same_row and bool(re.fullmatch(r"[A-Za-z]+", unit_text.strip()))) or header
+        left_label = (csv_a.group(1) == csv_b.group(1)
+                      and int(csv_b.group(2)) == int(csv_a.group(2)) - 1
+                      and bool(re.search(r"(?:quantity|qty|capacity|min[_ ]?order|moq)",
+                                         unit_text.replace("_", " "), re.I)))
+        return (same_row and bool(re.fullmatch(r"[A-Za-z]+", unit_text.strip()))) or left_label or header
     xlsx_a = re.fullmatch(r"(?:'[^']+'|[^!]+)!([A-Z]+)(\d+)", first)
     xlsx_b = re.fullmatch(r"(?:'[^']+'|[^!]+)!([A-Z]+)(\d+)", second)
-    return bool(xlsx_a and xlsx_b and first.rsplit("!", 1)[0] == second.rsplit("!", 1)[0]
-                and xlsx_a.group(1) == xlsx_b.group(1)
-                and int(xlsx_a.group(2)) == int(xlsx_b.group(2)) + 1)
+    if not xlsx_a or not xlsx_b or doc is None:
+        return False
+    amount_segment, header_segment = doc.segment(first), doc.segment(second)
+    if not amount_segment or not header_segment or HIDDEN_FLAGS.intersection(header_segment.flags):
+        return False
+    return _header_reaches(EvidenceRef(doc.document_id, first, "", "", amount_segment.text),
+                           EvidenceRef(doc.document_id, second, "", "", header_segment.text), doc)
 
 
-def _quantity_unit_problem(amount: Any, unit: Any, refs: list[EvidenceRef]) -> str | None:
+def _quantity_unit_problem(amount: Any, unit: Any, refs: list[EvidenceRef],
+                           doc: Document | None = None) -> str | None:
     target = _decimal(amount)
     if target is None or not isinstance(unit, str) or unit not in nz.KG_PER_UNIT:
         return "invalid_value"
@@ -146,13 +240,157 @@ def _quantity_unit_problem(amount: Any, unit: Any, refs: list[EvidenceRef]) -> s
         if not re.fullmatch(r"[\d.,]+", amount_ref.segment_text.strip()):
             continue
         for unit_ref in refs:
-            if not _related_cells(amount_ref.locator, unit_ref.locator, unit_ref.segment_text):
+            if not _related_cells(amount_ref.locator, unit_ref.locator, unit_ref.segment_text, doc):
                 continue
+            unit_text = unit_ref.segment_text.strip()
+            if not re.fullmatch(r"(?:t|MT|tonnes?|kgs?|kilograms?|lbs?|pounds?)", unit_text, re.I):
+                label = unit_text.replace("_", " ")
+                if not re.search(r"\b(?:quantity|qty|capacity|minimum order|min order|moq)\b", label, re.I):
+                    continue
             if nz.unit_problem(unit_ref.segment_text):
                 return nz.unit_problem(unit_ref.segment_text)
             if unit in nz.units_in(unit_ref.segment_text):
                 return None
     return "unit"
+
+
+def _row_identity(doc: Document, header: EvidenceRef, rows: list[int], quantity_column: int,
+                  unit_column: int) -> tuple[str, str, dict[str, str]] | None:
+    """One visible contiguous table with identical non-lot commercial columns."""
+    parts = _cell_parts(header.locator)
+    if parts is None or len(rows) > 256:
+        return None
+    sheet, header_row, _ = parts
+    columns = [quantity_column]
+    for direction in (-1, 1):
+        column = quantity_column + direction
+        while column > 0 and len(columns) < 64:
+            segment = doc.segment(_cell_locator(sheet, header_row, column))
+            if segment is None or not segment.text.strip():
+                break
+            if HIDDEN_FLAGS.intersection(segment.flags) or "formula_without_cached_value" in segment.flags:
+                return None
+            columns.append(column)
+            column += direction
+        if column > 0 and len(columns) >= 64 and doc.segment(_cell_locator(sheet, header_row, column)):
+            return None
+    labels = {}
+    for column in sorted(columns):
+        segment = doc.segment(_cell_locator(sheet, header_row, column))
+        if segment is None or HIDDEN_FLAGS.intersection(segment.flags):
+            return None
+        label = re.sub(r"\s+", " ", segment.text.replace("_", " ").strip()).casefold()
+        if label in labels.values():
+            return None
+        labels[column] = label
+    product_cols = [column for column, label in labels.items() if label in {"product", "description"}]
+    grade_cols = [column for column, label in labels.items() if label == "grade"]
+    if len(product_cols) != 1 or len(grade_cols) != 1:
+        return None
+    excluded = {quantity_column, unit_column}
+    excluded.update(column for column, label in labels.items()
+                    if label in {"lot", "ship month", "ship window", "shipment window", "laycan"})
+    identity = None
+    for row in rows:
+        values = {}
+        for column in labels:
+            if column in excluded:
+                continue
+            segment = doc.segment(_cell_locator(sheet, row, column))
+            if (segment is None or HIDDEN_FLAGS.intersection(segment.flags)
+                    or "formula_without_cached_value" in segment.flags or not segment.text.strip()):
+                return None
+            values[column] = re.sub(r"\s+", " ", segment.text.strip()).casefold()
+        if identity is None:
+            identity = values
+        elif values != identity:
+            return None
+    if identity is None:
+        return None
+    return (identity[product_cols[0]], identity[grade_cols[0]],
+            {labels[column]: value for column, value in identity.items()})
+
+
+def _aggregate_quantity_problem(amount: Any, unit: str, refs: list[EvidenceRef],
+                                doc: Document,
+                                item_identity: tuple[str | None, str | None, dict | None] | None = None) -> str | None:
+    """Check each contributing table cell before accepting a derived sum."""
+    numeric = [ref for ref in refs if re.fullmatch(r"[\d.,]+", ref.segment_text.strip())]
+    if len(numeric) < 2:
+        return None
+    if len({ref.locator for ref in numeric}) != len(numeric):
+        return "quantity_binding"
+    if not isinstance(unit, str) or unit not in nz.KG_PER_UNIT:
+        return "invalid_value"
+    target = _decimal(amount)
+    style = nz.number_style([ref.segment_text for ref in refs])
+    if target is None:
+        return "invalid_value"
+    values = [nz.numbers_in(ref.segment_text, decimal_comma=style) for ref in numeric]
+    if any(len(found) != 1 or next(iter(found)) <= 0 for found in values):
+        return "amount"
+    if not _exact_sum_matches(target, [next(iter(found)) for found in values]):
+        return "amount"
+    shared_header = None
+    shared_unit_column = None
+    rows = []
+    for amount_ref in numeric:
+        cell = _cell_parts(amount_ref.locator)
+        if cell is None:
+            return "quantity_binding"
+        rows.append(cell[1])
+        headers = list({ref.locator: ref for ref in refs if _header_reaches(amount_ref, ref, doc)
+                        and re.fullmatch(r"(?:qty|quantity)(?:[_ ](?:tonnes?|kg|lbs?))?",
+                                         ref.segment_text.strip(), re.I)}.values())
+        if len(headers) != 1:
+            return "quantity_binding"
+        header = headers[0]
+        if shared_header is None:
+            shared_header = header.locator
+        elif shared_header != header.locator:
+            return "quantity_binding"
+        if shared_unit_column is None:
+            shared_unit_column = cell[2] + 1
+        header_units = nz.units_in(header.segment_text)
+        if header_units:
+            if header_units != {unit}:
+                return "unit"
+            continue
+        unit_refs = [ref for ref in refs if
+                     (unit_cell := _cell_parts(ref.locator)) is not None
+                     and unit_cell[0] == cell[0] and unit_cell[1] == cell[1]
+                     and unit_cell[2] == cell[2] + 1 and nz.units_in(ref.segment_text) == {unit}]
+        if len(unit_refs) != 1:
+            return "unit"
+        unit_header = doc.segment(_cell_locator(cell[0], _cell_parts(header.locator)[1], cell[2] + 1))
+        if (unit_header is None or HIDDEN_FLAGS.intersection(unit_header.flags)
+                or "formula_without_cached_value" in unit_header.flags
+                or not _header_reaches(unit_refs[0],
+                                       EvidenceRef(doc.document_id, unit_header.locator, "", "", unit_header.text),
+                                       doc, unit_data=True)
+                or not re.fullmatch(r"(?:qty|quantity)[_ ]unit", unit_header.text.strip(), re.I)):
+            return "quantity_binding"
+    identity = _row_identity(doc, header, rows, cell[2], shared_unit_column)
+    if identity is None:
+        return "quantity_binding"
+    if item_identity is not None:
+        description, grade, pricing = item_identity
+        if (not isinstance(description, str) or not isinstance(grade, str)
+                or re.sub(r"\s+", " ", description.strip()).casefold() != identity[0]
+                or re.sub(r"\s+", " ", grade.strip()).casefold() != identity[1]):
+            return "quantity_binding"
+        if (not isinstance(pricing, dict) or pricing.get("type") != "fixed"
+                or not isinstance(pricing.get("unit_price"), dict)):
+            return "quantity_binding"
+        source = identity[2]
+        price_amount = _decimal(pricing["unit_price"].get("amount"))
+        source_amount = nz.parse_decimal(source.get("price", ""))
+        if (price_amount is None or source_amount != price_amount
+                or not isinstance(pricing["unit_price"].get("currency"), str)
+                or source.get("price currency", source.get("currency")) != pricing["unit_price"]["currency"].casefold()
+                or nz.units_in(source.get("price unit", "")) != {pricing.get("per_unit")}):
+            return "quantity_binding"
+    return None
 
 
 def _money_supported(money: dict, texts: list[str]) -> list[str]:
@@ -194,7 +432,7 @@ def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[Evi
             continue
         # A price header directly above its amount can carry both currency and denominator.
         for header_ref in refs:
-            if (_related_cells(amount_ref.locator, header_ref.locator, header_ref.segment_text)
+            if (_related_cells(amount_ref.locator, header_ref.locator, header_ref.segment_text, doc)
                     and re.search(r"\b(?:price|premium)\b", header_ref.segment_text, re.I)
                     and currency in nz.currencies_in(header_ref.segment_text)
                     and unit in nz.units_in(header_ref.segment_text)):
@@ -248,7 +486,8 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
             if (label and not HIDDEN_FLAGS.intersection(label.flags)
                     and "formula_without_cached_value" not in label.flags
                     and re.search(r"\b(?:price[_ ]currency|settlement[_ ]currency|currency)\b", label.text, re.I)
-                    and not re.search(r"\b(?:payment|terms|method)\b", label.text, re.I)):
+                    and (not re.search(r"\b(?:payment|terms|method)\b", label.text, re.I)
+                         or bool(re.fullmatch(r"payment[_ ]currency", label.text.strip(), re.I)))):
                 return True
     return False
 
@@ -316,7 +555,8 @@ def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:
     return []
 
 
-def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document) -> list[str]:
+def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document,
+                   item_identity: tuple[str | None, str | None, dict | None] | None = None) -> list[str]:
     """Which parts of the value cannot be read from the cited text (empty list means supported)."""
     texts = [ref.segment_text for ref in refs]
     joined = " ".join(texts)
@@ -325,7 +565,8 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document
     if kind == "text":
         return [] if isinstance(value, str) and value.strip() and nz.squash(value) in nz.squash(joined) else ["text"]
     if kind == "date":
-        return [] if isinstance(value, str) and value in nz.dates_in(joined) else ["date"]
+        problem = _date_problem(value, refs)
+        return [] if problem is None else [problem]
     if kind == "integer":
         number = _decimal(value)
         if number is None or number != number.to_integral_value():
@@ -341,10 +582,16 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document
         if (amount := _decimal(value.get("amount"))) is None or amount < 0:
             return ["invalid_value"]
         out = []
+        aggregate = sum(bool(re.fullmatch(r"[\d.,]+", ref.segment_text.strip())) for ref in refs) >= 2
+        aggregate_problem = _aggregate_quantity_problem(value.get("amount"), value.get("unit"), refs, doc,
+                                                         item_identity)
+        if aggregate_problem:
+            out.append(aggregate_problem)
         amount_problem = _amount_problem(value.get("amount"), texts)
         if amount_problem:
             out.append(amount_problem)
-        unit_problem = _quantity_unit_problem(value.get("amount"), value.get("unit"), refs)
+        unit_problem = None if aggregate and aggregate_problem is None else _quantity_unit_problem(
+            value.get("amount"), value.get("unit"), refs, doc)
         if unit_problem:
             out.append(unit_problem)
         period = value.get("period")
@@ -406,7 +653,8 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document
 
 # ---------- the check ----------
 
-def check_candidate(doc: Document, kind: str, proposal: Any) -> Candidate:
+def check_candidate(doc: Document, kind: str, proposal: Any,
+                    item_identity: tuple[str | None, str | None, dict | None] | None = None) -> Candidate:
     problems, refs = [], []
     if not isinstance(proposal, dict):
         return Candidate(value=None, evidence=[], problems=["invalid_proposal"], cited=[])
@@ -440,7 +688,7 @@ def check_candidate(doc: Document, kind: str, proposal: Any) -> Candidate:
     if refs and not problems:
         order = {segment.locator: index for index, segment in enumerate(doc.segments)}
         refs.sort(key=lambda ref: order[ref.locator])
-        missing_parts = value_problems(kind, proposal.get("value"), refs, doc)
+        missing_parts = value_problems(kind, proposal.get("value"), refs, doc, item_identity)
         if missing_parts:
             problems.append("value_not_in_evidence")
             problems.extend(f"unsupported_{p}" for p in missing_parts)
@@ -451,9 +699,26 @@ def check_candidate(doc: Document, kind: str, proposal: Any) -> Candidate:
 
 def canonical(value: Any) -> str:
     """Comparable form: amounts compared as numbers, so 9412.5 and 9412.50 are the same value."""
+    def exact_amount(v):
+        number = _decimal(v)
+        if number is None:
+            raise InvalidOperation
+        part = number.as_tuple()
+        if len(part.digits) > 256 or abs(part.exponent) > 256:
+            raise InvalidOperation
+        digits = list(part.digits)
+        if not any(digits):
+            return "0"
+        exponent = part.exponent
+        while digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        coefficient = "".join(map(str, digits))
+        return f"{'-' if part.sign else ''}{coefficient}e{exponent}"
+
     def norm(v):
         if isinstance(v, dict):
-            return {k: (str(Decimal(str(x)).normalize()) if k == "amount" and x is not None else norm(x))
+            return {k: (exact_amount(x) if k == "amount" and x is not None else norm(x))
                     for k, x in sorted(v.items())}
         if isinstance(v, list):
             return [norm(x) for x in v]
@@ -461,10 +726,11 @@ def canonical(value: Any) -> str:
     return json.dumps(norm(value), sort_keys=True)
 
 
-def resolve_field(doc: Document, name: str, kind: str, proposals: list[dict], source: str = "rules") -> FieldResult:
+def resolve_field(doc: Document, name: str, kind: str, proposals: list[dict], source: str = "rules",
+                  *, item_identity: tuple[str | None, str | None, dict | None] | None = None) -> FieldResult:
     if not isinstance(proposals, list):
         proposals = [proposals]
-    candidates = [check_candidate(doc, kind, p) for p in proposals]
+    candidates = [check_candidate(doc, kind, p, item_identity) for p in proposals]
     critical = base_name(name) in CRITICAL_FIELDS
     verified, distinct = [], set()
     for candidate in candidates:

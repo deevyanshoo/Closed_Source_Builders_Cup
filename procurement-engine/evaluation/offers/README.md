@@ -25,7 +25,7 @@ answers; see below). Consequence: the fixture set has no positive example of an 
 |---|---|---|---|---|---|
 | Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07_deb0b144c75d44e0af79c69abdb32edb.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
 | Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07_38702aa4716a4d80b6bdc9ebbe58b090.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
-| Gemini, held-out (revision 204487d, key v1) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | All 8 real calls rejected: free-tier quota exhausted. Every quote fell back to rules, so no Gemini score exists yet |
+| Gemini, held-out (revision 204487d, key v1, API key) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | Superseded attempt: all 8 calls rejected by the free-tier quota. See the Vertex run below |
 | Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Run before #24 and key v2; the one difference was the fixture's `[SYNTHETIC]` tag in the supplier name |
 | Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | n/a | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
 
@@ -49,10 +49,47 @@ currency, which key v2 counts as an invented value; Q05 is `unverified` where th
 generic "Currency" label should ever count as the invoice currency is decision 1 in
 `src/procure/offers/CONTRACT_PROPOSAL.md`.
 
+## Real Gemini held-out run via Vertex (2026-10-07, revision a03ff09, key v2)
+
+Auth path `vertex_adc` (Application Default Credentials). Budget agreed with the platform lead: 9 real calls,
+synthetic quotes only. **Real calls used: 9 of 9.** One auth check on training quote Q01
+(`vertex_auth_check_2026-10-07.json`), then `MAX_LIVE_CALLS=8` for the held-out run
+(`score_gemini_heldout_2026-10-07_8214b0fe533a42c6bb30f5ec999ff7b4.json`). No retries. Rules, prompts and the
+answer key were not changed after seeing results.
+
+- Q01 auth check: Gemini answered, 14/15 fields; the miss was settlement currency (invented value, see below).
+- Held-out: 6 of 8 quotes got a Gemini answer (Q06, Q07, Q15, Q16, Q17, Q18). Q08 and Q14 were real calls that
+  failed with `provider_error` and fell back to rules, so the run's status is `partly_fell_back_to_rules`.
+
+| Held-out measure | Rules (8 quotes) | Gemini run (6 Gemini, 2 rules fallback) | Same 6 quotes: Gemini | Same 6 quotes: rules |
+|---|---|---|---|---|
+| Field accuracy | 88.5% (115/130) | 79.2% (103/130) | 74.4% (67/90) | 87.8% (79/90) |
+| Whole quotes correct | 1/8 | 0/8 | 0/6 | 1/6 |
+| Invented values | 0 | 5 | 5 | 0 |
+| Wrong values | 1 | 3 | 2 | 0 |
+| Missed conflicts | 0 | 1 | 1 | 0 |
+| Missing fields left missing | 15/16 | 9/16 | | |
+| Conflict flagged | 1/1 | 0/1 | | |
+| Expired flagged | 1/1 | 1/1 | | |
+| Embedded instruction flagged | 1/1 | 1/1 | | |
+
+Findings:
+
+- **All 5 invented values are settlement currency.** Gemini proposed the price currency as the settlement
+  currency and cited the price line; the evidence check from #24 accepts a currency code that appears inside a
+  longer line, so the value passed. Under the agreed rule this is not an explicit invoice or payment currency.
+  Tightening the check is a rule change for review, not made here.
+- **Wrong values from Gemini:** item description on Q07 and Q16 differs from the key (the score record does not
+  store the extracted text, so the exact wording is not available without another call). Q14's wrong value came
+  from the rules fallback (same as the rules run).
+- **Missed conflict on Q18:** Gemini returned only one of the two stated prices, so no conflict was raised. The
+  evidence check cannot detect a candidate the model omits; the rules extractor found both.
+- **Injection:** Q07 got a Gemini answer; the hidden instruction was flagged and did not become a value.
+- On these synthetic quotes the rules extractor is more accurate than Gemini, partly because the same author wrote
+  the fixtures and the rules. This is one run on 6 answered quotes, not a general measure of either extractor.
+
 ## Live calls
 
 Real Gemini calls are now gated: they need `RUN_LIVE_GEMINI=1` and stay within `MAX_LIVE_CALLS` (default 0). Each
 score record includes `live_calls` (`used`, `max`, `enabled`). The rules runs above used 0 live calls.
 
-**To do:** run `RUN_LIVE_GEMINI=1 MAX_LIVE_CALLS=8 .venv/bin/python scripts/score_offer_extraction.py --mode gemini
---split heldout` once quota or a Vertex project allows, to get the first real Gemini held-out score against key v2.

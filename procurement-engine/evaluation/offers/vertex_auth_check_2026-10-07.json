@@ -1,0 +1,39 @@
+{
+  "kind": "vertex_auth_check",
+  "quote": "Q01",
+  "split": "train",
+  "run_at": "2026-10-07T14:56:26+00:00",
+  "revision": "a03ff09",
+  "extractor": "gemini",
+  "detail": {
+    "requested": "gemini",
+    "call": "real",
+    "auth": "vertex_adc",
+    "fallback_reason": null,
+    "error_kind": null,
+    "stage": null,
+    "model": "gemini-2.5-flash",
+    "latency_ms": 10803,
+    "live_calls": {
+      "used": 1,
+      "max": 1
+    }
+  },
+  "live_calls": {
+    "used": 1,
+    "max": 1,
+    "enabled": true
+  },
+  "field_accuracy": 0.9333,
+  "quote_correct": false,
+  "errors": [
+    {
+      "field": "settlement_currency",
+      "expected_status": "missing",
+      "got_status": "extracted",
+      "correct": false,
+      "error": "invented_value"
+    }
+  ],
+  "synthetic_inputs": true
+}

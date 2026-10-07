@@ -208,3 +208,15 @@ def test_runner_labels_both_metrics_and_preserves_previous_run(tmp_path, monkeyp
     assert module.main() == 0
     files = list((tmp_path / "evaluation" / "offers").glob("*.json"))
     assert len(files) == 2 and first[0].read_bytes() == first_bytes
+
+
+def test_gemini_run_that_never_used_gemini_is_labelled():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="gemini", split="heldout")  # tests have no key, so every quote falls back
+    assert report["status"] == "gemini_not_used"
+    assert module.run(mode="rules", split="heldout")["status"] == "completed"

@@ -73,6 +73,7 @@ def run(mode: str = "rules", split: str = "heldout") -> dict:
         detail = {"quote": q["id"], "extractor": ex.extractor,
                         "call": ex.extractor_detail.get("call", "none"),
                         "fallback_reason": ex.extractor_detail.get("fallback_reason"),
+                        "error_kind": ex.extractor_detail.get("error_kind"),
                         "latency_ms": ex.extractor_detail.get("latency_ms"),
                         "field_accuracy": score["accuracy"], "quote_correct": score["quote_correct"],
                         "extra_items": score["extra_items"],
@@ -82,15 +83,19 @@ def run(mode: str = "rules", split: str = "heldout") -> dict:
                 detail[key] = ex.extractor_detail[key]
         details.append(detail)
     settings = get_settings()
+    used = Counter(d["extractor"] for d in details)
+    status = "gemini_not_used" if mode in ("gemini", "auto") and not used.get("gemini") else "completed"
+    if status == "completed" and mode in ("gemini", "auto") and used.get("rules"):
+        status = "partly_fell_back_to_rules"
     summary = scoring.summarize(scores)
     summary["field_accuracy"] = summary["accuracy"]
-    return {"kind": "offer_extraction_score", "mode": mode, "split": split,
+    return {"kind": "offer_extraction_score", "status": status, "mode": mode, "split": split,
             "run_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(), "revision": _revision(),
             "manifest_as_of": manifest["as_of"], "manifest_sha256": _sha256(FIXTURES / "manifest.json"),
             "input_sha256": input_hashes, "source_sha256": _source_hashes(),
             "key_configured": bool(settings.gemini_api_key),
             "offline": settings.offline, "synthetic_inputs": True,
-            "extractors_used": dict(Counter(d["extractor"] for d in details)),
+            "extractors_used": dict(used),
             "calls": dict(Counter(d["call"] for d in details)),
             "summary": summary, "quotes": details,
             "caveat": "Synthetic documents written by the same author as the rules; scores are likely optimistic."}
@@ -119,7 +124,7 @@ def main() -> int:
     finally:
         temp_path.unlink()
     s = report["summary"]
-    print(json.dumps({"mode": args.mode, "split": args.split,
+    print(json.dumps({"status": report["status"], "mode": args.mode, "split": args.split,
                       "field_accuracy": s["field_accuracy"], "fields_correct": s["correct"],
                       "fields_total": s["total"], "quote_accuracy": s["quote_accuracy"],
                       "quotes_correct": s["quotes_correct"], "quotes": s["quotes"],

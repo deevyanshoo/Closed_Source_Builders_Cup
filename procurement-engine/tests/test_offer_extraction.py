@@ -293,3 +293,21 @@ def test_separate_laycan_cell_keeps_candidate_without_verifying_a_quantity_pair(
     ]
     assert {e.locator for e in shipments.candidates[0].evidence} == {"r9:c1", "r9:c2", "r12:c2"}
     assert ex.items[0]["pricing"].status == "missing"  # separate settlement code is not a price currency
+
+
+class QuotaError(Exception):
+    code = 429
+
+
+def test_quota_failure_is_recorded_without_exception_text(with_key):
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF,
+                       client=FakeClient(error=QuotaError("429 RESOURCE_EXHAUSTED secret-ish detail")))
+    assert ex.extractor == "rules"
+    assert ex.extractor_detail["fallback_reason"] == "call_failed"
+    assert ex.extractor_detail["error_kind"] == "quota_exhausted"
+    assert "secret-ish" not in json.dumps(ex.extractor_detail)
+
+
+def test_other_provider_failures_are_recorded_as_provider_error(with_key):
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(error=RuntimeError("boom")))
+    assert ex.extractor_detail["error_kind"] == "provider_error"

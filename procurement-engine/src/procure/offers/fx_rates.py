@@ -20,6 +20,7 @@ from decimal import Decimal
 
 from ..db import now_iso
 from ..ingest.http import OfflineError, cache_latest, cache_time, cache_write, http_get
+from .normalize import _bounded_decimal
 
 log = logging.getLogger(__name__)
 
@@ -48,16 +49,34 @@ class FxRate:
                 "status": self.status, "message": self.message}
 
 
-def _parse(text: str, quote: str) -> tuple[Decimal, str]:
+def _parse(text: str, base: str, quote: str, on: dt.date | None) -> tuple[Decimal, str]:
     payload = json.loads(text, parse_float=Decimal)
-    rate = Decimal(str(payload["rates"][quote]))
-    if rate <= 0:
-        raise ValueError(f"non-positive rate {rate}")
-    return rate, str(payload["date"])
+    if not isinstance(payload, dict) or payload.get("base") != base:
+        raise ValueError("FX response base does not match request")
+    date_text = payload.get("date")
+    if not isinstance(date_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_text):
+        raise ValueError("FX response date is invalid")
+    try:
+        rate_date = dt.date.fromisoformat(date_text)
+    except ValueError as exc:
+        raise ValueError("FX response date is invalid") from exc
+    if rate_date > (on or dt.date.today()):
+        raise ValueError("FX response date is after requested date")
+    amount = payload.get("amount", 1)
+    if isinstance(amount, bool) or _bounded_decimal(amount, allow_negative=False) != Decimal("1"):
+        raise ValueError("FX response does not price one base unit")
+    rates = payload.get("rates")
+    if not isinstance(rates, dict) or quote not in rates:
+        raise ValueError("FX response quote does not match request")
+    rate = _bounded_decimal(rates[quote], allow_negative=False)
+    if rate is None or rate <= 0:
+        raise ValueError("FX response rate is not finite and positive")
+    return rate, date_text
 
 
 def get_rate(base: str, quote: str, on: dt.date | None = None) -> FxRate:
-    if not (_CODE.match(base or "") and _CODE.match(quote or "")):
+    if not (isinstance(base, str) and isinstance(quote, str) and _CODE.fullmatch(base)
+            and _CODE.fullmatch(quote)):
         return FxRate(base, quote, None, None, None, None, "invalid_currency",
                       "Currency codes must be three upper-case letters")
     if base == quote:
@@ -69,7 +88,7 @@ def get_rate(base: str, quote: str, on: dt.date | None = None) -> FxRate:
     for url, params in ENDPOINTS:
         try:
             resp = http_get(url.format(day=day), params=params(base, quote), retries=2)
-            rate, rate_date = _parse(resp.text, quote)
+            rate, rate_date = _parse(resp.text, base, quote, on)
             cache_write(prefix, ".json", resp.text.encode())
             return FxRate(base, quote, rate, rate_date, SOURCE, now_iso(), "live", url.split("/{")[0])
         except OfflineError as exc:
@@ -82,7 +101,7 @@ def get_rate(base: str, quote: str, on: dt.date | None = None) -> FxRate:
     cached = cache_latest(prefix, ".json")
     if cached is not None:
         try:
-            rate, rate_date = _parse(cached.read_text(), quote)
+            rate, rate_date = _parse(cached.read_text(), base, quote, on)
             return FxRate(base, quote, rate, rate_date, SOURCE, cache_time(cached).isoformat(), "cache",
                           f"Live unavailable; cached response {cached.name}")
         except Exception as exc:  # noqa: BLE001

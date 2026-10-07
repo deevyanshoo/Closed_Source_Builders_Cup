@@ -253,6 +253,43 @@ def test_malformed_nested_value_cannot_abort_conflict_resolution():
     json.dumps(result.to_dict())
 
 
+@pytest.mark.parametrize("source", ["Available -5 tonne", "Available −5 tonne", "Available +5 tonne"])
+def test_signed_physical_source_cannot_verify_opposite_quantity(source):
+    doc = _csv(f'quote,other\n"{source}",x\n')
+    opposite = "5" if "-5" in source or "−5" in source else "-5"
+    assert _status(doc, "quantity", "quantity", {"amount": opposite, "unit": "tonne"},
+                   "r2:c1").status == "unverified"
+    if "+5" in source:
+        assert _status(doc, "quantity", "quantity", {"amount": "5", "unit": "tonne"},
+                       "r2:c1").status == "extracted"
+
+
+def test_negative_shipment_source_cannot_verify_positive_or_negative_lot():
+    doc = _csv('quantity,window\n-50 tonne,December 2026\n')
+    for amount in ("50", "-50"):
+        lot = [{"quantity": {"amount": amount, "unit": "tonne"}, "window": "2026-12"}]
+        assert _status(doc, "shipments", "shipments", lot, "r2:c1", "r2:c2").status == "unverified"
+
+
+@pytest.mark.parametrize("source", ["premium -USD 95 per tonne", "premium USD -95 per tonne",
+                                     "premium -USD95/pertonne", "premium −USD95/pertonne",
+                                     "premium USD −95 per tonne"])
+def test_negative_index_premium_preserves_its_sign(source):
+    doc = _csv(f'quote,other\n"LME Copper official cash settlement; monthly average; {source}",x\n')
+    def proposal(amount):
+        return {"type": "index_linked", "index": "LME Copper official cash settlement",
+                "averaging_period": "monthly average", "premium": {"amount": amount, "currency": "USD"},
+                "per_unit": "tonne"}
+    assert _status(doc, "pricing", "pricing", proposal("95"), "r2:c1").status == "unverified"
+    assert _status(doc, "pricing", "pricing", proposal("-95"), "r2:c1").status == "extracted"
+
+
+def test_negative_fixed_price_is_never_verified():
+    doc = _csv('quote,other\n"Price USD -5 per tonne",x\n')
+    assert _status(doc, "pricing", "pricing", _price("5"), "r2:c1").status == "unverified"
+    assert _status(doc, "pricing", "pricing", _price("-5"), "r2:c1").status == "unverified"
+
+
 def test_reader_visibility_uncertainty_blocks_evidence():
     from fpdf import FPDF
 

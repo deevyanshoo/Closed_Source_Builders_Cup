@@ -13,11 +13,23 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation, localcontext
 
 # ---------- numbers ----------
 
-_NUMBER = re.compile(r"(?<![\w.,])\d[\d.,]*")
+_NUMBER = re.compile(r"(?<![\w.,])[+-]?\d[\d.,]*")
+
+
+def _signed_text(text: str) -> str:
+    """Move a sign before a currency marker onto its following amount."""
+    text = text.replace("−", "-")  # the mathematical minus used in PDFs and spreadsheets
+    return re.sub(
+        r"(?<![\w])([+-])\s*([A-Z]{3}|US\$|€|£|₹)\s*(\d[\d.,]*)",
+        lambda match: f"{match.group(2)} {match.group(1)}{match.group(3)}", text)
+
+
+def _tokens(text: str) -> list[str]:
+    return _NUMBER.findall(_signed_text(text))
 
 
 def _thousands_groups(groups: list[str]) -> bool:
@@ -45,6 +57,8 @@ def _decimal_separator(token: str, decimal_comma: bool) -> str | None:
 
 def _parse(token: str, decimal_comma: bool) -> Decimal | None:
     token = token.rstrip(".,")
+    sign = "-" if token.startswith("-") else ""
+    token = token.lstrip("+-")
     if not token:
         return None
     decimal_sep = _decimal_separator(token, decimal_comma)
@@ -58,14 +72,14 @@ def _parse(token: str, decimal_comma: bool) -> Decimal | None:
     if not digits.isdigit() or (fraction and not fraction.isdigit()):
         return None
     try:
-        return Decimal(f"{digits}.{fraction}" if fraction else digits)
+        return Decimal(sign + (f"{digits}.{fraction}" if fraction else digits))
     except InvalidOperation:
         return None
 
 
 def parse_decimal(text: str, *, decimal_comma: bool = False) -> Decimal | None:
     """The single number in `text`, or None if there is none or more than one."""
-    found = [n for n in (_parse(t, decimal_comma) for t in _NUMBER.findall(text)) if n is not None]
+    found = [n for n in (_parse(t, decimal_comma) for t in _tokens(text)) if n is not None]
     return found[0] if len(found) == 1 else None
 
 
@@ -73,8 +87,8 @@ def number_style(texts: list[str]) -> bool | None:
     """Decimal-comma convention when cited numbers establish it; None means unresolved."""
     styles = set()
     for text in texts:
-        for token in _NUMBER.findall(text):
-            token = token.rstrip(".,")
+        for token in _tokens(text):
+            token = token.rstrip(".,").lstrip("+-")
             if "," in token and "." in token:
                 styles.add(token.rfind(",") > token.rfind("."))
             elif "," in token and token.count(",") == 1:
@@ -91,7 +105,7 @@ def number_style(texts: list[str]) -> bool | None:
 def numbers_in(text: str, *, decimal_comma: bool | None = None) -> set[Decimal]:
     """Numbers with one defensible interpretation; lone three-digit separators need context."""
     out = set()
-    for token in _NUMBER.findall(text):
+    for token in _tokens(text):
         point, comma = _parse(token, False), _parse(token, True)
         if point == comma and point is not None:
             out.add(point)
@@ -103,14 +117,14 @@ def numbers_in(text: str, *, decimal_comma: bool | None = None) -> set[Decimal]:
 
 
 def ambiguous_number_in(text: str) -> bool:
-    return any(_parse(token, False) != _parse(token, True) for token in _NUMBER.findall(text))
+    return any(_parse(token, False) != _parse(token, True) for token in _tokens(text))
 
 
 def uses_decimal_comma(texts) -> bool:
     """True when the document writes numbers like 2.598,00 or 9,15 (comma as decimal separator)."""
     for text in texts:
-        for token in _NUMBER.findall(text):
-            token = token.rstrip(".,")
+        for token in _tokens(text):
+            token = token.rstrip(".,").lstrip("+-")
             if "," in token and "." in token and token.rfind(",") > token.rfind("."):
                 return True
     return False
@@ -236,7 +250,7 @@ def _currency_context(text: str, code: str) -> bool:
     if text.strip() == code:  # a dedicated table cell
         return True
     escaped = re.escape(code)
-    if re.search(rf"(?<![A-Za-z]){escaped}(?![A-Za-z])\s*\d[\d.,]*\s*(?:/|per)\s*"
+    if re.search(rf"(?<![A-Za-z]){escaped}(?![A-Za-z])\s*[-+−]?\d[\d.,]*\s*(?:/\s*(?:per\s*)?|per\s*)"
                  rf"(?:metric\s+)?(?:t|tonne|kg|lb)\b", text, re.I):
         return True
     if re.search(rf"\b(?:price|premium|currency|settlement\s+currency|invoice\s+currency|quote\s+currency)\b"
@@ -272,12 +286,43 @@ def squash(text: str) -> str:
 # ---------- normalised values ----------
 
 DERIVED_PLACES = Decimal("1e-10")  # derived per-kg values are rounded half-even to 10 decimal places
+MAX_SIGNIFICANT_DIGITS = 30
+MAX_FRACTIONAL_PLACES = 10
+ARITHMETIC_PRECISION = 80  # quantity * unit, then price / unit * bounded FX, including derived places
+
+
+def _bounded_decimal(value, *, allow_negative: bool) -> Decimal | None:
+    """Accept finite offer inputs within a documented 30-digit, 10-place envelope."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        return None
+    text = str(value)
+    if len(text) > 64:
+        return None
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, ValueError):
+        return None
+    if not number.is_finite() or (number < 0 and not allow_negative):
+        return None
+    sign, digits, exponent = number.as_tuple()
+    if (len(digits) > MAX_SIGNIFICANT_DIGITS or exponent < -MAX_FRACTIONAL_PLACES
+            or number.adjusted() > MAX_SIGNIFICANT_DIGITS - 1):
+        return None
+    return number
+
+
+def _exact(value: Decimal) -> str:
+    """Exact source-derived quantity; never apply the reporting-price rounding rule."""
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def fmt(value: Decimal) -> str:
     """Plain decimal string without exponent; derived values longer than 10 places are rounded."""
-    if value.as_tuple().exponent < -10:
-        value = value.quantize(DERIVED_PLACES, rounding=ROUND_HALF_EVEN)
+    with localcontext() as context:
+        context.prec = ARITHMETIC_PRECISION
+        if value.as_tuple().exponent < -10:
+            value = value.quantize(DERIVED_PLACES, rounding=ROUND_HALF_EVEN)
     text = format(value, "f")
     return text.rstrip("0").rstrip(".") if "." in text else text
 
@@ -289,25 +334,52 @@ def _money(amount: Decimal, currency: str) -> dict:
 def normalize_quantity(value: dict) -> dict:
     """A quantity in kg, converted exactly. Unknown units are not converted."""
     out = {"original": value, "kg": None, "status": "ok"}
-    try:
-        amount = Decimal(str(value["amount"]))
-    except (KeyError, TypeError, InvalidOperation):
+    if not isinstance(value, dict) or "amount" not in value or "unit" not in value or (
+            set(value) - {"amount", "unit", "period"}):
+        return {**out, "status": "invalid_amount"}
+    amount = _bounded_decimal(value["amount"], allow_negative=False)
+    if amount is None:
         return {**out, "status": "invalid_amount"}
     unit = value.get("unit")
-    if unit not in KG_PER_UNIT:
+    if not isinstance(unit, str) or unit not in KG_PER_UNIT:
         return {**out, "status": "unsupported_unit"}
-    return {**out, "kg": fmt(amount * KG_PER_UNIT[unit])}
+    with localcontext() as context:
+        context.prec = ARITHMETIC_PRECISION
+        return {**out, "kg": _exact(amount * KG_PER_UNIT[unit])}
+
+
+def _usable_rate(rate, base: str, quote: str, as_of: dt.date) -> Decimal | None:
+    if (getattr(rate, "base", None) != base or getattr(rate, "quote", None) != quote
+            or getattr(rate, "status", None) not in {"live", "cache"}
+            or not callable(getattr(rate, "to_dict", None))):
+        return None
+    number = _bounded_decimal(getattr(rate, "rate", None), allow_negative=False)
+    date_text = getattr(rate, "rate_date", None)
+    if number is None or number <= 0 or not isinstance(date_text, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_text):
+        return None
+    try:
+        rate_date = dt.date.fromisoformat(date_text)
+    except ValueError:
+        return None
+    return number if rate_date <= as_of else None
 
 
 def _reporting(amount_per_kg: Decimal, currency: str, reporting_currency: str, as_of: dt.date, rate_lookup) -> dict:
     if currency == reporting_currency:
         return {"currency": reporting_currency, "status": "not_needed", "fx": None,
                 "per_kg": _money(amount_per_kg, currency)}
-    rate = rate_lookup(currency, reporting_currency, as_of)
-    if rate.rate is None:
-        return {"currency": reporting_currency, "status": rate.status, "fx": rate.to_dict(), "per_kg": None}
+    try:
+        rate = rate_lookup(currency, reporting_currency, as_of)
+    except Exception:  # an unavailable lookup cannot authorize conversion
+        return {"currency": reporting_currency, "status": "unavailable", "fx": None, "per_kg": None}
+    usable = _usable_rate(rate, currency, reporting_currency, as_of)
+    if usable is None:
+        return {"currency": reporting_currency, "status": "unavailable", "fx": None, "per_kg": None}
+    with localcontext() as context:
+        context.prec = ARITHMETIC_PRECISION
+        converted = amount_per_kg * usable
     return {"currency": reporting_currency, "status": rate.status, "fx": rate.to_dict(),
-            "per_kg": _money(amount_per_kg * rate.rate, reporting_currency)}
+            "per_kg": _money(converted, reporting_currency)}
 
 
 def normalize_pricing(value: dict, *, reporting_currency: str, as_of: dt.date, rate_lookup=None) -> dict:
@@ -316,20 +388,46 @@ def normalize_pricing(value: dict, *, reporting_currency: str, as_of: dt.date, r
     Index-linked prices keep their index and averaging period; only the premium is converted.
     No price is invented for an index that has not fixed yet.
     """
+    if not isinstance(value, dict):
+        return {"type": None, "original": value, "status": "invalid_amount"}
+    kind = value.get("type")
+    money_key = "unit_price" if kind == "fixed" else "premium" if kind == "index_linked" else None
+    if money_key is None:
+        return {"type": kind, "original": value,
+                "status": "invalid_amount" if kind is None else "unsupported_pricing_type"}
+    if (kind == "fixed" and set(value) != {"type", "unit_price", "per_unit"}) or (
+            kind == "index_linked" and (not {"type", "index", "averaging_period", "premium", "per_unit"} <= set(value)
+                                        or set(value) - {"type", "index", "averaging_period", "premium", "per_unit",
+                                                         "fx_basis", "fx_terms", "fx_conversion", "quotational_period"})):
+        return {"type": kind, "original": value, "status": "invalid_amount"}
+    money = value.get(money_key)
+    if not isinstance(money, dict) or set(money) != {"amount", "currency"}:
+        return {"type": kind, "original": value, "status": "invalid_amount"}
+    amount = _bounded_decimal(money["amount"], allow_negative=kind == "index_linked")
+    if amount is None or (kind == "index_linked" and (
+            not isinstance(value.get("index"), str) or not value["index"].strip() or
+            not isinstance(value.get("averaging_period"), str) or not value["averaging_period"].strip())):
+        return {"type": kind, "original": value, "status": "invalid_amount"}
+    if (not isinstance(money["currency"], str) or money["currency"] not in ISO_4217_CODES
+            or money["currency"] in _NON_SETTLEMENT_CODES or not isinstance(reporting_currency, str)
+            or reporting_currency not in ISO_4217_CODES or reporting_currency in _NON_SETTLEMENT_CODES):
+        return {"type": kind, "original": value, "status": "unsupported_currency"}
     if rate_lookup is None:
         from .fx_rates import get_rate as rate_lookup
     per_unit = value.get("per_unit")
-    if per_unit not in KG_PER_UNIT:
+    if not isinstance(per_unit, str) or per_unit not in KG_PER_UNIT:
         return {"type": value.get("type"), "original": value, "status": "unsupported_unit"}
     kg = KG_PER_UNIT[per_unit]
     if value.get("type") == "fixed":
-        money = value["unit_price"]
-        per_kg = Decimal(str(money["amount"])) / kg
+        with localcontext() as context:
+            context.prec = ARITHMETIC_PRECISION
+            per_kg = amount / kg
         return {"type": "fixed", "original": value, "status": "ok", "per_kg": _money(per_kg, money["currency"]),
                 "reporting": _reporting(per_kg, money["currency"], reporting_currency, as_of, rate_lookup)}
     if value.get("type") == "index_linked":
-        money = value["premium"]
-        per_kg = Decimal(str(money["amount"])) / kg
+        with localcontext() as context:
+            context.prec = ARITHMETIC_PRECISION
+            per_kg = amount / kg
         reporting = _reporting(per_kg, money["currency"], reporting_currency, as_of, rate_lookup)
         reporting["premium_per_kg"] = reporting.pop("per_kg")
         return {"type": "index_linked", "original": value, "status": "ok", "index": value.get("index"),
@@ -339,7 +437,13 @@ def normalize_pricing(value: dict, *, reporting_currency: str, as_of: dt.date, r
 
 
 def expiry_status(valid_until: str | None, as_of: dt.date) -> str:
-    """'expired' when the validity date is before `as_of`, 'valid' otherwise, 'unknown' without a date."""
-    if not valid_until:
+    """Inclusive expiry; missing is unknown, malformed is invalid."""
+    if valid_until is None or valid_until == "":
         return "unknown"
-    return "expired" if dt.date.fromisoformat(valid_until) < as_of else "valid"
+    if not isinstance(valid_until, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", valid_until):
+        return "invalid"
+    try:
+        expiry = dt.date.fromisoformat(valid_until)
+    except ValueError:
+        return "invalid"
+    return "expired" if expiry < as_of else "valid"

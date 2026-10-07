@@ -178,12 +178,12 @@ def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[Evi
     for ref in refs:
         for clause in re.split(r"[;\n]", ref.segment_text):
             for expression in re.finditer(
-                    r"(?<![A-Za-z])(?:[A-Z]{3}|US\$|€|£|₹)(?![A-Za-z])\s*"
-                    r"(?P<amount>\d[\d.,]*)\s*(?:/|per)\s*"
+                    r"(?<![A-Za-z0-9])[-+−]?(?:[A-Z]{3}|US\$|€|£|₹)(?![A-Za-z])\s*"
+                    r"[-+−]?(?P<amount>\d[\d.,]*)\s*(?:/\s*(?:per\s*)?|per\s*)"
                     r"(?:metric\s+)?(?:tonnes?|tons?|kilograms?|kgs?|pounds?|lbs?|t)\b",
                     clause, re.I):
                 written = expression.group(0)
-                if (target in nz.numbers_in(expression.group("amount"), decimal_comma=style)
+                if (target in nz.numbers_in(written, decimal_comma=style)
                         and currency in nz.currencies_in(written)
                         and unit in nz.units_in(written)
                         and nz.unit_problem(written) is None):
@@ -275,6 +275,8 @@ def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:
         quantity = lot.get("quantity")
         if not isinstance(quantity, dict):
             return ["invalid_value"]
+        if (amount := _decimal(quantity.get("amount"))) is None or amount < 0:
+            return ["lot_quantity"]
         if len(nz.windows_ordered_in(clause)) > 1:
             # One shared quantity can describe equal lots. Distinct quantities on the
             # same clause need explicit pairings, which this reader cannot establish.
@@ -336,6 +338,8 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document
         if not isinstance(value, dict) or not {"amount", "unit"} <= set(value) or (
                 set(value) - {"amount", "unit", "period"}):
             return ["invalid_value"]
+        if (amount := _decimal(value.get("amount"))) is None or amount < 0:
+            return ["invalid_value"]
         out = []
         amount_problem = _amount_problem(value.get("amount"), texts)
         if amount_problem:
@@ -363,6 +367,8 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document
                 return ["invalid_value"]
             money = value.get("unit_price")
             out = _money_supported(money, texts)
+            if isinstance(money, dict) and (amount_value := _decimal(money.get("amount"))) is not None and amount_value < 0:
+                out.append("invalid_value")
         elif value.get("type") == "index_linked":
             if set(value) - {"type", "index", "averaging_period", "premium", "per_unit",
                               "fx_basis", "fx_terms", "fx_conversion", "quotational_period"}:

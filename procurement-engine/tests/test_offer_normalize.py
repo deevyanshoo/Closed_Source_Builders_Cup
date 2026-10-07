@@ -35,6 +35,17 @@ def test_decimal_comma_documents_read_a_lone_comma_as_decimal():
     assert parse_decimal("1,000") == Decimal("1000")
 
 
+def test_signed_source_numbers_keep_sign_with_or_without_currency():
+    for text in ("-50 tonne", "Available -5 tonne", "premium -USD 95 per tonne", "premium USD -95 per tonne",
+                 "premium -USD95/pertonne"):
+        assert all(number < 0 for number in nz.numbers_in(text))
+    assert parse_decimal("-50 tonne") == Decimal("-50")
+    assert parse_decimal("+50 tonne") == Decimal("50")
+    assert nz.numbers_in("-2,598", decimal_comma=False) == {Decimal("-2598")}
+    assert nz.ambiguous_number_in("-2,598") is True
+    assert nz.numbers_in("Available −5 tonne") == {Decimal("-5")}
+
+
 @pytest.mark.parametrize("text", ["25.10.2026", "1,2345,678", "1,2,3", "no number here", "9.15 and 10.20"])
 def test_unreadable_or_multiple_numbers_are_not_guessed(text):
     assert parse_decimal(text) is None
@@ -81,6 +92,29 @@ def test_quantities_convert_exactly_to_kg(value, kg):
 def test_unknown_quantity_unit_is_unsupported_not_converted():
     out = normalize_quantity({"amount": "5", "unit": "dmt"})
     assert out["status"] == "unsupported_unit" and out["kg"] is None
+
+
+@pytest.mark.parametrize("value", [None, {}, {"amount": "NaN", "unit": "tonne"},
+                                         {"amount": "Infinity", "unit": "tonne"},
+                                         {"amount": "-5", "unit": "tonne"},
+                                         {"amount": "1e1000000", "unit": "tonne"},
+                                         {"amount": "1" * 31, "unit": "tonne"}])
+def test_invalid_quantity_is_bounded_and_unconverted(value):
+    out = normalize_quantity(value)
+    assert out["status"] == "invalid_amount" and out["kg"] is None
+
+
+def test_thirty_digit_tonne_conversion_is_exact_not_context_rounded():
+    amount = "123456789012345678901234567890"
+    out = normalize_quantity({"amount": amount, "unit": "tonne"})
+    assert out["status"] == "ok"
+    assert out["kg"] == "123456789012345678901234567890000"
+
+
+def test_exact_quantity_scale_boundary_and_malformed_unit():
+    assert normalize_quantity({"amount": "0.1234567890", "unit": "tonne"})["kg"] == "123.456789"
+    assert normalize_quantity({"amount": "0.12345678901", "unit": "tonne"})["status"] == "invalid_amount"
+    assert normalize_quantity({"amount": "5", "unit": []})["status"] == "unsupported_unit"
 
 
 @pytest.mark.parametrize("text,problem", [("price per ton", "ambiguous_unit"), ("USD 99 per dmt", "unsupported_unit"),
@@ -151,6 +185,33 @@ def test_response_without_the_requested_currency_is_unavailable(monkeypatch):
     assert rate.status == "unavailable" and rate.rate is None
 
 
+@pytest.mark.parametrize("payload", [
+    {"amount": 1, "base": "GBP", "date": "2026-10-06", "rates": {"USD": 2}},
+    {"amount": 1, "base": "EUR", "date": "2026-10-08", "rates": {"USD": 2}},
+    {"amount": 1, "base": "EUR", "date": "tomorrow", "rates": {"USD": 2}},
+    {"amount": 1, "base": "EUR", "date": "2026-10-06", "rates": {"USD": float("inf")}},
+    {"amount": 2, "base": "EUR", "date": "2026-10-06", "rates": {"USD": 2}},
+    {"amount": 1, "base": "EUR", "date": "2026-10-06", "rates": {"USD": -2}},
+])
+def test_invalid_live_fx_payload_is_unavailable_and_never_cached(monkeypatch, payload):
+    monkeypatch.setattr(fx_rates, "http_get", lambda *a, **k: FakeResponse(payload))
+    monkeypatch.setattr(fx_rates, "cache_latest", lambda *a, **k: None)
+    writes = []
+    monkeypatch.setattr(fx_rates, "cache_write", lambda *a, **k: writes.append((a, k)))
+    rate = fx_rates.get_rate("EUR", "USD", dt.date(2026, 10, 7))
+    assert rate.status == "unavailable" and rate.rate is None and not writes
+
+
+def test_invalid_cached_fx_payload_is_unavailable(monkeypatch, tmp_path):
+    cache = tmp_path / "bad-fx.json"
+    cache.write_text(json.dumps({"amount": 1, "base": "GBP", "date": "2026-10-06",
+                                 "rates": {"USD": 2}}))
+    monkeypatch.setattr(fx_rates, "http_get", lambda *a, **k: (_ for _ in ()).throw(fx_rates.OfflineError("offline")))
+    monkeypatch.setattr(fx_rates, "cache_latest", lambda *a, **k: cache)
+    rate = fx_rates.get_rate("EUR", "USD", dt.date(2026, 10, 7))
+    assert rate.status == "unavailable" and rate.rate is None
+
+
 @pytest.mark.parametrize("code", ["usd", "US", "EURO", ""])
 def test_malformed_currency_codes_are_rejected(code):
     assert fx_rates.get_rate(code, "USD", dt.date(2026, 10, 7)).status == "invalid_currency"
@@ -204,9 +265,48 @@ def test_index_linked_price_stays_index_plus_premium():
     assert "per_kg" not in out and "unit_price" not in out
 
 
+@pytest.mark.parametrize("value", [None, {}, fixed("-5", "USD", "kg"), fixed("NaN", "USD", "kg"),
+                                         {"type": "fixed", "per_unit": "kg", "unit_price": {}},
+                                         fixed("1e1000000", "USD", "kg")])
+def test_invalid_fixed_price_fails_closed_before_arithmetic(value):
+    out = normalize_pricing(value, reporting_currency="USD", as_of=dt.date(2026, 10, 7))
+    assert out["status"] == "invalid_amount" and "per_kg" not in out
+
+
+def test_typed_negative_index_premium_keeps_sign():
+    value = {"type": "index_linked", "index": "LME Copper", "averaging_period": "monthly average",
+             "premium": {"amount": "-95", "currency": "USD"}, "per_unit": "tonne"}
+    out = normalize_pricing(value, reporting_currency="USD", as_of=dt.date(2026, 10, 7))
+    assert out["status"] == "ok" and out["premium_per_kg"] == {"amount": "-0.095", "currency": "USD"}
+
+
+def test_malformed_currency_and_unit_shapes_fail_before_price_arithmetic():
+    bad_currency = fixed("5", [], "kg")
+    bad_unit = fixed("5", "USD", [])
+    assert normalize_pricing(bad_currency, reporting_currency="USD", as_of=dt.date(2026, 10, 7))["status"] == "unsupported_currency"
+    assert normalize_pricing(bad_unit, reporting_currency="USD", as_of=dt.date(2026, 10, 7))["status"] == "unsupported_unit"
+
+
+@pytest.mark.parametrize("bad_rate", [
+    fx_rates.FxRate("GBP", "USD", Decimal("2"), "2026-10-06", "mock", "now", "live", ""),
+    fx_rates.FxRate("EUR", "USD", Decimal("Infinity"), "2026-10-06", "mock", "now", "live", ""),
+    fx_rates.FxRate("EUR", "USD", Decimal("2"), "2026-10-08", "mock", "now", "live", ""),
+])
+def test_injected_fx_lookup_cannot_bypass_identity_finiteness_or_date(bad_rate):
+    out = normalize_pricing(fixed("9.15", "EUR", "kg"), reporting_currency="USD", as_of=dt.date(2026, 10, 7),
+                            rate_lookup=lambda *_: bad_rate)
+    assert out["reporting"]["status"] == "unavailable"
+    assert out["reporting"]["per_kg"] is None
+
+
 # ---------- expiry ----------
 
 @pytest.mark.parametrize("valid_until,status", [("2026-09-30", "expired"), ("2026-10-07", "valid"),
                                                 ("2026-10-31", "valid"), (None, "unknown")])
 def test_expiry_against_as_of_date(valid_until, status):
     assert expiry_status(valid_until, dt.date(2026, 10, 7)) == status
+
+
+@pytest.mark.parametrize("value", ["not-a-date", "2026-02-30", 20261007, [], {}])
+def test_malformed_expiry_is_invalid_not_valid_or_exception(value):
+    assert expiry_status(value, dt.date(2026, 10, 7)) == "invalid"

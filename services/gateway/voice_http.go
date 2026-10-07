@@ -66,25 +66,40 @@ type voiceRecord struct {
 	productionRef                                               *contract.ProductionContextRef
 	accepted, turnAccepted                                      bool
 	stale                                                       bool
+	proposalPublishing                                          bool
 }
 type voiceHTTPAdapter struct {
-	mu         sync.Mutex
-	now        func() time.Time
-	clock      *atomic.Value
-	last       time.Time
-	manager    *voice.Manager
-	runner     *voice.Runner
-	root       context.Context
-	cancel     context.CancelFunc
-	sessions   map[string]*voiceRecord
-	active     int
-	production *stateServer
-	closed     bool
-	done       chan struct{}
-	workers    sync.WaitGroup
+	mu              sync.Mutex
+	now             func() time.Time
+	clock           *atomic.Value
+	last            time.Time
+	manager         *voice.Manager
+	runner          *voice.Runner
+	root            context.Context
+	cancel          context.CancelFunc
+	sessions        map[string]*voiceRecord
+	active          int
+	production      *stateServer
+	proposalSource  voice.ProposalSource
+	proposalMapper  voice.ProposalMapper
+	proposalTimeout time.Duration
+	proposalMode    bool
+	closed          bool
+	done            chan struct{}
+	workers         sync.WaitGroup
 }
 
 func newVoiceHTTPAdapter(executor voice.Executor, now func() time.Time) (*voiceHTTPAdapter, error) {
+	return makeVoiceHTTPAdapter(executor, nil, nil, now, false)
+}
+
+// The proposal constructor is server-side injection only. Default gateway
+// configuration continues to select the existing typed-call path.
+func newVoiceHTTPAdapterWithProposal(executor voice.Executor, source voice.ProposalSource, mapper voice.ProposalMapper, now func() time.Time) (*voiceHTTPAdapter, error) {
+	return makeVoiceHTTPAdapter(executor, source, mapper, now, true)
+}
+
+func makeVoiceHTTPAdapter(executor voice.Executor, source voice.ProposalSource, mapper voice.ProposalMapper, now func() time.Time, proposal bool) (*voiceHTTPAdapter, error) {
 	if now == nil {
 		return nil, voice.ErrInvalid
 	}
@@ -100,7 +115,7 @@ func newVoiceHTTPAdapter(executor voice.Executor, now func() time.Time) (*voiceH
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &voiceHTTPAdapter{now: now, clock: &clock, last: initial, manager: m, runner: r, root: ctx, cancel: cancel, sessions: make(map[string]*voiceRecord), done: make(chan struct{})}
+	a := &voiceHTTPAdapter{now: now, clock: &clock, last: initial, manager: m, runner: r, root: ctx, cancel: cancel, sessions: make(map[string]*voiceRecord), done: make(chan struct{}), proposalMode: proposal, proposalSource: source, proposalMapper: mapper, proposalTimeout: 5 * time.Second}
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
@@ -434,6 +449,10 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	turnCount := voiceArrayCount(value)
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	ref, expected := a.savedRef(owner, id)
+	if a.proposalMode && ref == nil && expected != nil {
+		voiceErr(w, 503, "production_context_unavailable", "Saved production context required")
+		return
+	}
 	var guard *productionGuard
 	fail := func(status int, code, message string) {
 		if guard != nil {
@@ -509,6 +528,15 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		fail(422, "invalid_request", "Invalid voice call")
 		return
 	}
+	var arguments []byte
+	if a.proposalMode {
+		arguments, err = json.Marshal(request["call"].(map[string]any)["arguments"])
+		if err != nil || len(arguments) == 0 || len(arguments) > voice.ProposalCallLimit {
+			a.mu.Unlock()
+			fail(422, "invalid_request", "Invalid voice arguments")
+			return
+		}
+	}
 	a.active++
 	lease, err := a.manager.StartTurn(s.ctx, owner, id)
 	if err != nil {
@@ -528,6 +556,7 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	s.lease = lease
 	s.state = "pending"
 	s.turnAccepted = ref == nil
+	s.proposalPublishing = false
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": lease.TurnID(), "status": "accepted"}
@@ -572,7 +601,11 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		a.releaseBeforeAcceptance(owner, id, lease)
 		return
 	}
-	go a.run(owner, id, lease, capture, call)
+	if a.proposalMode {
+		go a.runProposal(owner, id, lease, capture, arguments, p, ref, expected)
+	} else {
+		go a.run(owner, id, lease, capture, call)
+	}
 }
 func (a *voiceHTTPAdapter) releaseBeforeAcceptance(owner voice.Owner, id string, lease *voice.Lease) {
 	defer a.workers.Done()
@@ -584,6 +617,7 @@ func (a *voiceHTTPAdapter) releaseBeforeAcceptance(owner voice.Owner, id string,
 		s.lease = nil
 		s.state = ""
 		s.turnAccepted = false
+		s.proposalPublishing = false
 		s.outcome = nil
 	}
 	a.mu.Unlock()
@@ -615,6 +649,115 @@ func (a *voiceHTTPAdapter) run(owner voice.Owner, id string, lease *voice.Lease,
 		return
 	}
 	a.acceptOutputLocked(s, output)
+}
+
+// proposalGuard checks current ownership before a fresh saved-context read.
+// Callers recheck the lease after the read and close the row-share guard outside a.mu.
+func (a *voiceHTTPAdapter) proposalGuard(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) (*productionGuard, error) {
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	current := s == expected && s != nil && s.lease == lease && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease)
+	a.mu.Unlock()
+	if !current {
+		return nil, voice.ErrUnavailable
+	}
+	if ref == nil || a.production == nil {
+		return nil, voice.ErrExecution
+	}
+	guard, _, code := a.production.guardProduction(ctx, p, *ref)
+	if code == 404 || code == 409 {
+		a.staleRecord(owner, id, expected)
+		return nil, voice.ErrUnavailable
+	}
+	if code != 0 {
+		return nil, voice.ErrExecution
+	}
+	if ctx.Err() != nil || guard.ctx.Err() != nil {
+		guard.rollback()
+		return nil, voice.ErrUnavailable
+	}
+	return guard, nil
+}
+
+// The source and mapper preflights release their guards before slow work.
+func (a *voiceHTTPAdapter) proposalCurrent(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) error {
+	guard, err := a.proposalGuard(ctx, p, owner, id, lease, ref, expected)
+	if err != nil {
+		return err
+	}
+	if err := guard.close(); err != nil {
+		return voice.ErrExecution
+	}
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	current := s == expected && s != nil && s.lease == lease && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease) && ctx.Err() == nil
+	a.mu.Unlock()
+	if !current {
+		return voice.ErrUnavailable
+	}
+	return nil
+}
+
+func (a *voiceHTTPAdapter) runProposal(owner voice.Owner, id string, lease *voice.Lease, capture *voice.RecoveryContext, arguments []byte, p principal, ref *contract.ProductionContextRef, expected *voiceRecord) {
+	defer a.workers.Done()
+	defer func() { a.mu.Lock(); a.active--; a.mu.Unlock() }()
+	ctx, cancel := context.WithTimeout(lease.Context(), a.proposalTimeout)
+	defer cancel()
+	err := a.proposalCurrent(ctx, p, owner, id, lease, ref, expected)
+	var call []byte
+	if err == nil {
+		call, err = voice.ConvertProposal(ctx, a.proposalSource, a.proposalMapper, arguments)
+	}
+	if err == nil {
+		err = a.proposalCurrent(ctx, p, owner, id, lease, ref, expected)
+	}
+	if err == nil {
+		err = a.runner.Run(owner, lease, capture, call)
+	}
+	var publicationGuard *productionGuard
+	if err == nil {
+		publicationGuard, err = a.proposalGuard(lease.Context(), p, owner, id, lease, ref, expected)
+	}
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	if s == nil || s != expected || s.lease != lease || a.closed || !a.manager.IsCurrent(owner, lease) || s.state != "pending" {
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
+		return
+	}
+	if err != nil || (publicationGuard != nil && publicationGuard.ctx.Err() != nil) || lease.Context().Err() != nil {
+		s.state = "failed"
+		s.last = a.clock.Load().(time.Time)
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
+		return
+	}
+	output, ready, dequeueErr := a.manager.Dequeue(owner, id)
+	if dequeueErr != nil || !ready {
+		s.state = "failed"
+		a.mu.Unlock()
+		publicationGuard.rollback()
+		return
+	}
+	a.acceptOutputLocked(s, output)
+	if s.state == "ready" {
+		s.proposalPublishing = true
+	}
+	a.mu.Unlock()
+	closeErr := publicationGuard.close()
+	a.mu.Lock()
+	if current := a.currentLocked(owner, id); current == s && s.lease == lease && s.proposalPublishing {
+		if closeErr != nil {
+			s.outcome = nil
+			s.state = "failed"
+		}
+		s.proposalPublishing = false
+	}
+	a.mu.Unlock()
 }
 func (a *voiceHTTPAdapter) acceptOutputLocked(s *voiceRecord, output voice.Output) {
 	if s.lease == nil || output.TurnID != s.lease.TurnID() || len(output.Payload) > voiceOutcomeLimit {
@@ -664,6 +807,7 @@ func (a *voiceHTTPAdapter) cancelTurn(w http.ResponseWriter, r *http.Request, p 
 	s.lease = nil
 	s.state = ""
 	s.turnAccepted = false
+	s.proposalPublishing = false
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "status": "cancelled"}
@@ -731,27 +875,33 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		fail(404, "voice_session_unavailable", "Voice session unavailable")
 		return
 	}
-	output, ready, dequeueErr := a.manager.Dequeue(owner, id)
-	if dequeueErr != nil {
-		delete(a.sessions, id)
-		s.cancel()
-		_ = a.manager.Close(owner, id)
-		a.mu.Unlock()
-		fail(404, "voice_session_unavailable", "Voice session unavailable")
-		return
-	}
-	if ready && s.state == "pending" {
-		a.acceptOutputLocked(s, output)
+	if !a.proposalMode {
+		output, ready, dequeueErr := a.manager.Dequeue(owner, id)
+		if dequeueErr != nil {
+			delete(a.sessions, id)
+			s.cancel()
+			_ = a.manager.Close(owner, id)
+			a.mu.Unlock()
+			fail(404, "voice_session_unavailable", "Voice session unavailable")
+			return
+		}
+		if ready && s.state == "pending" {
+			a.acceptOutputLocked(s, output)
+		}
 	}
 	s.last = now
-	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": s.state}
+	publicState := s.state
+	if a.proposalMode && s.proposalPublishing {
+		publicState = "pending"
+	}
+	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": publicState}
 	if ref != nil {
 		response["production_context_ref"] = *ref
 	}
-	if s.state == "ready" {
+	if publicState == "ready" {
 		response["outcome"] = append(json.RawMessage(nil), s.outcome...)
 	}
-	if s.state == "failed" {
+	if publicState == "failed" {
 		response["error"] = map[string]string{"code": "execution_unavailable", "message": "Local voice execution unavailable"}
 	}
 	a.mu.Unlock()

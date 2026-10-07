@@ -45,3 +45,52 @@ Create bodies are at most 1MiB; turn bodies 128KiB. Captured canonical snapshot 
 Focused adapter/auth/lifecycle tests and normal/race checks must distinguish deterministic injected executors from actual loopback HTTP→Runner→fixed Python→poll evidence. The four connected hand/no-op/precision/unsupported cases compare against independent public numerical calculations with server scenario identity; record local process latency separately from provider latency. Generated-client transport-stub serialization checks prove string/state preservation only, not authentication or connected execution.
 
 No accepted broad numerical/Python/UI/provider suites are repeated for this adapter. The global40-call pilot remains exhausted, SQL activation held and provider/account state root-owned. This local prerequisite does not complete issue4 or demonstrate microphone/STT/Gemini/TTS, hosted routes, production identity, persisted-plan freshness or operational outcomes.
+
+
+## Server-owned offline proposal seam
+
+The public session/turn/result contracts stay unchanged. The normal constructor
+uses the existing typed synthetic comparison path. An explicit internal
+`newVoiceHTTPAdapterWithProposal` constructor is available for a server-owned
+local test source and fixed `LocalPythonProposalMapper`; no public request
+field accepts SDK/provider output and no new runtime flag selects a fake
+provider. Existing viewer/editor read-only policy and same-origin local
+authentication remain authoritative.
+
+Proposal mode authenticates and captures the host snapshot and current lease
+before requesting a source result. A source receives an owned copy of declared
+semantic argument JSON only, never the trusted snapshot/reference/revision,
+principal/session/turn identity or computed result. Its private projection is
+mapped through the pinned SDK bridge. Current owner, lease and saved-context
+revision are checked before numerical dispatch and before selecting a result.
+Saved synthetic production contexts are authoritative server records; a legacy
+saved recommendation cannot supply their graph.
+
+The leased proposal phase has a five-second deadline and shares the existing
+four-worker budget with numerical execution. Sources must honor cancellation.
+Noncooperative injected work holds its slot until it returns, and late output
+cannot execute or publish after replacement, cancellation or expiry. This
+avoids unlimited detached timeout/replacement workers; arbitrary callbacks
+cannot be forcibly terminated. Explicit cancel/close remain usable. A source
+error, invalid projection, unavailable mapper or timeout produces the existing
+sanitized failed `execution_unavailable` state; no typed/provider fallback.
+Accepted async turns retain existing request handoff semantics.
+
+The fixed mapper child uses trusted absolute Python/source paths, a clean
+environment, bounded stdin/stdout/stderr and inherited cancellation; it is
+waited and reaped. The mapper does not execute tools. The unchanged Runner and
+fixed Python numerical child retain host binding/currentness and strict result
+validation. Database checks use bounded existing revision guards without
+holding the voice registry mutex across database waits or child execution.
+The final proposal publication guard remains held through internal outcome
+acceptance. Polling exposes pending until its bounded database close succeeds;
+a failed close clears the cached outcome. Replacement and cancellation clear
+that publication state for their own lease. The registry mutex is released
+before database close, preserving cancel/close availability. Public transport
+selection and write semantics remain as documented above.
+
+Evidence for this increment must separately identify authenticated loopback
+HTTP, injected server proposals, actual installed SDK mapping and actual fixed
+Python numerical equality. Local PostgreSQL 17 tests establish revision
+behavior only, not Cloud SQL 18 or deployment. Global 40-call pilot remains
+exhausted; SQL activation HOLD and all provider/account actions remain root-owned.

@@ -3,8 +3,8 @@
   "status": "completed",
   "mode": "rules",
   "split": "train",
-  "run_at": "2026-10-07T14:06:51+00:00",
-  "revision": "204487d",
+  "run_at": "2026-10-07T14:28:31+00:00",
+  "revision": "30e8cd4",
   "manifest_as_of": "2026-10-07",
   "key_configured": true,
   "offline": false,
@@ -97,6 +97,8 @@
         "accuracy": 0.7
       }
     },
+    "quotes_correct": 0,
+    "quote_accuracy": 0.0,
     "errors": {
       "not_extracted": 23
     },

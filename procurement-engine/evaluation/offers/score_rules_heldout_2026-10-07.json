@@ -3,8 +3,8 @@
   "status": "completed",
   "mode": "rules",
   "split": "heldout",
-  "run_at": "2026-10-07T14:06:49+00:00",
-  "revision": "204487d",
+  "run_at": "2026-10-07T14:28:30+00:00",
+  "revision": "30e8cd4",
   "manifest_as_of": "2026-10-07",
   "key_configured": true,
   "offline": false,
@@ -17,9 +17,9 @@
   },
   "summary": {
     "quotes": 8,
-    "correct": 109,
+    "correct": 108,
     "total": 130,
-    "accuracy": 0.8385,
+    "accuracy": 0.8308,
     "per_field": {
       "supplier_name": {
         "correct": 8,
@@ -92,13 +92,16 @@
         "accuracy": 0.9
       },
       "pricing": {
-        "correct": 8,
+        "correct": 7,
         "total": 10,
-        "accuracy": 0.8
+        "accuracy": 0.7
       }
     },
+    "quotes_correct": 0,
+    "quote_accuracy": 0.0,
     "errors": {
-      "not_extracted": 21
+      "not_extracted": 21,
+      "wrong_value": 1
     },
     "extra_items": 0,
     "flags": {
@@ -197,7 +200,7 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.8667,
+      "accuracy": 0.8,
       "errors": [
         {
           "field": "settlement_currency",
@@ -212,6 +215,13 @@
           "got_status": "unverified",
           "correct": false,
           "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "extracted",
+          "correct": false,
+          "error": "wrong_value"
         }
       ]
     },

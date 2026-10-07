@@ -168,6 +168,91 @@ def _money_supported(money: dict, texts: list[str]) -> list[str]:
     return out
 
 
+def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[EvidenceRef],
+                           doc: Document) -> str | None:
+    """Require the price components in one clause or an adjacent price row/header."""
+    target = _decimal(amount)
+    if target is None or not isinstance(currency, str) or not isinstance(unit, str):
+        return "invalid_value"
+    style = nz.number_style([ref.segment_text for ref in refs])
+    for ref in refs:
+        for clause in re.split(r"[;\n]", ref.segment_text):
+            for expression in re.finditer(
+                    r"(?<![A-Za-z])(?:[A-Z]{3}|US\$|€|£|₹)(?![A-Za-z])\s*"
+                    r"(?P<amount>\d[\d.,]*)\s*(?:/|per)\s*"
+                    r"(?:metric\s+)?(?:tonnes?|tons?|kilograms?|kgs?|pounds?|lbs?|t)\b",
+                    clause, re.I):
+                written = expression.group(0)
+                if (target in nz.numbers_in(expression.group("amount"), decimal_comma=style)
+                        and currency in nz.currencies_in(written)
+                        and unit in nz.units_in(written)
+                        and nz.unit_problem(written) is None):
+                    return None
+    for amount_ref in refs:
+        if not re.fullmatch(r"[\d.,]+", amount_ref.segment_text.strip()) or target not in nz.numbers_in(
+                amount_ref.segment_text, decimal_comma=style):
+            continue
+        # A price header directly above its amount can carry both currency and denominator.
+        for header_ref in refs:
+            if (_related_cells(amount_ref.locator, header_ref.locator, header_ref.segment_text)
+                    and re.search(r"\b(?:price|premium)\b", header_ref.segment_text, re.I)
+                    and currency in nz.currencies_in(header_ref.segment_text)
+                    and unit in nz.units_in(header_ref.segment_text)):
+                return None
+        # A structured price row binds amount, currency and unit in successive columns.
+        amount_cell = re.fullmatch(r"r(\d+):c(\d+)", amount_ref.locator)
+        if amount_cell:
+            row, column = map(int, amount_cell.groups())
+            header = None
+            for previous_row in range(row - 1, max(0, row - 8), -1):
+                candidate = doc.segment(f"r{previous_row}:c{column}")
+                if candidate is None or re.fullmatch(r"[\d.,]+", candidate.text.strip()):
+                    continue
+                header = candidate
+                break
+            currency_ref = next((ref for ref in refs if ref.locator == f"r{row}:c{column + 1}"), None)
+            unit_ref = next((ref for ref in refs if ref.locator == f"r{row}:c{column + 2}"), None)
+            if (header and not HIDDEN_FLAGS.intersection(header.flags)
+                    and re.search(r"(?<![A-Za-z])(?:price|premium)(?![A-Za-z])", header.text, re.I)
+                    and currency_ref and unit_ref and currency_ref.segment_text.strip() == currency
+                    and unit in nz.units_in(unit_ref.segment_text)
+                    and nz.unit_problem(unit_ref.segment_text) is None):
+                return None
+    return "price_binding"
+
+
+def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> bool:
+    if not isinstance(value, str):
+        return False
+    for ref in refs:
+        text = ref.segment_text.strip()
+        if value not in nz.currencies_in(text):
+            continue
+        if text != value:
+            return True
+        cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
+        if not cell:
+            continue  # an isolated code needs a labeled cell, not an inferred role
+        row, column = map(int, cell.groups())
+        locators = [f"r{row}:c{column - 1}"]
+        for previous_row in range(row - 1, max(0, row - 8), -1):
+            above = doc.segment(f"r{previous_row}:c{column}")
+            if above is None:
+                continue
+            if above.text.strip() == value:
+                continue  # repeated table data below a shared header
+            locators.append(above.locator)
+            break
+        for locator in locators:
+            label = doc.segment(locator)
+            if (label and not HIDDEN_FLAGS.intersection(label.flags)
+                    and "formula_without_cached_value" not in label.flags
+                    and re.search(r"\b(?:price[_ ]currency|settlement[_ ]currency|currency)\b", label.text, re.I)
+                    and not re.search(r"\b(?:payment|terms|method)\b", label.text, re.I)):
+                return True
+    return False
+
+
 def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:
     if not isinstance(value, list) or not value or any(
             not isinstance(lot, dict) or set(lot) != {"quantity", "window"} or
@@ -198,11 +283,30 @@ def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:
                 clause, re.I)
             if len(quantity_tokens) != 1:
                 return ["lot_quantity"]
+            if re.search(r"\btotal\b", clause, re.I) or not (
+                    re.search(r"\blots?\s+of\s+\d", clause, re.I) or
+                    re.search(r"\beach\b", clause, re.I)):
+                return ["lot_quantity"]
         row = re.match(r"r(\d+):c", window_ref.locator)
-        related = ([EvidenceRef(window_ref.document_id, window_ref.locator, window_ref.quote,
-                                window_ref.text_sha256, clause)] if clause != window_ref.segment_text else
-                   [ref for ref in refs if re.match(rf"r{row.group(1)}:c", ref.locator)] if row else
-                   [ref for ref in refs if ref.locator == window_ref.locator])
+        if clause != window_ref.segment_text:
+            related = [EvidenceRef(window_ref.document_id, window_ref.locator, window_ref.quote,
+                                   window_ref.text_sha256, clause)]
+        elif row and not re.search(r"\b\d[\d.,]*\s*(?:metric\s+)?(?:tonnes?|tons?|kg|lb|t)\b",
+                                   window_ref.segment_text, re.I):
+            row_number, column = map(int, re.fullmatch(r"r(\d+):c(\d+)", window_ref.locator).groups())
+            cells = {int(match.group(1)): ref for ref in refs
+                     if (match := re.fullmatch(rf"r{row_number}:c(\d+)", ref.locator))}
+            preceding = cells.get(column - 1)
+            if preceding and nz.units_in(preceding.segment_text) and nz.numbers_in(preceding.segment_text):
+                related = [preceding, window_ref]
+            elif (preceding and cells.get(column - 2)
+                  and nz.units_in(preceding.segment_text)
+                  and nz.numbers_in(cells[column - 2].segment_text)):
+                related = [cells[column - 2], preceding, window_ref]
+            else:
+                return ["lot_quantity"]
+        else:
+            related = [window_ref]
         texts = [ref.segment_text for ref in related]
         if _amount_problem(quantity.get("amount"), texts) or _quantity_unit_problem(
                 quantity.get("amount"), quantity.get("unit"), related):
@@ -210,7 +314,7 @@ def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:
     return []
 
 
-def value_problems(kind: str, value: Any, refs: list[EvidenceRef]) -> list[str]:
+def value_problems(kind: str, value: Any, refs: list[EvidenceRef], doc: Document) -> list[str]:
     """Which parts of the value cannot be read from the cited text (empty list means supported)."""
     texts = [ref.segment_text for ref in refs]
     joined = " ".join(texts)
@@ -227,9 +331,10 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef]) -> list[str]:
         problem = _amount_problem(value, texts)
         return [] if problem is None else [problem]
     if kind == "currency":
-        return [] if isinstance(value, str) and any(value in nz.currencies_in(text) for text in texts) else ["currency"]
+        return [] if _currency_supported(value, refs, doc) else ["currency"]
     if kind == "quantity":
-        if not isinstance(value, dict):
+        if not isinstance(value, dict) or not {"amount", "unit"} <= set(value) or (
+                set(value) - {"amount", "unit", "period"}):
             return ["invalid_value"]
         out = []
         amount_problem = _amount_problem(value.get("amount"), texts)
@@ -256,14 +361,14 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef]) -> list[str]:
         if value.get("type") == "fixed":
             if set(value) != {"type", "unit_price", "per_unit"}:
                 return ["invalid_value"]
-            out = _money_supported(value.get("unit_price"), texts)
-            amount = value.get("unit_price", {}).get("amount") if isinstance(value.get("unit_price"), dict) else None
+            money = value.get("unit_price")
+            out = _money_supported(money, texts)
         elif value.get("type") == "index_linked":
             if set(value) - {"type", "index", "averaging_period", "premium", "per_unit",
                               "fx_basis", "fx_terms", "fx_conversion", "quotational_period"}:
                 return ["invalid_value"]
-            out = _money_supported(value.get("premium"), texts)
-            amount = value.get("premium", {}).get("amount") if isinstance(value.get("premium"), dict) else None
+            money = value.get("premium")
+            out = _money_supported(money, texts)
             index, period = value.get("index"), value.get("averaging_period")
             if not isinstance(index, str) or not index.strip() or nz.squash(index) not in nz.squash(joined):
                 out.append("index")
@@ -275,8 +380,11 @@ def value_problems(kind: str, value: Any, refs: list[EvidenceRef]) -> list[str]:
                     out.append(key)
         else:
             return ["pricing_type"]
-        unit_problem = _quantity_unit_problem(amount, value.get("per_unit"), refs)
-        return out + ([unit_problem] if unit_problem else [])
+        amount = money.get("amount") if isinstance(money, dict) else None
+        binding_problem = _price_binding_problem(
+            amount, money.get("currency") if isinstance(money, dict) else None,
+            value.get("per_unit"), refs, doc)
+        return out + ([binding_problem] if binding_problem else [])
     if kind == "shipments":
         return _shipments_problems(value, refs)
     if kind == "material":
@@ -326,7 +434,7 @@ def check_candidate(doc: Document, kind: str, proposal: Any) -> Candidate:
     if refs and not problems:
         order = {segment.locator: index for index, segment in enumerate(doc.segments)}
         refs.sort(key=lambda ref: order[ref.locator])
-        missing_parts = value_problems(kind, proposal.get("value"), refs)
+        missing_parts = value_problems(kind, proposal.get("value"), refs, doc)
         if missing_parts:
             problems.append("value_not_in_evidence")
             problems.extend(f"unsupported_{p}" for p in missing_parts)
@@ -352,8 +460,17 @@ def resolve_field(doc: Document, name: str, kind: str, proposals: list[dict], so
         proposals = [proposals]
     candidates = [check_candidate(doc, kind, p) for p in proposals]
     critical = base_name(name) in CRITICAL_FIELDS
-    verified = [c for c in candidates if c.verified]
-    distinct = {canonical(c.value) for c in verified}
+    verified, distinct = [], set()
+    for candidate in candidates:
+        if not candidate.verified:
+            continue
+        try:
+            comparable = canonical(candidate.value)
+        except (InvalidOperation, TypeError, ValueError, OverflowError):
+            candidate.problems.extend(["value_not_in_evidence", "invalid_value"])
+            continue
+        verified.append(candidate)
+        distinct.add(comparable)
     if not candidates:
         return FieldResult(name, kind, "missing", None, [], [], critical, source, ["not stated in the document"])
     if not verified:

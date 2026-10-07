@@ -184,6 +184,75 @@ def test_two_quantities_on_one_line_cannot_be_swapped_between_windows():
     assert _status(doc, "shipments", "shipments", swapped, "r2:c1").status == "unverified"
 
 
+def test_price_cannot_borrow_settlement_currency_from_another_clause():
+    doc = _csv('quote,other\n"Price EUR 10 per tonne; settlement currency USD",x\n')
+    assert _status(doc, "pricing", "pricing", _price("10", "EUR"), "r2:c1").status == "extracted"
+    assert _status(doc, "pricing", "pricing", _price("10", "USD"), "r2:c1").status == "unverified"
+
+
+def test_price_amount_cannot_borrow_another_amount_in_same_clause():
+    doc = _csv('quote,other\n"MOQ 10 tonne, price USD 20 per tonne",x\n')
+    assert _status(doc, "pricing", "pricing", _price("20"), "r2:c1").status == "extracted"
+    assert _status(doc, "pricing", "pricing", _price("10"), "r2:c1").status == "unverified"
+
+
+def test_structured_price_row_binds_amount_currency_and_unit():
+    doc = _csv('price,price_currency,price_unit,settlement_currency\n10,EUR,tonne,USD\n')
+    assert _status(doc, "pricing", "pricing", _price("10", "EUR"),
+                   "r1:c1", "r1:c2", "r1:c3", "r2:c1", "r2:c2", "r2:c3").status == "extracted"
+    assert _status(doc, "pricing", "pricing", _price("10", "USD"),
+                   "r1:c1", "r1:c2", "r1:c3", "r1:c4", "r2:c1", "r2:c2", "r2:c3", "r2:c4").status == "unverified"
+    assert _status(_doc("Q09"), "pricing", "pricing", _price("4.28", "USD", "lb"),
+                   "r3:c10", "r3:c11", "r3:c12").status == "extracted"
+    quantity_row = _csv('qty,currency,unit\n10,USD,tonne\n')
+    assert _status(quantity_row, "pricing", "pricing", _price("10"),
+                   "r1:c1", "r1:c2", "r1:c3", "r2:c1", "r2:c2", "r2:c3").status == "unverified"
+
+
+def test_shipment_cells_pair_quantities_with_their_own_windows():
+    doc = _csv('Q1,W1,Q2,W2\n50 tonne,December 2026,100 tonne,January 2027\n')
+    evidence = ("r2:c1", "r2:c2", "r2:c3", "r2:c4")
+    correct = [{"quantity": {"amount": "50", "unit": "tonne"}, "window": "2026-12"},
+               {"quantity": {"amount": "100", "unit": "tonne"}, "window": "2027-01"}]
+    swapped = [{"quantity": {"amount": "100", "unit": "tonne"}, "window": "2026-12"},
+               {"quantity": {"amount": "50", "unit": "tonne"}, "window": "2027-01"}]
+    assert _status(doc, "shipments", "shipments", correct, *evidence).status == "extracted"
+    assert _status(doc, "shipments", "shipments", swapped, *evidence).status == "unverified"
+
+
+def test_total_lot_quantity_is_not_each_lot_quantity():
+    total = _csv('quote,other\n"2 lots, 50 t total: December 2026 and January 2027",x\n')
+    each = _csv('quote,other\n"2 lots of 50 t each: December 2026 and January 2027",x\n')
+    lots = [{"quantity": {"amount": "50", "unit": "tonne"}, "window": window}
+            for window in ("2026-12", "2027-01")]
+    assert _status(total, "shipments", "shipments", lots, "r2:c1").status == "unverified"
+    assert _status(each, "shipments", "shipments", lots, "r2:c1").status == "extracted"
+
+
+def test_bare_currency_cell_uses_its_header_context():
+    doc = _csv('Payment terms,Price currency\nCAD,USD\n')
+    assert _status(doc, "settlement_currency", "currency", "CAD", "r2:c1").status == "unverified"
+    assert _status(doc, "settlement_currency", "currency", "USD", "r2:c2").status == "extracted"
+
+
+def test_extra_quantity_keys_and_nested_amounts_are_structured_unverified():
+    doc = _csv('quote,other\n"5 tonne",x\n')
+    for value in ({"amount": "5", "unit": "tonne", "conversion": "invented"},
+                  {"amount": "5", "unit": "tonne", "metadata": {"amount": "bad"}}):
+        result = _status(doc, "quantity", "quantity", value, "r2:c1")
+        assert result.status == "unverified"
+        assert "invalid_value" in result.candidates[0].problems
+        json.dumps(result.to_dict())
+
+
+def test_malformed_nested_value_cannot_abort_conflict_resolution():
+    value = {"code": "CIF", "place": "Nhava Sheva, India", "metadata": {"amount": "bad"}}
+    result = _status(_doc("Q01"), "incoterm", "incoterm", value, "p1:l11")
+    assert result.status == "unverified"
+    assert "invalid_value" in result.candidates[0].problems
+    json.dumps(result.to_dict())
+
+
 def test_reader_visibility_uncertainty_blocks_evidence():
     from fpdf import FPDF
 

@@ -15,7 +15,7 @@ as they came out.
 | Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07.json` | completed | **83.9%** (109/130) | All 21 misses are `not_extracted`; 0 wrong, 0 invented values |
 | Rules, training (10 quotes) | `score_rules_train_2026-10-07.json` | completed | 84.7% | Down from 100% before #24's stricter settlement-currency and binding rules |
 | Gemini, held-out | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | Eight recorded real-call attempts had coarse `quota_exhausted` errors; every quote fell back to rules, so its numbers are the rules numbers. The record does not establish project tier, limit, cause or reset time |
-| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 | Run before the quota ran out and before the #24 merge. Only difference: supplier name without the fixture's `[SYNTHETIC]` tag, which the scorer now ignores |
+| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 | Recorded before the held-out quota errors and before the #24 merge; the cause and reset time are unverified. Only difference: supplier name without the fixture's `[SYNTHETIC]` tag, which the scorer now ignores |
 | Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
 
 Held-out flag detection (rules): missing fields 8/8, conflict 1/1, expired 1/1 (0 false positives), embedded
@@ -30,3 +30,13 @@ shipments 5/8, quantity 9/10 and pricing 8/10, where values without an unambiguo
 **To do:** verify provider availability and the applicable project quota from independent account evidence before
 planning a new real Gemini held-out run. The historical JSON is preserved as recorded; it does not contain later
 whole-quote metrics or exact source/input hashes and cannot be retroactively relabeled as such.
+
+## Preserved historical demo record
+
+`e2e_demo_2026-10-07.json` is the original synthetic, offline record and is retained unchanged for history.
+Its Q01 `settlement_currency` annotation incorrectly says `verified_against_document`: Q01 documents USD
+as the **unit-price currency**, not the settlement currency. That annotation is superseded and must not be
+used as document evidence or as acceptance of the repaired demo. The current demo treats settlement USD
+as an explicit synthetic reviewer assertion without document evidence and writes a separate unique record.
+Neither the historical nor repaired local demo proves provider use, tenant-bound gateway integration,
+production authentication, or deployment.

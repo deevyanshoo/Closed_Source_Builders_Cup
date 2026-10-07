@@ -15,7 +15,7 @@ import json
 import time
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..documents import Document
 from ..settings import assumptions, get_settings
@@ -38,28 +38,33 @@ Rules:
 """
 
 
-class Evidence(BaseModel):
+class Strict(BaseModel):
+    """Unknown keys are rejected: the model cannot add fields such as an approval or a message."""
+    model_config = ConfigDict(extra="forbid")
+
+
+class Evidence(Strict):
     locator: str
     quote: str
 
 
-class TextValue(BaseModel):
+class TextValue(Strict):
     value: str
     evidence: list[Evidence]
 
 
-class IntValue(BaseModel):
+class IntValue(Strict):
     value: int
     evidence: list[Evidence]
 
 
-class IncotermValue(BaseModel):
+class IncotermValue(Strict):
     code: str
     place: str | None = None
     evidence: list[Evidence]
 
 
-class QuantityValue(BaseModel):
+class QuantityValue(Strict):
     amount: str
     unit: Literal["tonne", "kg", "lb", "other"]
     evidence: list[Evidence]
@@ -69,18 +74,18 @@ class CapacityValue(QuantityValue):
     period: Literal["month", "quarter", "year", "week"] | None = None
 
 
-class Lot(BaseModel):
+class Lot(Strict):
     amount: str
     unit: Literal["tonne", "kg", "lb", "other"]
     window: str
 
 
-class ShipmentsValue(BaseModel):
+class ShipmentsValue(Strict):
     lots: list[Lot]
     evidence: list[Evidence]
 
 
-class PricingValue(BaseModel):
+class PricingValue(Strict):
     type: Literal["fixed", "index_linked"]
     amount: str | None = None  # fixed unit price, or the premium for index-linked
     currency: str
@@ -90,14 +95,14 @@ class PricingValue(BaseModel):
     evidence: list[Evidence]
 
 
-class GeminiItem(BaseModel):
+class GeminiItem(Strict):
     description: list[TextValue]
     grade: list[TextValue]
     quantity: list[QuantityValue]
     pricing: list[PricingValue]
 
 
-class GeminiOffer(BaseModel):
+class GeminiOffer(Strict):
     supplier_name: list[TextValue]
     origin_country: list[TextValue]
     incoterm: list[IncotermValue]
@@ -117,6 +122,21 @@ class GeminiUnavailable(RuntimeError):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
+
+
+def response_schema() -> dict:
+    """The schema sent to Gemini to shape generation.
+
+    `additionalProperties` is left out because provider support for it varies; strictness is
+    enforced locally instead, where GeminiOffer rejects any key outside the schema.
+    """
+    def strip(node):
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if k != "additionalProperties"}
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+    return strip(GeminiOffer.model_json_schema())
 
 
 def render_segments(doc: Document) -> str:
@@ -198,7 +218,8 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
 
     model = assumptions()["news"]["gemini_model"]
     config = types.GenerateContentConfig(system_instruction=SYSTEM_INSTRUCTION, temperature=0.0,
-                                         response_mime_type="application/json", response_schema=GeminiOffer)
+                                         response_mime_type="application/json", response_schema=response_schema(),
+                                         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
     started = time.monotonic()
     try:
         resp = client.models.generate_content(model=model, contents=build_prompt(doc), config=config)

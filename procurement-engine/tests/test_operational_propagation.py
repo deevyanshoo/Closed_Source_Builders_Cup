@@ -361,3 +361,43 @@ def test_utc_conversion_overflow_returns_invalid_timestamp():
     assert_unsupported(snapshot, scenario, "invalid_timestamp")
     snapshot["as_of"] = "9999-12-31T23:59:59-01:00"
     assert_unsupported(snapshot, scenario, "invalid_timestamp")
+
+
+def test_oversized_plain_decimal_input_rejects_without_conversion_exception():
+    snapshot, scenario = case(stock="9" * 5000)
+    assert_unsupported(snapshot, scenario, "invalid_quantity")
+    snapshot, scenario = case(arrival="0." + "0" * 1024 + "1")
+    assert_unsupported(snapshot, scenario, "invalid_quantity")
+
+
+def test_many_valid_arrivals_cannot_exceed_scaled_balance_output_bound():
+    tiny = "0." + "0" * 1022 + "1"  # 1 integral + 1023 fractional digits
+    snapshot, scenario = case(stock=tiny, arrival="9" * 1024,
+                              demands=(("K1", "P1", "1", DAY + "10:00:00Z"),))
+    prototype = snapshot["arrival_lines"][0]
+    for number in range(2, 101):
+        snapshot["arrival_lines"].append({**prototype, "line_id": f"L{number}"})
+    assert_unsupported(snapshot, scenario, "invalid_quantity")
+
+
+def test_exact_near_boundary_balance_survives_configured_640_digit_guard():
+    import sys
+
+    large = "9" * 1024
+    tiny = "0." + "0" * 1022 + "1"
+    snapshot, scenario = case(stock=large, arrival=large,
+                              demands=(("K1", "P1", tiny, DAY + "10:00:00Z"),))
+    guard_supported = hasattr(sys, "get_int_max_str_digits") and hasattr(sys, "set_int_max_str_digits")
+    prior = sys.get_int_max_str_digits() if guard_supported else None
+    try:
+        if guard_supported:
+            sys.set_int_max_str_digits(640)
+        result = project_arrival_change(snapshot, scenario)
+        assert result["status"] == "screened"
+        assert result["component_balances"][0]["starting_stock"] == large
+        assert result["component_balances"][0]["baseline_ending_stock"] == (
+            "1" + "9" * 1023 + "7." + "9" * 1023)
+        assert demand(result, "K1")["baseline"]["shortfall"] == "0"
+    finally:
+        if guard_supported:
+            sys.set_int_max_str_digits(prior)

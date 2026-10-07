@@ -16,6 +16,9 @@ from decimal import Decimal
 import re
 
 _AMOUNT = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
+_MAX_INPUT_DIGITS = 1024
+_MAX_SCALED_COEFFICIENT = 10 ** 2048
+_CONVERSION_CHUNK = 128
 _TIMESTAMP = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
 )
@@ -72,13 +75,15 @@ def _instant(value: object) -> datetime:
 def _amount(value: object) -> tuple[int, int]:
     if not isinstance(value, str) or not _AMOUNT.fullmatch(value):
         raise _Reject("invalid_quantity")
-    # Decimal validates the decimal representation without ambient arithmetic;
-    # its coefficient/exponent are then used as exact integer scaled units.
-    digits = Decimal(value).as_tuple()
-    coefficient = int("".join(str(d) for d in digits.digits))
-    scale = max(-digits.exponent, 0)
-    if digits.exponent > 0:
-        coefficient *= 10 ** digits.exponent
+    whole, separator, fraction = value.partition(".")
+    digits = whole + fraction
+    if len(digits) > _MAX_INPUT_DIGITS:
+        raise _Reject("invalid_quantity")
+    coefficient = 0
+    for offset in range(0, len(digits), _CONVERSION_CHUNK):
+        chunk = digits[offset:offset + _CONVERSION_CHUNK]
+        coefficient = coefficient * 10 ** len(chunk) + int(chunk)
+    scale = len(fraction) if separator else 0
     return coefficient, scale
 
 
@@ -94,17 +99,34 @@ def _iso(value: datetime) -> str:
 
 
 def _scaled(amount: tuple[int, int], scale: int) -> int:
-    return amount[0] * 10 ** (scale - amount[1])
+    return _bounded(amount[0] * 10 ** (scale - amount[1]))
+
+
+def _bounded(value: int) -> int:
+    if value < 0 or value >= _MAX_SCALED_COEFFICIENT:
+        raise _Reject("invalid_quantity")
+    return value
+
+
+def _integer_text(value: int) -> str:
+    """Format bounded integers without Python's configurable int-string limit."""
+    base = 10 ** _CONVERSION_CHUNK
+    chunks = []
+    while value >= base:
+        value, tail = divmod(value, base)
+        chunks.append(tail)
+    return str(value) + "".join(f"{tail:0{_CONVERSION_CHUNK}d}" for tail in reversed(chunks))
 
 
 def _decimal(value: int, scale: int) -> str:
+    _bounded(value)
     if value == 0:
         return "0"
     if scale == 0:
-        return str(value)
+        return _integer_text(value)
     whole, fractional = divmod(value, 10 ** scale)
-    tail = str(fractional).rjust(scale, "0").rstrip("0")
-    return f"{whole}.{tail}" if tail else str(whole)
+    tail = _integer_text(fractional).rjust(scale, "0").rstrip("0")
+    return f"{_integer_text(whole)}.{tail}" if tail else _integer_text(whole)
 
 
 def _same_or_conflict(table: dict, key: str, value: tuple, reason: str) -> None:
@@ -272,7 +294,7 @@ def _screen(inventory, arrivals, commitments, changes):
             stock = start
             for _, event_kind, identifier, amount in events:
                 if event_kind == 0:
-                    stock += amount
+                    stock = _bounded(stock + amount)
                 else:
                     used = min(stock, amount)
                     stock -= used

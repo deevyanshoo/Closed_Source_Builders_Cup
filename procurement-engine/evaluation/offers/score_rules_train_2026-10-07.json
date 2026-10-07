@@ -3,10 +3,15 @@
   "status": "completed",
   "mode": "rules",
   "split": "train",
-  "run_at": "2026-10-07T14:28:31+00:00",
-  "revision": "30e8cd4",
+  "run_at": "2026-10-07T14:47:33+00:00",
+  "revision": "a96e840",
   "manifest_as_of": "2026-10-07",
   "key_configured": true,
+  "live_calls": {
+    "used": 0,
+    "max": 0,
+    "enabled": false
+  },
   "offline": false,
   "synthetic_inputs": true,
   "extractors_used": {
@@ -17,9 +22,9 @@
   },
   "summary": {
     "quotes": 10,
-    "correct": 127,
+    "correct": 134,
     "total": 150,
-    "accuracy": 0.8467,
+    "accuracy": 0.8933,
     "per_field": {
       "supplier_name": {
         "correct": 10,
@@ -37,9 +42,9 @@
         "accuracy": 1.0
       },
       "settlement_currency": {
-        "correct": 1,
+        "correct": 8,
         "total": 10,
-        "accuracy": 0.1
+        "accuracy": 0.8
       },
       "payment_terms": {
         "correct": 10,
@@ -97,16 +102,18 @@
         "accuracy": 0.7
       }
     },
-    "quotes_correct": 0,
-    "quote_accuracy": 0.0,
+    "quotes_correct": 4,
+    "quote_accuracy": 0.4,
     "errors": {
-      "not_extracted": 23
+      "not_extracted": 14,
+      "invented_value": 1,
+      "wrong_status": 1
     },
     "extra_items": 0,
     "flags": {
       "missing": {
-        "expected": 12,
-        "flagged": 12
+        "expected": 22,
+        "flagged": 20
       },
       "conflict": {
         "expected": 0,
@@ -131,16 +138,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.9333,
-      "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        }
-      ]
+      "accuracy": 1.0,
+      "errors": []
     },
     {
       "quote": "Q02",
@@ -149,15 +148,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.7333,
+      "accuracy": 0.8,
       "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        },
         {
           "field": "min_order",
           "expected_status": "present",
@@ -188,8 +180,15 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.8667,
+      "accuracy": 0.8,
       "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "missing",
+          "got_status": "extracted",
+          "correct": false,
+          "error": "invented_value"
+        },
         {
           "field": "shipments",
           "expected_status": "present",
@@ -213,16 +212,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.9333,
-      "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        }
-      ]
+      "accuracy": 1.0,
+      "errors": []
     },
     {
       "quote": "Q05",
@@ -235,10 +226,10 @@
       "errors": [
         {
           "field": "settlement_currency",
-          "expected_status": "present",
+          "expected_status": "missing",
           "got_status": "unverified",
           "correct": false,
-          "error": "not_extracted"
+          "error": "wrong_status"
         },
         {
           "field": "items[0].quantity",
@@ -263,16 +254,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.9333,
-      "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        }
-      ]
+      "accuracy": 1.0,
+      "errors": []
     },
     {
       "quote": "Q10",
@@ -281,15 +264,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.8667,
+      "accuracy": 0.9333,
       "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        },
         {
           "field": "capacity",
           "expected_status": "present",
@@ -306,16 +282,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.9333,
-      "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        }
-      ]
+      "accuracy": 1.0,
+      "errors": []
     },
     {
       "quote": "Q12",
@@ -324,15 +292,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.8,
+      "accuracy": 0.8667,
       "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        },
         {
           "field": "min_order",
           "expected_status": "present",
@@ -356,15 +317,8 @@
       "fallback_reason": null,
       "error_kind": null,
       "latency_ms": null,
-      "accuracy": 0.6667,
+      "accuracy": 0.7333,
       "errors": [
-        {
-          "field": "settlement_currency",
-          "expected_status": "present",
-          "got_status": "missing",
-          "correct": false,
-          "error": "not_extracted"
-        },
         {
           "field": "min_order",
           "expected_status": "present",

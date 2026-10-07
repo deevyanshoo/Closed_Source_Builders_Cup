@@ -8,25 +8,49 @@ the manifest answer key, field by field. Regenerate with `scripts/score_offer_ex
 optimistic for real supplier documents. Rules were tuned on training quotes only; held-out results are reported
 as they came out.
 
-## Results, 2026-10-07 (rules runs at revision 30e8cd4, after merging #26's stricter scorer)
+## Answer key version 2 (correction, 2026-10-07)
 
-| Run | File | Status | Field accuracy | Notes |
-|---|---|---|---|---|
-| Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07.json` | completed | **83.1%** (108/130); whole quotes 0/8 | 21 `not_extracted`, 1 `wrong_value` (Q14 index price: the FX-conversion clause landed in the averaging period), 0 invented values. No quote is fully correct because settlement currency is missing on all 8 |
-| Rules, training (10 quotes) | `score_rules_train_2026-10-07.json` | completed | 84.7% | Down from 100% before #24's stricter settlement-currency and binding rules |
-| Gemini, held-out (revision 204487d) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | All 8 real calls rejected: free-tier quota exhausted (20 requests/day for gemini-2.5-flash). Every quote fell back to rules, so its numbers are the rules numbers |
-| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 | Run before the quota ran out and before the #24 merge. Only difference: supplier name without the fixture's `[SYNTHETIC]` tag, which the scorer now ignores |
-| Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
+Since #24 the agreed rule is that settlement (invoice or payment) currency is present only when a document states
+it explicitly; a price currency alone does not count. Answer key v1 had marked it present from the price currency
+on all 18 quotes. **Key v2 corrects the answer key to match the agreed rule: settlement currency is now missing on
+all 18**, because none of the synthetic quotes states an invoice or payment currency.
 
-Held-out flag detection (rules): missing fields 8/8, conflict 1/1, expired 1/1 (0 false positives), embedded
+This is a correction of the answer key, not a change to extraction rules: documents and extractor code are
+unchanged. It was made **before any Gemini held-out run** (the only Gemini held-out attempt returned no Gemini
+answers; see below). Consequence: the fixture set has no positive example of an explicit settlement currency.
+
+## Results (rules at revision a96e840, key v2)
+
+| Run | File | Status | Field accuracy | Whole quotes | Notes |
+|---|---|---|---|---|---|
+| Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
+| Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
+| Gemini, held-out (revision 204487d, key v1) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | All 8 real calls rejected: free-tier quota exhausted. Every quote fell back to rules, so no Gemini score exists yet |
+| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Run before #24 and key v2; the one difference was the fixture's `[SYNTHETIC]` tag in the supplier name |
+| Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | n/a | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
+
+Earlier key-v1 rules scores (held-out 83.1%, training 84.7%) are superseded; they counted the price currency as a
+settlement currency the extractor correctly left missing.
+
+Held-out flag detection (rules): missing fields 15/16, conflict 1/1, expired 1/1 (0 false positives), embedded
 instruction 1/1.
 
 Held-out per field (rules): supplier, origin, Incoterm, payment terms, validity, lead time, material, description
-and grade are all 100%. Settlement currency 0/8: since #24, a price currency is not taken as the invoice
-currency, while the answer key assumes it is (decision 1 in `src/procure/offers/CONTRACT_PROPOSAL.md`).
-Excluding that field: 108/122 (88.5%). The rest are fail-closed `unverified` results (MOQ 4/8, capacity 5/8,
-shipments 5/8, quantity 9/10), where values without an unambiguous unit binding are rejected, and pricing 7/10
-(two unverified, one wrong: Q14). Q14 is held-out, so the rule was not changed in response.
+and grade are all 100%. Settlement currency 7/8: Q08 comes out `unverified` (a generic "Currency" label beside
+EUR) where the key says missing. MOQ 4/8, capacity 5/8, shipments 5/8 and quantity 9/10 are fail-closed
+`unverified` results where a value has no unambiguous unit binding. Pricing 7/10: two unverified and one wrong
+value (Q14: the FX-conversion clause landed in the averaging period). Q14 and Q08 are held-out, so no rule was
+changed in response.
 
-**To do:** rerun `--mode gemini --split heldout` after the free-tier quota resets (or on a billed project, which
-needs owner approval) to get a real Gemini held-out score.
+Training differences worth knowing: Q03's CSV row `currency, USD` is accepted by the #24 check as a settlement
+currency, which key v2 counts as an invented value; Q05 is `unverified` where the key says missing. Whether a
+generic "Currency" label should ever count as the invoice currency is decision 1 in
+`src/procure/offers/CONTRACT_PROPOSAL.md`.
+
+## Live calls
+
+Real Gemini calls are now gated: they need `RUN_LIVE_GEMINI=1` and stay within `MAX_LIVE_CALLS` (default 0). Each
+score record includes `live_calls` (`used`, `max`, `enabled`). The rules runs above used 0 live calls.
+
+**To do:** run `RUN_LIVE_GEMINI=1 MAX_LIVE_CALLS=8 .venv/bin/python scripts/score_offer_extraction.py --mode gemini
+--split heldout` once quota or a Vertex project allows, to get the first real Gemini held-out score against key v2.

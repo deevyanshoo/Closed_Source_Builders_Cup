@@ -293,3 +293,70 @@ def test_separate_laycan_cell_keeps_candidate_without_verifying_a_quantity_pair(
     ]
     assert {e.locator for e in shipments.candidates[0].evidence} == {"r9:c1", "r9:c2", "r12:c2"}
     assert ex.items[0]["pricing"].status == "missing"  # separate settlement code is not a price currency
+
+
+class QuotaError(Exception):
+    code = 429
+
+
+def test_quota_failure_is_recorded_without_exception_text(with_key):
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF,
+                       client=FakeClient(error=QuotaError("429 RESOURCE_EXHAUSTED secret-ish detail")))
+    assert ex.extractor == "rules"
+    assert ex.extractor_detail["fallback_reason"] == "call_failed"
+    assert ex.extractor_detail["error_kind"] == "quota_exhausted"
+    assert "secret-ish" not in json.dumps(ex.extractor_detail)
+
+
+def test_other_provider_failures_are_recorded_as_provider_error(with_key):
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(error=RuntimeError("boom")))
+    assert ex.extractor_detail["error_kind"] == "provider_error"
+
+
+class AccessorFailure(Exception):
+    @property
+    def code(self):
+        raise RuntimeError("secret in error accessor")
+
+
+class HostileCode:
+    def __bool__(self):
+        raise RuntimeError("secret in truth check")
+
+    def __eq__(self, other):
+        raise RuntimeError("secret in comparison")
+
+
+class ObjectCodeFailure(Exception):
+    code = HostileCode()
+
+
+class HostileEqualityCode:
+    def __eq__(self, other):
+        raise RuntimeError("secret in comparison")
+
+
+class EqualityCodeFailure(Exception):
+    code = HostileEqualityCode()
+
+
+class StatusCodeQuota(Exception):
+    status_code = 429
+
+
+@pytest.mark.parametrize("failure,kind", [
+    (AccessorFailure("provider detail must remain hidden"), "provider_error"),
+    (ObjectCodeFailure("provider detail must remain hidden"), "provider_error"),
+    (EqualityCodeFailure("provider detail must remain hidden"), "provider_error"),
+    (StatusCodeQuota("provider detail must remain hidden"), "quota_exhausted"),
+])
+def test_provider_error_metadata_cannot_escape_rules_fallback(with_key, failure, kind):
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF,
+                       client=FakeClient(error=failure), rate_lookup=_no_rate)
+    assert ex.extractor == "rules"
+    assert ex.extractor_detail["fallback_reason"] == "call_failed"
+    assert ex.extractor_detail["call"] == "mocked"
+    assert ex.extractor_detail["attempted"] is True
+    assert ex.extractor_detail["stage"] == "generate_content"
+    assert ex.extractor_detail["error_kind"] == kind
+    assert "secret" not in json.dumps(ex.extractor_detail)

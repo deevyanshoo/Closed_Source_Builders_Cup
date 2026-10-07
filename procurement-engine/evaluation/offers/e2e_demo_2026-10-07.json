@@ -1,0 +1,180 @@
+{
+  "kind": "offer_end_to_end_demo",
+  "run_at": "2026-10-07T14:21:11+00:00",
+  "revision": "03ccb1c",
+  "synthetic_inputs": true,
+  "offline": true,
+  "market_data": {
+    "prices": "synthetic",
+    "fx": "synthetic",
+    "news:copper": "sample",
+    "news:aluminium": "sample",
+    "news:iron_ore": "sample"
+  },
+  "note": "Synthetic quote and offline synthetic market data. A local RFQ draft only; nothing was sent.",
+  "steps": [
+    {
+      "step": "extracted",
+      "status": "needs_review",
+      "blocking_reasons": [
+        {
+          "code": "field_missing",
+          "field": "settlement_currency",
+          "message": "settlement_currency is missing"
+        }
+      ]
+    },
+    {
+      "step": "corrected",
+      "status": "corrected",
+      "field": "settlement_currency",
+      "evidence_status": "verified_against_document"
+    },
+    {
+      "step": "saved",
+      "status": "saved",
+      "version": 3
+    },
+    {
+      "step": "planning_input",
+      "offer": {
+        "index": 0,
+        "material": "copper",
+        "description": "Copper cathode",
+        "grade": "Grade A, min 99.99% Cu",
+        "quantity_kg": "250000",
+        "price": {
+          "type": "fixed",
+          "per_kg": {
+            "amount": "9.4125",
+            "currency": "USD"
+          },
+          "reporting": {
+            "currency": "USD",
+            "status": "not_needed",
+            "fx": null,
+            "per_kg": {
+              "amount": "9.4125",
+              "currency": "USD"
+            }
+          }
+        }
+      },
+      "legacy_request": {
+        "offer_id": "399b8cce2571",
+        "item_index": 0,
+        "status": "ready",
+        "reason": null,
+        "request": {
+          "material": "copper",
+          "quantity_kg": 250000.0,
+          "need_by_month": 3,
+          "current_stock_kg": 20000.0,
+          "monthly_consumption_kg": 15000.0,
+          "supplier_lead_time_months": 2,
+          "risk_appetite": "medium"
+        },
+        "assumptions": [
+          "lead_time_days=45 rounded up to whole months (2) for the legacy monthly engine",
+          "the legacy engine works in float kilograms and INR market price paths; the offer price is shown beside its result but is not an input to it"
+        ]
+      },
+      "limitations": [
+        "Offer prices, MOQ, capacity and payment terms are not inputs to the legacy /recommend engine; a multi-supplier allocation needs the planning service's PlanningRequest (see CONTRACT_PROPOSAL.md)."
+      ]
+    },
+    {
+      "step": "rfq_drafted",
+      "status": "rfq_drafted",
+      "recommendation": {
+        "id": "6d13ba68937f",
+        "summary": "Buy 40% now and 60% in 1 month",
+        "warnings": [
+          "Recommended schedule leaves 10,000 kg of demand unmet before month 3; this schedule's stock and arrivals do not cover every period.",
+          "Last observed price is Sep 2026; planning starts Oct 2026. The 1 intervening month(s) and planning-month price are forecasts with uncertainty; publication date is unknown."
+        ]
+      },
+      "rfq": {
+        "action_id": "bceddcf78d50",
+        "status": "draft",
+        "subject": "Request for quotation: Copper, 250,000 kg over 2 delivery lot(s)",
+        "body": "Dear Supplier team,\n\nWe would like to request a quotation for Copper for delivery to our plant in Pune, India.\n\nQuantities and timing:\n  - 100,000 kg, order now, delivery by month 2 (reference price band INR 643.45 to 699.39 per kg)\n  - 150,000 kg, order in 1 month, delivery by month 3 (reference price band INR 629.40 to 702.08 per kg)\n\nPlease quote in USD per metric tonne and INR per kg (CIF India, duty excluded), with payment terms, validity period and confirmed lead time for each lot.\nThe reference price bands above are our internal estimates (10th to 50th percentile) and are shared only to indicate our expected range.\n\nPlease reply within 5 working days.\n\nRegards,\nProcurement team"
+      },
+      "sent": false
+    }
+  ],
+  "audit_events": [
+    {
+      "seq": 1,
+      "at": "2026-10-07T14:21:09+00:00",
+      "actor": "buyer",
+      "action": "created",
+      "field": null,
+      "old": null,
+      "new": {
+        "extraction_id": "be15fb57722b",
+        "extractor": "rules",
+        "call": "none"
+      },
+      "from_status": null,
+      "to_status": "needs_review"
+    },
+    {
+      "seq": 2,
+      "at": "2026-10-07T14:21:09+00:00",
+      "actor": "reviewer",
+      "action": "correct",
+      "field": "settlement_currency",
+      "old": {
+        "status": "missing",
+        "value": null
+      },
+      "new": {
+        "status": "corrected",
+        "value": "USD",
+        "evidence_status": "verified_against_document"
+      },
+      "from_status": "needs_review",
+      "to_status": "corrected"
+    },
+    {
+      "seq": 3,
+      "at": "2026-10-07T14:21:09+00:00",
+      "actor": "reviewer",
+      "action": "save",
+      "field": null,
+      "old": null,
+      "new": null,
+      "from_status": "corrected",
+      "to_status": "saved"
+    },
+    {
+      "seq": 4,
+      "at": "2026-10-07T14:21:09+00:00",
+      "actor": "planner",
+      "action": "use_in_plan",
+      "field": null,
+      "old": null,
+      "new": {
+        "version": 4
+      },
+      "from_status": "saved",
+      "to_status": "used_in_plan"
+    },
+    {
+      "seq": 5,
+      "at": "2026-10-07T14:21:11+00:00",
+      "actor": "planner",
+      "action": "draft_rfq",
+      "field": null,
+      "old": null,
+      "new": {
+        "recommendation_id": "6d13ba68937f",
+        "action_id": "bceddcf78d50",
+        "sent": false
+      },
+      "from_status": "used_in_plan",
+      "to_status": "rfq_drafted"
+    }
+  ]
+}

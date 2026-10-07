@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private operator-only export and empty-database restore of cs_plan_actions."""
+"""Private operator-only export and empty-database restore of saved state."""
 
 from __future__ import annotations
 
@@ -26,6 +26,10 @@ BIN = Path('/opt/homebrew/opt/postgresql@17/bin')
 SCHEMA = 'cs_plan_actions'
 TABLES = ('schema_migrations', 'plans', 'plan_revisions', 'approvals', 'action_receipts', 'audit_events')
 MIGRATION = Path(__file__).resolve().parents[1] / 'services/gateway/migrations/001_plans_actions.up.sql'
+CONTEXT_SCHEMA = 'cs_production_contexts'
+CONTEXT_TABLES = ('schema_migrations', 'contexts')
+CONTEXT_MIGRATION = Path(__file__).resolve().parents[1] / 'services/gateway/migrations/002_production_contexts.up.sql'
+SCHEMAS = {SCHEMA: TABLES, CONTEXT_SCHEMA: CONTEXT_TABLES}
 SHA40 = re.compile(r'[0-9a-f]{40}\Z')
 SHA64 = re.compile(r'[0-9a-f]{64}\Z')
 SNAPSHOT = re.compile(r'[0-9A-Fa-f-]{4,100}\Z')
@@ -176,13 +180,27 @@ def verify_empty(connection: Connection) -> None:
         raise BackupError('Restore target is not an empty local database.')
 
 
-def _source_schema(connection: Connection) -> None:
-    names = query(connection, "SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_tables WHERE schemaname='cs_plan_actions'")
-    if names != ','.join(sorted(TABLES)):
-        raise BackupError('Schema does not have exactly the accepted six tables.')
-    versions = query(connection, "SELECT string_agg(version::text, ',' ORDER BY version) FROM cs_plan_actions.schema_migrations")
-    if versions != '1':
-        raise BackupError('Schema migration version is not 1.')
+def _source_schema(connection: Connection, format_version: int = 2) -> None:
+    selected = _selected_schemas(format_version)
+    namespaces = query(connection, "SELECT coalesce(string_agg(nspname, ',' ORDER BY nspname),'') FROM pg_namespace WHERE nspname NOT IN ('public','information_schema') AND nspname !~ '^pg_'")
+    if set(filter(None, namespaces.split(','))) != set(selected):
+        raise BackupError('Source has missing or unexpected custom schemas.')
+    for schema, tables in selected.items():
+        names = query(connection, f"SELECT coalesce(string_agg(tablename, ',' ORDER BY tablename),'') FROM pg_tables WHERE schemaname='{schema}'")
+        if names != ','.join(sorted(tables)):
+            raise BackupError('Source schema does not have exactly the accepted tables.')
+        objects = query(connection, f"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='{schema}' AND c.relkind NOT IN ('r','i')")
+        if objects != '0':
+            raise BackupError('Source schema has unsupported objects.')
+        versions = query(connection, f"SELECT string_agg(version::text, ',' ORDER BY version) FROM {schema}.schema_migrations")
+        if versions != '1':
+            raise BackupError('Source schema migration version is not 1.')
+
+
+def _selected_schemas(format_version: int) -> dict[str, tuple[str, ...]]:
+    if type(format_version) is not int or format_version not in (1, 2):
+        raise BackupError('Unsupported backup format version.')
+    return {SCHEMA: TABLES} if format_version == 1 else SCHEMAS
 
 
 def _server_version(connection: Connection) -> str:
@@ -204,6 +222,10 @@ def _migration_sha() -> str:
     return _sha_file(MIGRATION)
 
 
+def _migration_shas() -> dict[str, str]:
+    return {SCHEMA: _sha_file(MIGRATION), CONTEXT_SCHEMA: _sha_file(CONTEXT_MIGRATION)}
+
+
 def _git_revision() -> str:
     try:
         output = subprocess.run(['/usr/bin/git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[1],
@@ -217,13 +239,14 @@ def _git_revision() -> str:
     return revision
 
 
-def _table_digest(connection: Connection, table: str, snapshot: str | None = None) -> dict[str, object]:
-    if table not in TABLES or snapshot is not None and not SNAPSHOT.fullmatch(snapshot):
+def _table_digest(connection: Connection, table: str, snapshot: str | None = None,
+                  schema: str = SCHEMA) -> dict[str, object]:
+    if schema not in SCHEMAS or table not in SCHEMAS[schema] or snapshot is not None and not SNAPSHOT.fullmatch(snapshot):
         raise BackupError('Invalid table or snapshot selection.')
     sql = ("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; "
            + (f"SET TRANSACTION SNAPSHOT '{snapshot}'; " if snapshot else '')
            + "SET LOCAL TIME ZONE 'UTC'; "
-           + f"COPY (SELECT encode(convert_to(to_jsonb(t)::text, 'UTF8'), 'hex') FROM {SCHEMA}.{table} t ORDER BY to_jsonb(t)::text COLLATE \"C\") TO STDOUT; COMMIT;")
+           + f"COPY (SELECT encode(convert_to(to_jsonb(t)::text, 'UTF8'), 'hex') FROM {schema}.{table} t ORDER BY to_jsonb(t)::text COLLATE \"C\") TO STDOUT; COMMIT;")
     output = run_tool('psql', ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', sql], connection, 120)
     digest = hashlib.sha256()
     count = 0
@@ -240,6 +263,12 @@ def _table_digest(connection: Connection, table: str, snapshot: str | None = Non
 
 def table_digests(connection: Connection, snapshot: str | None = None) -> dict[str, dict[str, object]]:
     return {table: _table_digest(connection, table, snapshot) for table in TABLES}
+
+
+def schema_digests(connection: Connection, snapshot: str | None = None,
+                   format_version: int = 2) -> dict[str, dict[str, dict[str, object]]]:
+    return {schema: {table: _table_digest(connection, table, snapshot, schema) for table in tables}
+            for schema, tables in _selected_schemas(format_version).items()}
 
 
 @contextmanager
@@ -285,28 +314,33 @@ def snapshot_holder(connection: Connection):
                 process.wait(timeout=5)
 
 
-def archive_list(path: Path) -> None:
+def archive_list(path: Path, format_version: int = 2) -> None:
+    selected = _selected_schemas(format_version)
     output = _plain_tool('pg_restore', ['--list', str(path)], 15)
     entries = [line for line in output.decode('utf-8', errors='replace').splitlines() if re.match(r'^\d+;', line)]
-    tables, data_tables = [], []
-    schemas = 0
+    tables = {schema: [] for schema in selected}
+    data_tables = {schema: [] for schema in selected}
+    schemas = []
     for line in entries:
         item = re.match(r'^\d+;\s+\d+\s+\d+\s+(.+)$', line)
         if not item:
             raise BackupError('Archive TOC entry is invalid.')
         detail = item.group(1)
-        if re.fullmatch(r'SCHEMA - cs_plan_actions \S+', detail):
-            schemas += 1
+        schema_entry = re.fullmatch(r'SCHEMA - ([a-z_][a-z_0-9]*) \S+', detail)
+        if schema_entry:
+            schemas.append(schema_entry.group(1))
             continue
-        kind = re.fullmatch(r'(TABLE DATA|TABLE|INDEX|CONSTRAINT|FK CONSTRAINT|DEFAULT) cs_plan_actions ([a-z_][a-z_0-9]*) (?:\S+ ?)+', detail)
-        if not kind:
+        kind = re.fullmatch(r'(TABLE DATA|TABLE|INDEX|CONSTRAINT|FK CONSTRAINT|DEFAULT) ([a-z_][a-z_0-9]*) ([a-z_][a-z_0-9]*) (?:\S+ ?)+', detail)
+        if not kind or kind.group(2) not in selected:
             raise BackupError('Archive contains unsupported or foreign objects.')
+        schema, name = kind.group(2), kind.group(3)
         if kind.group(1) == 'TABLE':
-            tables.append(kind.group(2))
+            tables[schema].append(name)
         if kind.group(1) == 'TABLE DATA':
-            data_tables.append(kind.group(2))
-    if schemas != 1 or sorted(tables) != sorted(TABLES) or sorted(data_tables) != sorted(TABLES):
-        raise BackupError('Archive does not contain exactly the accepted schema and six tables.')
+            data_tables[schema].append(name)
+    if sorted(schemas) != sorted(selected) or any(sorted(tables[s]) != sorted(t) or sorted(data_tables[s]) != sorted(t)
+                                                     for s, t in selected.items()):
+        raise BackupError('Archive does not contain exactly the accepted schemas and tables.')
 
 
 def write_private(path: Path, data: bytes) -> None:
@@ -338,7 +372,7 @@ def check_hash(value: str, pattern: re.Pattern[str], label: str) -> None:
 
 
 def validate_manifest(bundle: str | Path, expected_sha: str, expected_revision: str,
-                      versions: dict[str, str], migration_sha: str) -> dict[str, object]:
+                      versions: dict[str, str], migration_sha: str | dict[str, str]) -> dict[str, object]:
     bundle = Path(bundle)
     private_dir(bundle.parent)
     private_dir(bundle)
@@ -353,11 +387,14 @@ def validate_manifest(bundle: str | Path, expected_sha: str, expected_revision: 
         data = json.loads(manifest_file.read_bytes())
     except (OSError, ValueError):
         raise BackupError('Manifest is unreadable.') from None
-    keys = {'format_version', 'schema', 'schema_version', 'source_revision', 'migration_sha256', 'archive_sha256',
-            'source_identity', 'server_version', 'tools', 'tables'}
-    if not isinstance(data, dict) or set(data) != keys or type(data['format_version']) is not int or data['format_version'] != 1 or data['schema'] != SCHEMA or type(data['schema_version']) is not int or data['schema_version'] != 1:
+    if not isinstance(data, dict) or type(data.get('format_version')) is not int or data['format_version'] not in (1, 2):
         raise BackupError('Manifest format or schema is unsupported.')
-    if data['source_revision'] != expected_revision or data['migration_sha256'] != migration_sha or data['tools'] != versions:
+    version = data['format_version']
+    common = {'format_version', 'source_revision', 'archive_sha256', 'source_identity', 'server_version', 'tools'}
+    keys = common | ({'schema', 'schema_version', 'migration_sha256', 'tables'} if version == 1 else {'schemas'})
+    if set(data) != keys:
+        raise BackupError('Manifest format or schema is unsupported.')
+    if data['source_revision'] != expected_revision or data['tools'] != versions:
         raise BackupError('Manifest revision, migration or PostgreSQL tool identity differs.')
     source = data['source_identity']
     if not isinstance(source, dict) or set(source) != {'system_identifier', 'database_oid', 'database'}:
@@ -366,22 +403,43 @@ def validate_manifest(bundle: str | Path, expected_sha: str, expected_revision: 
         raise BackupError('Manifest source identity is invalid.')
     if not isinstance(data['server_version'], str) or not PG17_VERSION.fullmatch(data['server_version']):
         raise BackupError('Manifest PostgreSQL server version is unsupported.')
-    if not isinstance(data['tables'], dict) or set(data['tables']) != set(TABLES):
-        raise BackupError('Manifest table set is invalid.')
-    for table in TABLES:
-        entry = data['tables'][table]
-        if not isinstance(entry, dict) or set(entry) != {'count', 'sha256'} or type(entry['count']) is not int or entry['count'] < 0 or not isinstance(entry['sha256'], str) or not SHA64.fullmatch(entry['sha256']):
-            raise BackupError('Manifest table count or digest is invalid.')
+    if version == 1:
+        plan_sha = migration_sha if isinstance(migration_sha, str) else migration_sha.get(SCHEMA)
+        if data['schema'] != SCHEMA or type(data['schema_version']) is not int or data['schema_version'] != 1 or data['migration_sha256'] != plan_sha:
+            raise BackupError('Manifest schema or migration is unsupported.')
+        _validate_tables(data['tables'], TABLES)
+    else:
+        if not isinstance(migration_sha, dict) or set(migration_sha) != set(SCHEMAS):
+            raise BackupError('Both migration hashes are required for composite restore.')
+        schemas = data['schemas']
+        if not isinstance(schemas, dict) or set(schemas) != set(SCHEMAS):
+            raise BackupError('Manifest schema set is invalid.')
+        for schema, tables in SCHEMAS.items():
+            item = schemas[schema]
+            if not isinstance(item, dict) or set(item) != {'schema_version', 'migration_sha256', 'tables'} or type(item['schema_version']) is not int or item['schema_version'] != 1 or item['migration_sha256'] != migration_sha[schema]:
+                raise BackupError('Manifest schema version or migration is invalid.')
+            _validate_tables(item['tables'], tables)
     if not isinstance(data['archive_sha256'], str) or not SHA64.fullmatch(data['archive_sha256']) or _sha_file(archive) != data['archive_sha256']:
         raise BackupError('Archive SHA256 does not match the trusted manifest.')
     return data
+
+
+def _validate_tables(entries: object, tables: tuple[str, ...]) -> None:
+    if not isinstance(entries, dict) or set(entries) != set(tables):
+        raise BackupError('Manifest table set is invalid.')
+    for table in tables:
+        entry = entries[table]
+        if not isinstance(entry, dict) or set(entry) != {'count', 'sha256'} or type(entry['count']) is not int or entry['count'] < 0 or not isinstance(entry['sha256'], str) or not SHA64.fullmatch(entry['sha256']):
+            raise BackupError('Manifest table count or digest is invalid.')
 
 
 def restore_archive(archive: str | Path, connection: Connection) -> None:
     run_tool('pg_restore', ['--single-transaction', '--exit-on-error', '--no-owner', '--no-acl', str(archive)], connection, 120)
 
 
-def export_bundle(source_file: str, output_dir: str, revision: str) -> dict[str, object]:
+def export_bundle(source_file: str, output_dir: str, revision: str,
+                  format_version: int = 2) -> dict[str, object]:
+    selected = _selected_schemas(format_version)
     check_hash(revision, SHA40, 'Source revision')
     if _git_revision() != revision:
         raise BackupError('Supplied source revision differs from this checkout HEAD.')
@@ -395,21 +453,26 @@ def export_bundle(source_file: str, output_dir: str, revision: str) -> dict[str,
     if server != versions['pg_dump']:
         raise BackupError('Source server and PostgreSQL 17 tools must have the same version.')
     source_id = identity(source)
-    _source_schema(source)
+    _source_schema(source, format_version)
     stage = Path(tempfile.mkdtemp(prefix='.local-state-stage-', dir=destination.parent))
     try:
         stage.chmod(0o700)
         archive = stage / 'archive.dump'
         write_private(archive, b'')
         with snapshot_holder(source) as snapshot:
-            run_tool('pg_dump', ['--format=custom', '--schema=' + SCHEMA, '--no-owner', '--no-acl', '--snapshot=' + snapshot,
-                                 '--file=' + str(archive)], source, 120)
-            tables = table_digests(source, snapshot)
+            run_tool('pg_dump', ['--format=custom', *(f'--schema={schema}' for schema in selected),
+                                 '--no-owner', '--no-acl', '--snapshot=' + snapshot, '--file=' + str(archive)], source, 120)
+            digests = table_digests(source, snapshot) if format_version == 1 else schema_digests(source, snapshot, format_version=2)
         private_file(archive)
-        archive_list(archive)
-        manifest = {'format_version': 1, 'schema': SCHEMA, 'schema_version': 1, 'source_revision': revision,
-                    'migration_sha256': _migration_sha(), 'archive_sha256': _sha_file(archive),
-                    'source_identity': source_id, 'server_version': server, 'tools': versions, 'tables': tables}
+        archive_list(archive, format_version)
+        manifest = {'format_version': format_version, 'source_revision': revision, 'archive_sha256': _sha_file(archive),
+                    'source_identity': source_id, 'server_version': server, 'tools': versions}
+        if format_version == 1:
+            manifest.update({'schema': SCHEMA, 'schema_version': 1, 'migration_sha256': _migration_sha(), 'tables': digests})
+        else:
+            migrations = _migration_shas()
+            manifest['schemas'] = {schema: {'schema_version': 1, 'migration_sha256': migrations[schema],
+                                            'tables': digests[schema]} for schema in selected}
         manifest_bytes = (json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode('utf-8')
         write_private(stage / 'manifest.json', manifest_bytes)
         descriptor = os.open(stage, os.O_RDONLY)
@@ -418,20 +481,28 @@ def export_bundle(source_file: str, output_dir: str, revision: str) -> dict[str,
         finally:
             os.close(descriptor)
         publish_bundle(stage, destination)
-        return {'status': 'exported', 'manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
-                'archive_sha256': manifest['archive_sha256'], 'source_revision': revision, 'tables': tables}
+        result = {'status': 'exported', 'manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+                  'archive_sha256': manifest['archive_sha256'], 'source_revision': revision,
+                  'format_version': format_version, 'coverage': _coverage(format_version)}
+        result['tables' if format_version == 1 else 'schemas'] = digests if format_version == 1 else manifest['schemas']
+        return result
     except Exception:
         if stage.exists():
             shutil.rmtree(stage)
         raise
 
 
+def _coverage(format_version: int) -> str:
+    return 'legacy_plan_actions_only' if format_version == 1 else 'plan_actions_and_production_contexts'
+
+
 def restore_bundle(source_file: str, target_file: str, bundle_dir: str, expected_sha: str, expected_revision: str) -> dict[str, object]:
     source, target = load_connection(source_file), load_connection(target_file)
     versions = tool_versions()
-    manifest = validate_manifest(bundle_dir, expected_sha, expected_revision, versions, _migration_sha())
+    manifest = validate_manifest(bundle_dir, expected_sha, expected_revision, versions, _migration_shas())
+    format_version = manifest['format_version']
     archive = Path(bundle_dir) / 'archive.dump'
-    archive_list(archive)
+    archive_list(archive, format_version)
     actual_source, actual_target = identity(source), identity(target)
     if actual_source != manifest['source_identity']:
         raise BackupError('Live source database differs from the trusted export source.')
@@ -439,16 +510,20 @@ def restore_bundle(source_file: str, target_file: str, bundle_dir: str, expected
     if _server_version(source) != manifest['server_version'] or _server_version(target) != manifest['server_version']:
         raise BackupError('Source or target PostgreSQL server version differs from the export.')
     verify_empty(target)
-    restore_archive(archive, target)
     try:
-        _source_schema(target)
-        actual_tables = table_digests(target)
-        if actual_tables != manifest['tables']:
+        restore_archive(archive, target)
+        _source_schema(target, format_version)
+        actual_tables = table_digests(target) if format_version == 1 else schema_digests(target, format_version=2)
+        expected_tables = manifest['tables'] if format_version == 1 else {schema: item['tables'] for schema, item in manifest['schemas'].items()}
+        if actual_tables != expected_tables:
             raise BackupError('Restored table counts or row digests differ from the trusted export.')
     except Exception:
         raise BackupError('Restore target is quarantined; verify before any configuration switch.') from None
-    return {'status': 'restored_verified', 'source_revision': expected_revision, 'manifest_sha256': expected_sha,
-            'source_identity': actual_source, 'target_identity': actual_target, 'tables': actual_tables}
+    result = {'status': 'restored_verified', 'source_revision': expected_revision, 'manifest_sha256': expected_sha,
+              'source_identity': actual_source, 'target_identity': actual_target,
+              'format_version': format_version, 'coverage': _coverage(format_version)}
+    result['tables' if format_version == 1 else 'schemas'] = actual_tables if format_version == 1 else manifest['schemas']
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -458,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
     export.add_argument('--source-connection-file', required=True)
     export.add_argument('--output-dir', required=True)
     export.add_argument('--source-revision', required=True)
+    export.add_argument('--format-version', type=int, choices=(1, 2), default=2)
     restore = commands.add_parser('restore')
     restore.add_argument('--source-connection-file', required=True)
     restore.add_argument('--target-connection-file', required=True)
@@ -468,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == 'export':
-            result = export_bundle(args.source_connection_file, args.output_dir, args.source_revision)
+            result = export_bundle(args.source_connection_file, args.output_dir, args.source_revision, args.format_version)
         else:
             result = restore_bundle(args.source_connection_file, args.target_connection_file, args.bundle_dir,
                                     args.expected_manifest_sha256, args.expected_source_revision)

@@ -288,7 +288,7 @@ class Rehearsal:
         self.negative_catalog_before = self.sql('recovery_negative', "SELECT jsonb_agg(jsonb_build_array(n.nspname,c.relname,c.relkind) ORDER BY n.nspname,c.relname)::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public';")
         bundle = self.run_dir / 'bundle'
         self.backup(['export', '--source-connection-file', self.run_dir / 'recovery_source.url',
-                     '--output-dir', bundle, '--source-revision', revision])
+                     '--output-dir', bundle, '--source-revision', revision, '--format-version', '1'])
         manifest = json.loads((bundle / 'manifest.json').read_text())
         manifest_hash = hashlib.sha256((bundle / 'manifest.json').read_bytes()).hexdigest()
         restore = ['restore', '--source-connection-file', self.run_dir / 'recovery_source.url',

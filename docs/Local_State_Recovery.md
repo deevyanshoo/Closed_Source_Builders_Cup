@@ -1,10 +1,12 @@
 # Local saved-state export and restore
 
-This operator-only rehearsal exports the existing `cs_plan_actions` schema and
-restores it into a **different empty local database**. It preserves saved
-snapshots, exact decimal strings, ownership, revisions, approvals, RFQ draft
-receipts and audit rows. Restore never recomputes a recommendation or executes
-an action. The CLI has no browser upload or remote restore surface.
+The default operator export uses format **v2**: one custom archive covers both
+`cs_plan_actions` (six workflow tables) and `cs_production_contexts` (two saved
+synthetic context tables). Restore writes only to a **different empty local
+database**. It preserves complete saved snapshots, exact decimal strings,
+ownership/revisions, context metadata, approvals, RFQ draft receipts and audit
+rows. Restore does not recompute a recommendation or execute an action. The CLI
+has no browser upload or remote restore surface.
 
 This is local PostgreSQL17 evidence. Cloud SQL activation remains **HOLD**;
 PostgreSQL18, hosted recovery, provider identity, online cutover and paid
@@ -39,7 +41,7 @@ call that authentication.
 
 1. Retain the original database, its configuration and the exact source commit.
    Stop writers for the rehearsal/cutover. Export is transactionally consistent:
-   the custom dump and all six table counts/full-row digests share one exported
+   the custom dump and all eight table counts/full-row digests share one exported
    repeatable-read read-only snapshot. This does not prove a live online switch
    is safe while writers continue.
 2. Export to a **new** bundle directory; completed output cannot be overwritten:
@@ -52,9 +54,12 @@ call that authentication.
    ```
 
    Retain the reported manifest SHA256 through a trusted operator channel. The
-   manifest records schema revision, migration hash, source revision, actual
-   source cluster/database identity, exact tool versions, archive hash and all
-   six table counts/digests; it does not contain URLs, passwords or raw rows.
+   v2 manifest records both schema versions and accepted migration001/002 hashes,
+   source Git revision, actual source cluster/database identity, exact tool/server
+   versions, archive hash and all eight table counts/full-row digests. It contains
+   no URLs, passwords or raw rows. Both schemas must have exactly migration1 and
+   the accepted table set; missing/extra schemas/tables or unsupported archive
+   objects are rejected. Quiesce DDL as well as application writers.
 3. Have the operator create a distinct empty local target. The restore CLI does
    not create/drop a database, rename schemas, clean objects or offer `--force`.
    It checks actual cluster system identifier/databaseOID, so changing
@@ -93,41 +98,90 @@ Migration001 rollback renames the schema to `cs_plan_actions_archived_v1`. That
 in-cluster archive is not a backup, does not survive losing the cluster, and
 must not replace a separately verified export/restore artifact.
 
-## Run the isolated rehearsal
+## Archive compatibility
 
-Run from an isolated checkout. Build the unchanged gateway using the existing
-Go toolchain and module cache; no dependency/provider installation is required:
+A v2 manifest has exactly `format_version=2`, `source_revision`,
+`archive_sha256`, `source_identity`, `server_version`, `tools`, and `schemas`.
+`schemas` has exactly `cs_plan_actions` and `cs_production_contexts`; each has
+`schema_version=1`, `migration_sha256`, and `tables` with `{count,sha256}` for
+its exact accepted tables. The custom dump and all eight digests use the same
+exported snapshot. The archive TOC is checked before target writes.
+
+Historical **v1** remains readable with the existing restore arguments, source
+identity gate and trusted manifest hash. It retains its original single-schema
+manifest and covers **only** six `cs_plan_actions` tables. Restore reports
+`format_version:1` and `coverage:legacy_plan_actions_only`; it does not fabricate
+or initialize production contexts. A v1 archive cannot recover a complete
+current gateway database. The old source revision is checked against the trusted
+manifest; unchanged accepted migration hashes must match the installed checkout.
+
+New exports default to v2 and fail when either required schema is absent.
+Explicit `export --format-version 1` is available only for a legacy source with
+no context schema. It refuses even an empty `cs_production_contexts`, preventing
+silent omission of known saved-context state. V2 reports
+`coverage:plan_actions_and_production_contexts`. Changing the format version or
+coverage declaration cannot upgrade an old archive. Retain original private
+bundles and their externally trusted hashes; never rewrite them in place.
+
+Migration002 rollback archives `cs_production_contexts` inside the same cluster,
+which is not an independent backup. The v2 export covers active schemas only;
+unexpected custom/archived schemas require an explicit operator decision and
+are rejected, never silently included or discarded.
+
+## Run the isolated two-schema rehearsal
+
+Build the unchanged gateway from the isolated checkout with the existing Go
+installation/cache; no provider/dependency installation is required:
 
 ```sh
 cd services/gateway
 go build -o ../../.local-tools/state-recovery-gateway .
 cd ../..
 python3 -m unittest discover -s scripts/tests -p test_local_state_backup.py -v
-python3 scripts/check_local_state_restore.py \
-  --run-dir "$PWD/.local-tools/state-recovery-new-run" \
-  --postgres-port 55428 \
+python3 scripts/check_local_context_state_restore.py \
+  --run-dir "$PWD/.local-tools/state-recovery-context-new-run" \
+  --postgres-port 55432 \
   --receipt /private/operator/new-sanitized-receipt.json
 ```
 
-The harness requires a **new** `.local-tools/state-recovery-*` directory and a
-free loopback port other than the protected55416 cluster. It starts a new
-SCRAM-authenticated PostgreSQL cluster, five synthetic task databases, a task
-gateway and the existing Python runtime read-only from the baseline checkout's
-`.venv/bin/python`. Python code/config comes from the current checkout, with
-`OFFLINE=1`, an empty model key and private data/audit paths. Existing clusters
-and reference services are untouched.
+The opt-in harness requires a **new** `.local-tools/state-recovery-*` directory
+and verifies task port55432 is free before creating its own SCRAM-authenticated
+PostgreSQL17 cluster and synthetic databases. Reference55416, restore55428,
+saved-context55430 and all prior archives are preserved. It starts only a task
+gateway, a labelled recommendation HTTP fixture and the fixed local Python
+comparison bridge. Tokens/passwords/connection files stay private, outside argv
+and public receipts. Provider settings are not inherited.
 
-One plan is saved through actual offline Python. A separate explicitly labelled
-legacy HTTP fixture supplies the hand-constructed exact value
-`42123456.123456789012345678`; that fixture proves storage/transport precision,
-not numerical/model correctness. Both use real gateway HTTP/PostgreSQL. The
-harness exports, rejects alias/populated/custom-schema/corrupt restores, restores into the
-empty target, restarts only task services, compares every row and HTTP history,
-and exercises eight concurrent receipt replays plus semantic denial cases.
+The recommendation precision fixture supplies
+`42123456.123456789012345678`; it is storage/transport evidence, not a forecast or
+model result. Complete caller-supplied synthetic contexts include
+`1000000000000000000.000000000000000001`. Saving them claims accepted syntax,
+not numerical feasibility. After export→distinct empty restore→actual PostgreSQL
+and gateway restart, all eight complete table contents, saved plan/approval/
+receipt/audit HTTP state and complete context snapshot/reference/revision/
+metadata must match. Eight concurrent executed-key retries return the original
+receipt without a new effect. Changed-content/consumed/stale/viewer/foreign
+requests must fail. A restored saved-context comparison is checked against the
+entire fixed public Python result; subsequent replacement rejects stale
+reference creation, session start and repeated result polls, while cancel/close
+remain available. A further gateway restart retains the new context revision.
 
-The harness stops only its own child processes/cluster and removes its
-synthetic credential files. It retains private clusters/logs/bundles for
-inspection. Its public receipt reports counts, digests, versions and check
-labels; deterministic mocked tooling tests are distinct from this real local
-rehearsal. A successful local run does not prove Cloud SQL backups, PostgreSQL18
-compatibility, disaster recovery retention policy or provider permissions.
+The rehearsal also exercises real same-database alias, populated/custom-schema/
+system-object target, trusted manifest mutation and archive corruption gates;
+missing/extra source tables reject export. A separate populated legacy source
+exports/restores v1 and compares all six full tables with explicit limited scope.
+The accepted `check_local_state_restore.py` remains a legacy-only rehearsal and
+now requests `--format-version 1`; its broader offline Python checks are not
+rerun by this increment.
+
+The harness stops only its own processes/cluster and removes synthetic credential
+files. Private cluster/log/archive artifacts remain for inspection. Public
+receipts contain hashes/counts/version/check labels, not rows or credentials.
+Unit tests with mocked tools remain distinct from actual local PostgreSQL/HTTP
+checks. Cleanup failure is a failed rehearsal, never a passing backup receipt.
+
+**Live original source identity remains required during restore.** This is not a
+catastrophic-source-loss recovery path, hosted/online-cutover proof, retention
+policy or CloudSQL18 compatibility. Successful restore into an isolated target
+is a prerequisite; an operator must still verify the application before any
+configuration switch and retain the original source.

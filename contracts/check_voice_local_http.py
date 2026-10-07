@@ -45,4 +45,16 @@ for schema, value, mutate in [
 precision=json.loads((ROOT/'examples/recovery_precision_request.json').read_text())
 assert values['recovery_precision_session']['snapshot']==precision['snapshot'], 'Precision snapshot changed'
 assert values['recovery_precision_turn']['call']['arguments']['assignments']==precision['recovery']['assignments'], 'Precision assignments changed'
+# New contract fixtures also preserve the authoritative numerical result after server scenario identity substitution.
+import sys
+sys.path.insert(0, str(ROOT.parent / 'procurement-engine/src'))
+from procure.production.recovery import compare_receipt_recovery
+for stem in ('recovery', 'recovery_noop', 'recovery_precision', 'recovery_unsupported'):
+ original=json.loads((ROOT/'examples'/(stem+'_request.json')).read_text())
+ scenario=deepcopy(original['scenario']); alternative=deepcopy(original['recovery'])
+ scenario['scenario_id']=values['created']['scenario_id']; alternative['scenario_id']=scenario['scenario_id']
+ actual=compare_receipt_recovery(original['snapshot'], scenario, alternative)
+ assert values[stem+'_result']['outcome']['result']==actual, 'Synthetic HTTP fixture differs from public comparison: '+stem
+assert values['recovery_result']['outcome']['result']['disrupted_baseline']['orders'][0]['demands'][0]['shortfall']=='4'
+assert values['recovery_result']['outcome']['result']['recovery']['orders'][0]['late_by_seconds']=='3600'
 print(str(len(mapping)) + ' local synthetic voice HTTP fixtures valid; identity/function/float/unknown/response-state mutations rejected')

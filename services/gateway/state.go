@@ -26,6 +26,7 @@ import (
 const stateVersion = "0.2.0"
 
 type stateConfig struct {
+	VoicePythonPath, VoiceSourcePath                                        string
 	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
 	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string
 	Verifier                                                                machineVerifier
@@ -47,6 +48,7 @@ type identityFile struct {
 	Identities []identity `json:"identities"`
 }
 type stateServer struct {
+	voice         *voiceHTTPAdapter
 	cfg           stateConfig
 	db            *pgx.ConnConfig
 	identities    []identity
@@ -79,6 +81,7 @@ func newStateHandler(cfg stateConfig) http.Handler {
 			s.assets, err = newAssetsHandler(root)
 		}
 		if err != nil {
+			_ = s.Shutdown(context.Background())
 			return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				stateError(w, 503, "service_unavailable", "Gateway configuration unavailable")
 			})
@@ -133,6 +136,7 @@ func newLocalStateServer(cfg stateConfig) *stateServer {
 	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(cfg.Schema) {
 		s.db = nil
 	}
+	s.voice = initVoiceHTTP(cfg)
 	return s
 }
 
@@ -145,6 +149,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		machine = p
 		r = r.WithContext(context.WithValue(r.Context(), machinePrincipalKey{}, p))
+	}
+	if r.URL.Path == "/v2/voice/sessions" || strings.HasPrefix(r.URL.Path, "/v2/voice/sessions/") {
+		s.voiceHTTPRoute(w, r)
+		return
 	}
 	if r.URL.Path == "/ready" {
 		s.ready(w, r)

@@ -469,17 +469,24 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
             or value in nz._NON_SETTLEMENT_CODES):
         return False
     code = re.escape(value)
-    # The code must be the stated currency, rather than one leg of a currency pair
-    # or a prefix of a longer token. Inspect the complete located segment.
-    currency_token = rf"{code}(?![A-Za-z0-9]|\s*[/,]\s*[A-Z]{{3}}\b)"
+    # The code must be a standalone currency, not a pair, unit-price denominator,
+    # amount prefix or longer token. Inspect the full located clause, not only the
+    # model's shortened quote.
+    currency_token = rf"{code}(?![A-Za-z0-9]|\s*/|\s*,\s*[A-Z]{{3}}\b|\s+\d)"
     role = (rf"\b(?:invoice|settlement|payment)[_ -]+currency\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
             rf"|\bcurrency\s+of\s+settlement\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
-            rf"|\b(?:payable|settled|payment)\s+in\s+{currency_token}"
-            rf"|\bsettlement\b\s*[:=\-–—]\s*{currency_token}")
+            rf"|\b(?:payable|settled|payment)\s+in\s+{currency_token}")
     label_role = re.compile(r"(?:invoice|settlement|payment)[_ -]+currency|currency[_ ]+of[_ ]+settlement", re.I)
+    unsafe_clause = re.compile(
+        r"\b(?:not|never|no|non|cannot|can't|prohibited|forbidden|excluded|either|or|and)\b"
+        r"|\b(?:LME|benchmark|cash\s+settlement|unit\s+price)\b"
+        r"|(?:/\s*|\bper\s+)(?:metric\s+)?(?:tonnes?|tons?|kilograms?|kgs?|pounds?|lbs?|t)\b",
+        re.I,
+    )
     for ref in refs:
         text = ref.segment_text.strip()
-        if re.search(role, text, re.I):
+        if any(re.search(role, clause, re.I) and not unsafe_clause.search(clause)
+               for clause in re.split(r"[;\n]", text)):
             return True
         if text != value:
             continue

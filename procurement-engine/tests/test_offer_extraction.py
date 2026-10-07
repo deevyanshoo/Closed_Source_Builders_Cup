@@ -228,6 +228,16 @@ def _located_currency(text: str, *, locator: str = "p1:l1"):
     "Payment terms: 30 days from invoice date; price USD 9,412.50",
     "Invoice currency: USD/INR",
     "Invoice currency: USDT",
+    "Settlement: USD",
+    "LME Copper cash settlement: USD 9,412.50 per tonne",
+    "Settlement: USD/tonne",
+    "Settlement currency: USD/tonne",
+    "Settlement currency: USD 9,412.50 per tonne",
+    "LME cash settlement currency: USD",
+    "Not payable in USD",
+    "Payment in USD is prohibited",
+    "Invoice currency: USD or EUR",
+    "Invoice currency: USD and EUR",
 ])
 def test_settlement_currency_rejects_price_generic_fx_or_nonexact_code(text):
     document = _located_currency(text)
@@ -239,15 +249,34 @@ def test_settlement_currency_rejects_price_generic_fx_or_nonexact_code(text):
 @pytest.mark.parametrize("text", [
     "Invoice currency: USD",
     "Settlement currency — USD",
+    "Settlement currency: USD",
     "Payment currency: USD",
     "Payable in USD",
-    "Settlement: USD",
 ])
 def test_settlement_currency_accepts_explicit_located_statement(text):
     document = _located_currency(text)
     candidate = evidence.check_candidate(document, "currency", {"value": "USD",
                                                                "evidence": ev("p1:l1", text)})
     assert candidate.verified
+
+
+@pytest.mark.parametrize("text", [
+    "LME Copper cash settlement: USD 9,412.50 per tonne",
+    "Settlement: USD/tonne",
+    "Not payable in USD",
+    "Payment in USD is prohibited",
+    "Invoice currency: USD or EUR",
+])
+def test_ambiguous_or_negated_settlement_source_cannot_unlock_save(text):
+    document = _located_currency(text)
+    field = evidence.resolve_field(document, "settlement_currency", "currency",
+                                   [{"value": "USD", "evidence": ev("p1:l1", text)}], source="gemini")
+    assert field.status == "unverified" and field.value is None and field.evidence == []
+    baseline = rules("Q01")
+    baseline.fields["settlement_currency"] = field
+    reasons = lifecycle.blocking_reasons(baseline.to_dict(), AS_OF)
+    assert any(r["field"] == "settlement_currency" for r in reasons)
+    assert "save" not in lifecycle.allowed_actions(lifecycle.initial_status(baseline.to_dict(), AS_OF), reasons)
 
 
 @pytest.mark.parametrize("label,expected", [

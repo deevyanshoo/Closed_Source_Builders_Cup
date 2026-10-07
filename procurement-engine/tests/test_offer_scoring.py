@@ -5,6 +5,7 @@ import datetime as dt
 import json
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,12 +22,27 @@ def rules(quote_id):
     return extract_offer(read_document(FIXTURES / QUOTES[quote_id]["file"]), mode="rules", as_of=AS_OF)
 
 
+def matching_score_input(quote_id):
+    """Answer-key-shaped unit input, separate from real document extraction accuracy."""
+    entry = QUOTES[quote_id]
+    expected = entry["expected"]
+    def field(value):
+        return SimpleNamespace(status="extracted" if value["status"] == "present" else value["status"],
+                               value=deepcopy(value.get("value")))
+    return SimpleNamespace(
+        fields={n: field(expected[n]) for n in scoring.OFFER_FIELDS},
+        items=[{n: field({"status": "present", "value": item["material"]} if n == "material" else item[n])
+                for n in scoring.ITEM_FIELDS} for item in expected["items"]],
+        normalized={"origin_country_code": expected["origin_country"]["value"]},
+        review_flags=[], extractor="synthetic-unit-input")
+
+
 def by_name(score):
     return {f["field"]: f for f in score["fields"]}
 
 
 def test_matching_extraction_scores_every_field_correct():
-    score = scoring.score_quote(rules("Q01"), QUOTES["Q01"])
+    score = scoring.score_quote(matching_score_input("Q01"), QUOTES["Q01"])
     assert score["accuracy"] == 1.0
     assert score["correct"] == score["total"] == 15  # 10 offer fields + 5 item fields
 
@@ -102,6 +118,7 @@ def test_q10_accepts_complete_equivalent_index_price():
 
 def test_q14_wrong_fx_clause_cannot_hide_in_index_or_averaging_window():
     ex = rules("Q14")
+    ex.items[0]["pricing"].value["averaging_period"] += " converted at an unstated FX rate"
     result = by_name(scoring.score_quote(ex, QUOTES["Q14"]))["items[0].pricing"]
     assert (result["correct"], result["error"]) == (False, "wrong_value")
 
@@ -117,12 +134,12 @@ def test_explicit_fx_basis_must_match_when_key_contains_it():
 
 
 def test_extra_invented_item_fails_whole_quote_while_field_accuracy_keeps_its_denominator():
-    ex = rules("Q01")
+    ex = matching_score_input("Q01")
     ex.items.append(deepcopy(ex.items[0]))
     score = scoring.score_quote(ex, QUOTES["Q01"])
     assert (score["accuracy"], score["correct"], score["total"], score["extra_items"]) == (1.0, 15, 15, 1)
     assert score["quote_correct"] is False
-    summary = scoring.summarize([scoring.score_quote(rules("Q01"), QUOTES["Q01"]), score])
+    summary = scoring.summarize([scoring.score_quote(matching_score_input("Q01"), QUOTES["Q01"]), score])
     assert (summary["quotes_correct"], summary["quotes"], summary["quote_accuracy"]) == (1, 2, 0.5)
 
 
@@ -130,3 +147,10 @@ def test_missing_item_fails_whole_quote():
     ex = rules("Q01")
     ex.items.clear()
     assert scoring.score_quote(ex, QUOTES["Q01"])["quote_correct"] is False
+
+
+def test_real_q01_price_currency_cannot_count_as_verified_settlement():
+    score = scoring.score_quote(rules("Q01"), QUOTES["Q01"])
+    settlement = by_name(score)["settlement_currency"]
+    assert (settlement["correct"], settlement["error"]) == (False, "not_extracted")
+    assert score["quote_correct"] is False

@@ -19,6 +19,25 @@ const FIELD_MAP: Record<string, FieldKey> = {
 function labelMoney(money: Money) { return `${money.currency} ${formatDecimal(money.amount)}`; }
 function dateText(value: string | null) { return value || 'Unavailable'; }
 
+export function sessionPresentation(session: SessionResponse | null, sessionError: string) {
+  if (sessionError) return {
+    masthead: 'SESSION UNAVAILABLE',
+    details: 'Interactive sign-in unavailable. Saved plans require an authenticated session.',
+  };
+  if (!session) return {
+    masthead: 'CHECKING SESSION',
+    details: 'Loading local session…',
+  };
+  if (session.identity_mode === 'private_machine') return {
+    masthead: `PRIVATE MACHINE / ${session.role.toUpperCase()} / ${session.principal_id}`,
+    details: `Workspace ${session.workspace_id} · service caller · interactive sign-in unavailable`,
+  };
+  return {
+    masthead: `LOCAL DEVELOPMENT / ${session.role.toUpperCase()} / ${session.principal_id}`,
+    details: `Workspace ${session.workspace_id} · local development identity · ${session.role} access`,
+  };
+}
+
 export function PlanningPage() {
   const [draft, setDraft] = useState<PlanningDraft>(initialDraft);
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
@@ -27,6 +46,7 @@ export function PlanningPage() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [sessionError, setSessionError] = useState('');
   const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
+  const [savedPlansError, setSavedPlansError] = useState('');
   const [selected, setSelected] = useState<SavedPlan | null>(null);
   const [dirty, setDirty] = useState(false);
   const [review, setReview] = useState(false);
@@ -69,27 +89,39 @@ export function PlanningPage() {
   async function loadSession() {
     const token = ++sessionSerial.current;
     setSessionError('');
+    let identity: SessionResponse;
     try {
-      const identity = await fetchSession();
-      if (token !== sessionSerial.current) return;
-      stateSerial.current += 1;
-      serial.current += 1; planRequest.current?.abort();
-      setSelected(null); setApproval(null); execution.current = null; setReview(false);
-      setReceipts([]); setApprovals([]); setAudit([]); setSavedPlans([]); setResult({ kind: 'none' });
-      setSession(identity);
-      setDraft(current => ({ ...current, workspaceId: identity.workspace_id }));
+      identity = await fetchSession();
+    } catch (error) {
+      if (token === sessionSerial.current) {
+        stateSerial.current += 1; serial.current += 1; planRequest.current?.abort();
+        setSession(null); setSelected(null); setApproval(null); execution.current = null; setReview(false);
+        setSavedPlans([]); setSavedPlansError(''); setReceipts([]); setApprovals([]); setAudit([]); setResult({ kind: 'none' });
+        setSessionError(error instanceof Error ? error.message : 'Session unavailable.');
+      }
+      return;
+    }
+    if (token !== sessionSerial.current) return;
+    stateSerial.current += 1;
+    serial.current += 1; planRequest.current?.abort();
+    setSelected(null); setApproval(null); execution.current = null; setReview(false);
+    setReceipts([]); setApprovals([]); setAudit([]); setSavedPlans([]); setSavedPlansError(''); setResult({ kind: 'none' });
+    setSession(identity);
+    setDraft(current => ({ ...current, workspaceId: identity.workspace_id }));
+    try {
       const saved = await listPlans(identity.workspace_id);
       if (token === sessionSerial.current) setSavedPlans(saved.plans);
     } catch (error) {
-      if (token === sessionSerial.current) setSessionError(error instanceof Error ? error.message : 'Session unavailable.');
+      if (token === sessionSerial.current) setSavedPlansError(error instanceof Error ? error.message : 'Saved plans unavailable.');
     }
   }
 
   async function refreshPlans() {
     if (!session) return;
     const token = stateSerial.current;
+    setSavedPlansError('');
     try { const response = await listPlans(session.workspace_id); if (token === stateSerial.current) setSavedPlans(response.plans); }
-    catch (error) { if (token === stateSerial.current) setStateMessage(error instanceof Error ? error.message : 'Saved plans unavailable.'); }
+    catch (error) { if (token === stateSerial.current) setSavedPlansError(error instanceof Error ? error.message : 'Saved plans unavailable.'); }
   }
 
   async function selectPlan(id: string) {
@@ -221,13 +253,15 @@ export function PlanningPage() {
   const catalogUnavailable = catalog.kind === 'loaded' && catalog.response.availability.code !== 'available';
   const canSubmit = catalog.kind === 'loaded' && !catalogUnavailable && materials.length > 0 && result.kind !== 'loading' && !busy;
   const readySaved = selected && !dirty && selected.snapshot.status === 'ready' && selected.snapshot.plan;
-  const canWrite = session?.role === 'editor' && !busy;
+  const canWrite = session?.role === 'editor' && !sessionError && !busy;
   const args = readySaved && selected ? actionArguments(selected) : null;
+  const identityCopy = sessionPresentation(session, sessionError);
 
   return <div className="shell">
     <header className="masthead">
       <div className="brand">CLOSED <span>SOURCE</span><sup> / PLANNING</sup></div>
-      <div className="masthead-meta">LOCAL WORKSPACE <span className="red-dot" aria-hidden="true">●</span> {session ? `${session.role.toUpperCase()} / ${session.principal_id}` : 'SESSION UNAVAILABLE'}</div>
+      <a className="recovery-back" href="/recovery">Synthetic recovery comparison</a>
+      <div className="masthead-meta"><span className="red-dot" aria-hidden="true">●</span> {identityCopy.masthead}</div>
     </header>
     <main>
       <section className="intro" aria-labelledby="page-title">
@@ -236,8 +270,9 @@ export function PlanningPage() {
         <p>Enter a material need and current stock. Compare a computed buying schedule with its source evidence and stated limits.</p>
       </section>
       <section className="saved-strip" aria-label="Saved plans">
-        <div><span className="eyebrow">SAVED PLANS</span><p>{session ? `Workspace ${session.workspace_id} · ${session.role} access` : sessionError ? 'Local session unavailable' : 'Loading local session…'}</p></div>
+        <div><span className="eyebrow">SAVED PLANS</span><p>{identityCopy.details}</p></div>
         {sessionError && <div className="notice notice-error" role="alert">{sessionError} <button type="button" className="text-button" disabled={busy} onClick={loadSession}>Retry session →</button></div>}
+        {session && savedPlansError && <div className="notice notice-error" role="alert"><strong>Saved-plan storage unavailable</strong><p>{savedPlansError}</p><button type="button" className="text-button" disabled={busy} onClick={refreshPlans}>Retry list →</button></div>}
         {session && <div className="saved-controls"><button type="button" className="text-button" disabled={busy} onClick={() => { stateSerial.current += 1; serial.current += 1; planRequest.current?.abort(); setSelected(null); setDraft({ ...initialDraft, workspaceId: session.workspace_id }); setDirty(false); setResult({ kind: 'none' }); setApproval(null); execution.current = null; setReview(false); setReceipts([]); setApprovals([]); setAudit([]); setStateMessage(''); }}>New plan</button><button type="button" className="text-button" disabled={busy} onClick={refreshPlans}>Refresh list</button>{savedPlans.map(item => <button type="button" disabled={busy} className={selected?.saved_plan_id === item.saved_plan_id ? 'saved-choice selected-choice' : 'saved-choice'} key={item.saved_plan_id} onClick={() => selectPlan(item.saved_plan_id)}>{item.snapshot.request.material} · {item.snapshot.request.buyer.id} · revision {item.revision} · {item.saved_plan_id.slice(0, 6)}</button>)}</div>}
       </section>
       <div className="workspace-grid">

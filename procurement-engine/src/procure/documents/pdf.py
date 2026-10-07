@@ -8,6 +8,9 @@ one space, and a wide gap between two cells on the same row becomes two spaces.
 Text that is near-white, tiny or off the page is still returned, flagged `low_visibility`,
 so hidden instructions are visible to review instead of silently read or dropped. A page
 with no text layer (a scan) produces a `no_text_layer` warning; no OCR is attempted.
+pdfminer does not expose text opacity on character objects. If a page declares a transparent
+graphics state, every extracted line on that page gets `visibility_unverified` so callers
+cannot mistake an unflagged black glyph for proven visible text.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ import io
 import pdfplumber
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
+from pdfminer.pdftypes import resolve1
 from pdfminer.psparser import PSException
 from pdfplumber.utils.exceptions import PdfminerException
 
@@ -27,6 +31,7 @@ MIN_VISIBLE_SIZE = 3.0  # points
 NEAR_WHITE = 0.94
 WORD_GAP = 0.25  # fraction of font size
 COLUMN_GAP = 1.5  # fraction of font size
+MIN_VISIBLE_OPACITY = 0.05
 
 
 def _near_white(color) -> bool:
@@ -81,6 +86,24 @@ def _visual_lines(page) -> list[tuple[str, tuple[str, ...]]]:
     return lines
 
 
+def _page_has_uncertain_opacity(page) -> bool:
+    states = resolve1(page.page_obj.resources.get("ExtGState", {}))
+    if not isinstance(states, dict):
+        return True
+    for state in states.values():
+        settings = resolve1(state)
+        if not isinstance(settings, dict):
+            return True
+        try:
+            if any(float(settings.get(key, 1)) < MIN_VISIBLE_OPACITY for key in ("ca", "CA")):
+                return True
+        except (TypeError, ValueError):
+            return True
+        if settings.get("SMask") not in (None, "None"):
+            return True
+    return False
+
+
 def read_pdf(data: bytes, document_id: str):
     try:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
@@ -92,10 +115,13 @@ def read_pdf(data: bytes, document_id: str):
             segments, warnings = [], []
             for page_no, page in enumerate(pdf.pages, start=1):
                 lines = _visual_lines(page)
+                opacity_uncertain = _page_has_uncertain_opacity(page)
                 if not lines:
                     warnings.append(DocumentWarning("no_text_layer",
                                                     f"Page {page_no} has no extractable text (scanned?)", page=page_no))
                 for line_no, (text, flags) in enumerate(lines, start=1):
+                    if opacity_uncertain:
+                        flags += ("visibility_unverified",)
                     segments.append(make_segment(document_id, "pdf_line", f"p{page_no}:l{line_no}", text,
                                                  page=page_no, line=line_no, flags=flags))
     except DocumentReadError:

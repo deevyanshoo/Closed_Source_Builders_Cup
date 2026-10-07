@@ -14,6 +14,7 @@ import pytest
 from procure.documents import read_document
 from procure.offers.extraction import extract_offer
 from procure.offers import extract_gemini
+from procure.offers import fx_rates
 
 FIXTURES = Path(__file__).parent / "fixtures" / "offers"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text())
@@ -21,12 +22,26 @@ QUOTES = {q["id"]: q for q in MANIFEST["quotes"]}
 AS_OF = dt.date(2026, 10, 7)
 
 
+def _deny_provider(*args, **kwargs):
+    raise AssertionError("provider access forbidden in extraction tests")
+
+
+def _no_rate(base, quote, on):
+    return fx_rates.FxRate(base, quote, None, None, None, None, "unavailable", "offline test")
+
+
+@pytest.fixture(autouse=True)
+def _stub_fx_provider(monkeypatch):
+    monkeypatch.setattr(fx_rates, "http_get", _deny_provider)
+    monkeypatch.setattr(fx_rates, "get_rate", _deny_provider)
+
+
 def doc(quote_id):
     return read_document(FIXTURES / QUOTES[quote_id]["file"])
 
 
 def rules(quote_id):
-    return extract_offer(doc(quote_id), mode="rules", as_of=AS_OF)
+    return extract_offer(doc(quote_id), mode="rules", as_of=AS_OF, rate_lookup=_no_rate)
 
 
 # ---------- rules extractor ----------
@@ -173,7 +188,7 @@ def with_key(monkeypatch):
 
 def test_mocked_gemini_result_is_labelled_mocked_and_evidence_checked(with_key):
     client = FakeClient(q01_payload())
-    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=client)
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=client, rate_lookup=_no_rate)
     assert ex.extractor == "gemini"
     assert ex.extractor_detail["call"] == "mocked"
     assert ex.items[0]["pricing"].value["unit_price"]["amount"] == "9412.50"
@@ -183,7 +198,7 @@ def test_mocked_gemini_result_is_labelled_mocked_and_evidence_checked(with_key):
 
 def test_gemini_receives_located_segments_not_the_raw_file(with_key):
     client = FakeClient(q01_payload())
-    extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=client)
+    extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=client, rate_lookup=_no_rate)
     prompt = client.models.calls[0]["contents"]
     assert "[p1:l10] Unit price: USD 9,412.50 per metric tonne" in prompt
     assert "%PDF" not in prompt
@@ -196,29 +211,41 @@ def test_gemini_hallucination_is_unverified(with_key):
     payload = q01_payload()
     payload["items"][0]["pricing"][0].update({"amount": "8999.00"})
     payload["valid_until"] = [{"value": "2026-12-31", "evidence": ev("p1:l16", "31 December 2026")}]
-    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(payload))
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(payload), rate_lookup=_no_rate)
     assert ex.items[0]["pricing"].status == "unverified"
     assert ex.fields["valid_until"].status == "unverified"
     assert ex.fields["valid_until"].value is None
 
 
 def test_gemini_failure_falls_back_to_rules(with_key):
-    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(error=RuntimeError("quota")))
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF,
+                       client=FakeClient(error=RuntimeError("quota")), rate_lookup=_no_rate)
     assert ex.extractor == "rules"
     assert ex.extractor_detail["requested"] == "gemini"
-    assert "quota" in ex.extractor_detail["fallback_reason"]
+    assert ex.extractor_detail["fallback_reason"] == "call_failed"
+    assert ex.extractor_detail["call"] == "mocked"
+    assert ex.extractor_detail["attempted"] is True
 
 
 def test_gemini_invalid_json_falls_back_to_rules(with_key):
-    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient({"supplier_name": "not a list"}))
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF,
+                       client=FakeClient({"supplier_name": "not a list"}), rate_lookup=_no_rate)
     assert ex.extractor == "rules"
-    assert ex.extractor_detail["fallback_reason"].startswith("invalid_response")
+    assert ex.extractor_detail["fallback_reason"] == "invalid_response"
+    assert ex.extractor_detail["call"] == "mocked"
+    assert ex.extractor_detail["stage"] == "response_validation"
 
 
-def test_no_key_uses_rules():
-    ex = extract_offer(doc("Q01"), mode="auto", as_of=AS_OF)
+def test_no_key_uses_rules(monkeypatch):
+    from procure.settings import reset_caches
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OFFLINE", "1")
+    reset_caches()
+    ex = extract_offer(doc("Q01"), mode="auto", as_of=AS_OF, rate_lookup=_no_rate)
     assert ex.extractor == "rules"
     assert ex.extractor_detail["fallback_reason"] == "no_api_key"
+    reset_caches()
 
 
 def test_offline_blocks_gemini_even_with_a_key(monkeypatch):
@@ -229,7 +256,7 @@ def test_offline_blocks_gemini_even_with_a_key(monkeypatch):
     reset_caches()
     try:
         client = FakeClient(q01_payload())
-        ex = extract_offer(doc("Q01"), mode="auto", as_of=AS_OF, client=client)
+        ex = extract_offer(doc("Q01"), mode="auto", as_of=AS_OF, client=client, rate_lookup=_no_rate)
         assert ex.extractor == "rules" and ex.extractor_detail["fallback_reason"] == "offline"
         assert client.models.calls == []
     finally:
@@ -239,7 +266,7 @@ def test_offline_blocks_gemini_even_with_a_key(monkeypatch):
 
 def test_material_comes_from_the_catalog_not_the_model(with_key):
     payload = q01_payload()
-    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(payload))
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(payload), rate_lookup=_no_rate)
     assert ex.items[0]["material"].value == "copper"
     assert ex.items[0]["material"].evidence[0].locator == "p1:l7"
 
@@ -257,7 +284,12 @@ def test_gemini_schema_has_no_free_form_action_fields():
                      "valid_until", "lead_time_days", "min_order", "capacity", "shipments", "items"}
 
 
-def test_laycan_in_a_separate_cell_from_its_label_is_read():
-    shipments = rules("Q03").fields["shipments"]
-    assert shipments.status == "extracted"
-    assert shipments.value == [{"quantity": {"amount": "80000", "unit": "tonne"}, "window": "2026-11-15/2026-11-25"}]
+def test_separate_laycan_cell_keeps_candidate_without_verifying_a_quantity_pair():
+    ex = rules("Q03")
+    shipments = ex.fields["shipments"]
+    assert (shipments.status, shipments.value) == ("unverified", None)
+    assert shipments.candidates[0].value == [
+        {"quantity": {"amount": "80000", "unit": "tonne"}, "window": "2026-11-15/2026-11-25"}
+    ]
+    assert {e.locator for e in shipments.candidates[0].evidence} == {"r9:c1", "r9:c2", "r12:c2"}
+    assert ex.items[0]["pricing"].status == "missing"  # separate settlement code is not a price currency

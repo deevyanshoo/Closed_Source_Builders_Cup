@@ -6,6 +6,8 @@ Per field the result is correct or one of:
   invented_value   the key says missing; the extraction produced a value
   missed_conflict  the key says the document states two values; the extraction picked one
 Amounts compare as numbers (2615 equals 2615.00) and text compares case-insensitively.
+Field accuracy covers expected fields using positional item alignment. Whole-quote
+correctness also requires the item count to match; extra items cannot pass a quote.
 """
 from __future__ import annotations
 

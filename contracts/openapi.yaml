@@ -1098,6 +1098,824 @@
           }
         }
       }
+    },
+    "/v2/production/receipt-recovery/comparisons": {
+      "post": {
+        "operationId": "compareReceiptRecovery",
+        "summary": "Compare a supplied synthetic receipt scenario without applying it",
+        "description": "Authenticated local or private-machine server-owned workspace only. Versions are caller consistency guards, not a saved current production plan. No database, application, deduplication, supplier communication or operational assurance. Request 1MiB, response 2MiB; strict JSON and schema.",
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 16,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryComparisonRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete modeled synthetic comparison",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryComparisonResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported numerical assumptions or malformed wire request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RecoveryComparisonUnsupportedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StateErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace or origin denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "JSON content type required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Invalid numerical upstream response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Numerical service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/voice/sessions": {
+      "post": {
+        "operationId": "createLocalVoiceSession",
+        "description": "Opt-in authenticated LOCAL ephemeral synthetic context. Viewer/editor read-only rights; no saved-plan/provider claim. Missing safe host config returns503.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "x-local-only": true,
+        "x-read-only": true,
+        "x-synthetic-only": true,
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2113536,
+        "x-max-depth": 16,
+        "x-max-array-items": 256,
+        "x-total-array-items": 4096,
+        "responses": {
+          "201": {
+            "description": "Local synthetic VoiceHTTPSessionResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden origin/workspace/role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown/foreign/expired/stale voice session or turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owned context version mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body/headers/identity assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded voice session/execution capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Local voice unavailable or shutdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceHTTPSessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/voice/sessions/{session_id}": {
+      "delete": {
+        "operationId": "closeLocalVoiceSession",
+        "description": "Close current owned process-local session and cancel child. Unknown/foreign/expired closes share404.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "x-local-only": true,
+        "x-read-only": true,
+        "x-synthetic-only": true,
+        "x-request-max-bytes": 0,
+        "x-response-max-bytes": 2113536,
+        "x-max-depth": 16,
+        "x-max-array-items": 256,
+        "x-total-array-items": 4096,
+        "responses": {
+          "200": {
+            "description": "Local synthetic VoiceHTTPCloseResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPCloseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden origin/workspace/role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown/foreign/expired/stale voice session or turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owned context version mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body/headers/identity assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded voice session/execution capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Local voice unavailable or shutdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/voice/sessions/{session_id}/turns": {
+      "post": {
+        "operationId": "startLocalVoiceTurn",
+        "description": "Start/replace readonly turn; immutable synthetic context-version precondition. Execution outlives successfully completed202 request; cancellation before acceptance suppresses work, afterward use cancel/close. Capacity rejects before replacement.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "x-local-only": true,
+        "x-read-only": true,
+        "x-synthetic-only": true,
+        "x-request-max-bytes": 131072,
+        "x-response-max-bytes": 2113536,
+        "x-max-depth": 16,
+        "x-max-array-items": 256,
+        "x-total-array-items": 4096,
+        "responses": {
+          "202": {
+            "description": "Local synthetic VoiceHTTPTurnResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPTurnResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden origin/workspace/role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown/foreign/expired/stale voice session or turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owned context version mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body/headers/identity assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded voice session/execution capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Local voice unavailable or shutdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceHTTPTurnRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/voice/sessions/{session_id}/turns/{turn_id}/cancel": {
+      "post": {
+        "operationId": "cancelLocalVoiceTurn",
+        "description": "Cancel current owned matching turn, suppress queued/cached/late output. A completed cancel before subsequent poll prevents selection; cannot retract already sent bytes.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "x-local-only": true,
+        "x-read-only": true,
+        "x-synthetic-only": true,
+        "x-request-max-bytes": 0,
+        "x-response-max-bytes": 2113536,
+        "x-max-depth": 16,
+        "x-max-array-items": 256,
+        "x-total-array-items": 4096,
+        "responses": {
+          "200": {
+            "description": "Local synthetic VoiceHTTPCancelResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPCancelResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden origin/workspace/role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown/foreign/expired/stale voice session or turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owned context version mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body/headers/identity assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded voice session/execution capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Local voice unavailable or shutdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/voice/sessions/{session_id}/turns/{turn_id}/result": {
+      "get": {
+        "operationId": "pollLocalVoiceResult",
+        "description": "Poll matching current owned turn and immutable context. Pending/ready/failed exact variants; ready is validated Python outcome. Cached polls recheck live lease. No lock across network writes or atomic external-send promise.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "x-local-only": true,
+        "x-read-only": true,
+        "x-synthetic-only": true,
+        "x-request-max-bytes": 0,
+        "x-response-max-bytes": 2113536,
+        "x-max-depth": 16,
+        "x-max-array-items": 256,
+        "x-total-array-items": 4096,
+        "responses": {
+          "200": {
+            "description": "Local synthetic VoiceHTTPResultResponse",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPResultResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden origin/workspace/role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown/foreign/expired/stale voice session or turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Owned context version mismatch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid body/headers/identity assertions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded voice session/execution capacity exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Local voice unavailable or shutdown",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          },
+          {
+            "name": "turn_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20,
+              "pattern": "^[1-9][0-9]*$"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1865,7 +2683,15 @@
           },
           "development_only": {
             "type": "boolean",
-            "const": true
+            "description": "True only for local development identities. False requires explicit private_machine mode; it does not prove end-user sign-in."
+          },
+          "identity_mode": {
+            "type": "string",
+            "enum": [
+              "development",
+              "private_machine"
+            ],
+            "description": "Server-derived session class; omitted by compatible legacy development responses."
           }
         },
         "required": [
@@ -1874,6 +2700,37 @@
           "workspace_id",
           "role",
           "development_only"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "development_only": {
+                  "const": false
+                }
+              },
+              "required": [
+                "development_only"
+              ]
+            },
+            "then": {
+              "required": [
+                "identity_mode"
+              ],
+              "properties": {
+                "identity_mode": {
+                  "const": "private_machine"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "identity_mode": {
+                  "const": "development"
+                }
+              }
+            }
+          }
         ]
       },
       "ReadinessResponse": {
@@ -1900,7 +2757,8 @@
             "type": "string",
             "enum": [
               "development",
-              "unavailable"
+              "unavailable",
+              "private_machine"
             ]
           },
           "provider": {
@@ -2478,6 +3336,1804 @@
         "required": [
           "contract_version",
           "error"
+        ]
+      },
+      "ProductionInventoryComponent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "starting_stock": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "stock_as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "starting_stock",
+          "stock_as_of"
+        ]
+      },
+      "ProductionBomComponent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity_per_output_unit": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "quantity_per_output_unit"
+        ]
+      },
+      "ProductionProduct": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "bom": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionBomComponent"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "product_id",
+          "output_unit",
+          "bom"
+        ]
+      },
+      "ProductionRouting": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "run_seconds_per_output_unit": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "product_id",
+          "resource_id",
+          "output_unit",
+          "run_seconds_per_output_unit"
+        ]
+      },
+      "ProductionResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "capacity_model": {
+            "type": "string",
+            "const": "single_machine"
+          }
+        },
+        "required": [
+          "resource_id",
+          "capacity_model"
+        ]
+      },
+      "ProductionPeriod": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "start": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "end": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "period_id",
+          "resource_id",
+          "start",
+          "end"
+        ]
+      },
+      "ProductionMaintenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maintenance_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "start": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "end": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "maintenance_id",
+          "resource_id",
+          "start",
+          "end"
+        ]
+      },
+      "ProductionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "receipt_id",
+          "component_id",
+          "unit",
+          "quantity",
+          "arrival_at"
+        ]
+      },
+      "ProductionOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "output_quantity": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "due_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "order_id",
+          "product_id",
+          "output_unit",
+          "output_quantity",
+          "resource_id",
+          "due_at"
+        ]
+      },
+      "ProductionAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "order_id",
+          "period_id"
+        ]
+      },
+      "ProductionSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionInventoryComponent"
+            },
+            "minItems": 1
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionProduct"
+            },
+            "minItems": 1
+          },
+          "routings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionRouting"
+            },
+            "minItems": 1
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionResource"
+            },
+            "minItems": 1
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionPeriod"
+            },
+            "minItems": 1
+          },
+          "maintenance": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaintenance"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionReceipt"
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionOrder"
+            },
+            "minItems": 1
+          },
+          "baseline_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionAssignment"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "workspace_id",
+          "plan_version",
+          "snapshot_id",
+          "as_of",
+          "synthetic",
+          "inventory",
+          "products",
+          "routings",
+          "resources",
+          "periods",
+          "maintenance",
+          "receipts",
+          "orders",
+          "baseline_assignments"
+        ]
+      },
+      "ReceiptArrivalReplacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "receipt_id",
+          "expected_arrival_at",
+          "arrival_at"
+        ]
+      },
+      "ReceiptArrivalScenario": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "arrival_replacements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptArrivalReplacement"
+            }
+          }
+        },
+        "required": [
+          "workspace_id",
+          "expected_plan_version",
+          "source_snapshot_id",
+          "scenario_id",
+          "synthetic",
+          "arrival_replacements"
+        ]
+      },
+      "RecoveryAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionAssignment"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "workspace_id",
+          "expected_plan_version",
+          "source_snapshot_id",
+          "scenario_id",
+          "synthetic",
+          "assignments"
+        ]
+      },
+      "RecoveryComparisonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/ReceiptArrivalScenario"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/RecoveryAssignment"
+          }
+        },
+        "required": [
+          "contract_version",
+          "snapshot",
+          "scenario",
+          "recovery"
+        ]
+      },
+      "ProductionMaterialDemand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "used": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "shortfall": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "remaining_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "quantity",
+          "used",
+          "shortfall",
+          "remaining_stock"
+        ]
+      },
+      "ProductionOrderScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "output_quantity": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "material_required_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_completion_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "due_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaterialDemand"
+            },
+            "minItems": 1
+          },
+          "material_pass": {
+            "type": "boolean"
+          },
+          "modeled_due_pass": {
+            "type": "boolean"
+          },
+          "late_by_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "order_id",
+          "product_id",
+          "output_unit",
+          "output_quantity",
+          "resource_id",
+          "period_id",
+          "material_required_at",
+          "modeled_completion_at",
+          "due_at",
+          "demands",
+          "material_pass",
+          "modeled_due_pass",
+          "late_by_seconds"
+        ]
+      },
+      "ProductionCapacityScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "nominal_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "blocked_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "available_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "workload_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "excess_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "remaining_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "capacity_pass": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resource_id",
+          "period_id",
+          "nominal_seconds",
+          "blocked_seconds",
+          "available_seconds",
+          "workload_seconds",
+          "excess_seconds",
+          "remaining_seconds",
+          "capacity_pass"
+        ]
+      },
+      "ProductionMaterialBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "starting_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "ending_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "starting_stock",
+          "ending_stock"
+        ]
+      },
+      "ProductionScheduleScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionOrderScreen"
+            },
+            "minItems": 1
+          },
+          "capacity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionCapacityScreen"
+            },
+            "minItems": 1
+          },
+          "material_balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaterialBalance"
+            },
+            "minItems": 1
+          },
+          "material_balance_end_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_checks_pass": {
+            "type": "boolean"
+          },
+          "failed_checks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        },
+        "required": [
+          "orders",
+          "capacity",
+          "material_balances",
+          "material_balance_end_at",
+          "modeled_checks_pass",
+          "failed_checks"
+        ]
+      },
+      "ReceiptArrivalChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "before_arrival_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "after_arrival_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "before_arrival_at",
+          "after_arrival_at"
+        ]
+      },
+      "ReceiptRecoveryComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "compared"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_checks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "material_at_period_start",
+                "aggregate_single_machine_capacity",
+                "modeled_period_end_due"
+              ]
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "unmodeled_constraints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "minItems": 1
+          },
+          "original_baseline": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "disrupted_baseline": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "receipt_changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptArrivalChange"
+            }
+          },
+          "potentially_exposed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          },
+          "disruption_changed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          },
+          "recovery_changed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "status",
+          "synthetic",
+          "workspace_id",
+          "plan_version",
+          "snapshot_id",
+          "scenario_id",
+          "as_of",
+          "modeled_checks",
+          "unmodeled_constraints",
+          "original_baseline",
+          "disrupted_baseline",
+          "recovery",
+          "receipt_changes",
+          "potentially_exposed_order_ids",
+          "disruption_changed_order_ids",
+          "recovery_changed_order_ids"
+        ]
+      },
+      "RecoveryComparisonResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/ReceiptRecoveryComparison"
+          }
+        },
+        "required": [
+          "contract_version",
+          "comparison"
+        ]
+      },
+      "RecoveryComparisonUnsupportedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "status": {
+            "type": "string",
+            "const": "unsupported"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid_quantity",
+              "invalid_timestamp",
+              "incomplete_snapshot",
+              "incomplete_assignment",
+              "unsupported_constraint",
+              "conflicting_snapshot",
+              "invalid_scope",
+              "incomplete_inventory",
+              "invalid_snapshot",
+              "incomplete_bom",
+              "incompatible_unit",
+              "incomplete_resource",
+              "incomplete_routing",
+              "incomplete_period",
+              "pre_as_of",
+              "invalid_period",
+              "overlapping_periods",
+              "incomplete_maintenance",
+              "incomplete_receipt",
+              "incomplete_order",
+              "resource_mismatch",
+              "workspace_mismatch",
+              "stale_plan_version",
+              "snapshot_mismatch",
+              "invalid_scenario",
+              "invalid_recovery",
+              "invalid_replacement",
+              "duplicate_replacement",
+              "unknown_receipt",
+              "stale_receipt"
+            ]
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "contract_version",
+          "status",
+          "reason",
+          "details"
+        ]
+      },
+      "VoiceHTTPSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "contract_version",
+          "snapshot"
+        ],
+        "description": "Supplied synthetic snapshot only; workspace must equal authenticated host workspace. Does not establish saved-plan freshness."
+      },
+      "VoiceHTTPCallArguments": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "arrival_replacements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptArrivalReplacement"
+            },
+            "maxItems": 256
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionAssignment"
+            },
+            "minItems": 1,
+            "maxItems": 256
+          }
+        },
+        "required": [
+          "arrival_replacements",
+          "assignments"
+        ]
+      },
+      "VoiceHTTPCall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/VoiceHTTPCallArguments"
+          }
+        },
+        "required": [
+          "name",
+          "arguments"
+        ]
+      },
+      "VoiceHTTPTurnRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "call": {
+            "$ref": "#/components/schemas/VoiceHTTPCall"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_version",
+          "call"
+        ],
+        "description": "Transport context-version precondition plus arguments only; model cannot supply ownership or snapshot/scenario overrides."
+      },
+      "VoiceHTTPSessionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "const": "created"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "snapshot_id",
+          "plan_version",
+          "scenario_id",
+          "status"
+        ]
+      },
+      "VoiceHTTPTurnResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "status": {
+            "type": "string",
+            "const": "accepted"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "turn_id",
+          "status"
+        ]
+      },
+      "VoiceHTTPCancelResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "status": {
+            "type": "string",
+            "const": "cancelled"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "turn_id",
+          "status"
+        ]
+      },
+      "VoiceHTTPCloseResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "status": {
+            "type": "string",
+            "const": "closed"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "read_only",
+          "synthetic",
+          "status"
+        ]
+      },
+      "VoiceHTTPToolOwnership": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          }
+        },
+        "required": [
+          "session_id",
+          "turn_id"
+        ]
+      },
+      "VoiceHTTPComparedOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "status": {
+            "type": "string",
+            "const": "compared"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ReceiptRecoveryComparison"
+          }
+        },
+        "required": [
+          "tool_name",
+          "read_only",
+          "ownership",
+          "status",
+          "result"
+        ]
+      },
+      "VoiceHTTPUnsupportedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "unsupported"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "details"
+        ]
+      },
+      "VoiceHTTPUnsupportedOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "status": {
+            "type": "string",
+            "const": "unsupported"
+          },
+          "result": {
+            "$ref": "#/components/schemas/VoiceHTTPUnsupportedResult"
+          }
+        },
+        "required": [
+          "tool_name",
+          "read_only",
+          "ownership",
+          "status",
+          "result"
+        ]
+      },
+      "VoiceHTTPClarificationOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "status": {
+            "type": "string",
+            "const": "clarification_required"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "missing_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^arguments\\."
+            },
+            "minItems": 1,
+            "maxItems": 256
+          }
+        },
+        "required": [
+          "tool_name",
+          "read_only",
+          "ownership",
+          "status",
+          "reason",
+          "missing_fields"
+        ]
+      },
+      "VoiceHTTPRejectedOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "status": {
+            "type": "string",
+            "const": "rejected"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "tool_name",
+          "read_only",
+          "ownership",
+          "status",
+          "reason"
+        ]
+      },
+      "VoiceHTTPUnavailableOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "status": {
+            "type": "string",
+            "const": "unavailable"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "tool_name",
+          "read_only",
+          "ownership",
+          "status",
+          "reason"
+        ]
+      },
+      "VoiceHTTPOutcome": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoiceHTTPComparedOutcome"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPUnsupportedOutcome"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPClarificationOutcome"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPRejectedOutcome"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPUnavailableOutcome"
+          }
+        ]
+      },
+      "VoiceHTTPExecutionError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "execution_unavailable"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "VoiceHTTPPendingResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "state": {
+            "type": "string",
+            "const": "pending"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "turn_id",
+          "state"
+        ]
+      },
+      "VoiceHTTPReadyResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "state": {
+            "type": "string",
+            "const": "ready"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/VoiceHTTPOutcome"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "turn_id",
+          "state",
+          "outcome"
+        ]
+      },
+      "VoiceHTTPFailedResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "context_fingerprint": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "turn_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "state": {
+            "type": "string",
+            "const": "failed"
+          },
+          "error": {
+            "$ref": "#/components/schemas/VoiceHTTPExecutionError"
+          }
+        },
+        "required": [
+          "contract_version",
+          "session_id",
+          "context_version",
+          "context_fingerprint",
+          "read_only",
+          "synthetic",
+          "turn_id",
+          "state",
+          "error"
+        ]
+      },
+      "VoiceHTTPResultResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoiceHTTPPendingResult"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPReadyResult"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPFailedResult"
+          }
         ]
       }
     },

@@ -251,6 +251,49 @@ def test_same_event_in_another_plan_has_different_scenario_identity():
     assert first["source_receipt"]["binding_sha256"] != second["source_receipt"]["binding_sha256"]
 
 
+def test_corrected_source_on_same_event_has_a_new_deterministic_scenario_identity():
+    original = [copy.deepcopy(FIXTURE["records"][4])]
+    corrected = copy.deepcopy(original)
+    corrected[0]["source"]["provider_id"] = "synthetic-corrected-feed"
+    corrected[0]["evidence"][0]["content_sha256"] = "0" * 64
+    first = scenarios(original)["scenarios"][0]
+    second = scenarios(corrected)["scenarios"][0]
+    repeat = scenarios(corrected)["scenarios"][0]
+    assert first["event_id"] == second["event_id"]
+    assert first["source_receipt"]["binding_sha256"] != second["source_receipt"]["binding_sha256"]
+    assert first["scenario"]["scenario_id"] != second["scenario"]["scenario_id"]
+    assert second == repeat
+    first_result = project_arrival_change(SNAPSHOT, first["scenario"])
+    second_result = project_arrival_change(SNAPSHOT, second["scenario"])
+    assert first_result["status"] == second_result["status"] == "screened"
+    assert {k: v for k, v in first_result.items() if k != "scenario_id"} == \
+           {k: v for k, v in second_result.items() if k != "scenario_id"}
+
+
+@pytest.mark.parametrize("arrival_lines", [
+    None, "secret-lines", {"shipment_id": "SHP-SYN-004"}, [None], ["secret-line"], [{}],
+    [{"line_id": "LINE-004-A"}], [{"shipment_id": "SHP-SYN-004"}],
+    [{"shipment_id": "", "line_id": "LINE-004-A"}],
+    [{"shipment_id": " SHP-SYN-004", "line_id": "LINE-004-A"}],
+    [{"shipment_id": "SHP-SYN-004", "line_id": " "}],
+    [{"shipment_id": "SHP-SYN-004", "line_id": "LINE-004-A "}],
+])
+def test_malformed_arrival_line_join_has_one_controlled_error(arrival_lines):
+    snapshot = copy.deepcopy(SNAPSHOT)
+    snapshot["arrival_lines"] = arrival_lines
+    binding = bound([FIXTURE["records"][4]], snapshot)
+    with pytest.raises(ValueError, match="^invalid arrival line join$"):
+        build_arrival_scenarios(binding, snapshot)
+
+
+def test_missing_arrival_lines_has_the_same_controlled_error():
+    snapshot = copy.deepcopy(SNAPSHOT)
+    del snapshot["arrival_lines"]
+    binding = bound([FIXTURE["records"][4]], snapshot)
+    with pytest.raises(ValueError, match="^invalid arrival line join$"):
+        build_arrival_scenarios(binding, snapshot)
+
+
 def test_non_string_quantity_is_not_coerced_by_binding():
     row = copy.deepcopy(FIXTURE["records"][3])
     row["quantity"]["amount"] = 20

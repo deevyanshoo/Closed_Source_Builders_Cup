@@ -206,8 +206,17 @@ def build_arrival_scenarios(binding: _BoundSyntheticMilestones, snapshot: Mappin
     normalized, snapshot = _open_binding(binding, snapshot)
     snapshot_as_of = _instant(snapshot.get("as_of"), "as_of")
     lines: dict[str, list[str]] = defaultdict(list)
-    for line in snapshot.get("arrival_lines") or []:
-        lines[line["shipment_id"]].append(line["line_id"])
+    arrival_lines = snapshot.get("arrival_lines")
+    if type(arrival_lines) is not list:
+        raise ValueError("invalid arrival line join")
+    for line in arrival_lines:
+        if type(line) is not dict:
+            raise ValueError("invalid arrival line join")
+        shipment_id, line_id = line.get("shipment_id"), line.get("line_id")
+        if any(type(value) is not str or not value or value != value.strip()
+               for value in (shipment_id, line_id)):
+            raise ValueError("invalid arrival line join")
+        lines[shipment_id].append(line_id)
 
     by_shipment: dict[str, list[dict]] = defaultdict(list)
     for event in normalized["events"]:
@@ -244,7 +253,7 @@ def build_arrival_scenarios(binding: _BoundSyntheticMilestones, snapshot: Mappin
             assumptions.append("An ETA is a stated estimate, not an observed arrival.")
         identity = _sha(_json_bytes([snapshot["workspace_id"], snapshot["plan_version"],
                                      snapshot["snapshot_id"], binding._snapshot_sha256,
-                                     chosen["event_id"]], _INPUT_LIMIT))
+                                     chosen["event_id"], binding._binding_sha256], _INPUT_LIMIT))
         receipt = {
             "as_of": normalized["as_of"], "workspace_id": snapshot["workspace_id"],
             "plan_version": snapshot["plan_version"], "snapshot_id": snapshot["snapshot_id"],

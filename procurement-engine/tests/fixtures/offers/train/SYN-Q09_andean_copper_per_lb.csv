@@ -1,0 +1,4 @@
+SYNTHETIC TEST DOCUMENT - fictional supplier quote for software testing. Not a real offer.
+quote_ref,supplier,origin,product,grade,lot,qty,qty_unit,ship_month,price,price_currency,price_unit,incoterm,named_place,moq,moq_unit,monthly_capacity,capacity_unit,payment_terms,valid_until
+AC-5531,Andean Copper Exports SAC [SYNTHETIC],Peru,Copper cathode,Grade A,1,50,t,2026-12,4.28,USD,lb,CIF,Nhava Sheva,25,t,300,t,Cash against documents (CAD),2026-11-10
+AC-5531,Andean Copper Exports SAC [SYNTHETIC],Peru,Copper cathode,Grade A,2,50,t,2027-01,4.28,USD,lb,CIF,Nhava Sheva,25,t,300,t,Cash against documents (CAD),2026-11-10

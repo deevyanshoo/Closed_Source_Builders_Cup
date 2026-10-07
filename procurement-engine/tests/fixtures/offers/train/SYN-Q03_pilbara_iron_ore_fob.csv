@@ -1,0 +1,14 @@
+SYNTHETIC TEST DOCUMENT - fictional supplier quote for software testing. Not a real offer.
+field,value
+supplier,Pilbara Plains Ore Pty Ltd [SYNTHETIC]
+product,Iron ore fines 62% Fe
+origin,Australia
+incoterm,FOB Port Hedland
+currency,USD
+price_per_tonne,104.20
+quantity_tonnes,80000
+min_order_tonnes,50000
+capacity_tonnes_per_month,300000
+laycan,15-25 November 2026
+payment_terms,LC 90 days from bill of lading date
+valid_until,2026-10-20

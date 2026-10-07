@@ -38,6 +38,10 @@ func main() {
 	if err != nil {
 		log.Fatal("invalid gateway configuration")
 	}
+	cfg, err = withVoiceLocalFlags(cfg, os.Args[1:])
+	if err != nil {
+		log.Fatal("invalid local voice configuration")
+	}
 	var handler http.Handler
 	if cfg.Mode == "private_machine" {
 		handler, err = newPrivateStateHandler(cfg)
@@ -52,7 +56,9 @@ func main() {
 		}
 		handler = newStateHandler(cfg)
 	}
-	log.Fatal(http.ListenAndServe(addr, handler))
+	if err := serveGateway(addr, handler); err != nil {
+		log.Fatal("gateway server unavailable")
+	}
 }
 
 func newHandler(upstream, examples string) http.Handler {

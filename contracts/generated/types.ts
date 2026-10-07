@@ -515,3 +515,163 @@ export interface RecoveryComparisonUnsupportedResponse {
   reason: "invalid_quantity" | "invalid_timestamp" | "incomplete_snapshot" | "incomplete_assignment" | "unsupported_constraint" | "conflicting_snapshot" | "invalid_scope" | "incomplete_inventory" | "invalid_snapshot" | "incomplete_bom" | "incompatible_unit" | "incomplete_resource" | "incomplete_routing" | "incomplete_period" | "pre_as_of" | "invalid_period" | "overlapping_periods" | "incomplete_maintenance" | "incomplete_receipt" | "incomplete_order" | "resource_mismatch" | "workspace_mismatch" | "stale_plan_version" | "snapshot_mismatch" | "invalid_scenario" | "invalid_recovery" | "invalid_replacement" | "duplicate_replacement" | "unknown_receipt" | "stale_receipt";
   details: (string)[];
 }
+
+export interface VoiceHTTPSessionRequest {
+  contract_version: "0.2.0";
+  snapshot: ProductionSnapshot;
+}
+
+export interface VoiceHTTPCallArguments {
+  arrival_replacements: (ReceiptArrivalReplacement)[];
+  assignments: (ProductionAssignment)[];
+}
+
+export interface VoiceHTTPCall {
+  name: "compare_receipt_recovery";
+  arguments: VoiceHTTPCallArguments;
+}
+
+export interface VoiceHTTPTurnRequest {
+  contract_version: "0.2.0";
+  context_version: string;
+  call: VoiceHTTPCall;
+}
+
+export interface VoiceHTTPSessionResponse {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  snapshot_id: string;
+  plan_version: string;
+  scenario_id: string;
+  status: "created";
+}
+
+export interface VoiceHTTPTurnResponse {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  turn_id: string;
+  status: "accepted";
+}
+
+export interface VoiceHTTPCancelResponse {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  turn_id: string;
+  status: "cancelled";
+}
+
+export interface VoiceHTTPCloseResponse {
+  contract_version: "0.2.0";
+  session_id: string;
+  read_only: true;
+  synthetic: true;
+  status: "closed";
+}
+
+export interface VoiceHTTPToolOwnership {
+  session_id: string;
+  turn_id: string;
+}
+
+export interface VoiceHTTPComparedOutcome {
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  ownership: VoiceHTTPToolOwnership;
+  status: "compared";
+  result: ReceiptRecoveryComparison;
+}
+
+export interface VoiceHTTPUnsupportedResult {
+  status: "unsupported";
+  reason: string;
+  details: (string)[];
+}
+
+export interface VoiceHTTPUnsupportedOutcome {
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  ownership: VoiceHTTPToolOwnership;
+  status: "unsupported";
+  result: VoiceHTTPUnsupportedResult;
+}
+
+export interface VoiceHTTPClarificationOutcome {
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  ownership: VoiceHTTPToolOwnership;
+  status: "clarification_required";
+  reason: string;
+  missing_fields: (string)[];
+}
+
+export interface VoiceHTTPRejectedOutcome {
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  ownership: VoiceHTTPToolOwnership;
+  status: "rejected";
+  reason: string;
+}
+
+export interface VoiceHTTPUnavailableOutcome {
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  ownership: VoiceHTTPToolOwnership;
+  status: "unavailable";
+  reason: string;
+}
+
+export type VoiceHTTPOutcome = VoiceHTTPComparedOutcome | VoiceHTTPUnsupportedOutcome | VoiceHTTPClarificationOutcome | VoiceHTTPRejectedOutcome | VoiceHTTPUnavailableOutcome;
+
+export interface VoiceHTTPExecutionError {
+  code: "execution_unavailable";
+  message: string;
+}
+
+export interface VoiceHTTPPendingResult {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  turn_id: string;
+  state: "pending";
+}
+
+export interface VoiceHTTPReadyResult {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  turn_id: string;
+  state: "ready";
+  outcome: VoiceHTTPOutcome;
+}
+
+export interface VoiceHTTPFailedResult {
+  contract_version: "0.2.0";
+  session_id: string;
+  context_version: string;
+  context_fingerprint: string;
+  read_only: true;
+  synthetic: true;
+  turn_id: string;
+  state: "failed";
+  error: VoiceHTTPExecutionError;
+}
+
+export type VoiceHTTPResultResponse = VoiceHTTPPendingResult | VoiceHTTPReadyResult | VoiceHTTPFailedResult;

@@ -63,6 +63,8 @@ def _propose(doc: Document, mode: str, client) -> tuple[dict, str, dict]:
             return proposals, "gemini", {**detail, **record}
         except extract_gemini.GeminiUnavailable as exc:
             detail["fallback_reason"] = exc.reason
+            if exc.attempted:
+                detail.update({"call": exc.call, "attempted": True, "stage": exc.stage})
     return extract_rules.extract(doc), "rules", detail
 
 

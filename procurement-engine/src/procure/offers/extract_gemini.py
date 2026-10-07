@@ -30,11 +30,13 @@ Rules:
 - Every value must cite the locator in square brackets and an exact quote copied from that line or cell.
 - If a field is not stated, return an empty list for it. Do not infer, estimate or convert values.
 - If the document states two different values for a field, return both as separate candidates.
-- Segments marked {hidden} are not visible to a reader; never use them as evidence.
+- Segments marked {hidden}, including uncertain PDF visibility, are not reliable reader-visible
+  evidence; never use them as evidence.
 - Amounts are plain decimal strings without thousands separators, for example "9412.50".
 - Units are tonne, kg or lb (a metric ton or MT is tonne). Use "other" for anything else.
 - Dates are ISO YYYY-MM-DD. Currencies are ISO 4217 codes. Incoterm codes use Incoterms 2020.
 - For an index-linked price, set type "index_linked" with the index, averaging period and premium.
+  If a separate FX conversion clause is stated, copy it verbatim into fx_basis.
 """
 
 
@@ -87,6 +89,7 @@ class PricingValue(BaseModel):
     per_unit: Literal["tonne", "kg", "lb", "other"]
     index: str | None = None
     averaging_period: str | None = None
+    fx_basis: str | None = None
     evidence: list[Evidence]
 
 
@@ -114,15 +117,19 @@ class GeminiOffer(BaseModel):
 class GeminiUnavailable(RuntimeError):
     """Gemini cannot be used for this call; `reason` is a short machine-readable cause."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, *, call: str = "none", attempted: bool = False, stage: str | None = None):
         super().__init__(reason)
         self.reason = reason
+        self.call = call
+        self.attempted = attempted
+        self.stage = stage
 
 
 def render_segments(doc: Document) -> str:
     lines = []
     for s in doc.segments:
-        marks = " {hidden}" if {"low_visibility", "partly_low_visibility", "hidden_sheet", "hidden_row",
+        marks = " {hidden}" if {"low_visibility", "partly_low_visibility", "visibility_unverified",
+                                "hidden_sheet", "hidden_row",
                                 "hidden_column"} & set(s.flags) else ""
         marks += " {uncomputed formula}" if "formula_without_cached_value" in s.flags else ""
         lines.append(f"[{s.locator}]{marks} {s.text}")
@@ -168,6 +175,8 @@ def to_proposals(offer: GeminiOffer) -> dict:
             else:
                 value = {"type": "index_linked", "index": p.index, "averaging_period": p.averaging_period,
                          "premium": {"amount": p.amount, "currency": p.currency}, "per_unit": unit}
+                if p.fx_basis is not None:
+                    value["fx_basis"] = p.fx_basis
             pricing.append({"value": value, "evidence": _ev(p.evidence)})
         items.append({
             "description": [{"value": v.value, "evidence": _ev(v.evidence)} for v in it.description],
@@ -202,13 +211,13 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
     started = time.monotonic()
     try:
         resp = client.models.generate_content(model=model, contents=build_prompt(doc), config=config)
-    except Exception as exc:  # noqa: BLE001 - provider, quota or network failure
-        raise GeminiUnavailable(f"call_failed: {type(exc).__name__}: {exc}"[:300]) from exc
+    except Exception:  # noqa: BLE001 - provider, quota or network failure
+        raise GeminiUnavailable("call_failed", call=call_kind, attempted=True, stage="generate_content") from None
     latency_ms = round((time.monotonic() - started) * 1000)
     try:
         offer = GeminiOffer.model_validate(json.loads(resp.text))
-    except (ValidationError, ValueError, TypeError) as exc:
-        raise GeminiUnavailable(f"invalid_response: {str(exc)[:200]}") from exc
+    except (ValidationError, ValueError, TypeError):
+        raise GeminiUnavailable("invalid_response", call=call_kind, attempted=True, stage="response_validation") from None
     usage = getattr(resp, "usage_metadata", None)
     record = {"provider": "google-genai", "model": model, "call": call_kind, "latency_ms": latency_ms,
               "prompt_tokens": getattr(usage, "prompt_token_count", None),

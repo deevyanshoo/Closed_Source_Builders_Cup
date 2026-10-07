@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal, localcontext
 
 from ..documents import Document, Segment
 from ..settings import materials_config
@@ -504,7 +505,8 @@ def _ordered_months(text: str) -> list[str]:
 
 def _relative_validity(text: str) -> bool:
     """A date used as the anchor of a duration is not an expiry date."""
-    return bool(re.search(r"\b\d+\s+(?:calendar\s+)?(?:days?|weeks?|months?)\s+from\b", text, re.I))
+    return bool(re.search(r"\b\d+\s+(?:(?:calendar|business|working)\s+)?"
+                          r"(?:days?|weeks?|months?)\s+(?:from|after|following)\b", text, re.I))
 
 
 def _lot_line(fields, cell: Cell, decimal_comma: bool) -> None:
@@ -634,8 +636,10 @@ def _table_items(table: Table, roles, decimal_comma, price_props, fields) -> lis
                         q["period"] = (m.group(1) or _PERIOD_WORD[m.group(2).lower()]).lower() if m else None
                     _add(fields["min_order" if r == "moq" else "capacity"], proposal(q, c, h, extra))
         if "validity" in cells:
-            for d in sorted(nz.dates_in(cells["validity"][0].quote)):
-                _add(fields["valid_until"], proposal(d, cells["validity"][0]))
+            validity_cell = cells["validity"][0]
+            if not _relative_validity(validity_cell.quote):
+                for d in sorted(nz.dates_in(validity_cell.quote)):
+                    _add(fields["valid_until"], proposal(d, validity_cell))
         if "lead_time" in cells:
             c, h = cells["lead_time"]
             if re.fullmatch(r"\d+", c.quote.strip()) and "day" in h.quote.lower():
@@ -645,10 +649,15 @@ def _table_items(table: Table, roles, decimal_comma, price_props, fields) -> lis
         if len(qs) == 1:
             q, cells = qs[0]
             _add(item["quantity"], proposal(q, *cells))
-        elif len(qs) > 1 and len({q["unit"] for q, _ in qs}) == 1:
-            total = sum(nz.parse_decimal(q["amount"]) for q, _ in qs)
-            cells = [c for _, cs in qs for c in cs]
-            _add(item["quantity"], proposal({"amount": str(total), "unit": qs[0][0]["unit"]}, *cells))
+        elif 1 < len(qs) <= 256 and len({q["unit"] for q, _ in qs}) == 1:
+            amounts = [nz._bounded_decimal(q["amount"], allow_negative=False) for q, _ in qs]
+            if all(amount is not None for amount in amounts):
+                with localcontext() as context:
+                    context.prec = nz.ARITHMETIC_PRECISION
+                    total = sum(amounts, Decimal(0))
+                if nz._bounded_decimal(str(total), allow_negative=False) is not None:
+                    cells = [c for _, cs in qs for c in cs]
+                    _add(item["quantity"], proposal({"amount": str(total), "unit": qs[0][0]["unit"]}, *cells))
     if lot_rows:
         _add(fields["shipments"], {"value": [l for l, _ in lot_rows],
                                    "evidence": [c.ev() for _, cs in lot_rows for c in cs if c is not None]})

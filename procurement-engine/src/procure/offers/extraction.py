@@ -133,7 +133,13 @@ def assemble(doc: Document, proposals: dict, source: str, detail: dict, *, as_of
               for name, kind in FIELD_KINDS.items()}
     items = []
     for i, item_props in enumerate(proposals.get("items") or [{}]):
-        item = {key: resolve_field(doc, f"items[{i}].{key}", kind, item_props.get(key, []), source)
+        verified_siblings = {key: resolve_field(doc, f"items[{i}].{key}", ITEM_KINDS[key],
+                                                item_props.get(key, []), source)
+                             for key in ("description", "grade", "pricing")}
+        identity = tuple(verified_siblings[key].value if verified_siblings[key].status == "extracted" else None
+                         for key in ("description", "grade", "pricing"))
+        item = {key: (resolve_field(doc, f"items[{i}].quantity", kind, item_props.get(key, []), source,
+                                    item_identity=identity) if key == "quantity" else verified_siblings[key])
                 for key, kind in ITEM_KINDS.items()}
         item["material"] = _material(doc, f"items[{i}].material", item["description"], source)
         items.append(item)

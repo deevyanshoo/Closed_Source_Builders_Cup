@@ -15,7 +15,7 @@ import json
 import time
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from ..documents import Document
 from ..settings import assumptions, get_settings
@@ -216,10 +216,12 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
     latency_ms = round((time.monotonic() - started) * 1000)
     try:
         offer = GeminiOffer.model_validate(json.loads(resp.text))
-    except (ValidationError, ValueError, TypeError):
+        usage = getattr(resp, "usage_metadata", None)
+        prompt_tokens = getattr(usage, "prompt_token_count", None)
+        output_tokens = getattr(usage, "candidates_token_count", None)
+    except Exception:  # noqa: BLE001 - malformed SDK response or accessor failure
         raise GeminiUnavailable("invalid_response", call=call_kind, attempted=True, stage="response_validation") from None
-    usage = getattr(resp, "usage_metadata", None)
     record = {"provider": "google-genai", "model": model, "call": call_kind, "latency_ms": latency_ms,
-              "prompt_tokens": getattr(usage, "prompt_token_count", None),
-              "output_tokens": getattr(usage, "candidates_token_count", None)}
+              "prompt_tokens": prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else None,
+              "output_tokens": output_tokens if type(output_tokens) is int and output_tokens >= 0 else None}
     return to_proposals(offer), record

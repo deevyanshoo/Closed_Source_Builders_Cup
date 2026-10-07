@@ -63,6 +63,36 @@ def test_relative_validity_date_is_not_expiry_but_explicit_end_date_is():
     assert (absolute.fields["valid_until"].status, absolute.fields["valid_until"].value) == ("extracted", "2026-10-31")
 
 
+@pytest.mark.parametrize("anchor", ("from", "after", "following"))
+@pytest.mark.parametrize("route", ("labelled", "free_text", "table"))
+def test_relative_validity_anchor_never_becomes_expiry(anchor, route):
+    relative = f"30 days {anchor} 1 October 2026"
+    if route == "labelled":
+        source = f"Label,Value\nValidity,{relative}\n"
+    elif route == "free_text":
+        source = f"Label,Value\nNote,This offer is valid for {relative}\n"
+    else:
+        source = ("Product,Price,Currency,Price unit,Validity\n"
+                  f"Copper,10,USD,tonne,{relative}\n")
+    offer = _rules(source)
+    assert (offer.fields["valid_until"].status, offer.fields["valid_until"].value) == ("missing", None)
+    assert offer.normalized["expiry"] == "unknown"
+
+
+@pytest.mark.parametrize("route", ("labelled", "free_text", "table"))
+def test_explicit_end_date_remains_supported_in_each_route(route):
+    if route == "labelled":
+        source = "Label,Value\nValid until,31 October 2026\n"
+    elif route == "free_text":
+        source = "Label,Value\nNote,This offer is valid until 31 October 2026\n"
+    else:
+        source = ("Product,Price,Currency,Price unit,Validity\n"
+                  "Copper,10,USD,tonne,Valid until 31 October 2026\n")
+    offer = _rules(source)
+    assert (offer.fields["valid_until"].status, offer.fields["valid_until"].value) == ("extracted", "2026-10-31")
+    assert offer.normalized["expiry"] == "valid"
+
+
 def test_same_price_different_grades_keep_distinct_row_quantities():
     offer = _rules("Product,Grade,Quantity,Unit,Price,Currency,Price unit\n"
                    "Copper cathode,Grade A,50,tonne,10,USD,tonne\n"
@@ -75,6 +105,18 @@ def test_same_price_different_grades_keep_distinct_row_quantities():
     assert "r2:c3" in {e.locator for e in offer.items[0]["quantity"].evidence}
     assert "r3:c3" in {e.locator for e in offer.items[1]["quantity"].evidence}
     assert "r3:c3" not in {e.locator for e in offer.items[0]["quantity"].evidence}
+
+
+def test_same_identity_large_quantity_total_is_exact():
+    offer = _rules("product,grade,qty,qty_unit,price,price_currency,price_unit\n"
+                   "Copper cathode,Grade A,10000000000000000000000000000,tonne,10,USD,tonne\n"
+                   "Copper cathode,Grade A,1,tonne,10,USD,tonne\n")
+    assert len(offer.items) == 1
+    quantity = offer.items[0]["quantity"]
+    assert (quantity.status, quantity.value) == (
+        "extracted", {"amount": "10000000000000000000000000001", "unit": "tonne"})
+    assert {"r2:c3", "r3:c3"} <= {e.locator for e in quantity.evidence}
+    assert offer.normalized["items"][0]["quantity"]["kg"] == "10000000000000000000000000001000"
 
 
 def test_q14_keeps_index_average_and_fx_clause_separate():
@@ -148,6 +190,61 @@ class _FailingModels:
 class _FailingClient:
     def __init__(self):
         self.models = _FailingModels()
+
+
+class _ReturningModels:
+    def __init__(self, response):
+        self.response = response
+        self.calls = 0
+
+    def generate_content(self, **kwargs):
+        self.calls += 1
+        return self.response
+
+
+class _ReturningClient:
+    def __init__(self, response):
+        self.models = _ReturningModels(response)
+
+
+class _BrokenText:
+    @property
+    def text(self):
+        raise RuntimeError("secret-token response-text")
+
+
+class _BrokenUsage:
+    def __init__(self, text):
+        self.text = text
+
+    @property
+    def usage_metadata(self):
+        raise RuntimeError("secret-token usage-metadata")
+
+
+@pytest.mark.parametrize("response_kind", ("absent", "text_accessor", "usage_accessor"))
+def test_malformed_mocked_response_falls_back_with_safe_attempt_record(monkeypatch, response_kind):
+    from procure.settings import reset_caches
+
+    payload = {name: [] for name in extract_gemini.GeminiOffer.model_fields}
+    response = {"absent": None, "text_accessor": _BrokenText(),
+                "usage_accessor": _BrokenUsage(json.dumps(payload))}[response_kind]
+    monkeypatch.setenv("OFFLINE", "0")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-not-real")
+    reset_caches()
+    try:
+        client = _ReturningClient(response)
+        offer = extract_offer(_pdf_with_hidden_instruction(), mode="gemini", as_of=AS_OF,
+                              client=client, rate_lookup=_no_rate)
+        assert client.models.calls == 1
+        assert offer.extractor == "rules"
+        assert offer.extractor_detail["call"] == "mocked"
+        assert offer.extractor_detail["attempted"] is True
+        assert offer.extractor_detail["stage"] == "response_validation"
+        assert offer.extractor_detail["fallback_reason"] == "invalid_response"
+        assert "secret-token" not in json.dumps(offer.to_dict())
+    finally:
+        reset_caches()
 
 
 def test_failed_mocked_model_attempt_is_audited_without_exception_text(monkeypatch):

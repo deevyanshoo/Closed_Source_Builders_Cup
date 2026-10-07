@@ -106,6 +106,7 @@ export class VoiceController {
   private cleanupBarrier: Promise<void> = Promise.resolve();
   private readonly retired: Run[] = [];
   private cleanupFailed = false;
+  private cleanupFailure?: unknown;
   private disposed = false;
   private modified = false;
   constructor(options: Options = {}) { this.transport = options.transport ?? ((input, init) => globalThis.fetch(input, init)); this.loadSession = options.loadSession ?? fetchSession; this.pause = options.pause ?? defaultPause; this.now = options.now ?? Date.now; this.requestTimeoutMs = options.requestTimeoutMs ?? 12000; }
@@ -174,7 +175,8 @@ export class VoiceController {
     if (failure) throw new VoiceError('Could not confirm cleanup of the previous local session. Check the session before continuing.', 'cleanup');
     run.session = undefined; run.turn = undefined;
   }
-  private async drainRetired(): Promise<void> {
+  private async drainRetired(explicitRetry = false): Promise<void> {
+    if (this.cleanupFailed && !explicitRetry) throw this.cleanupFailure ?? new VoiceError('Could not confirm cleanup of the previous local session.', 'cleanup');
     try {
       while (this.retired.length) {
         const run = this.retired[0];
@@ -183,7 +185,8 @@ export class VoiceController {
         this.retired.shift();
       }
       this.cleanupFailed = false;
-    } catch (error) { this.cleanupFailed = true; throw error; }
+      this.cleanupFailure = undefined;
+    } catch (error) { this.cleanupFailed = true; this.cleanupFailure = error; throw error; }
   }
   private retire(kind: VoiceKind): Promise<void> {
     ++this.generation; this.identityAbort?.abort();
@@ -199,7 +202,7 @@ export class VoiceController {
     this.emit({ identity: undefined, base: undefined });
     try {
       if (retryFailedCleanup) {
-        this.cleanupBarrier = cleanup.catch(() => {}).then(() => this.drainRetired());
+        this.cleanupBarrier = cleanup.catch(() => {}).then(() => this.drainRetired(true));
         await this.cleanupBarrier;
       } else await cleanup;
       if (generation !== this.generation || this.disposed) return;
@@ -279,7 +282,10 @@ export class VoiceController {
       const kind = error instanceof VoiceError ? error.kind : 'unavailable';
       if (kind === 'session') this.signedOut(error instanceof VoiceError ? error.message : undefined);
       else { this.clear(kind === 'capacity' ? 'capacity' : kind === 'expired' ? 'expired' : kind === 'validation' ? 'failed' : 'unavailable'); this.emit({ message: error instanceof VoiceError ? error.message : 'Local comparison unavailable.' }); }
-      try { await this.cleanup(run); } catch (cleanupError) { this.emit({ kind: 'failed', message: cleanupError instanceof Error ? cleanupError.message : 'Cleanup failed.' }); }
+      try { await this.cleanup(run); } catch (cleanupError) {
+        this.cleanupFailed = true; this.cleanupFailure = cleanupError;
+        this.emit({ kind: 'failed', message: cleanupError instanceof Error ? cleanupError.message : 'Cleanup failed.' });
+      }
     }
   }
   async run(): Promise<void> {

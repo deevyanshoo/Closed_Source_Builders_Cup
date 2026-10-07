@@ -269,6 +269,36 @@ describe('typed voice lifecycle ownership', () => {
     await controller.refreshIdentity();
     expect({ creates, deletes, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 3, kind: 'idle' });
   });
+  it('blocks direct run after execute cleanup fails until explicit identity refresh', async () => {
+    let creates = 0; let deletes = 0; let checks = 0;
+    const events: string[] = [];
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/voice/sessions' && init?.method === 'POST') {
+        creates++; events.push('create');
+        return creates === 1 ? json(created(), 201) : json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503);
+      }
+      if (path.endsWith('/turns') && init?.method === 'POST') return json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503);
+      if (init?.method === 'DELETE') {
+        deletes++; events.push('delete');
+        return deletes === 1 ? json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503)
+          : json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' });
+      }
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => { checks++; return identity; } });
+    await controller.refreshIdentity(); await controller.run();
+    expect({ creates, deletes, checks, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 1, checks: 3, kind: 'failed' });
+    expect(controller.state.session).toBeUndefined();
+    expect(controller.state.comparison).toBeUndefined();
+    await controller.run();
+    expect({ creates, deletes, checks }).toEqual({ creates: 1, deletes: 1, checks: 3 });
+    await controller.refreshIdentity();
+    expect({ creates, deletes, checks, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 2, checks: 4, kind: 'idle' });
+    await controller.run();
+    expect(creates).toBe(2);
+    expect(events).toEqual(['create', 'delete', 'delete', 'create']);
+  });
   it('hides a ready result when the owner changes during the final identity check', async () => {
     const ready = JSON.parse(resultRaw) as Record<string, unknown> & { outcome: { ownership: { session_id: string } } };
     ready.session_id = id; ready.context_version = version; ready.context_fingerprint = fingerprint; ready.outcome.ownership.session_id = id;

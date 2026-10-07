@@ -171,6 +171,7 @@ type SessionResponse struct {
   WorkspaceId string `json:"workspace_id"`
   Role string `json:"role"`
   DevelopmentOnly bool `json:"development_only"`
+  IdentityMode *string `json:"identity_mode,omitempty"`
 }
 
 type ReadinessResponse struct {
@@ -309,4 +310,209 @@ type AuditResponse struct {
 type StateErrorResponse struct {
   ContractVersion string `json:"contract_version"`
   Error SemanticError `json:"error"`
+}
+
+type ProductionInventoryComponent struct {
+  ComponentId string `json:"component_id"`
+  Unit string `json:"unit"`
+  StartingStock string `json:"starting_stock"`
+  StockAsOf string `json:"stock_as_of"`
+}
+
+type ProductionBomComponent struct {
+  ComponentId string `json:"component_id"`
+  Unit string `json:"unit"`
+  QuantityPerOutputUnit string `json:"quantity_per_output_unit"`
+}
+
+type ProductionProduct struct {
+  ProductId string `json:"product_id"`
+  OutputUnit string `json:"output_unit"`
+  Bom []ProductionBomComponent `json:"bom"`
+}
+
+type ProductionRouting struct {
+  ProductId string `json:"product_id"`
+  ResourceId string `json:"resource_id"`
+  OutputUnit string `json:"output_unit"`
+  RunSecondsPerOutputUnit string `json:"run_seconds_per_output_unit"`
+}
+
+type ProductionResource struct {
+  ResourceId string `json:"resource_id"`
+  CapacityModel string `json:"capacity_model"`
+}
+
+type ProductionPeriod struct {
+  PeriodId string `json:"period_id"`
+  ResourceId string `json:"resource_id"`
+  Start string `json:"start"`
+  End string `json:"end"`
+}
+
+type ProductionMaintenance struct {
+  MaintenanceId string `json:"maintenance_id"`
+  ResourceId string `json:"resource_id"`
+  Start string `json:"start"`
+  End string `json:"end"`
+}
+
+type ProductionReceipt struct {
+  ReceiptId string `json:"receipt_id"`
+  ComponentId string `json:"component_id"`
+  Unit string `json:"unit"`
+  Quantity string `json:"quantity"`
+  ArrivalAt string `json:"arrival_at"`
+}
+
+type ProductionOrder struct {
+  OrderId string `json:"order_id"`
+  ProductId string `json:"product_id"`
+  OutputUnit string `json:"output_unit"`
+  OutputQuantity string `json:"output_quantity"`
+  ResourceId string `json:"resource_id"`
+  DueAt string `json:"due_at"`
+}
+
+type ProductionAssignment struct {
+  OrderId string `json:"order_id"`
+  PeriodId string `json:"period_id"`
+}
+
+type ProductionSnapshot struct {
+  WorkspaceId string `json:"workspace_id"`
+  PlanVersion string `json:"plan_version"`
+  SnapshotId string `json:"snapshot_id"`
+  AsOf string `json:"as_of"`
+  Synthetic bool `json:"synthetic"`
+  Inventory []ProductionInventoryComponent `json:"inventory"`
+  Products []ProductionProduct `json:"products"`
+  Routings []ProductionRouting `json:"routings"`
+  Resources []ProductionResource `json:"resources"`
+  Periods []ProductionPeriod `json:"periods"`
+  Maintenance []ProductionMaintenance `json:"maintenance"`
+  Receipts []ProductionReceipt `json:"receipts"`
+  Orders []ProductionOrder `json:"orders"`
+  BaselineAssignments []ProductionAssignment `json:"baseline_assignments"`
+}
+
+type ReceiptArrivalReplacement struct {
+  ReceiptId string `json:"receipt_id"`
+  ExpectedArrivalAt string `json:"expected_arrival_at"`
+  ArrivalAt string `json:"arrival_at"`
+}
+
+type ReceiptArrivalScenario struct {
+  WorkspaceId string `json:"workspace_id"`
+  ExpectedPlanVersion string `json:"expected_plan_version"`
+  SourceSnapshotId string `json:"source_snapshot_id"`
+  ScenarioId string `json:"scenario_id"`
+  Synthetic bool `json:"synthetic"`
+  ArrivalReplacements []ReceiptArrivalReplacement `json:"arrival_replacements"`
+}
+
+type RecoveryAssignment struct {
+  WorkspaceId string `json:"workspace_id"`
+  ExpectedPlanVersion string `json:"expected_plan_version"`
+  SourceSnapshotId string `json:"source_snapshot_id"`
+  ScenarioId string `json:"scenario_id"`
+  Synthetic bool `json:"synthetic"`
+  Assignments []ProductionAssignment `json:"assignments"`
+}
+
+type RecoveryComparisonRequest struct {
+  ContractVersion string `json:"contract_version"`
+  Snapshot ProductionSnapshot `json:"snapshot"`
+  Scenario ReceiptArrivalScenario `json:"scenario"`
+  Recovery RecoveryAssignment `json:"recovery"`
+}
+
+type ProductionMaterialDemand struct {
+  ComponentId string `json:"component_id"`
+  Unit string `json:"unit"`
+  Quantity string `json:"quantity"`
+  Used string `json:"used"`
+  Shortfall string `json:"shortfall"`
+  RemainingStock string `json:"remaining_stock"`
+}
+
+type ProductionOrderScreen struct {
+  OrderId string `json:"order_id"`
+  ProductId string `json:"product_id"`
+  OutputUnit string `json:"output_unit"`
+  OutputQuantity string `json:"output_quantity"`
+  ResourceId string `json:"resource_id"`
+  PeriodId string `json:"period_id"`
+  MaterialRequiredAt string `json:"material_required_at"`
+  ModeledCompletionAt string `json:"modeled_completion_at"`
+  DueAt string `json:"due_at"`
+  Demands []ProductionMaterialDemand `json:"demands"`
+  MaterialPass bool `json:"material_pass"`
+  ModeledDuePass bool `json:"modeled_due_pass"`
+  LateBySeconds string `json:"late_by_seconds"`
+}
+
+type ProductionCapacityScreen struct {
+  ResourceId string `json:"resource_id"`
+  PeriodId string `json:"period_id"`
+  NominalSeconds string `json:"nominal_seconds"`
+  BlockedSeconds string `json:"blocked_seconds"`
+  AvailableSeconds string `json:"available_seconds"`
+  WorkloadSeconds string `json:"workload_seconds"`
+  ExcessSeconds string `json:"excess_seconds"`
+  RemainingSeconds string `json:"remaining_seconds"`
+  CapacityPass bool `json:"capacity_pass"`
+}
+
+type ProductionMaterialBalance struct {
+  ComponentId string `json:"component_id"`
+  Unit string `json:"unit"`
+  StartingStock string `json:"starting_stock"`
+  EndingStock string `json:"ending_stock"`
+}
+
+type ProductionScheduleScreen struct {
+  Orders []ProductionOrderScreen `json:"orders"`
+  Capacity []ProductionCapacityScreen `json:"capacity"`
+  MaterialBalances []ProductionMaterialBalance `json:"material_balances"`
+  MaterialBalanceEndAt string `json:"material_balance_end_at"`
+  ModeledChecksPass bool `json:"modeled_checks_pass"`
+  FailedChecks []string `json:"failed_checks"`
+}
+
+type ReceiptArrivalChange struct {
+  ReceiptId string `json:"receipt_id"`
+  BeforeArrivalAt string `json:"before_arrival_at"`
+  AfterArrivalAt string `json:"after_arrival_at"`
+}
+
+type ReceiptRecoveryComparison struct {
+  Status string `json:"status"`
+  Synthetic bool `json:"synthetic"`
+  WorkspaceId string `json:"workspace_id"`
+  PlanVersion string `json:"plan_version"`
+  SnapshotId string `json:"snapshot_id"`
+  ScenarioId string `json:"scenario_id"`
+  AsOf string `json:"as_of"`
+  ModeledChecks []string `json:"modeled_checks"`
+  UnmodeledConstraints []string `json:"unmodeled_constraints"`
+  OriginalBaseline ProductionScheduleScreen `json:"original_baseline"`
+  DisruptedBaseline ProductionScheduleScreen `json:"disrupted_baseline"`
+  Recovery ProductionScheduleScreen `json:"recovery"`
+  ReceiptChanges []ReceiptArrivalChange `json:"receipt_changes"`
+  PotentiallyExposedOrderIds []string `json:"potentially_exposed_order_ids"`
+  DisruptionChangedOrderIds []string `json:"disruption_changed_order_ids"`
+  RecoveryChangedOrderIds []string `json:"recovery_changed_order_ids"`
+}
+
+type RecoveryComparisonResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Comparison ReceiptRecoveryComparison `json:"comparison"`
+}
+
+type RecoveryComparisonUnsupportedResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Status string `json:"status"`
+  Reason string `json:"reason"`
+  Details []string `json:"details"`
 }

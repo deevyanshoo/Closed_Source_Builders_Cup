@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,7 +11,6 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,33 +34,33 @@ var countryRE = regexp.MustCompile(`^[A-Z]{2}$`)
 var numericRE = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 func main() {
-	upstream := os.Getenv("PYTHON_SERVICE_URL")
-	if upstream == "" {
-		upstream = "http://127.0.0.1:8016"
+	cfg, addr, err := runtimeFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatal("invalid gateway configuration")
 	}
-	addr := os.Getenv("GATEWAY_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:8816"
+	var handler http.Handler
+	if cfg.Mode == "private_machine" {
+		handler, err = newPrivateStateHandler(cfg)
+		if err != nil {
+			log.Fatal("private gateway configuration unavailable")
+		}
+	} else {
+		if cfg.AssetsDir != "" {
+			if _, err := newAssetsHandler(cfg.AssetsDir); err != nil {
+				log.Fatal("production assets unavailable")
+			}
+		}
+		handler = newStateHandler(cfg)
 	}
-	examples := os.Getenv("CONTRACT_EXAMPLES_DIR")
-	if examples == "" {
-		examples = "../../contracts/examples"
-	}
-	u, e := url.Parse(upstream)
-	if e != nil || u.Scheme != "http" || u.Host == "" || u.User != nil {
-		log.Fatal("invalid PYTHON_SERVICE_URL")
-	}
-	log.Fatal(http.ListenAndServe(addr, newStateHandler(stateConfig{
-		DBURLFile:      os.Getenv("DATABASE_URL_FILE"),
-		IdentitiesFile: os.Getenv("DEV_IDENTITIES_FILE"),
-		AllowedOrigin:  os.Getenv("DEV_ALLOWED_ORIGIN"),
-		Upstream:       strings.TrimRight(upstream, "/"), Examples: examples,
-	})))
+	log.Fatal(http.ListenAndServe(addr, handler))
 }
 
 func newHandler(upstream, examples string) http.Handler {
+	return newHandlerWithClient(upstream, examples, &http.Client{Timeout: 8 * time.Second})
+}
+
+func newHandlerWithClient(upstream, examples string, client *http.Client) http.Handler {
 	m := http.NewServeMux()
-	client := &http.Client{Timeout: 8 * time.Second}
 	m.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			http.Error(w, "method not allowed", 405)
@@ -95,7 +95,7 @@ func newHandler(upstream, examples string) http.Handler {
 			http.Error(w, "method not allowed", 405)
 			return
 		}
-		body, status, e := fetch(client, upstream, "GET", "/materials", nil)
+		body, status, e := fetch(r.Context(), client, upstream, "GET", "/materials", nil)
 		if e != nil || status >= 500 {
 			write(w, 200, contract.MaterialsResponse{ContractVersion: version, Availability: contract.Availability{Code: "provider_unavailable", Reason: "Material catalog service unavailable"}, Materials: []contract.Material{}})
 			return
@@ -172,8 +172,8 @@ func decodeUpstream(b []byte, v any) error {
 	}
 	return nil
 }
-func fetch(c *http.Client, base, method, path string, payload []byte) ([]byte, int, error) {
-	req, e := http.NewRequest(method, base+path, bytes.NewReader(payload))
+func fetch(ctx context.Context, c *http.Client, base, method, path string, payload []byte) ([]byte, int, error) {
+	req, e := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(payload))
 	if e != nil {
 		return nil, 0, e
 	}
@@ -310,7 +310,7 @@ func recommend(w http.ResponseWriter, r *http.Request, c *http.Client, upstream 
 		legacy["max_budget_inr"] = json.Number(q.Budget.Amount)
 	}
 	payload, _ := json.Marshal(legacy)
-	body, status, e := fetch(c, upstream, "POST", "/recommend", payload)
+	body, status, e := fetch(r.Context(), c, upstream, "POST", "/recommend", payload)
 	if e != nil || status >= 500 {
 		writeError(w, 503, "provider_unavailable", "Recommendation service unavailable", "")
 		return

@@ -82,6 +82,12 @@ waited and reaped. The mapper does not execute tools. The unchanged Runner and
 fixed Python numerical child retain host binding/currentness and strict result
 validation. Database checks use bounded existing revision guards without
 holding the voice registry mutex across database waits or child execution.
+The final proposal publication guard remains held through internal outcome
+acceptance. Polling exposes pending until its bounded database close succeeds;
+a failed close clears the cached outcome. Replacement and cancellation clear
+that publication state for their own lease. The registry mutex is released
+before database close, preserving cancel/close availability. Public transport
+selection and write semantics remain as documented above.
 
 Evidence for this increment must separately identify authenticated loopback
 HTTP, injected server proposals, actual installed SDK mapping and actual fixed

@@ -66,6 +66,7 @@ type voiceRecord struct {
 	productionRef                                               *contract.ProductionContextRef
 	accepted, turnAccepted                                      bool
 	stale                                                       bool
+	proposalPublishing                                          bool
 }
 type voiceHTTPAdapter struct {
 	mu              sync.Mutex
@@ -555,6 +556,7 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	s.lease = lease
 	s.state = "pending"
 	s.turnAccepted = ref == nil
+	s.proposalPublishing = false
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": lease.TurnID(), "status": "accepted"}
@@ -615,6 +617,7 @@ func (a *voiceHTTPAdapter) releaseBeforeAcceptance(owner voice.Owner, id string,
 		s.lease = nil
 		s.state = ""
 		s.turnAccepted = false
+		s.proposalPublishing = false
 		s.outcome = nil
 	}
 	a.mu.Unlock()
@@ -648,33 +651,46 @@ func (a *voiceHTTPAdapter) run(owner voice.Owner, id string, lease *voice.Lease,
 	a.acceptOutputLocked(s, output)
 }
 
-// proposalCurrent checks the lease on both sides of the DB read. The row-share
-// transaction is kept short; publication performs a separate fresh check.
-func (a *voiceHTTPAdapter) proposalCurrent(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) error {
+// proposalGuard checks current ownership before a fresh saved-context read.
+// Callers recheck the lease after the read and close the row-share guard outside a.mu.
+func (a *voiceHTTPAdapter) proposalGuard(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) (*productionGuard, error) {
 	a.mu.Lock()
 	s := a.currentLocked(owner, id)
 	current := s == expected && s != nil && s.lease == lease && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease)
 	a.mu.Unlock()
 	if !current {
-		return voice.ErrUnavailable
+		return nil, voice.ErrUnavailable
 	}
 	if ref == nil || a.production == nil {
-		return voice.ErrExecution
+		return nil, voice.ErrExecution
 	}
 	guard, _, code := a.production.guardProduction(ctx, p, *ref)
 	if code == 404 || code == 409 {
 		a.staleRecord(owner, id, expected)
-		return voice.ErrUnavailable
+		return nil, voice.ErrUnavailable
 	}
 	if code != 0 {
-		return voice.ErrExecution
+		return nil, voice.ErrExecution
+	}
+	if ctx.Err() != nil || guard.ctx.Err() != nil {
+		guard.rollback()
+		return nil, voice.ErrUnavailable
+	}
+	return guard, nil
+}
+
+// The source and mapper preflights release their guards before slow work.
+func (a *voiceHTTPAdapter) proposalCurrent(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) error {
+	guard, err := a.proposalGuard(ctx, p, owner, id, lease, ref, expected)
+	if err != nil {
+		return err
 	}
 	if err := guard.close(); err != nil {
 		return voice.ErrExecution
 	}
 	a.mu.Lock()
-	s = a.currentLocked(owner, id)
-	current = s == expected && s.lease == lease && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease)
+	s := a.currentLocked(owner, id)
+	current := s == expected && s != nil && s.lease == lease && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease) && ctx.Err() == nil
 	a.mu.Unlock()
 	if !current {
 		return voice.ErrUnavailable
@@ -698,26 +714,50 @@ func (a *voiceHTTPAdapter) runProposal(owner voice.Owner, id string, lease *voic
 	if err == nil {
 		err = a.runner.Run(owner, lease, capture, call)
 	}
+	var publicationGuard *productionGuard
 	if err == nil {
-		err = a.proposalCurrent(lease.Context(), p, owner, id, lease, ref, expected)
+		publicationGuard, err = a.proposalGuard(lease.Context(), p, owner, id, lease, ref, expected)
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	s := a.currentLocked(owner, id)
 	if s == nil || s != expected || s.lease != lease || a.closed || !a.manager.IsCurrent(owner, lease) || s.state != "pending" {
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
 		return
 	}
-	if err != nil {
+	if err != nil || (publicationGuard != nil && publicationGuard.ctx.Err() != nil) || lease.Context().Err() != nil {
 		s.state = "failed"
 		s.last = a.clock.Load().(time.Time)
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
 		return
 	}
 	output, ready, dequeueErr := a.manager.Dequeue(owner, id)
 	if dequeueErr != nil || !ready {
 		s.state = "failed"
+		a.mu.Unlock()
+		publicationGuard.rollback()
 		return
 	}
 	a.acceptOutputLocked(s, output)
+	if s.state == "ready" {
+		s.proposalPublishing = true
+	}
+	a.mu.Unlock()
+	closeErr := publicationGuard.close()
+	a.mu.Lock()
+	if current := a.currentLocked(owner, id); current == s && s.lease == lease && s.proposalPublishing {
+		if closeErr != nil {
+			s.outcome = nil
+			s.state = "failed"
+		}
+		s.proposalPublishing = false
+	}
+	a.mu.Unlock()
 }
 func (a *voiceHTTPAdapter) acceptOutputLocked(s *voiceRecord, output voice.Output) {
 	if s.lease == nil || output.TurnID != s.lease.TurnID() || len(output.Payload) > voiceOutcomeLimit {
@@ -767,6 +807,7 @@ func (a *voiceHTTPAdapter) cancelTurn(w http.ResponseWriter, r *http.Request, p 
 	s.lease = nil
 	s.state = ""
 	s.turnAccepted = false
+	s.proposalPublishing = false
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "status": "cancelled"}
@@ -849,14 +890,18 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		}
 	}
 	s.last = now
-	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": s.state}
+	publicState := s.state
+	if a.proposalMode && s.proposalPublishing {
+		publicState = "pending"
+	}
+	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": publicState}
 	if ref != nil {
 		response["production_context_ref"] = *ref
 	}
-	if s.state == "ready" {
+	if publicState == "ready" {
 		response["outcome"] = append(json.RawMessage(nil), s.outcome...)
 	}
-	if s.state == "failed" {
+	if publicState == "failed" {
 		response["error"] = map[string]string{"code": "execution_unavailable", "message": "Local voice execution unavailable"}
 	}
 	a.mu.Unlock()

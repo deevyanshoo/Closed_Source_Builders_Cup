@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"closedsource/gateway/internal/voice"
+	"github.com/jackc/pgx/v5"
 )
 
 // The source is constructed on the server, from an offline SDK projection.
@@ -198,6 +199,166 @@ func TestProposalGatewayRevisionChangeDuringNumericalExecutionPreventsPublicatio
 	}
 }
 
+func TestProposalGatewayPublicationGuardRetainedUntilInternalAcceptance(t *testing.T) {
+	python := os.Getenv("VOICE_LOCAL_PYTHON")
+	if python == "" {
+		t.Skip("trusted offline Python path unset")
+	}
+	h, db := productionTestHandler(t)
+	state := h.(*stateServer)
+	sourcePath, err := filepath.Abs("../../procurement-engine/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := voice.LocalPythonConfig{PythonPath: python, SourcePath: sourcePath}
+	fixed, err := voice.NewLocalPythonExecutor(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapper, err := voice.NewLocalPythonProposalMapper(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := make(chan struct{})
+	resume := make(chan struct{})
+	var resumeOnce sync.Once
+	executor := voiceExecutorFunc(func(ctx context.Context, request []byte) ([]byte, error) {
+		close(reached)
+		<-resume
+		return fixed.Execute(ctx, request)
+	})
+	adapter, err := newVoiceHTTPAdapterWithProposal(executor, proposalFixtureSource(t), mapper, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.voice = adapter
+	adapter.production = state
+	t.Cleanup(func() { resumeOnce.Do(func() { close(resume) }); _ = adapter.Shutdown(context.Background()) })
+	var fixture map[string]any
+	if err := json.Unmarshal(voiceFixture(t, "voice_http_recovery_session.json"), &fixture); err != nil {
+		t.Fatal(err)
+	}
+	created := productionCall(state, "POST", "/v2/workspaces/W/production-contexts", "editor", map[string]any{"contract_version": stateVersion, "snapshot": fixture["snapshot"]})
+	if created.Code != 201 {
+		t.Fatalf("context create %d %s", created.Code, created.Body.String())
+	}
+	contextID := voiceConnectedJSON(t, created.Body.Bytes())["context"].(map[string]any)["context_id"].(string)
+	t.Cleanup(func() {
+		_, _ = db.Exec(context.Background(), `DELETE FROM cs_production_contexts.contexts WHERE context_id=$1`, contextID)
+	})
+	saved := productionCall(state, "POST", savedVoicePath, "viewer", map[string]any{"contract_version": stateVersion, "context_id": contextID, "expected_revision": 1})
+	if saved.Code != 201 {
+		t.Fatalf("saved create %d %s", saved.Code, saved.Body.String())
+	}
+	session := voiceConnectedJSON(t, saved.Body.Bytes())
+	id := session["session_id"].(string)
+	turn := productionCall(state, "POST", voicePath+"/"+id+"/turns", "viewer", voiceConnectedJSON(t, voiceTurnBody(t, session["context_version"].(string))))
+	if turn.Code != 202 {
+		t.Fatalf("turn %d %s", turn.Code, turn.Body.String())
+	}
+	turnID := voiceConnectedJSON(t, turn.Body.Bytes())["turn_id"].(string)
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("executor did not reach gate")
+	}
+	lockConn, err := pgx.ConnectConfig(context.Background(), state.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockConn.Close(context.Background())
+	lockTx, err := lockConn.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rowReleased := false
+	defer func() {
+		if !rowReleased {
+			_ = lockTx.Rollback(context.Background())
+		}
+	}()
+	if _, err := lockTx.Exec(context.Background(), `UPDATE cs_production_contexts.contexts SET updated_at=updated_at WHERE context_id=$1`, contextID); err != nil {
+		t.Fatal(err)
+	}
+	resumeOnce.Do(func() { close(resume) })
+	guardWaiting := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		var waiting int
+		if err := db.QueryRow(context.Background(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT revision,snapshot FROM cs_production_contexts.contexts%FOR SHARE'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			guardWaiting = true
+			break
+		}
+	}
+	if !guardWaiting {
+		t.Fatal("final saved-context guard did not wait on task row lock")
+	}
+	adapter.mu.Lock()
+	mutexHeld := true
+	defer func() {
+		if mutexHeld {
+			adapter.mu.Unlock()
+		}
+	}()
+	if err := lockTx.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rowReleased = true
+	guardReleasedFromWait := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		var waiting int
+		if err := db.QueryRow(context.Background(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT revision,snapshot FROM cs_production_contexts.contexts%FOR SHARE'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 0 {
+			guardReleasedFromWait = true
+			break
+		}
+	}
+	if !guardReleasedFromWait {
+		t.Fatal("final guard did not acquire row after release")
+	}
+	updateDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		updateDone <- productionCall(state, "PUT", "/v2/production-contexts/"+contextID, "editor", map[string]any{"contract_version": stateVersion, "expected_revision": 1, "snapshot": fixture["snapshot"]})
+	}()
+	blocked := false
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		select {
+		case result := <-updateDone:
+			t.Fatalf("revision update committed before internal acceptance: status=%d", result.Code)
+		default:
+		}
+		var waiting int
+		if err := db.QueryRow(context.Background(), `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'UPDATE cs_production_contexts.contexts SET revision=revision+1%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			blocked = true
+			break
+		}
+	}
+	if !blocked {
+		t.Fatal("revision update did not wait on retained publication guard")
+	}
+	adapter.mu.Unlock()
+	mutexHeld = false
+	select {
+	case result := <-updateDone:
+		if result.Code != 200 {
+			t.Fatalf("revision update after acceptance %d %s", result.Code, result.Body.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("revision update stayed blocked after acceptance")
+	}
+	result := productionCall(state, "GET", voicePath+"/"+id+"/turns/"+turnID+"/result", "viewer", nil)
+	if result.Code != 409 {
+		t.Fatalf("committed newer revision remained public %d %s", result.Code, result.Body.String())
+	}
+}
+
 func TestProposalGatewayUnavailableInvalidTimeoutAndCleanup(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -264,6 +425,32 @@ func TestProposalGatewayUnavailableInvalidTimeoutAndCleanup(t *testing.T) {
 			}
 			if !bytes.Contains(failed.Body.Bytes(), []byte(`"code":"execution_unavailable"`)) || numericalCalls.Load() != 0 {
 				t.Fatalf("failure leaked or executed %s calls=%d", failed.Body.String(), numericalCalls.Load())
+			}
+			if tc.name == "unavailable source" {
+				// Reproduce an old worker between internal acceptance and guard close.
+				// The next lease must not inherit its publication marker.
+				adapter.mu.Lock()
+				adapter.sessions[id].proposalPublishing = true
+				adapter.mu.Unlock()
+				replacement := productionCall(state, "POST", voicePath+"/"+id+"/turns", "viewer", voiceConnectedJSON(t, voiceTurnBody(t, session["context_version"].(string))))
+				if replacement.Code != 202 {
+					t.Fatalf("replacement %d", replacement.Code)
+				}
+				turnID = voiceConnectedJSON(t, replacement.Body.Bytes())["turn_id"].(string)
+				failed = nil
+				for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+					result := productionCall(state, "GET", voicePath+"/"+id+"/turns/"+turnID+"/result", "viewer", nil)
+					if result.Code != 200 {
+						t.Fatalf("replacement poll %d", result.Code)
+					}
+					if voiceConnectedJSON(t, result.Body.Bytes())["state"] == "failed" {
+						failed = result
+						break
+					}
+				}
+				if failed == nil {
+					t.Fatal("replacement inherited stale publication marker")
+				}
 			}
 			cancel := productionCall(state, "POST", voicePath+"/"+id+"/turns/"+turnID+"/cancel", "viewer", nil)
 			if cancel.Code != 200 {

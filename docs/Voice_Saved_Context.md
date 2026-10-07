@@ -32,6 +32,6 @@ Focused contracts, gateway normal/race tests, frontend type/build/controller tes
 
 ## Storage and recovery limits
 
-Migration002 creates the independent `cs_production_contexts` schema. It does not alter the accepted six-table `cs_plan_actions` operator backup schema. **The existing local state export/restore rehearsal does not cover these new context records.** Export coverage for them requires a separately approved increment. Restart persistence within this task database is tested independently; it is not a backup claim.
+Migration002 creates the independent `cs_production_contexts` schema. It does not alter the accepted six-table `cs_plan_actions` operator backup schema. **Historical v1 local archives do not cover these context records.** The approved [two-schema local export/restore](Local_State_Recovery.md) uses composite v2 to cover all six workflow tables and both context tables. It requires a trusted private archive and a distinct empty local target; legacy v1 restore remains explicitly limited. Restart persistence alone is not a backup claim.
 
 The down migration archives the context schema rather than deleting it and refuses to overwrite an existing archive; up can restore it. No production migration or provider activation is performed by this package. Local synthetic role tokens are a development mechanism, not end-user production authentication.

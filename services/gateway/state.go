@@ -150,6 +150,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.ready(w, r)
 		return
 	}
+	if r.URL.Path == recoveryPath {
+		s.recoveryComparison(w, r)
+		return
+	}
 	if r.URL.Path == "/v2/plans/recommendations" {
 		if s.cfg.Mode == "private_machine" && r.Method == "POST" {
 			body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))

@@ -120,7 +120,8 @@ class ServiceApp:
                    or (method == 'GET' and any(path.startswith(prefix) and
                        '/' not in path[len(prefix):] and bool(path[len(prefix):])
                        for prefix in ('/prices/', '/forecast/', '/news/', '/backtest/')))
-                   or (method == 'POST' and path == '/recommend'))
+                   or (method == 'POST' and path in {'/recommend',
+                       '/production/receipt-recovery/comparisons'}))
         if not allowed:
             await error(403, 'service_route_unavailable')
             return

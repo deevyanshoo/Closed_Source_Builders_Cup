@@ -1,0 +1,398 @@
+{
+  "kind": "offer_extraction_score",
+  "status": "completed",
+  "mode": "rules",
+  "split": "train",
+  "run_at": "2026-10-07T14:06:51+00:00",
+  "revision": "204487d",
+  "manifest_as_of": "2026-10-07",
+  "key_configured": true,
+  "offline": false,
+  "synthetic_inputs": true,
+  "extractors_used": {
+    "rules": 10
+  },
+  "calls": {
+    "none": 10
+  },
+  "summary": {
+    "quotes": 10,
+    "correct": 127,
+    "total": 150,
+    "accuracy": 0.8467,
+    "per_field": {
+      "supplier_name": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "origin_country": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "incoterm": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "settlement_currency": {
+        "correct": 1,
+        "total": 10,
+        "accuracy": 0.1
+      },
+      "payment_terms": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "valid_until": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "lead_time_days": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "min_order": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "capacity": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "shipments": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "material": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "description": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "grade": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "quantity": {
+        "correct": 8,
+        "total": 10,
+        "accuracy": 0.8
+      },
+      "pricing": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      }
+    },
+    "errors": {
+      "not_extracted": 23
+    },
+    "extra_items": 0,
+    "flags": {
+      "missing": {
+        "expected": 12,
+        "flagged": 12
+      },
+      "conflict": {
+        "expected": 0,
+        "flagged": 0
+      },
+      "expired": {
+        "expected": 0,
+        "flagged": 0,
+        "false_positive": 0
+      },
+      "embedded_instruction": {
+        "expected": 0,
+        "flagged": 0
+      }
+    }
+  },
+  "quotes": [
+    {
+      "quote": "Q01",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.9333,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q02",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.7333,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q03",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.8667,
+      "errors": [
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q04",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.9333,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q05",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.8,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].quantity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q09",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.9333,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q10",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.8667,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q11",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.9333,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q12",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.8,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q13",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "accuracy": 0.6667,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].quantity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    }
+  ],
+  "caveat": "Synthetic documents written by the same author as the rules; scores are likely optimistic."
+}

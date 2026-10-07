@@ -1,6 +1,7 @@
-"""Opt-in real Gemini test. Skipped unless RUN_LIVE_GEMINI=1 and a key is in procurement-engine/.env.
+"""Opt-in real Gemini test. Skipped unless RUN_LIVE_GEMINI=1, MAX_LIVE_CALLS allows the calls and a
+key is in procurement-engine/.env.
 
-    RUN_LIVE_GEMINI=1 .venv/bin/python -m pytest -m live
+    RUN_LIVE_GEMINI=1 MAX_LIVE_CALLS=2 .venv/bin/python -m pytest -m live
 
 The default suite never calls Google (conftest removes the key). This test makes real, billable
 calls, so it only runs when asked. Recorded evidence comes from scripts/gemini_live_check.py.
@@ -16,6 +17,7 @@ import pytest
 from dotenv import dotenv_values
 
 from procure.documents import read_document
+from procure.offers import extract_gemini
 from procure.offers.extraction import extract_offer
 from procure.settings import PROJECT_ROOT, reset_caches
 
@@ -28,6 +30,8 @@ QUOTES = {q["id"]: q for q in json.loads((FIXTURES / "manifest.json").read_text(
 def real_key(monkeypatch):
     if os.getenv("RUN_LIVE_GEMINI") != "1":
         pytest.skip("set RUN_LIVE_GEMINI=1 to make real Gemini calls")
+    if extract_gemini.live_call_stats()["used"] >= extract_gemini.live_call_stats()["max"]:
+        pytest.skip("MAX_LIVE_CALLS does not allow another real call")
     key = dotenv_values(PROJECT_ROOT / ".env").get("GEMINI_API_KEY") or os.getenv("LIVE_GEMINI_API_KEY")
     if not key:
         pytest.skip("no GEMINI_API_KEY in procurement-engine/.env")

@@ -1,0 +1,412 @@
+{
+  "kind": "offer_extraction_score",
+  "status": "completed",
+  "mode": "rules",
+  "split": "train",
+  "run_at": "2026-10-07T14:52:22+00:00",
+  "revision": "21d891b63f0b0bcede3f9124ce7391c129863f9c",
+  "manifest_as_of": "2026-10-07",
+  "manifest_sha256": "c792b8b2c8675c1cafe15737d39c0ee095216e738064434286c7651f0f6cbf4c",
+  "input_sha256": {
+    "Q01": "5032b4010bd8062807470077369cdcb935023c4bcf2860ab8456251a1b0d1205",
+    "Q02": "e8f0d842eeeb603e69d93d3a2a4d602bf41eb34f70138a9efc1ef311f4575049",
+    "Q03": "f204a1ddc7b83585fe11ad0493f6db8f09c75aa62b2b696fa4b4bce2a38aff54",
+    "Q04": "0fe290e0f0d63e4d8c74617722821501514e6f2d0322cf3e331668529197e6b2",
+    "Q05": "e5e9782ce4f2e2a0725e8e7b3b2630e749665140fc1fdc7fd26c081b812e2760",
+    "Q09": "f759d5f6c3b4ac00dab6858bd89abd10f774c0f1785f4a10fcc510b78b502202",
+    "Q10": "1046d6f483abfde9de85669a26ee310aeb820a98f1c04f333cd2336367d5633e",
+    "Q11": "c66d6a8e273353665746e613197472df59ec2f368211255471bdbd6ea39befaa",
+    "Q12": "56c979e6112a04e85d033900dcb5075bbe0327eb57b749e00e3225e37852d1f7",
+    "Q13": "2aca55d30850eb40551834ad424223c27da662edca21dba77df8865bc1511cfc"
+  },
+  "source_sha256": {
+    "scripts/score_offer_extraction.py": "5d2acc4904aa057a8562a7aa47b7561de790853bd088be187641a76de209d469",
+    "src/procure/offers/__init__.py": "8421082353c1d148ed6f643fb9c17beecbf12816725f65099ebeca67f610f2a0",
+    "src/procure/offers/countries.py": "c03b36890807ea03df8f79af09b81c01b55ed8e5149571aa3445ebb7047be85b",
+    "src/procure/offers/evidence.py": "1f3121dc290793f1176dbbed90ea524ac2ce8cf35ff011543123644842672f5b",
+    "src/procure/offers/extract_gemini.py": "f9ae8a9ffd60c721a3958c02eb0e756b7e1462abbf5bb9e88dcb774941f8ccc9",
+    "src/procure/offers/extract_rules.py": "f704a4843be0a1de5118dd77b1b470745c679957a77a17675ba0b9f799439437",
+    "src/procure/offers/extraction.py": "4a99a2689448a952ee4bfc5ca74ceb0ecd0a836cdb6eece4df587e6a52cf7d40",
+    "src/procure/offers/fx_rates.py": "ef79c5d8b094048204b6223b09cbfdde09fed27105470377c5fc16f8633e03d2",
+    "src/procure/offers/http.py": "0ab78aa8e37de6c3b576bd36c91e13466346f0acb6c2496b2197d62804d7c9b7",
+    "src/procure/offers/lifecycle.py": "0b7d8ba9202eddd1681f051119b0ede5563865807fdbbbcf51d2f5b6d9855a88",
+    "src/procure/offers/normalize.py": "787a7ef92b8280e10d24aa2ee3b279dc695100d42ba5c6d99d6cab0f3077123e",
+    "src/procure/offers/scoring.py": "d6f8aa3a54cf644065d0620602cfbb02727ce652892e0759c3699a12d8f0dd01",
+    "src/procure/offers/store.py": "28050c722f33ad41823cf567596c7464ccd9906761829dac5e19b09fc97485dd",
+    "src/procure/documents/__init__.py": "72aa79facd0dfeb580461f846277b4cb713b12ee1d457dbd23d0816a1d16afe6",
+    "src/procure/documents/delimited.py": "9ee0eab89d9de69e288fc818fec30c57604ca431cd5ba38b197d052588c26ae2",
+    "src/procure/documents/models.py": "ad4685eda969baeb570a92fba34fc9eb4140a7f77674bde6091819eebd504c52",
+    "src/procure/documents/pdf.py": "da1b83a01b3c1c3fcaf638591e8a936f7aad67347ea4e11031780712b921b3a8",
+    "src/procure/documents/reader.py": "7622c59089c9d958b6a6fa8f070249b5f36ffa939dfd0fab6ada88dc75bf89b2",
+    "src/procure/documents/spreadsheet.py": "99882a41db040fedd0e84c92282c9afd8f2348ececf3986ecccd0342936d2f75",
+    "config/assumptions.yaml": "18ae516ea357d0cc31d432968ee2b8013d78b4c776a22bc724daee83b765b4f7",
+    "config/materials.yaml": "a67b41385cd51e4e0f40407a552b1ccd7cf2b3f6e8264c8fce42cd7d27cab6ac",
+    "config/iso3166_alpha2.csv": "8a93f683106278466970d16520ba86dcc0cd153310964d3f66cf3b3172e4736b"
+  },
+  "key_configured": true,
+  "live_calls": {
+    "used": 0,
+    "max": 0,
+    "enabled": false
+  },
+  "offline": false,
+  "synthetic_inputs": true,
+  "extractors_used": {
+    "rules": 10
+  },
+  "calls": {
+    "none": 10
+  },
+  "summary": {
+    "quotes": 10,
+    "correct": 134,
+    "total": 150,
+    "accuracy": 0.8933,
+    "per_field": {
+      "supplier_name": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "origin_country": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "incoterm": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "settlement_currency": {
+        "correct": 8,
+        "total": 10,
+        "accuracy": 0.8
+      },
+      "payment_terms": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "valid_until": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "lead_time_days": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "min_order": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "capacity": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "shipments": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      },
+      "material": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "description": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "grade": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "quantity": {
+        "correct": 8,
+        "total": 10,
+        "accuracy": 0.8
+      },
+      "pricing": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      }
+    },
+    "quotes_correct": 4,
+    "quote_accuracy": 0.4,
+    "errors": {
+      "not_extracted": 14,
+      "invented_value": 1,
+      "wrong_status": 1
+    },
+    "extra_items": 0,
+    "flags": {
+      "missing": {
+        "expected": 22,
+        "flagged": 20
+      },
+      "conflict": {
+        "expected": 0,
+        "flagged": 0
+      },
+      "expired": {
+        "expected": 0,
+        "flagged": 0,
+        "false_positive": 0
+      },
+      "embedded_instruction": {
+        "expected": 0,
+        "flagged": 0
+      }
+    },
+    "field_accuracy": 0.8933
+  },
+  "quotes": [
+    {
+      "quote": "Q01",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 1.0,
+      "quote_correct": true,
+      "extra_items": 0,
+      "errors": []
+    },
+    {
+      "quote": "Q02",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q03",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "missing",
+          "got_status": "extracted",
+          "correct": false,
+          "error": "invented_value"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q04",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 1.0,
+      "quote_correct": true,
+      "extra_items": 0,
+      "errors": []
+    },
+    {
+      "quote": "Q05",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "missing",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "wrong_status"
+        },
+        {
+          "field": "items[0].quantity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "missing",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q09",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 1.0,
+      "quote_correct": true,
+      "extra_items": 0,
+      "errors": []
+    },
+    {
+      "quote": "Q10",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.9333,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q11",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 1.0,
+      "quote_correct": true,
+      "extra_items": 0,
+      "errors": []
+    },
+    {
+      "quote": "Q12",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8667,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q13",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.7333,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].quantity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    }
+  ],
+  "caveat": "Synthetic documents written by the same author as the rules; scores are likely optimistic."
+}

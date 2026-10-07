@@ -50,6 +50,15 @@ def missing():
     return {"status": "missing", "value": None, "evidence": []}
 
 
+def price_currency_only():
+    """Settlement (invoice or payment) currency is present only when a document states it explicitly.
+
+    These quotes state price currencies only, so the key marks the field missing (agreed rule since #24;
+    corrected in answer key version 2, before any successful Gemini held-out evaluation).
+    """
+    return missing()
+
+
 def conflict(*candidates):
     return {"status": "conflict", "value": None,
             "candidates": [{"value": v, "evidence": list(ev)} for v, *ev in candidates]}
@@ -250,7 +259,7 @@ def q01(path):
             supplier_name=present("Atacama Red Metals SpA [SYNTHETIC]", name),
             origin_country=present("CL", origin),
             incoterm=present(incoterm("CIF", "Nhava Sheva, India"), terms),
-            settlement_currency=present("USD", price),
+            settlement_currency=price_currency_only(),
             payment_terms=present("30% advance by TT, 70% against copy of bill of lading", pay),
             valid_until=present("2026-10-31", valid),
             lead_time_days=present(45, lead),
@@ -307,7 +316,7 @@ def q02(path):
             supplier_name=present("Gulf Primary Aluminium FZE [SYNTHETIC]", name),
             origin_country=present("AE", origin),
             incoterm=present(incoterm("FOB", "Jebel Ali"), term, port),
-            settlement_currency=present("USD", price_head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Irrevocable LC at sight", pay),
             valid_until=present("2026-11-15", valid),
             lead_time_days=missing(),
@@ -351,7 +360,7 @@ def q03(path):
             supplier_name=present("Pilbara Plains Ore Pty Ltd [SYNTHETIC]", rows["supplier"]),
             origin_country=present("AU", rows["origin"]),
             incoterm=present(incoterm("FOB", "Port Hedland"), rows["incoterm"]),
-            settlement_currency=present("USD", rows["currency"]),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC 90 days from bill of lading date", rows["payment_terms"]),
             valid_until=present("2026-10-20", rows["valid_until"]),
             lead_time_days=missing(),
@@ -397,7 +406,7 @@ def q04(path):
             supplier_name=present("Rheinland Kupferdraht GmbH [SYNTHETIC]", name),
             origin_country=present("DE", origin),
             incoterm=present(incoterm("DAP", "Chakan plant, Pune, India"), terms),
-            settlement_currency=present("EUR", price),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Net 60 days from invoice date", pay),
             valid_until=present("2026-10-25", valid),
             lead_time_days=present(30, lead),
@@ -444,7 +453,7 @@ def q05(path):
             supplier_name=present("Huanan Cathode Trading Co., Ltd. [SYNTHETIC]", name),
             origin_country=present("CN", origin),
             incoterm=present(incoterm("CIF", "Chennai, India"), term),
-            settlement_currency=present("CNY", cur),
+            settlement_currency=price_currency_only(),
             payment_terms=present("50% TT advance, 50% before shipment", pay),
             valid_until=present("2026-10-18", valid),
             lead_time_days=present(35, lead),
@@ -485,7 +494,7 @@ def q06(path):
             supplier_name=present("Straits Light Metals Sdn Bhd [SYNTHETIC]", name),
             origin_country=present("MY", origin),
             incoterm=present(incoterm("CIF", "Chennai, India"), price),
-            settlement_currency=present("USD", price),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC at sight", pay),
             valid_until=present("2026-09-30", valid),
             lead_time_days=present(30, lead),
@@ -526,7 +535,7 @@ def q07(path):
             supplier_name=present("Yangtze Alloy Works Co., Ltd. [SYNTHETIC]", name),
             origin_country=present("CN", origin),
             incoterm=present(incoterm("FOB", "Shanghai"), price),
-            settlement_currency=present("USD", price),
+            settlement_currency=price_currency_only(),
             payment_terms=present("30% TT advance, 70% against BL copy", pay),
             valid_until=present("2026-10-29", valid),
             lead_time_days=present(25, lead),
@@ -585,7 +594,7 @@ def q08(path):
             supplier_name=present("Saxonia Aluminium Halbzeug GmbH [SYNTHETIC]", name),
             origin_country=present("DE", origin),
             incoterm=present(incoterm("DAP", "Pune plant, India"), term),
-            settlement_currency=present("EUR", cur),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Net 45 days", pay),
             valid_until=present("2026-11-01", valid),
             lead_time_days=present(28, lead),
@@ -619,7 +628,7 @@ def q09(path):
             supplier_name=present("Andean Copper Exports SAC [SYNTHETIC]", at(r1, "supplier")),
             origin_country=present("PE", at(r1, "origin")),
             incoterm=present(incoterm("CIF", "Nhava Sheva"), at(r1, "incoterm"), at(r1, "named_place")),
-            settlement_currency=present("USD", at(r1, "price_currency")),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Cash against documents (CAD)", at(r1, "payment_terms")),
             valid_until=present("2026-11-10", at(r1, "valid_until")),
             lead_time_days=missing(),
@@ -668,7 +677,7 @@ def q10(path):
             supplier_name=present("Southern Cone Copper Ltda [SYNTHETIC]", name),
             origin_country=present("CL", origin),
             incoterm=present(incoterm("CIF", "Mundra, India"), terms),
-            settlement_currency=present("USD", premium),
+            settlement_currency=price_currency_only(),
             payment_terms=present("provisional invoice 90% against bill of lading, final invoice after quotational "
                                   "period", pay),
             valid_until=present("2026-10-20", valid),
@@ -705,7 +714,7 @@ def q11(path):
             supplier_name=present("Zulu Coast Aluminium (Pty) Ltd [SYNTHETIC]", at("Supplier")),
             origin_country=present("ZA", at("Origin")),
             incoterm=present(incoterm("FOB", "Richards Bay"), at("Incoterm"), at("Place")),
-            settlement_currency=present("USD", price_head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC 60 days from BL", at("Payment")),
             valid_until=present("2026-10-28", at("Valid until")),
             lead_time_days=present(21, at("Lead time (days)"), hd("Lead time (days)")),
@@ -755,7 +764,7 @@ def q12(path):
             supplier_name=present("Atlantico Pellet Mineracao Ltda [SYNTHETIC]", name),
             origin_country=present("BR", origin),
             incoterm=present(incoterm("CIF", "Paradip, India"), term),
-            settlement_currency=present("USD", price_head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC at sight, 100%", pay),
             valid_until=present("2026-11-30", valid),
             lead_time_days=missing(),
@@ -798,7 +807,7 @@ def q13(path):
             supplier_name=present("Copperbelt Cathodes Ltd [SYNTHETIC]", name),
             origin_country=present("ZM", origin),
             incoterm=present(incoterm("FOB", "Dar es Salaam, Tanzania"), terms),
-            settlement_currency=present("USD", head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("100% TT before shipment", pay),
             valid_until=present("2026-11-15", valid),
             lead_time_days=present(60, lead),
@@ -842,7 +851,7 @@ def q14(path):
             supplier_name=present("Ruhr Billet Aluminium GmbH [SYNTHETIC]", name),
             origin_country=present("DE", origin),
             incoterm=present(incoterm("DAP", "Chennai plant, India"), terms),
-            settlement_currency=present("EUR", basis2, premium),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Net 30 days from delivery", pay),
             valid_until=present("2026-11-12", valid),
             lead_time_days=present(40, lead),
@@ -901,7 +910,7 @@ def q15(path):
             supplier_name=present("Ningbo Bright Copper Tube Co., Ltd. [SYNTHETIC]", name),
             origin_country=present("CN", origin),
             incoterm=present(incoterm("FOB", "Ningbo"), term),
-            settlement_currency=present("CNY", price_head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("30% TT advance, 70% against BL copy", pay),
             valid_until=present("2026-10-30", valid),
             lead_time_days=present(20, lead, lead_label),
@@ -945,7 +954,7 @@ def q16(path):
             supplier_name=present("Laurentian Smelting Inc. [SYNTHETIC]", rows["Supplier"]),
             origin_country=present("CA", rows["Origin"]),
             incoterm=present(incoterm("CIF", "Nhava Sheva, India"), rows["Delivery"]),
-            settlement_currency=present("USD", price_label),
+            settlement_currency=price_currency_only(),
             payment_terms=present("Net 30 days after arrival", rows["Payment"]),
             valid_until=present("2026-11-05", rows["Valid until"]),
             lead_time_days=present(50, rows["Lead time"]),
@@ -985,7 +994,7 @@ def q17(path):
             supplier_name=present("Cape West Iron Ore (Pty) Ltd [SYNTHETIC]", name),
             origin_country=present("ZA", origin),
             incoterm=present(incoterm("FOB", "Saldanha Bay"), price),
-            settlement_currency=present("USD", price),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC at sight", pay),
             valid_until=missing(),
             lead_time_days=missing(),
@@ -1035,7 +1044,7 @@ def q18(path):
             supplier_name=present("Southern Cross Copper Pty Ltd [SYNTHETIC]", name),
             origin_country=present("AU", origin),
             incoterm=present(incoterm("CIF", "Nhava Sheva, India"), term),
-            settlement_currency=present("USD", price_head),
+            settlement_currency=price_currency_only(),
             payment_terms=present("LC 30 days", pay),
             valid_until=present("2026-10-27", valid),
             lead_time_days=present(40, lead, lead_label),
@@ -1090,7 +1099,12 @@ def generate(out_dir: Path = HERE) -> dict:
         "synthetic": True,
         "notice": "All quotes are fictional test fixtures. Suppliers, references and prices are invented.",
         "generator": "tests/fixtures/offers/generate_quotes.py",
-        "manifest_version": 1,
+        "manifest_version": 2,
+        "answer_key_changes": [
+            "v2: settlement_currency is missing unless the document explicitly states the invoice or payment "
+            "currency (agreed rule since #24). Corrects the answer key only; documents and extraction rules are "
+            "unchanged. Made before any successful Gemini held-out evaluation.",
+        ],
         "as_of": AS_OF,
         "locators": {"pdf": "p<page>:l<line>", "xlsx": "<Sheet>!<Cell>", "csv": "r<row>:c<col>"},
         "units": {"tonne": "metric tonne (1000 kg)", "kg": "kilogram", "lb": "avoirdupois pound"},

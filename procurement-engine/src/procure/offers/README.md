@@ -22,12 +22,27 @@ flagged for review; visible text can still support a field only if it passes the
 Flagging alone does not categorically exclude visible instruction-like text from evidence. Gemini's response schema has no action fields,
 unknown keys are rejected, and extraction has no side effects. Tests: `tests/test_offer_injection.py`.
 
+## Credentials and the live-call gate
+
+- Vertex AI with Application Default Credentials when `GOOGLE_GENAI_USE_VERTEXAI=true` and `GOOGLE_CLOUD_PROJECT` and
+  `GOOGLE_CLOUD_LOCATION` are set (`api_version=v1`, 15 s timeout). An explicit Vertex selection with either setting
+  missing fails closed, even if `GEMINI_API_KEY` exists. API-key mode requires a separate non-Vertex selection.
+  `OFFLINE=1` blocks both.
+- Real calls also need `RUN_LIVE_GEMINI=1` and stay within `MAX_LIVE_CALLS` per process (default 0, so none).
+  Otherwise extraction falls back to rules with `live_calls_disabled` or `live_call_budget_exhausted`.
+- Missing or failed credentials fall back with `vertex_config_incomplete`, `no_api_key` or `credentials_unavailable`.
+  Audit records show `auth` (`vertex_adc` or `api_key`), `call` (`real` or `mocked`) and per-process reserved-attempt
+  counts. Credential/token values, keys, project IDs and credential paths are excluded; aggregate token counts may
+  be recorded. The per-process gate is not a global pilot-budget ledger.
+
 ## Real versus mocked Gemini
 
 - The default test suite never calls Google. `tests/conftest.py` removes any key loaded from `.env`; mocked
   responses are labelled `call: mocked`.
-- Real calls are recorded separately by `scripts/gemini_live_check.py` into `evaluation/offers/gemini_live_<date>.json`
-  (date, revision, model, latency, tokens). The key itself is never written.
+- Real-call diagnostics are recorded separately by `scripts/gemini_live_check.py` into unique create-only
+  `evaluation/offers/gemini_live_<date>_<run id>.json` files (date, revision, model, latency, aggregate token counts).
+  `completed` requires both checks to use real Gemini and the injection checks to pass; zero or partial outcomes are
+  labelled separately. The key itself is never written.
 - Opt-in real test: `RUN_LIVE_GEMINI=1 .venv/bin/python -m pytest -m live`.
 
 Recorded on 2026-10-07 (revision 6ff9c3e plus uncommitted Step 4 work), `gemini-2.5-flash`, synthetic inputs only:

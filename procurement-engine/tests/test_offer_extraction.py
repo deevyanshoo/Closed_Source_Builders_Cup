@@ -8,12 +8,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from procure.documents import read_document
+from procure.documents import Document, read_document
+from procure.documents.models import make_segment
 from procure.offers.extraction import extract_offer
 from procure.offers import extract_gemini
+from procure.offers import evidence, lifecycle
 from procure.offers import fx_rates
 
 FIXTURES = Path(__file__).parent / "fixtures" / "offers"
@@ -194,6 +197,72 @@ def test_mocked_gemini_result_is_labelled_mocked_and_evidence_checked(with_key):
     assert ex.items[0]["pricing"].value["unit_price"]["amount"] == "9412.50"
     assert ex.items[0]["pricing"].source == "gemini"
     assert ex.fields["valid_until"].status == "extracted"
+
+
+def test_strict_q01_gemini_price_currency_cannot_verify_settlement_or_unlock_save(monkeypatch):
+    monkeypatch.setattr(extract_gemini, "get_settings", lambda: SimpleNamespace(gemini_api_key=None, offline=False))
+    monkeypatch.setattr(extract_gemini, "_client", _deny_provider)
+    ex = extract_offer(doc("Q01"), mode="gemini", as_of=AS_OF, client=FakeClient(q01_payload()),
+                       rate_lookup=_no_rate)
+    settlement = ex.fields["settlement_currency"]
+    price = ex.items[0]["pricing"]
+    assert (settlement.status, settlement.value, settlement.evidence) == ("unverified", None, [])
+    assert price.status == "extracted" and price.value["unit_price"]["currency"] == "USD"
+    assert price.evidence[0].locator == "p1:l10"
+    reasons = lifecycle.blocking_reasons(ex.to_dict(), AS_OF)
+    assert ("settlement_currency", "field_unverified") in {(r["field"], r["code"]) for r in reasons}
+    assert "save" not in lifecycle.allowed_actions(lifecycle.initial_status(ex.to_dict(), AS_OF), reasons)
+
+
+def _located_currency(text: str, *, locator: str = "p1:l1"):
+    segment = make_segment("sha256:synthetic-settlement", "pdf_line", locator, text, page=1, line=1)
+    return Document(document_id=segment.document_id, filename="synthetic.pdf", media_type="application/pdf",
+                    byte_size=len(text.encode()), segments=(segment,))
+
+
+@pytest.mark.parametrize("text", [
+    "Unit price: USD 9,412.50 per metric tonne",
+    "Currency: USD",
+    "Price currency: USD",
+    "FX conversion USD/INR at invoice date",
+    "Payment terms: 30 days from invoice date; price USD 9,412.50",
+    "Invoice currency: USD/INR",
+    "Invoice currency: USDT",
+])
+def test_settlement_currency_rejects_price_generic_fx_or_nonexact_code(text):
+    document = _located_currency(text)
+    candidate = evidence.check_candidate(document, "currency", {"value": "USD",
+                                                               "evidence": ev("p1:l1", text)})
+    assert not candidate.verified
+
+
+@pytest.mark.parametrize("text", [
+    "Invoice currency: USD",
+    "Settlement currency — USD",
+    "Payment currency: USD",
+    "Payable in USD",
+    "Settlement: USD",
+])
+def test_settlement_currency_accepts_explicit_located_statement(text):
+    document = _located_currency(text)
+    candidate = evidence.check_candidate(document, "currency", {"value": "USD",
+                                                               "evidence": ev("p1:l1", text)})
+    assert candidate.verified
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("Invoice currency", True), ("settlement_currency", True), ("Payment Currency", True),
+    ("Currency", False), ("Price currency", False), ("FX basis invoice date", False),
+])
+def test_isolated_currency_cell_needs_explicit_settlement_role_label(label, expected):
+    document_id = "sha256:synthetic-cells"
+    segments = (make_segment(document_id, "csv_cell", "r1:c1", label, row=1, column=1),
+                make_segment(document_id, "csv_cell", "r1:c2", "USD", row=1, column=2))
+    document = Document(document_id=document_id, filename="synthetic.csv", media_type="text/csv", byte_size=0,
+                        segments=segments)
+    candidate = evidence.check_candidate(document, "currency", {"value": "USD",
+                                                               "evidence": ev("r1:c2", "USD")})
+    assert candidate.verified is expected
 
 
 def test_gemini_receives_located_segments_not_the_raw_file(with_key):

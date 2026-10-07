@@ -460,17 +460,32 @@ def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[Evi
 
 
 def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> bool:
-    if not isinstance(value, str):
+    """Bind a settlement currency to an explicit payment/invoice/settlement statement.
+
+    A unit-price currency, generic Currency heading or FX pair has no settlement role.
+    Pricing uses its separate amount/currency/unit binding and is unaffected here.
+    """
+    if (not isinstance(value, str) or value not in nz.ISO_4217_CODES
+            or value in nz._NON_SETTLEMENT_CODES):
         return False
+    code = re.escape(value)
+    # The code must be the stated currency, rather than one leg of a currency pair
+    # or a prefix of a longer token. Inspect the complete located segment.
+    currency_token = rf"{code}(?![A-Za-z0-9]|\s*[/,]\s*[A-Z]{{3}}\b)"
+    role = (rf"\b(?:invoice|settlement|payment)[_ -]+currency\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
+            rf"|\bcurrency\s+of\s+settlement\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
+            rf"|\b(?:payable|settled|payment)\s+in\s+{currency_token}"
+            rf"|\bsettlement\b\s*[:=\-–—]\s*{currency_token}")
+    label_role = re.compile(r"(?:invoice|settlement|payment)[_ -]+currency|currency[_ ]+of[_ ]+settlement", re.I)
     for ref in refs:
         text = ref.segment_text.strip()
-        if value not in nz.currencies_in(text):
-            continue
-        if text != value:
+        if re.search(role, text, re.I):
             return True
+        if text != value:
+            continue
         cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
         if not cell:
-            continue  # an isolated code needs a labeled cell, not an inferred role
+            continue  # an isolated code needs an explicit role label
         row, column = map(int, cell.groups())
         locators = [f"r{row}:c{column - 1}"]
         for previous_row in range(row - 1, max(0, row - 8), -1):
@@ -485,9 +500,7 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
             label = doc.segment(locator)
             if (label and not HIDDEN_FLAGS.intersection(label.flags)
                     and "formula_without_cached_value" not in label.flags
-                    and re.search(r"\b(?:price[_ ]currency|settlement[_ ]currency|currency)\b", label.text, re.I)
-                    and (not re.search(r"\b(?:payment|terms|method)\b", label.text, re.I)
-                         or bool(re.fullmatch(r"payment[_ ]currency", label.text.strip(), re.I)))):
+                    and label_role.fullmatch(label.text.strip())):
                 return True
     return False
 

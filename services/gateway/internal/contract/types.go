@@ -541,6 +541,7 @@ type VoiceHTTPTurnRequest struct {
 }
 
 type VoiceHTTPSessionResponse struct {
+  ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
   ContractVersion string `json:"contract_version"`
   SessionId string `json:"session_id"`
   ContextVersion string `json:"context_version"`
@@ -554,6 +555,7 @@ type VoiceHTTPSessionResponse struct {
 }
 
 type VoiceHTTPTurnResponse struct {
+  ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
   ContractVersion string `json:"contract_version"`
   SessionId string `json:"session_id"`
   ContextVersion string `json:"context_version"`
@@ -643,6 +645,7 @@ type VoiceHTTPExecutionError struct {
 }
 
 type VoiceHTTPPendingResult struct {
+  ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
   ContractVersion string `json:"contract_version"`
   SessionId string `json:"session_id"`
   ContextVersion string `json:"context_version"`
@@ -654,6 +657,7 @@ type VoiceHTTPPendingResult struct {
 }
 
 type VoiceHTTPReadyResult struct {
+  ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
   ContractVersion string `json:"contract_version"`
   SessionId string `json:"session_id"`
   ContextVersion string `json:"context_version"`
@@ -666,6 +670,7 @@ type VoiceHTTPReadyResult struct {
 }
 
 type VoiceHTTPFailedResult struct {
+  ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
   ContractVersion string `json:"contract_version"`
   SessionId string `json:"session_id"`
   ContextVersion string `json:"context_version"`
@@ -678,3 +683,73 @@ type VoiceHTTPFailedResult struct {
 }
 
 type VoiceHTTPResultResponse = json.RawMessage
+
+type ProductionContextMetadata struct {
+  Synthetic bool `json:"synthetic"`
+  Source string `json:"source"`
+  SyntacticValidation string `json:"syntactic_validation"`
+  NumericalAcceptance string `json:"numerical_acceptance"`
+}
+
+type ProductionContextRef struct {
+  ContextId string `json:"context_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Revision int `json:"revision"`
+}
+
+type ProductionContextSummary struct {
+  ContextId string `json:"context_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Revision int `json:"revision"`
+  SnapshotId string `json:"snapshot_id"`
+  PlanVersion string `json:"plan_version"`
+  AsOf string `json:"as_of"`
+  Metadata ProductionContextMetadata `json:"metadata"`
+  CreatedBy string `json:"created_by"`
+  UpdatedBy string `json:"updated_by"`
+  CreatedAt string `json:"created_at"`
+  UpdatedAt string `json:"updated_at"`
+}
+
+type StoredProductionContext struct {
+  ContextId string `json:"context_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Revision int `json:"revision"`
+  SnapshotId string `json:"snapshot_id"`
+  PlanVersion string `json:"plan_version"`
+  AsOf string `json:"as_of"`
+  Metadata ProductionContextMetadata `json:"metadata"`
+  CreatedBy string `json:"created_by"`
+  UpdatedBy string `json:"updated_by"`
+  CreatedAt string `json:"created_at"`
+  UpdatedAt string `json:"updated_at"`
+  Snapshot ProductionSnapshot `json:"snapshot"`
+}
+
+type CreateProductionContextRequest struct {
+  ContractVersion string `json:"contract_version"`
+  Snapshot ProductionSnapshot `json:"snapshot"`
+}
+
+type ReplaceProductionContextRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ExpectedRevision int `json:"expected_revision"`
+  Snapshot ProductionSnapshot `json:"snapshot"`
+}
+
+type ProductionContextResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context StoredProductionContext `json:"context"`
+}
+
+type ProductionContextsResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Contexts []ProductionContextSummary `json:"contexts"`
+  HasMore bool `json:"has_more"`
+}
+
+type VoiceHTTPSavedSessionRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ContextId string `json:"context_id"`
+  ExpectedRevision int `json:"expected_revision"`
+}

@@ -21,6 +21,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"closedsource/gateway/internal/contract"
 	"closedsource/gateway/internal/voice"
 )
 
@@ -62,21 +63,25 @@ type voiceRecord struct {
 	lease                                                       *voice.Lease
 	state                                                       string
 	outcome                                                     json.RawMessage
+	productionRef                                               *contract.ProductionContextRef
+	accepted, turnAccepted                                      bool
+	stale                                                       bool
 }
 type voiceHTTPAdapter struct {
-	mu       sync.Mutex
-	now      func() time.Time
-	clock    *atomic.Value
-	last     time.Time
-	manager  *voice.Manager
-	runner   *voice.Runner
-	root     context.Context
-	cancel   context.CancelFunc
-	sessions map[string]*voiceRecord
-	active   int
-	closed   bool
-	done     chan struct{}
-	workers  sync.WaitGroup
+	mu         sync.Mutex
+	now        func() time.Time
+	clock      *atomic.Value
+	last       time.Time
+	manager    *voice.Manager
+	runner     *voice.Runner
+	root       context.Context
+	cancel     context.CancelFunc
+	sessions   map[string]*voiceRecord
+	active     int
+	production *stateServer
+	closed     bool
+	done       chan struct{}
+	workers    sync.WaitGroup
 }
 
 func newVoiceHTTPAdapter(executor voice.Executor, now func() time.Time) (*voiceHTTPAdapter, error) {
@@ -324,17 +329,27 @@ func (a *voiceHTTPAdapter) create(w http.ResponseWriter, r *http.Request, p prin
 		voiceErr(w, 403, "forbidden", "Workspace access denied")
 		return
 	}
+	response, record, status, code := a.createRecord(r, p, snapshot, nil, true)
+	if status != 0 {
+		voiceErr(w, status, code, "Voice session unavailable")
+		return
+	}
+	voiceWrite(w, 201, response)
+	if r.Context().Err() != nil {
+		a.removeRecord(record)
+	}
+}
+
+func (a *voiceHTTPAdapter) createRecord(r *http.Request, p principal, snapshot map[string]any, ref *contract.ProductionContextRef, accepted bool) (map[string]any, *voiceRecord, int, string) {
 	snapshotCount := voiceArrayCount(snapshot)
 	owned, err := json.Marshal(snapshot)
 	if err != nil || len(owned) > voiceSnapshotLimit || !voiceID(snapshot["snapshot_id"].(string)) || !voiceID(snapshot["plan_version"].(string)) || !voiceInstant(snapshot["as_of"].(string)) {
-		voiceErr(w, 422, "invalid_request", "Invalid voice snapshot")
-		return
+		return nil, nil, 422, "invalid_request"
 	}
 	hash := sha256.Sum256(owned)
 	version, err := voiceStamp()
 	if err != nil {
-		voiceErr(w, 503, "voice_unavailable", "Local voice comparison unavailable")
-		return
+		return nil, nil, 503, "voice_unavailable"
 	}
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
@@ -343,34 +358,26 @@ func (a *voiceHTTPAdapter) create(w http.ResponseWriter, r *http.Request, p prin
 	a.sweepLocked(now)
 	if a.closed {
 		a.mu.Unlock()
-		voiceErr(w, 503, "voice_unavailable", "Local voice comparison unavailable")
-		return
+		return nil, nil, 503, "voice_unavailable"
 	}
 	if r.Context().Err() != nil {
 		a.mu.Unlock()
-		return
+		return nil, nil, 503, "voice_unavailable"
 	}
 	id, err := a.manager.Create(owner)
 	if err != nil {
 		a.mu.Unlock()
-		voiceErr(w, voiceManagerStatus(err), voiceManagerCode(err), "Voice capacity unavailable")
-		return
+		return nil, nil, voiceManagerStatus(err), voiceManagerCode(err)
 	}
 	sessionCtx, cancel := context.WithCancel(a.root)
-	s := &voiceRecord{owner: owner, id: id, version: version, fingerprint: hex.EncodeToString(hash[:]), scenario: "voice-" + version, snapshotID: snapshot["snapshot_id"].(string), planVersion: snapshot["plan_version"].(string), snapshot: append([]byte(nil), owned...), arrayCount: snapshotCount, ctx: sessionCtx, cancel: cancel, last: now}
+	s := &voiceRecord{owner: owner, id: id, version: version, fingerprint: hex.EncodeToString(hash[:]), scenario: "voice-" + version, snapshotID: snapshot["snapshot_id"].(string), planVersion: snapshot["plan_version"].(string), snapshot: append([]byte(nil), owned...), arrayCount: snapshotCount, ctx: sessionCtx, cancel: cancel, last: now, productionRef: ref, accepted: accepted}
 	a.sessions[id] = s
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "snapshot_id": s.snapshotID, "plan_version": s.planVersion, "scenario_id": s.scenario, "status": "created"}
-	a.mu.Unlock()
-	voiceWrite(w, 201, response)
-	if r.Context().Err() != nil {
-		a.mu.Lock()
-		if a.sessions[id] == s {
-			delete(a.sessions, id)
-			s.cancel()
-			_ = a.manager.Close(owner, id)
-		}
-		a.mu.Unlock()
+	if ref != nil {
+		response["production_context_ref"] = *ref
 	}
+	a.mu.Unlock()
+	return response, s, 0, ""
 }
 func voiceBodyCode(status int) string {
 	if status == 413 {
@@ -426,34 +433,70 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	request := value.(map[string]any)
 	turnCount := voiceArrayCount(value)
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
+	ref, expected := a.savedRef(owner, id)
+	var guard *productionGuard
+	fail := func(status int, code, message string) {
+		if guard != nil {
+			guard.rollback()
+			guard = nil
+		}
+		voiceErr(w, status, code, message)
+	}
+	if ref != nil {
+		if a.production == nil {
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		var code int
+		guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		if code != 0 {
+			if code == 404 || code == 409 {
+				a.staleRecord(owner, id, expected)
+				voiceErr(w, 409, "production_context_stale", "Production context revision changed")
+			} else {
+				voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			}
+			return
+		}
+		defer func() {
+			if guard != nil {
+				guard.rollback()
+			}
+		}()
+	}
 	now := a.sample()
 	a.mu.Lock()
 	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
-	if s == nil {
+	if s != nil && s.stale {
 		a.mu.Unlock()
-		voiceErr(w, 404, "voice_session_unavailable", "Voice session unavailable")
+		fail(409, "production_context_stale", "Production context revision changed")
+		return
+	}
+	if s == nil || !s.accepted || (ref != nil && (s != expected || s.productionRef == nil || *s.productionRef != *ref)) {
+		a.mu.Unlock()
+		fail(404, "voice_session_unavailable", "Voice session unavailable")
 		return
 	}
 	if turnCount+s.arrayCount > 4096 {
 		a.mu.Unlock()
-		voiceErr(w, 422, "invalid_request", "Invalid voice request")
+		fail(422, "invalid_request", "Invalid voice request")
 		return
 	}
 	if request["context_version"] != s.version {
 		a.mu.Unlock()
-		voiceErr(w, 409, "context_mismatch", "Voice context version mismatch")
+		fail(409, "context_mismatch", "Voice context version mismatch")
 		return
 	}
 	if a.closed {
 		a.mu.Unlock()
-		voiceErr(w, 503, "voice_unavailable", "Local voice comparison unavailable")
+		fail(503, "voice_unavailable", "Local voice comparison unavailable")
 		return
 	}
 	if a.active >= 4 {
 		a.mu.Unlock()
-		voiceErr(w, 429, "voice_capacity", "Voice execution capacity unavailable")
+		fail(429, "voice_capacity", "Voice execution capacity unavailable")
 		return
 	}
 	if r.Context().Err() != nil {
@@ -463,7 +506,7 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	call, err := json.Marshal(request["call"])
 	if err != nil || len(call) > voiceTurnLimit {
 		a.mu.Unlock()
-		voiceErr(w, 422, "invalid_request", "Invalid voice call")
+		fail(422, "invalid_request", "Invalid voice call")
 		return
 	}
 	a.active++
@@ -471,7 +514,7 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	if err != nil {
 		a.active--
 		a.mu.Unlock()
-		voiceErr(w, voiceManagerStatus(err), voiceManagerCode(err), "Voice session unavailable")
+		fail(voiceManagerStatus(err), voiceManagerCode(err), "Voice session unavailable")
 		return
 	}
 	capture, err := voice.CaptureRecoveryContext(owner, lease, voice.RecoveryMetadata{SnapshotID: s.snapshotID, PlanVersion: s.planVersion, ScenarioID: s.scenario}, s.snapshot)
@@ -479,18 +522,42 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		_ = a.manager.Cancel(owner, lease)
 		a.active--
 		a.mu.Unlock()
-		voiceErr(w, 422, "invalid_request", "Invalid voice snapshot")
+		fail(422, "invalid_request", "Invalid voice snapshot")
 		return
 	}
 	s.lease = lease
 	s.state = "pending"
+	s.turnAccepted = ref == nil
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": lease.TurnID(), "status": "accepted"}
+	if ref != nil {
+		response["production_context_ref"] = *ref
+	}
 	data, _ := json.Marshal(response)
 	data = append(data, '\n')
 	a.workers.Add(1)
 	a.mu.Unlock()
+	if guard != nil {
+		if err := guard.close(); err != nil {
+			guard = nil
+			_ = a.manager.Cancel(owner, lease)
+			a.releaseBeforeAcceptance(owner, id, lease)
+			a.staleRecord(owner, id, expected)
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		guard = nil
+		a.mu.Lock()
+		if current := a.currentLocked(owner, id); current != expected || current.lease != lease || a.closed || r.Context().Err() != nil {
+			a.mu.Unlock()
+			_ = a.manager.Cancel(owner, lease)
+			a.releaseBeforeAcceptance(owner, id, lease)
+			return
+		}
+		expected.turnAccepted = true
+		a.mu.Unlock()
+	}
 	if r.Context().Err() != nil {
 		_ = a.manager.Cancel(owner, lease)
 		a.releaseBeforeAcceptance(owner, id, lease)
@@ -516,6 +583,7 @@ func (a *voiceHTTPAdapter) releaseBeforeAcceptance(owner voice.Owner, id string,
 	if s := a.currentLocked(owner, id); s != nil && s.lease == lease {
 		s.lease = nil
 		s.state = ""
+		s.turnAccepted = false
 		s.outcome = nil
 	}
 	a.mu.Unlock()
@@ -580,7 +648,7 @@ func (a *voiceHTTPAdapter) cancelTurn(w http.ResponseWriter, r *http.Request, p 
 	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
-	if s != nil && s.lease != nil && !a.manager.IsCurrent(owner, s.lease) {
+	if s != nil && s.lease != nil && !s.stale && !a.manager.IsCurrent(owner, s.lease) {
 		delete(a.sessions, id)
 		s.cancel()
 		_ = a.manager.Close(owner, id)
@@ -595,6 +663,7 @@ func (a *voiceHTTPAdapter) cancelTurn(w http.ResponseWriter, r *http.Request, p 
 	_ = a.manager.Cancel(owner, lease)
 	s.lease = nil
 	s.state = ""
+	s.turnAccepted = false
 	s.outcome = nil
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "status": "cancelled"}
@@ -610,20 +679,56 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		return
 	}
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
+	ref, expected := a.savedRef(owner, id)
+	var guard *productionGuard
+	fail := func(status int, code, message string) {
+		if guard != nil {
+			guard.rollback()
+			guard = nil
+		}
+		voiceErr(w, status, code, message)
+	}
+	if ref != nil {
+		if a.production == nil {
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		var code int
+		guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		if code != 0 {
+			if code == 404 || code == 409 {
+				a.staleRecord(owner, id, expected)
+				voiceErr(w, 409, "production_context_stale", "Production context revision changed")
+			} else {
+				voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			}
+			return
+		}
+		defer func() {
+			if guard != nil {
+				guard.rollback()
+			}
+		}()
+	}
 	now := a.sample()
 	a.mu.Lock()
 	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
-	if s != nil && s.lease != nil && !a.manager.IsCurrent(owner, s.lease) {
+	if s != nil && s.lease != nil && !s.stale && !a.manager.IsCurrent(owner, s.lease) {
 		delete(a.sessions, id)
 		s.cancel()
 		_ = a.manager.Close(owner, id)
 		s = nil
 	}
-	if s == nil || s.lease == nil || s.lease.TurnID() != turnID {
+	if s != nil && s.stale {
 		a.mu.Unlock()
-		voiceErr(w, 404, "voice_session_unavailable", "Voice session unavailable")
+		fail(409, "production_context_stale", "Production context revision changed")
+		return
+	}
+	if s == nil || !s.accepted || !s.turnAccepted || s.lease == nil || s.lease.TurnID() != turnID || (ref != nil && (s != expected || s.productionRef == nil || *s.productionRef != *ref)) {
+		a.mu.Unlock()
+		fail(404, "voice_session_unavailable", "Voice session unavailable")
 		return
 	}
 	output, ready, dequeueErr := a.manager.Dequeue(owner, id)
@@ -632,7 +737,7 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		s.cancel()
 		_ = a.manager.Close(owner, id)
 		a.mu.Unlock()
-		voiceErr(w, 404, "voice_session_unavailable", "Voice session unavailable")
+		fail(404, "voice_session_unavailable", "Voice session unavailable")
 		return
 	}
 	if ready && s.state == "pending" {
@@ -640,6 +745,9 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 	}
 	s.last = now
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": s.state}
+	if ref != nil {
+		response["production_context_ref"] = *ref
+	}
 	if s.state == "ready" {
 		response["outcome"] = append(json.RawMessage(nil), s.outcome...)
 	}
@@ -647,6 +755,15 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		response["error"] = map[string]string{"code": "execution_unavailable", "message": "Local voice execution unavailable"}
 	}
 	a.mu.Unlock()
+	if guard != nil {
+		if err := guard.close(); err != nil {
+			guard = nil
+			a.staleRecord(owner, id, expected)
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		guard = nil
+	}
 	if r.Context().Err() != nil {
 		return
 	}
@@ -788,6 +905,21 @@ func voiceValid(value any, schema map[string]any, depth int) bool {
 		if _, ok := value.(bool); !ok {
 			return false
 		}
+	case "integer":
+		literal, ok := value.(json.Number)
+		if !ok || !regexp.MustCompile(`^(0|[1-9][0-9]*)$`).MatchString(literal.String()) {
+			return false
+		}
+		n, err := literal.Int64()
+		if err != nil || n < 0 || n > 2147483647 {
+			return false
+		}
+		if minimum, ok := schema["minimum"].(float64); ok && n < int64(minimum) {
+			return false
+		}
+		if maximum, ok := schema["maximum"].(float64); ok && n > int64(maximum) {
+			return false
+		}
 	default:
 		return false
 	}
@@ -843,6 +975,8 @@ func voiceTree(value any, depth int, total *int) bool {
 		return utf8.ValidString(x)
 	case bool:
 		return true
+	case json.Number:
+		return len(x.String()) <= 20
 	default:
 		return false
 	}

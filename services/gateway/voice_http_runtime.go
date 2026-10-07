@@ -176,5 +176,9 @@ func (s *stateServer) voiceHTTPRoute(w http.ResponseWriter, r *http.Request) {
 		voiceErr(w, 503, "voice_unavailable", "Local voice comparison unavailable")
 		return
 	}
+	if r.URL.Path == savedVoicePath {
+		s.savedVoiceSession(w, r, p)
+		return
+	}
 	s.voice.ServeHTTP(w, r, p)
 }

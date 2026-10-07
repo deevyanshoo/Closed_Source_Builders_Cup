@@ -538,6 +538,7 @@ export interface VoiceHTTPTurnRequest {
 }
 
 export interface VoiceHTTPSessionResponse {
+  production_context_ref?: ProductionContextRef;
   contract_version: "0.2.0";
   session_id: string;
   context_version: string;
@@ -551,6 +552,7 @@ export interface VoiceHTTPSessionResponse {
 }
 
 export interface VoiceHTTPTurnResponse {
+  production_context_ref?: ProductionContextRef;
   contract_version: "0.2.0";
   session_id: string;
   context_version: string;
@@ -640,6 +642,7 @@ export interface VoiceHTTPExecutionError {
 }
 
 export interface VoiceHTTPPendingResult {
+  production_context_ref?: ProductionContextRef;
   contract_version: "0.2.0";
   session_id: string;
   context_version: string;
@@ -651,6 +654,7 @@ export interface VoiceHTTPPendingResult {
 }
 
 export interface VoiceHTTPReadyResult {
+  production_context_ref?: ProductionContextRef;
   contract_version: "0.2.0";
   session_id: string;
   context_version: string;
@@ -663,6 +667,7 @@ export interface VoiceHTTPReadyResult {
 }
 
 export interface VoiceHTTPFailedResult {
+  production_context_ref?: ProductionContextRef;
   contract_version: "0.2.0";
   session_id: string;
   context_version: string;
@@ -675,3 +680,73 @@ export interface VoiceHTTPFailedResult {
 }
 
 export type VoiceHTTPResultResponse = VoiceHTTPPendingResult | VoiceHTTPReadyResult | VoiceHTTPFailedResult;
+
+export interface ProductionContextMetadata {
+  synthetic: true;
+  source: "caller_supplied_synthetic";
+  syntactic_validation: "accepted";
+  numerical_acceptance: "not_claimed";
+}
+
+export interface ProductionContextRef {
+  context_id: string;
+  workspace_id: string;
+  revision: number;
+}
+
+export interface ProductionContextSummary {
+  context_id: string;
+  workspace_id: string;
+  revision: number;
+  snapshot_id: string;
+  plan_version: string;
+  as_of: string;
+  metadata: ProductionContextMetadata;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoredProductionContext {
+  context_id: string;
+  workspace_id: string;
+  revision: number;
+  snapshot_id: string;
+  plan_version: string;
+  as_of: string;
+  metadata: ProductionContextMetadata;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+  snapshot: ProductionSnapshot;
+}
+
+export interface CreateProductionContextRequest {
+  contract_version: "0.2.0";
+  snapshot: ProductionSnapshot;
+}
+
+export interface ReplaceProductionContextRequest {
+  contract_version: "0.2.0";
+  expected_revision: number;
+  snapshot: ProductionSnapshot;
+}
+
+export interface ProductionContextResponse {
+  contract_version: "0.2.0";
+  context: StoredProductionContext;
+}
+
+export interface ProductionContextsResponse {
+  contract_version: "0.2.0";
+  contexts: (ProductionContextSummary)[];
+  has_more: boolean;
+}
+
+export interface VoiceHTTPSavedSessionRequest {
+  contract_version: "0.2.0";
+  context_id: string;
+  expected_revision: number;
+}

@@ -137,6 +137,9 @@ func newLocalStateServer(cfg stateConfig) *stateServer {
 		s.db = nil
 	}
 	s.voice = initVoiceHTTP(cfg)
+	if s.voice != nil {
+		s.voice.production = s
+	}
 	return s
 }
 
@@ -150,7 +153,7 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		machine = p
 		r = r.WithContext(context.WithValue(r.Context(), machinePrincipalKey{}, p))
 	}
-	if r.URL.Path == "/v2/voice/sessions" || strings.HasPrefix(r.URL.Path, "/v2/voice/sessions/") {
+	if r.URL.Path == "/v2/voice/sessions" || strings.HasPrefix(r.URL.Path, "/v2/voice/sessions/") || r.URL.Path == "/v2/voice/saved-context-sessions" {
 		s.voiceHTTPRoute(w, r)
 		return
 	}
@@ -178,7 +181,7 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.legacy.ServeHTTP(w, r)
 		return
 	}
-	if r.URL.Path == "/v2/session" || strings.HasPrefix(r.URL.Path, "/v2/workspaces/") || strings.HasPrefix(r.URL.Path, "/v2/plans/") || r.URL.Path == "/v2/actions/prepare_rfq" {
+	if r.URL.Path == "/v2/session" || strings.HasPrefix(r.URL.Path, "/v2/workspaces/") || strings.HasPrefix(r.URL.Path, "/v2/production-contexts/") || strings.HasPrefix(r.URL.Path, "/v2/plans/") || r.URL.Path == "/v2/actions/prepare_rfq" {
 		s.stateRoute(w, r)
 		return
 	}
@@ -226,6 +229,10 @@ func (s *stateServer) Authenticate(w http.ResponseWriter, r *http.Request) (prin
 	return p, false
 }
 func (s *stateServer) stateRoute(w http.ResponseWriter, r *http.Request) {
+	production := strings.Contains(r.URL.Path, "/production-contexts")
+	if production {
+		w.Header().Set("Cache-Control", "no-store")
+	}
 	p, ok := r.Context().Value(machinePrincipalKey{}).(principal)
 	if !ok {
 		p, ok = s.auth.Authenticate(w, r)
@@ -254,6 +261,10 @@ func (s *stateServer) stateRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.db == nil {
+		if production {
+			productionUnavailable(w)
+			return
+		}
 		stateError(w, 503, "database_unavailable", "Database is not configured")
 		return
 	}
@@ -261,10 +272,18 @@ func (s *stateServer) stateRoute(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	conn, err := pgx.ConnectConfig(ctx, s.db)
 	if err != nil {
+		if production {
+			productionUnavailable(w)
+			return
+		}
 		stateError(w, 503, "database_unavailable", "Database unavailable")
 		return
 	}
 	defer conn.Close(context.Background())
+	if production {
+		s.productionRoutes(w, r, ctx, conn, p)
+		return
+	}
 	if r.URL.Path == "/v2/actions/prepare_rfq" {
 		s.execute(w, r, ctx, conn, p)
 		return

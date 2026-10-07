@@ -17,6 +17,8 @@ Rules
   ``conflicting_duplicate``: which copy is right is not guessed.
 - Evidence whose ``valid_until`` is before ``as_of`` is kept and marked ``expired``. An event
   whose evidence has all expired is kept for review but is not operating evidence.
+- Evidence retrieved after ``as_of`` rejects the whole event before duplicate grouping;
+  evidence retrieved later than observation but by ``as_of`` may corroborate it.
 - Flags describe, never change, events: ``observed_out_of_order``, ``superseded_by_arrival``,
   ``evidence_expired``; shipments can carry ``sequence_conflict``.
 """
@@ -124,6 +126,8 @@ def _evidence(record: Mapping, as_of: datetime) -> list[dict]:
             valid_until = None if item.get("valid_until") is None else _instant(item["valid_until"], "valid_until")
         except _Reject as exc:
             raise _Reject("invalid_evidence", label) from exc
+        if retrieved > as_of:
+            raise _Reject("evidence_after_as_of", label)
         status = "no_stated_expiry" if valid_until is None else ("expired" if valid_until < as_of else "current")
         out.append({"evidence_id": item["evidence_id"], "kind": item["kind"], "locator": item["locator"],
                     "content_sha256": item["content_sha256"], "retrieved_at": _iso(retrieved),
@@ -224,7 +228,7 @@ def normalize_milestones(records: list, *, as_of: str) -> dict:
             if any(o["occurred_at"] > event["occurred_at"] and o["observed_at"] < event["observed_at"] for o in own):
                 event["flags"].append("observed_out_of_order")
             if event["event_type"] in ESTIMATE_TYPES and any(
-                    o["event_type"] == "arrived" and o["occurred_at"] > event["occurred_at"] for o in own):
+                    o["event_type"] in {"arrived", "delivered"} and o["occurred_at"] > event["occurred_at"] for o in own):
                 event["flags"].append("superseded_by_arrival")
         departures = [e["occurred_at"] for e in own if e["event_type"] == "departed"]
         if departures and any(e["event_type"] in ARRIVAL_TYPES and e["occurred_at"] < min(departures) for e in own):

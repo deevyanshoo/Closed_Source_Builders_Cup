@@ -14,3 +14,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["live: real provider calls; opt in with RUN_LIVE_GEMINI=1"]

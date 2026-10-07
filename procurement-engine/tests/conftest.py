@@ -18,6 +18,9 @@ os.environ.pop("GEMINI_API_KEY", None)
 from procure import db  # noqa: E402
 from procure.settings import reset_caches  # noqa: E402
 
+# Importing procure loads procurement-engine/.env, which may hold a developer's real key.
+# Remove it again so tests never see a real key and never call a provider.
+os.environ.pop("GEMINI_API_KEY", None)
 reset_caches()
 
 

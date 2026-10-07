@@ -1058,9 +1058,9 @@ QUOTES = [
     ("Q03", "train", "SYN-Q03_pilbara_iron_ore_fob.csv", q03),
     ("Q04", "train", "SYN-Q04_rheinland_wire_rod_dap.pdf", q04),
     ("Q05", "train", "SYN-Q05_huanan_cathode_cny.xlsx", q05),
-    ("Q06", "train", "SYN-Q06_straits_aluminium_expired.pdf", q06),
-    ("Q07", "train", "SYN-Q07_yangtze_alloy_hidden_text.pdf", q07),
-    ("Q08", "train", "SYN-Q08_saxonia_multi_item.xlsx", q08),
+    ("Q06", "heldout", "SYN-Q06_straits_aluminium_expired.pdf", q06),
+    ("Q07", "heldout", "SYN-Q07_yangtze_alloy_hidden_text.pdf", q07),
+    ("Q08", "heldout", "SYN-Q08_saxonia_multi_item.xlsx", q08),
     ("Q09", "train", "SYN-Q09_andean_copper_per_lb.csv", q09),
     ("Q10", "train", "SYN-Q10_southern_cone_index_linked.pdf", q10),
     ("Q11", "train", "SYN-Q11_zulu_coast_semicolon.csv", q11),
@@ -1076,6 +1076,9 @@ QUOTES = [
 
 def generate(out_dir: Path = HERE) -> dict:
     out_dir = Path(out_dir)
+    for split in ("train", "heldout"):  # drop files from an earlier split so no quote exists twice
+        for stale in (out_dir / split).glob("SYN-Q*"):
+            stale.unlink()
     entries = []
     for quote_id, split, filename, build in QUOTES:
         (out_dir / split).mkdir(parents=True, exist_ok=True)

@@ -1045,8 +1045,8 @@
     },
     {
       "id": "Q06",
-      "split": "train",
-      "file": "train/SYN-Q06_straits_aluminium_expired.pdf",
+      "split": "heldout",
+      "file": "heldout/SYN-Q06_straits_aluminium_expired.pdf",
       "format": "pdf",
       "synthetic": true,
       "cases": [
@@ -1235,8 +1235,8 @@
     },
     {
       "id": "Q07",
-      "split": "train",
-      "file": "train/SYN-Q07_yangtze_alloy_hidden_text.pdf",
+      "split": "heldout",
+      "file": "heldout/SYN-Q07_yangtze_alloy_hidden_text.pdf",
       "format": "pdf",
       "synthetic": true,
       "cases": [
@@ -1426,8 +1426,8 @@
     },
     {
       "id": "Q08",
-      "split": "train",
-      "file": "train/SYN-Q08_saxonia_multi_item.xlsx",
+      "split": "heldout",
+      "file": "heldout/SYN-Q08_saxonia_multi_item.xlsx",
       "format": "xlsx",
       "synthetic": true,
       "cases": [

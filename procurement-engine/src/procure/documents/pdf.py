@@ -1,8 +1,9 @@
 """PDF text as visual lines, numbered from 1 on each page, top to bottom.
 
-PyMuPDF reports text lines per block. Lines that share a baseline (for example two table
-cells side by side) are merged into one visual line, left to right, joined by two spaces.
-Spacing inside a line is kept, so fixed-width tables stay readable.
+Uses pdfplumber (MIT). Characters that share a baseline form one visual line, read left to
+right. Spaces written in the PDF are kept, so fixed-width tables stay readable. Where a PDF
+positions words without space characters, a gap wider than a quarter of the font size becomes
+one space, and a wide gap between two cells on the same row becomes two spaces.
 
 Text that is near-white, tiny or off the page is still returned, flagged `low_visibility`,
 so hidden instructions are visible to review instead of silently read or dropped. A page
@@ -10,49 +11,71 @@ with no text layer (a scan) produces a `no_text_layer` warning; no OCR is attemp
 """
 from __future__ import annotations
 
-import pymupdf
+import io
+
+import pdfplumber
+from pdfminer.pdfdocument import PDFPasswordIncorrect
+from pdfminer.pdfparser import PDFSyntaxError
+from pdfminer.psparser import PSException
+from pdfplumber.utils.exceptions import PdfminerException
 
 from .models import DocumentReadError, DocumentWarning, make_segment
 
 MAX_PDF_PAGES = 200
 BASELINE_TOLERANCE = 2.0  # points
 MIN_VISIBLE_SIZE = 3.0  # points
-NEAR_WHITE = 0xF0
+NEAR_WHITE = 0.94
+WORD_GAP = 0.25  # fraction of font size
+COLUMN_GAP = 1.5  # fraction of font size
 
 
-def _near_white(color: int) -> bool:
-    return all(((color >> shift) & 0xFF) >= NEAR_WHITE for shift in (16, 8, 0))
+def _near_white(color) -> bool:
+    if not isinstance(color, (tuple, list)) or not all(isinstance(c, (int, float)) for c in color):
+        return False
+    if len(color) in (1, 3):  # gray or RGB
+        return all(c >= NEAR_WHITE for c in color)
+    if len(color) == 4:  # CMYK
+        return all(c <= 1 - NEAR_WHITE for c in color)
+    return False
 
 
-def _low_visibility(span: dict, page_rect) -> bool:
-    x0, y0, x1, y1 = span["bbox"]
-    off_page = x1 <= page_rect.x0 or x0 >= page_rect.x1 or y1 <= page_rect.y0 or y0 >= page_rect.y1
-    return _near_white(span["color"]) or span["size"] < MIN_VISIBLE_SIZE or off_page
+def _low_visibility(ch: dict, width: float, height: float) -> bool:
+    off_page = ch["x1"] <= 0 or ch["x0"] >= width or ch["bottom"] <= 0 or ch["top"] >= height
+    return _near_white(ch.get("non_stroking_color")) or ch["size"] < MIN_VISIBLE_SIZE or off_page
+
+
+def _line_text(chars: list[dict]) -> str:
+    parts = [chars[0]["text"]]
+    for prev, ch in zip(chars, chars[1:]):
+        gap = ch["x0"] - prev["x1"]
+        if not prev["text"].isspace() and not ch["text"].isspace():
+            size = max(prev["size"], 1.0)
+            if gap > COLUMN_GAP * size:
+                parts.append("  ")
+            elif gap > WORD_GAP * size:
+                parts.append(" ")
+        parts.append(ch["text"])
+    return "".join(parts).strip()
 
 
 def _visual_lines(page) -> list[tuple[str, tuple[str, ...]]]:
-    raw = []
-    for block in page.get_text("dict")["blocks"]:
-        if block.get("type") != 0:
-            continue
-        for line in block["lines"]:
-            spans = [s for s in line["spans"] if s["text"].strip()]
-            if spans:
-                raw.append((spans[0]["origin"][1], line["bbox"][0], spans))
-    raw.sort(key=lambda r: (r[0], r[1]))
+    chars = [dict(ch, baseline=page.height - ch["matrix"][5]) for ch in page.chars]
+    chars.sort(key=lambda c: (c["baseline"], c["x0"]))
 
-    groups: list[list] = []
-    for entry in raw:
-        if groups and abs(entry[0] - groups[-1][0][0]) <= BASELINE_TOLERANCE:
-            groups[-1].append(entry)
+    groups: list[list[dict]] = []
+    for ch in chars:
+        if groups and abs(ch["baseline"] - groups[-1][0]["baseline"]) <= BASELINE_TOLERANCE:
+            groups[-1].append(ch)
         else:
-            groups.append([entry])
+            groups.append([ch])
 
     lines = []
     for group in groups:
-        group.sort(key=lambda r: r[1])
-        text = "  ".join("".join(s["text"] for s in spans).strip() for _, _, spans in group)
-        hidden = [_low_visibility(s, page.rect) for _, _, spans in group for s in spans]
+        group.sort(key=lambda c: c["x0"])
+        text = _line_text(group)
+        if not text:
+            continue
+        hidden = [_low_visibility(c, page.width, page.height) for c in group if not c["text"].isspace()]
         flags = ("low_visibility",) if all(hidden) else ("partly_low_visibility",) if any(hidden) else ()
         lines.append((text, flags))
     return lines
@@ -60,24 +83,27 @@ def _visual_lines(page) -> list[tuple[str, tuple[str, ...]]]:
 
 def read_pdf(data: bytes, document_id: str):
     try:
-        doc = pymupdf.open(stream=data, filetype="pdf")
-    except Exception as exc:  # PyMuPDF raises several types for damaged files
-        raise DocumentReadError("unreadable", f"PDF could not be opened: {exc}") from exc
-    with doc:
-        if doc.needs_pass:
-            raise DocumentReadError("encrypted", "PDF is password protected")
-        if doc.page_count == 0:
-            raise DocumentReadError("unreadable", "PDF has no pages")
-        if doc.page_count > MAX_PDF_PAGES:
-            raise DocumentReadError("too_large", f"PDF has more than {MAX_PDF_PAGES} pages")
-        segments, warnings = [], []
-        for page_no, page in enumerate(doc, start=1):
-            lines = _visual_lines(page)
-            if not lines:
-                warnings.append(DocumentWarning("no_text_layer", f"Page {page_no} has no extractable text (scanned?)",
-                                                page=page_no))
-            for line_no, (text, flags) in enumerate(lines, start=1):
-                segments.append(make_segment(document_id, "pdf_line", f"p{page_no}:l{line_no}", text,
-                                             page=page_no, line=line_no, flags=flags))
-        metadata = {"pages": doc.page_count}
-    return segments, warnings, metadata
+        with pdfplumber.open(io.BytesIO(data)) as pdf:
+            page_count = len(pdf.pages)
+            if page_count == 0:
+                raise DocumentReadError("unreadable", "PDF has no pages")
+            if page_count > MAX_PDF_PAGES:
+                raise DocumentReadError("too_large", f"PDF has more than {MAX_PDF_PAGES} pages")
+            segments, warnings = [], []
+            for page_no, page in enumerate(pdf.pages, start=1):
+                lines = _visual_lines(page)
+                if not lines:
+                    warnings.append(DocumentWarning("no_text_layer",
+                                                    f"Page {page_no} has no extractable text (scanned?)", page=page_no))
+                for line_no, (text, flags) in enumerate(lines, start=1):
+                    segments.append(make_segment(document_id, "pdf_line", f"p{page_no}:l{line_no}", text,
+                                                 page=page_no, line=line_no, flags=flags))
+    except DocumentReadError:
+        raise
+    except (PdfminerException, PDFPasswordIncorrect, PDFSyntaxError, PSException, ValueError, KeyError,
+            TypeError) as exc:
+        cause = exc.args[0] if isinstance(exc, PdfminerException) and exc.args else exc
+        if isinstance(cause, PDFPasswordIncorrect) or isinstance(exc.__cause__, PDFPasswordIncorrect):
+            raise DocumentReadError("encrypted", "PDF is password protected") from exc
+        raise DocumentReadError("unreadable", f"PDF could not be read: {cause}") from exc
+    return segments, warnings, {"pages": page_count}

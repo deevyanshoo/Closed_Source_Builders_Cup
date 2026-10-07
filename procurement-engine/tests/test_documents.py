@@ -46,7 +46,7 @@ def test_fixture_set_is_synthetic_and_split():
     quotes = MANIFEST["quotes"]
     assert MANIFEST["synthetic"] is True
     assert 15 <= len(quotes) <= 20
-    assert sum(q["split"] == "heldout" for q in quotes) == 5
+    assert sum(q["split"] == "heldout" for q in quotes) >= 5
     assert {q["format"] for q in quotes} == {"pdf", "xlsx", "csv"}
     for q in quotes:
         assert q["synthetic"] is True
@@ -65,6 +65,34 @@ def test_fixture_set_covers_required_cases():
         "missing_validity", "embedded_instruction", "multiple_items",
     }
     assert required <= cases, required - cases
+
+
+def test_heldout_set_measures_the_hard_cases():
+    heldout = {c for q in MANIFEST["quotes"] if q["split"] == "heldout" for c in q["cases"]}
+    assert {"expired", "embedded_instruction", "multiple_items", "price_conflict", "missing_validity",
+            "index_linked_price"} <= heldout
+    assert QUOTES["Q07"]["split"] == "heldout"
+
+
+def test_no_agpl_pdf_dependency():
+    """The repository will be public, so PDF reading must not depend on AGPL PyMuPDF."""
+    requirements = (Path(__file__).parents[1] / "requirements.txt").read_text().lower()
+    assert "pymupdf" not in requirements and "pdfplumber==" in requirements
+    source = (Path(__file__).parents[1] / "src" / "procure" / "documents" / "pdf.py").read_text()
+    assert "pymupdf" not in source and "fitz" not in source
+
+
+def test_pdf_cells_on_one_row_join_into_one_line():
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    pdf.cell(w=40, text="Price")
+    pdf.cell(w=40, text="USD 10", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(text="Next line")
+    doc = read_document(bytes(pdf.output()), filename="cells.pdf")
+    assert [s.text for s in doc.segments] == ["Price  USD 10", "Next line"]
 
 
 def test_every_synthetic_document_carries_a_visible_label():

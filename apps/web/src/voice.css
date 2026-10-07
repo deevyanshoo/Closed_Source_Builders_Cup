@@ -4,4 +4,21 @@
 .voice-shell input:focus-visible, .voice-shell select:focus-visible, .voice-shell button:focus-visible, .voice-shell a:focus-visible { outline: 3px solid #e7b968; outline-offset: 3px; }
 .voice-shell .field { min-width: 0; }
 .voice-shell .field input, .voice-shell .field select { max-width: 100%; }
+.voice-context { margin-top: 1.5rem; padding: 1.5rem; border: 1px solid #eaeaea; border-radius: 8px; background: #fff; }
+.voice-context h2, .voice-context h3 { margin: 0 0 .35rem; }
+.voice-context p { margin: .2rem 0 .8rem; }
+.voice-context-head, .voice-context-list-head { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.voice-source-actions, .voice-context-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
+.voice-context-body { display: grid; grid-template-columns: minmax(210px, .8fr) minmax(0, 1.7fr); gap: 1.5rem; margin-top: 1.5rem; }
+.voice-context-list { min-width: 0; }
+.voice-context-items { display: grid; gap: .45rem; max-height: 24rem; overflow: auto; }
+.voice-context-item { width: 100%; display: grid; gap: .2rem; padding: .8rem; text-align: left; border: 1px solid #eaeaea; border-radius: 6px; background: #fbfbfa; color: #2f3437; overflow-wrap: anywhere; }
+.voice-context-item[aria-pressed="true"] { border-color: #787774; background: #f7f6f3; }
+.voice-context-item span, .voice-context-meta { color: #787774; font-size: .83rem; overflow-wrap: anywhere; }
+.voice-context-editor { min-width: 0; }
+.voice-context-editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 18rem; padding: .8rem; border: 1px solid #eaeaea; border-radius: 6px; color: #2f3437; background: #fbfbfa; font: .78rem/1.5 'SF Mono', 'JetBrains Mono', monospace; resize: vertical; }
+.voice-context-editor textarea[readonly] { color: #787774; }
+.voice-context-actions { margin-top: .8rem; }
+.voice-shell textarea:focus-visible { outline: 3px solid #e7b968; outline-offset: 3px; }
 @media (max-width: 680px) { .voice-shell .recovery-controls > button { width: 100%; } .voice-shell .recovery-form-head { align-items: stretch; } }
+@media (max-width: 680px) { .voice-context { padding: 1rem; } .voice-context-head, .voice-context-list-head { display: block; } .voice-context-body { grid-template-columns: minmax(0, 1fr); } .voice-source-actions, .voice-context-actions { display: grid; grid-template-columns: minmax(0, 1fr); } .voice-context-actions button { width: 100%; } }

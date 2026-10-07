@@ -1916,6 +1916,627 @@
           }
         ]
       }
+    },
+    "/v2/workspaces/{workspace_id}/production-contexts": {
+      "get": {
+        "operationId": "listProductionContexts",
+        "summary": "listProductionContexts",
+        "description": "Local authenticated synthetic production context prerequisite; not a plan application or hosted/provider claim.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Strict local response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionContextsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 64,
+        "x-max-array-items": 1024,
+        "x-total-array-items": 4096,
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createProductionContext",
+        "summary": "createProductionContext",
+        "description": "Local authenticated synthetic production context prerequisite; not a plan application or hosted/provider claim.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Strict local response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionContextResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 64,
+        "x-max-array-items": 1024,
+        "x-total-array-items": 4096,
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductionContextRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/production-contexts/{context_id}": {
+      "get": {
+        "operationId": "readProductionContext",
+        "summary": "readProductionContext",
+        "description": "Local authenticated synthetic production context prerequisite; not a plan application or hosted/provider claim.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Strict local response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionContextResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 64,
+        "x-max-array-items": 1024,
+        "x-total-array-items": 4096,
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "replaceProductionContext",
+        "summary": "replaceProductionContext",
+        "description": "Local authenticated synthetic production context prerequisite; not a plan application or hosted/provider claim.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Strict local response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductionContextResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 64,
+        "x-max-array-items": 1024,
+        "x-total-array-items": 4096,
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z0-9_-]{32}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceProductionContextRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/voice/saved-context-sessions": {
+      "post": {
+        "operationId": "createSavedProductionVoiceSession",
+        "summary": "createSavedProductionVoiceSession",
+        "description": "Local authenticated synthetic production context prerequisite; not a plan application or hosted/provider claim.",
+        "security": [
+          {
+            "developmentBearer": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Strict local response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceHTTPSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Explicit unauthorized/foreign/stale/invalid/unavailable state; no effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-request-max-bytes": 1048576,
+        "x-response-max-bytes": 2097152,
+        "x-max-depth": 64,
+        "x-max-array-items": 1024,
+        "x-total-array-items": 4096,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceHTTPSavedSessionRequest"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4475,6 +5096,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -4542,6 +5166,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -4951,6 +5578,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -5007,6 +5637,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -5067,6 +5700,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -5135,6 +5771,321 @@
             "$ref": "#/components/schemas/VoiceHTTPFailedResult"
           }
         ]
+      },
+      "ProductionContextMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "source": {
+            "type": "string",
+            "const": "caller_supplied_synthetic"
+          },
+          "syntactic_validation": {
+            "type": "string",
+            "const": "accepted"
+          },
+          "numerical_acceptance": {
+            "type": "string",
+            "const": "not_claimed"
+          }
+        },
+        "required": [
+          "synthetic",
+          "source",
+          "syntactic_validation",
+          "numerical_acceptance"
+        ]
+      },
+      "ProductionContextRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision"
+        ]
+      },
+      "ProductionContextSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ProductionContextMetadata"
+          },
+          "created_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "updated_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision",
+          "snapshot_id",
+          "plan_version",
+          "as_of",
+          "metadata",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "StoredProductionContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ProductionContextMetadata"
+          },
+          "created_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "updated_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision",
+          "snapshot_id",
+          "plan_version",
+          "as_of",
+          "metadata",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+          "snapshot"
+        ]
+      },
+      "CreateProductionContextRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "contract_version",
+          "snapshot"
+        ],
+        "description": "Complete explicitly synthetic supplied input. Server replaces snapshot/plan identifiers. Syntactic acceptance only, not numerical or operational approval."
+      },
+      "ReplaceProductionContextRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "contract_version",
+          "expected_revision",
+          "snapshot"
+        ]
+      },
+      "ProductionContextResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/StoredProductionContext"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context"
+        ]
+      },
+      "ProductionContextsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionContextSummary"
+            },
+            "maxItems": 100
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "contexts",
+          "has_more"
+        ]
+      },
+      "VoiceHTTPSavedSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_id",
+          "expected_revision"
+        ],
+        "description": "Authenticated host reads current complete stored context; no caller snapshot override. Local synthetic read-only comparison only."
       }
     },
     "securitySchemes": {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionResponse } from '../../../contracts/generated/types';
-import { VoiceController, voiceMatches } from './voice';
+import { VoiceController, voiceMatches, voiceExample } from './voice';
 import resultRaw from '../../../contracts/examples/voice_http_recovery_result.json?raw';
 import precisionRaw from '../../../contracts/examples/voice_http_recovery_precision_result.json?raw';
 
@@ -16,6 +16,92 @@ const tick = () => new Promise<void>(done => queueMicrotask(done));
 const until = async (predicate: () => boolean) => { for (let i = 0; i < 100 && !predicate(); i++) await tick(); expect(predicate()).toBe(true); };
 
 describe('typed voice lifecycle ownership', () => {
+  it('uses the saved server reference and unchanged baseline inputs, then hides a stale final result', async () => {
+    const editor = { ...identity, role: 'editor' as const };
+    const ref = { context_id: 'd'.repeat(32), workspace_id: 'W', revision: 1 };
+    const snapshot = { ...voiceExample('recovery', 'W').snapshot, snapshot_id: `production-${ref.context_id}-r1`, plan_version: `production-plan-${ref.context_id}-r1` };
+    const context = { ...ref, snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, as_of: snapshot.as_of,
+      metadata: { synthetic: true, source: 'caller_supplied_synthetic', syntactic_validation: 'accepted', numerical_acceptance: 'not_claimed' },
+      created_by: 'p', updated_by: 'p', created_at: snapshot.as_of, updated_at: snapshot.as_of, snapshot };
+    const ready = JSON.parse(resultRaw) as Record<string, unknown> & { outcome: { ownership: { session_id: string } } };
+    ready.session_id = id; ready.context_version = version; ready.context_fingerprint = fingerprint; ready.production_context_ref = ref; ready.outcome.ownership.session_id = id;
+    let reads = 0; let savedCreates = 0; let inlineCreates = 0; let turnBody: { call: { arguments: { arrival_replacements: unknown[]; assignments: unknown[] } } } | undefined;
+    const paths: string[] = [];
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input); paths.push(`${init?.method || 'GET'} ${path}`);
+      if (path === '/v2/workspaces/W/production-contexts' && init?.method === 'GET') return json({ contract_version: '0.2.0', contexts: [{ ...context, snapshot: undefined }], has_more: false });
+      if (path === `/v2/production-contexts/${ref.context_id}`) return json({ contract_version: '0.2.0', context: { ...context, revision: ++reads >= 4 ? 2 : 1 } });
+      if (path === '/v2/voice/saved-context-sessions') { savedCreates++; expect(JSON.parse(String(init?.body))).toEqual({ contract_version: '0.2.0', context_id: ref.context_id, expected_revision: 1 }); return json({ ...created(), snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, production_context_ref: ref }, 201); }
+      if (path === '/v2/voice/sessions') { inlineCreates++; throw new Error('inline create forbidden'); }
+      if (path.endsWith('/turns') && init?.method === 'POST') { turnBody = JSON.parse(String(init.body)); return json({ ...accepted(), production_context_ref: ref }, 202); }
+      if (path.endsWith('/result')) return json(ready);
+      if (path.endsWith('/cancel')) return json({ ...accepted(), status: 'cancelled' });
+      if (init?.method === 'DELETE') return json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' });
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => editor });
+    await controller.refreshIdentity(); controller.selectSource('saved');
+    await until(() => controller.state.contexts.length === 1);
+    await controller.selectSaved(ref.context_id);
+    expect(controller.state.base?.snapshot).toEqual(snapshot);
+    await controller.run();
+    expect({ savedCreates, inlineCreates }).toEqual({ savedCreates: 1, inlineCreates: 0 });
+    expect(turnBody?.call.arguments).toEqual({ arrival_replacements: [], assignments: snapshot.baseline_assignments });
+    expect(controller.state.kind).toBe('stale');
+    expect(controller.state.comparison).toBeUndefined();
+    expect(paths).toContain(`DELETE /v2/voice/sessions/${id}`);
+  });
+  it('rejects unsafe saved revisions in the generated validator', () => {
+    const ref = { context_id: 'd'.repeat(32), workspace_id: 'W', revision: 1 };
+    expect(voiceMatches(ref, 'ProductionContextRef')).toBe(true);
+    expect(voiceMatches({ ...ref, revision: 1.5 }, 'ProductionContextRef')).toBe(false);
+    expect(voiceMatches({ ...ref, revision: Number.MAX_SAFE_INTEGER + 1 }, 'ProductionContextRef')).toBe(false);
+  });
+  it('blocks viewer saves before POST and keeps a draft separate from the selected stored input', async () => {
+    let writes = 0;
+    const transport: typeof fetch = async (_input, init) => { if (init?.method === 'POST' || init?.method === 'PUT') writes++; throw new Error('unexpected request'); };
+    const controller = new VoiceController({ transport, loadSession: async () => identity });
+    await controller.refreshIdentity();
+    controller.editSnapshot(JSON.stringify(voiceExample('recovery', 'W').snapshot));
+    expect(controller.state.base).toBeUndefined();
+    await controller.saveContext(false);
+    expect(writes).toBe(0);
+    expect(controller.state.kind).toBe('failed');
+    expect(controller.state.message).toContain('editor');
+  });
+  it('accepts server-owned IDs on save and sends the selected revision on replace', async () => {
+    const editor = { ...identity, role: 'editor' as const };
+    const contextId = 'd'.repeat(32);
+    const supplied = voiceExample('recovery_precision', 'W').snapshot;
+    let revision = 0; let putBody: Record<string, unknown> | undefined;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/workspaces/W/production-contexts' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body)).snapshot).toEqual(supplied);
+        revision = 1;
+      } else if (path === `/v2/production-contexts/${contextId}` && init?.method === 'PUT') {
+        putBody = JSON.parse(String(init.body)); revision = 2;
+      } else if (path === '/v2/workspaces/W/production-contexts' && init?.method === 'GET') {
+        return json({ contract_version: '0.2.0', contexts: [], has_more: false });
+      } else throw new Error(`unexpected ${path}`);
+      const snapshot = { ...supplied, snapshot_id: `production-${contextId}-r${revision}`, plan_version: `production-plan-${contextId}-r${revision}` };
+      return json({ contract_version: '0.2.0', context: { context_id: contextId, workspace_id: 'W', revision,
+        snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, as_of: snapshot.as_of,
+        metadata: { synthetic: true, source: 'caller_supplied_synthetic', syntactic_validation: 'accepted', numerical_acceptance: 'not_claimed' },
+        created_by: 'p', updated_by: 'p', created_at: snapshot.as_of, updated_at: snapshot.as_of, snapshot } }, revision === 1 ? 201 : 200);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => editor });
+    await controller.refreshIdentity(); controller.selectSource('saved');
+    await until(() => controller.state.kind === 'idle');
+    controller.editSnapshot(JSON.stringify(supplied));
+    await controller.saveContext(false);
+    expect(controller.state.selected?.revision).toBe(1);
+    expect(controller.state.base?.snapshot.snapshot_id).toBe(`production-${contextId}-r1`);
+    await controller.saveContext(true);
+    expect(putBody?.expected_revision).toBe(1);
+    expect(controller.state.selected?.revision).toBe(2);
+    expect(controller.state.base?.snapshot.plan_version).toBe(`production-plan-${contextId}-r2`);
+  });
   it('calls the default native transport with the global receiver', async () => {
     let requests = 0;
     vi.stubGlobal('fetch', function (this: typeof globalThis, input: RequestInfo | URL) {

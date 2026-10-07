@@ -102,7 +102,7 @@ def render():
                     for child in value:
                         walk(child)
             walk(schema)
-        for name in ('VoiceHTTPSessionRequest', 'VoiceHTTPTurnRequest', 'VoiceHTTPSessionResponse', 'VoiceHTTPTurnResponse', 'VoiceHTTPCancelResponse', 'VoiceHTTPCloseResponse', 'VoiceHTTPResultResponse', 'StateErrorResponse'):
+        for name in ('VoiceHTTPSessionRequest', 'VoiceHTTPTurnRequest', 'VoiceHTTPSessionResponse', 'VoiceHTTPTurnResponse', 'VoiceHTTPCancelResponse', 'VoiceHTTPCloseResponse', 'VoiceHTTPResultResponse', 'StateErrorResponse', 'CreateProductionContextRequest', 'ReplaceProductionContextRequest', 'ProductionContextResponse', 'ProductionContextsResponse', 'VoiceHTTPSavedSessionRequest'):
             collect_voice(name)
         data = {'components': {'schemas': selected}, 'limits': {'session_request_bytes': voice['x-request-max-bytes'], 'turn_request_bytes': SPEC['paths']['/v2/voice/sessions/{session_id}/turns']['post']['x-request-max-bytes'], 'response_bytes': voice['x-response-max-bytes'], 'max_depth': voice['x-max-depth'], 'max_array_items': voice['x-max-array-items'], 'total_array_items': voice['x-total-array-items']}}
         result['services/gateway/internal/contract/voice_http_schema.json'] = json.dumps(data, indent=2) + '\n'

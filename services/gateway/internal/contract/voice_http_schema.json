@@ -526,6 +526,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -589,10 +592,40 @@
           "status"
         ]
       },
+      "ProductionContextRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision"
+        ]
+      },
       "VoiceHTTPTurnResponse": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -753,6 +786,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -809,6 +845,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -1531,6 +1570,9 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "production_context_ref": {
+            "$ref": "#/components/schemas/ProductionContextRef"
+          },
           "contract_version": {
             "type": "string",
             "const": "0.2.0"
@@ -1644,6 +1686,294 @@
           "code",
           "message"
         ]
+      },
+      "CreateProductionContextRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "contract_version",
+          "snapshot"
+        ],
+        "description": "Complete explicitly synthetic supplied input. Server replaces snapshot/plan identifiers. Syntactic acceptance only, not numerical or operational approval."
+      },
+      "ReplaceProductionContextRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "contract_version",
+          "expected_revision",
+          "snapshot"
+        ]
+      },
+      "ProductionContextResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/StoredProductionContext"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context"
+        ]
+      },
+      "StoredProductionContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ProductionContextMetadata"
+          },
+          "created_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "updated_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision",
+          "snapshot_id",
+          "plan_version",
+          "as_of",
+          "metadata",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at",
+          "snapshot"
+        ]
+      },
+      "ProductionContextMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "source": {
+            "type": "string",
+            "const": "caller_supplied_synthetic"
+          },
+          "syntactic_validation": {
+            "type": "string",
+            "const": "accepted"
+          },
+          "numerical_acceptance": {
+            "type": "string",
+            "const": "not_claimed"
+          }
+        },
+        "required": [
+          "synthetic",
+          "source",
+          "syntactic_validation",
+          "numerical_acceptance"
+        ]
+      },
+      "ProductionContextsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionContextSummary"
+            },
+            "maxItems": 100
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "contexts",
+          "has_more"
+        ]
+      },
+      "ProductionContextSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/ProductionContextMetadata"
+          },
+          "created_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "updated_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "context_id",
+          "workspace_id",
+          "revision",
+          "snapshot_id",
+          "plan_version",
+          "as_of",
+          "metadata",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "VoiceHTTPSavedSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_id": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_id",
+          "expected_revision"
+        ],
+        "description": "Authenticated host reads current complete stored context; no caller snapshot override. Local synthetic read-only comparison only."
       }
     }
   },

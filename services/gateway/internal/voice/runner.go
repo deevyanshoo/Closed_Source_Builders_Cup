@@ -52,6 +52,7 @@ type Executor interface {
 type Runner struct {
 	manager  *Manager
 	executor Executor
+	timeout  time.Duration
 	mu       sync.Mutex
 	inflight int
 	active   map[*Lease]bool
@@ -284,7 +285,8 @@ func NewRunner(manager *Manager, executor Executor) (*Runner, error) {
 			return nil, ErrInvalid
 		}
 	}
-	return &Runner{manager: manager, executor: executor, active: make(map[*Lease]bool)}, nil
+	return &Runner{manager: manager, executor: executor, timeout: 30 * time.Second,
+		active: make(map[*Lease]bool)}, nil
 }
 
 func (r *Runner) acquire(lease *Lease) bool {
@@ -350,9 +352,12 @@ func (r *Runner) Run(owner Owner, lease *Lease, captured *RecoveryContext, callJ
 	if !r.manager.IsCurrent(owner, lease) {
 		return ErrUnavailable
 	}
-	ctx, cancel := context.WithTimeout(lease.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(lease.Context(), r.timeout)
 	defer cancel()
 	response, execErr := r.executor.Execute(ctx, append([]byte(nil), request...))
+	if ctx.Err() != nil {
+		return ErrUnavailable
+	}
 	if execErr != nil {
 		if !r.manager.IsCurrent(owner, lease) {
 			return ErrUnavailable
@@ -369,6 +374,9 @@ func (r *Runner) Run(owner Owner, lease *Lease, captured *RecoveryContext, callJ
 		return ErrExecution
 	}
 	if !r.manager.IsCurrent(owner, lease) {
+		return ErrUnavailable
+	}
+	if ctx.Err() != nil {
 		return ErrUnavailable
 	}
 	if err := r.manager.Enqueue(owner, lease, response); err != nil {

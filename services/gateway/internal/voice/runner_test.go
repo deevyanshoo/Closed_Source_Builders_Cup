@@ -534,3 +534,34 @@ func TestSuppressedBridgeOutcomeReturnsUnavailableWithoutQueue(t *testing.T) {
 		t.Fatalf("suppressed result queued: %v %v", ok, err)
 	}
 }
+
+func TestRunnerDeadlineSuppressesValidLateResponseWhileLeaseRemainsCurrent(t *testing.T) {
+	calls := 0
+	executor := functionExecutor(func(ctx context.Context, request []byte) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			<-ctx.Done()
+		}
+		return rejectedProtocolResponse(request), nil
+	})
+	m, runner, owner, id, lease, captured, call := runnerFixture(t, 1, executor)
+	runner.timeout = 20 * time.Millisecond // private deterministic test seam; production is 30s
+	if err := runner.Run(owner, lease, captured, call); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expired runner accepted valid late response: %v", err)
+	}
+	if !m.IsCurrent(owner, lease) {
+		t.Fatal("test did not isolate runner deadline from Manager lease")
+	}
+	if _, ok, err := m.Dequeue(owner, id); err != nil || ok {
+		t.Fatalf("expired runner queued output: %v %v", ok, err)
+	}
+	if err := runner.Run(owner, lease, captured, call); err != nil {
+		t.Fatalf("deadline retained gate capacity: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("executor calls = %d", calls)
+	}
+	if _, ok, err := m.Dequeue(owner, id); err != nil || !ok {
+		t.Fatalf("fresh current execution did not queue: %v %v", ok, err)
+	}
+}

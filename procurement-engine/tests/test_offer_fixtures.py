@@ -149,3 +149,21 @@ def test_expired_quote_is_expired_on_the_manifest_date():
         valid = q["expected"]["valid_until"]
         is_expired = valid["status"] == "present" and valid["value"] < as_of
         assert is_expired == ("expired" in q["cases"]), q["id"]
+
+
+EXPLICIT_SETTLEMENT = re.compile(
+    r"\b(invoice|invoicing|payment|settlement|billing)\s+currency\b|\bcurrency\s+of\s+(payment|invoice|settlement)\b|"
+    r"\b(invoiced|paid|payable|settled)\s+in\s+([A-Z]{3}|US\$)", re.I)
+
+
+@pytest.mark.parametrize("quote_id", sorted(QUOTES))
+def test_settlement_currency_is_present_only_when_explicitly_stated(quote_id):
+    """Agreed rule since #24: a price currency alone is not the invoice or payment currency."""
+    expected = QUOTES[quote_id]["expected"]["settlement_currency"]
+    stated = [s for s in read_document(FIXTURES / QUOTES[quote_id]["file"]).segments
+              if EXPLICIT_SETTLEMENT.search(s.text)]
+    if expected["status"] == "present":
+        assert any(EXPLICIT_SETTLEMENT.search(e["text"]) for e in expected["evidence"]), \
+            "settlement currency marked present without an explicit invoice or payment currency"
+    else:
+        assert not stated, f"document states a settlement currency at {[s.locator for s in stated]}"

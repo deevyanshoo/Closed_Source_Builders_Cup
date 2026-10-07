@@ -178,7 +178,12 @@ def test_missing_item_fails_whole_quote():
 
 
 def test_real_q01_price_currency_cannot_count_as_verified_settlement():
+    # Answer key v2: Q01 states only a price currency, so settlement currency is missing in the key and
+    # must stay missing in the extraction; promoting USD from the price line would be an invented value.
+    assert QUOTES["Q01"]["expected"]["settlement_currency"]["status"] == "missing"
     score = scoring.score_quote(rules("Q01"), QUOTES["Q01"])
     settlement = by_name(score)["settlement_currency"]
-    assert (settlement["correct"], settlement["error"]) == (False, "not_extracted")
-    assert score["quote_correct"] is False
+    assert (settlement["got_status"], settlement["correct"], settlement["error"]) == ("missing", True, None)
+    promoted = rules("Q01")
+    promoted.fields["settlement_currency"].status, promoted.fields["settlement_currency"].value = "extracted", "USD"
+    assert by_name(scoring.score_quote(promoted, QUOTES["Q01"]))["settlement_currency"]["error"] == "invented_value"

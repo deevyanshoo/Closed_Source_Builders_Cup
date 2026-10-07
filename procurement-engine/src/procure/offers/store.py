@@ -150,12 +150,16 @@ def _view(row: dict, payload: dict, today: dt.date, events: list | None = None) 
     reasons = lc.blocking_reasons(payload, today)
     status = ("expired" if row["status"] in lc.TRANSITIONS["expire"][0]
               and any(r["code"] == "expired" for r in reasons) else row["status"])
+    # Date previews must describe the same as-of date as their status. Keep the
+    # saved pricing/FX normalization frozen; reading an offer must not refresh it.
+    normalized = {**payload["normalized"], "as_of": today.isoformat(),
+                  "expiry": nz.expiry_status(lc.usable(payload["fields"]["valid_until"]), today)}
     out = {"offer_id": row["id"], "status": status, "version": int(row["version"]),
            "synthetic": bool(row["synthetic"]), "extraction_id": row["extraction_id"],
            "document": payload["document"], "extractor": payload["extractor"],
-           "extractor_detail": payload.get("extractor_detail"), "as_of": payload.get("as_of"),
+           "extractor_detail": payload.get("extractor_detail"), "as_of": today.isoformat(),
            "fields": payload["fields"], "items": payload["items"], "review_flags": payload["review_flags"],
-           "normalized": payload["normalized"], "blocking_reasons": reasons,
+           "normalized": normalized, "blocking_reasons": reasons,
            "allowed_actions": lc.allowed_actions(status, reasons),
            "created_at": row["created_at"], "updated_at": row["updated_at"]}
     if events is not None:
@@ -219,24 +223,33 @@ def create_from_upload(data: bytes, filename: str, *, mode: str = "auto", as_of:
     payload["reporting_currency"] = reporting_currency
     status = lc.initial_status(payload, today)
     now = db.now_iso()
+    existing_id = None
     with db._LOCK:
         with _transaction():
-            if not _rows("SELECT document_id FROM offer_documents WHERE document_id = ?", [doc.document_id]):
-                db.insert_row("offer_documents", {
-                    "document_id": doc.document_id, "filename": doc.filename, "media_type": doc.media_type,
-                    "byte_size": doc.byte_size, "segments_json": json.dumps([dataclasses.asdict(s) for s in doc.segments]),
-                    "warnings_json": json.dumps([dataclasses.asdict(w) for w in doc.warnings]),
-                    "metadata_json": json.dumps(doc.metadata, default=str), "created_at": now})
-            extraction_id, offer_id = db.new_id(), db.new_id()
-            db.insert_row("offer_extractions", {"id": extraction_id, "document_id": doc.document_id,
-                                                "extractor": extraction.extractor, "payload_json": json.dumps(ex),
-                                                "created_at": now})
-            db.insert_row("offers", {"id": offer_id, "extraction_id": extraction_id, "document_id": doc.document_id,
-                                     "status": status, "version": 1, "synthetic": extraction.synthetic,
-                                     "payload_json": json.dumps(payload), "created_at": now, "updated_at": now})
-            _event(offer_id, actor=actor, action="created", from_status=None, to_status=status,
-                   new={"extraction_id": extraction_id, "extractor": extraction.extractor,
-                        "call": extraction.extractor_detail.get("call")})
+            if not allow_duplicate:
+                existing = _rows("SELECT id FROM offers WHERE document_id = ? ORDER BY created_at LIMIT 1",
+                                 [doc.document_id])
+                existing_id = existing[0]["id"] if existing else None
+            if existing_id is None:
+                if not _rows("SELECT document_id FROM offer_documents WHERE document_id = ?", [doc.document_id]):
+                    db.insert_row("offer_documents", {
+                        "document_id": doc.document_id, "filename": doc.filename, "media_type": doc.media_type,
+                        "byte_size": doc.byte_size, "segments_json": json.dumps([dataclasses.asdict(s) for s in doc.segments]),
+                        "warnings_json": json.dumps([dataclasses.asdict(w) for w in doc.warnings]),
+                        "metadata_json": json.dumps(doc.metadata, default=str), "created_at": now})
+                extraction_id, offer_id = db.new_id(), db.new_id()
+                db.insert_row("offer_extractions", {"id": extraction_id, "document_id": doc.document_id,
+                                                    "extractor": extraction.extractor, "payload_json": json.dumps(ex),
+                                                    "created_at": now})
+                db.insert_row("offers", {"id": offer_id, "extraction_id": extraction_id, "document_id": doc.document_id,
+                                         "status": status, "version": 1, "synthetic": extraction.synthetic,
+                                         "payload_json": json.dumps(payload), "created_at": now, "updated_at": now})
+                _event(offer_id, actor=actor, action="created", from_status=None, to_status=status,
+                       new={"extraction_id": extraction_id, "extractor": extraction.extractor,
+                            "call": extraction.extractor_detail.get("call")})
+    if existing_id is not None:
+        offer = get_offer(existing_id, today=today)
+        return {"offer": offer, "extraction_id": offer["extraction_id"], "deduplicated": True}
     return {"offer": get_offer(offer_id, today=today), "extraction_id": extraction_id, "deduplicated": False}
 
 

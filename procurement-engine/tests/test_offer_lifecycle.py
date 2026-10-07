@@ -314,10 +314,50 @@ def test_as_of_preview_does_not_persist_expiry_or_resurrect_offer():
     offer = ready_q01()
     future = store.get_offer(offer["offer_id"], include_events=True, today=dt.date(2099, 1, 1))
     assert future["status"] == "expired" and future["version"] == offer["version"]
+    assert future["normalized"]["as_of"] == "2099-01-01"
+    assert future["normalized"]["expiry"] == "expired"
     assert [e["action"] for e in future["events"]].count("expire") == 0
     past = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
     assert past["status"] == "corrected" and past["version"] == offer["version"]
+    assert past["normalized"]["as_of"] == TODAY.isoformat()
+    assert past["normalized"]["expiry"] == "valid"
+    assert past["normalized"]["items"] == future["normalized"]["items"]
     assert [e["action"] for e in past["events"]].count("expire") == 0
+
+
+def test_concurrent_default_upload_of_same_document_deduplicates_inside_lock(monkeypatch):
+    # Both callers must have passed the fast precheck before either inserts.
+    content = (f"supplier,Unique {key()}\nmaterial,Steel\nprice,USD 10 per tonne\n").encode()
+    barrier = threading.Barrier(2, timeout=10)
+    original = store.extract_offer
+    results, errors = [], []
+
+    def synced_extract(*args, **kwargs):
+        barrier.wait()
+        return original(*args, **kwargs)
+
+    def create():
+        try:
+            results.append(store.create_from_upload(content, "same.csv", mode="rules", as_of=TODAY))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "extract_offer", synced_extract)
+        threads = [threading.Thread(target=create) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert len(results) == 2
+    assert len({result["offer"]["offer_id"] for result in results}) == 1
+    assert sorted(result["deduplicated"] for result in results) == [False, True]
+    duplicate = store.create_from_upload(content, "same.csv", mode="rules", as_of=TODAY,
+                                         allow_duplicate=True)
+    assert duplicate["deduplicated"] is False
+    assert duplicate["offer"]["offer_id"] != results[0]["offer"]["offer_id"]
 
 
 def test_concurrent_authoritative_expiry_writes_one_event():

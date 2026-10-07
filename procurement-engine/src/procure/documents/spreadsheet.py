@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import colorsys
 import io
+import posixpath
 import re
 import zipfile
 from xml.etree import ElementTree
@@ -22,6 +23,7 @@ from openpyxl import load_workbook
 from openpyxl.styles.colors import COLOR_INDEX
 from openpyxl.utils.cell import column_index_from_string, coordinate_from_string
 from openpyxl.utils.exceptions import InvalidFileException
+from openpyxl.xml.constants import PKG_REL_NS, REL_NS, SHEET_MAIN_NS, XLSM, XLSX, XLTM, XLTX
 
 from .models import DocumentReadError, make_segment
 
@@ -30,7 +32,78 @@ MAX_XLSX_MEMBERS = 1_024
 MAX_XLSX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_XLSX_EXPANSION_RATIO = 200
 _PLAIN_SHEET = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
-_SHEET_MEMBER = re.compile(r"^xl/worksheets/[^/]+\.xml$")
+_CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+_WORKSHEET_REL_TYPE = REL_NS + "/worksheet"
+_WORKBOOK_TYPES = {XLSX, XLSM, XLTX, XLTM}
+
+
+def _package_path(target: str, parent: str = "") -> str:
+    """Resolve an internal OOXML target without accepting path aliases or traversal."""
+    if not target or "\\" in target or "\x00" in target or "?" in target or "#" in target:
+        raise DocumentReadError("unreadable", "XLSX has an invalid package path")
+    absolute = target.startswith("/")
+    parts = target[1:].split("/") if absolute else target.split("/")
+    if any(part in ("", ".", "..") or ":" in part for part in parts):
+        raise DocumentReadError("unreadable", "XLSX has an ambiguous or traversing package path")
+    path = "/".join(parts) if absolute else posixpath.join(parent, *parts)
+    if not path or path.startswith("/"):
+        raise DocumentReadError("unreadable", "XLSX has an invalid package path")
+    return path
+
+
+def _worksheet_members(archive: zipfile.ZipFile, members: dict[str, zipfile.ZipInfo]):
+    """Follow the same workbook sheet relationships that openpyxl will load."""
+    manifest = members.get("[Content_Types].xml")
+    if manifest is None:
+        raise DocumentReadError("unreadable", "XLSX has no content types")
+    with archive.open(manifest) as source:
+        content_types = ElementTree.parse(source).getroot()
+    if content_types.tag != f"{{{_CONTENT_TYPES_NS}}}Types":
+        raise DocumentReadError("unreadable", "XLSX has invalid content types")
+    workbook_paths = []
+    for override in content_types.findall(f"{{{_CONTENT_TYPES_NS}}}Override"):
+        if override.get("ContentType") in _WORKBOOK_TYPES:
+            workbook_paths.append(_package_path(override.get("PartName", "")))
+    if len(workbook_paths) != 1:
+        raise DocumentReadError("unreadable", "XLSX workbook part is missing or ambiguous")
+    workbook_path = workbook_paths[0]
+    if workbook_path not in members:
+        raise DocumentReadError("unreadable", "XLSX workbook part is missing")
+    rels_path = posixpath.join(posixpath.dirname(workbook_path), "_rels",
+                               posixpath.basename(workbook_path) + ".rels")
+    if rels_path not in members:
+        raise DocumentReadError("unreadable", "XLSX workbook relationships are missing")
+    with archive.open(members[workbook_path]) as source:
+        workbook = ElementTree.parse(source).getroot()
+    with archive.open(members[rels_path]) as source:
+        relationships = ElementTree.parse(source).getroot()
+    if workbook.tag != f"{{{SHEET_MAIN_NS}}}workbook" or relationships.tag != f"{{{PKG_REL_NS}}}Relationships":
+        raise DocumentReadError("unreadable", "XLSX workbook relationships are invalid")
+    by_id = {}
+    for rel in relationships:
+        if rel.tag != f"{{{PKG_REL_NS}}}Relationship":
+            raise DocumentReadError("unreadable", "XLSX workbook relationship is malformed")
+        rel_id = rel.get("Id")
+        if not rel_id or rel_id in by_id or not rel.get("Type") or not rel.get("Target"):
+            raise DocumentReadError("unreadable", "XLSX workbook relationship is missing or duplicated")
+        by_id[rel_id] = rel
+    sheets = workbook.find(f"{{{SHEET_MAIN_NS}}}sheets")
+    if sheets is None:
+        raise DocumentReadError("unreadable", "XLSX workbook has no sheet list")
+    sheet_members = []
+    seen_targets = set()
+    for sheet in sheets:
+        if sheet.tag != f"{{{SHEET_MAIN_NS}}}sheet":
+            raise DocumentReadError("unreadable", "XLSX workbook sheet is malformed")
+        rel = by_id.get(sheet.get(f"{{{REL_NS}}}id"))
+        if rel is None or rel.get("Type") != _WORKSHEET_REL_TYPE or rel.get("TargetMode") not in (None, "Internal"):
+            raise DocumentReadError("unreadable", "XLSX worksheet relationship is missing or unsupported")
+        target = _package_path(rel.get("Target"), posixpath.dirname(workbook_path))
+        if target in seen_targets or target not in members or members[target].is_dir():
+            raise DocumentReadError("unreadable", "XLSX worksheet target is missing or duplicated")
+        seen_targets.add(target)
+        sheet_members.append(members[target])
+    return sheet_members
 
 
 def sheet_locator(sheet: str, coordinate: str) -> str:
@@ -60,7 +133,18 @@ def _theme_colors(wb) -> list[str | None]:
     try:
         root = ElementTree.fromstring(wb.loaded_theme)
         scheme = root.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}clrScheme")
-        return [(list(entry)[0].get("val") or list(entry)[0].get("lastClr")) for entry in scheme]
+        colors = {}
+        for entry in scheme:
+            color = next(iter(entry), None)
+            if color is None:
+                continue
+            kind = color.tag.rsplit("}", 1)[-1]
+            colors[entry.tag.rsplit("}", 1)[-1]] = (
+                color.get("lastClr") if kind == "sysClr" else color.get("val") if kind == "srgbClr" else None)
+        # Spreadsheet theme indices use light/dark pairs in this order, unlike XML's dk1/lt1 order.
+        order = ("lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3",
+                 "accent4", "accent5", "accent6", "hlink", "folHlink")
+        return [colors.get(name) for name in order]
     except (TypeError, ValueError, IndexError, AttributeError, ElementTree.ParseError):
         return []
 
@@ -114,15 +198,20 @@ def _preflight(data: bytes) -> None:
             if len(members) > MAX_XLSX_MEMBERS:
                 raise DocumentReadError("too_large", f"XLSX has more than {MAX_XLSX_MEMBERS} ZIP members")
             expanded = 0
-            occupied = rectangular_work = 0
+            by_name = {}
             for info in members:
+                name = info.filename[:-1] if info.is_dir() else info.filename
+                _package_path(name)
+                if name in by_name:
+                    raise DocumentReadError("unreadable", "XLSX has duplicate ZIP member names")
+                by_name[name] = info
                 expanded += info.file_size
                 if expanded > MAX_XLSX_UNCOMPRESSED_BYTES:
                     raise DocumentReadError("too_large", "XLSX declared uncompressed content is too large")
                 if info.file_size > MAX_XLSX_EXPANSION_RATIO * max(info.compress_size, 1):
                     raise DocumentReadError("too_large", "XLSX ZIP member expands too much")
-                if not _SHEET_MEMBER.match(info.filename):
-                    continue
+            occupied = rectangular_work = 0
+            for info in _worksheet_members(archive, by_name):
                 max_row = max_col = 0
                 with archive.open(info) as sheet:
                     root = None

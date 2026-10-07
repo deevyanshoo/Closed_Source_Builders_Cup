@@ -59,15 +59,41 @@ def parse_decimal(text: str, *, decimal_comma: bool = False) -> Decimal | None:
     return found[0] if len(found) == 1 else None
 
 
-def numbers_in(text: str) -> set[Decimal]:
-    """Every number in the text, read in both styles (used to check a value is supported)."""
+def number_style(texts: list[str]) -> bool | None:
+    """Decimal-comma convention when cited numbers establish it; None means unresolved."""
+    styles = set()
+    for text in texts:
+        for token in _NUMBER.findall(text):
+            token = token.rstrip(".,")
+            if "," in token and "." in token:
+                styles.add(token.rfind(",") > token.rfind("."))
+            elif "," in token and token.count(",") == 1:
+                whole, fraction = token.split(",")
+                if len(whole) <= 3 and 1 <= len(fraction) <= 2:
+                    styles.add(True)
+            elif "." in token and token.count(".") == 1:
+                whole, fraction = token.split(".")
+                if len(whole) <= 3 and 1 <= len(fraction) <= 2:
+                    styles.add(False)
+    return next(iter(styles)) if len(styles) == 1 else None
+
+
+def numbers_in(text: str, *, decimal_comma: bool | None = None) -> set[Decimal]:
+    """Numbers with one defensible interpretation; lone three-digit separators need context."""
     out = set()
     for token in _NUMBER.findall(text):
-        for style in (False, True):
-            value = _parse(token, style)
-            if value is not None:
-                out.add(value)
+        point, comma = _parse(token, False), _parse(token, True)
+        if point == comma and point is not None:
+            out.add(point)
+        elif decimal_comma is not None:
+            chosen = comma if decimal_comma else point
+            if chosen is not None:
+                out.add(chosen)
     return out
+
+
+def ambiguous_number_in(text: str) -> bool:
+    return any(_parse(token, False) != _parse(token, True) for token in _NUMBER.findall(text))
 
 
 def uses_decimal_comma(texts) -> bool:
@@ -126,6 +152,23 @@ def months_in(text: str) -> set[str]:
     return found
 
 
+def windows_ordered_in(text: str) -> list[str]:
+    """Explicit calendar windows in source order, without inferring a missing year."""
+    pattern = re.compile(rf"\b(?P<iso>\d{{4}}-\d{{2}})(?!-\d)|\b(?P<month>{_MONTH_WORD})\s+(?P<year>\d{{4}})\b", re.I)
+    found = []
+    for match in pattern.finditer(text):
+        if match.group("iso"):
+            value = match.group("iso")
+        else:
+            value = f"{match.group('year')}-{_MONTHS[match.group('month').lower()[:3]]:02d}"
+        try:
+            dt.date(int(value[:4]), int(value[5:]), 1)
+        except ValueError:
+            continue
+        found.append(value)
+    return found
+
+
 # ---------- units ----------
 
 KG_PER_UNIT = {"tonne": Decimal("1000"), "kg": Decimal("1"), "lb": Decimal("0.45359237")}  # exact definitions
@@ -163,10 +206,41 @@ def unit_problem(text: str) -> str | None:
 
 _SYMBOLS = {"US$": "USD", "€": "EUR", "£": "GBP", "₹": "INR", "RMB": "CNY"}  # unambiguous symbols only
 
+# SIX ISO 4217 List One, published 2026-09-17. This validates a code's identity, not
+# product/provider coverage; an unknown code needs review until this snapshot is refreshed.
+# https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
+ISO_4217_CODES = frozenset("""
+AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND BOB BOV BRL BSD BTN BWP BYN BZD
+CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP
+GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR
+KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR MVR MWK
+MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR
+SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH
+UGX USD USN UYI UYU UYW UZS VED VES VND VUV WST XAD XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR
+XOF XPD XPF XPT XSU XTS XUA XXX YER ZAR ZMW ZWG
+""".split())
+_NON_SETTLEMENT_CODES = frozenset({"XXX", "XTS"})  # no currency; reserved for testing
+
+
+def _currency_context(text: str, code: str) -> bool:
+    if text.strip() == code:  # a dedicated table cell
+        return True
+    escaped = re.escape(code)
+    if re.search(rf"(?<![A-Za-z]){escaped}(?![A-Za-z])\s*\d[\d.,]*\s*(?:/|per)\s*"
+                 rf"(?:metric\s+)?(?:t|tonne|kg|lb)\b", text, re.I):
+        return True
+    if re.search(rf"\b(?:price|premium|currency|settlement\s+currency|invoice\s+currency|quote\s+currency)\b"
+                 rf"[^\n;]{{0,48}}\b{escaped}\b", text, re.I):
+        return True
+    return False
+
 
 def currencies_in(text: str) -> set[str]:
-    found = set(re.findall(r"(?<![A-Za-z])([A-Z]{3})(?![A-Za-z])", text))
-    found.update(code for symbol, code in _SYMBOLS.items() if symbol in text)
+    found = {code for code in re.findall(r"(?<![A-Za-z])([A-Z]{3})(?![A-Za-z])", text)
+             if code in ISO_4217_CODES and code not in _NON_SETTLEMENT_CODES
+             and _currency_context(text, code)}
+    found.update(code for symbol, code in _SYMBOLS.items() if symbol in text and
+                 (text.strip() == symbol or bool(re.search(rf"{re.escape(symbol)}\s*\d", text))))
     return found
 
 

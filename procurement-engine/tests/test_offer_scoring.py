@@ -154,3 +154,19 @@ def test_real_q01_price_currency_cannot_count_as_verified_settlement():
     settlement = by_name(score)["settlement_currency"]
     assert (settlement["correct"], settlement["error"]) == (False, "not_extracted")
     assert score["quote_correct"] is False
+
+
+def test_scoring_run_over_the_heldout_set_records_how_it_ran():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="rules", split="heldout")
+    assert report["split"] == "heldout" and report["mode"] == "rules"
+    assert report["summary"]["quotes"] == sum(q["split"] == "heldout" for q in QUOTES.values())
+    assert report["extractors_used"] == {"rules": report["summary"]["quotes"]}
+    assert report["calls"] == {"none": report["summary"]["quotes"]}
+    assert report["synthetic_inputs"] is True and report["revision"]
+    assert {"missing", "conflict", "expired", "embedded_instruction"} <= set(report["summary"]["flags"])

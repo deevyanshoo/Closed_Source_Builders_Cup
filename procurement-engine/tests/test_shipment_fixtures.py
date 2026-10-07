@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "shipments" / "milestones.json").read_text())
@@ -46,6 +46,11 @@ def test_out_of_order_arrival_is_received_before_departure():
     rows = by_shipment("SHP-SYN-005")
     order = [r["event_id"] for r in rows]
     assert order.index("evt-005-arr") < order.index("evt-005-dep")
+    arrival = next(r for r in rows if r["event_id"] == "evt-005-arr")
+    departure = next(r for r in rows if r["event_id"] == "evt-005-dep")
+    def observed(row):
+        return datetime.fromisoformat(row["observed_at"].replace("Z", "+00:00")).astimezone(timezone.utc)
+    assert observed(arrival) < observed(departure)
 
 
 def test_missing_identifiers_are_really_missing():
@@ -68,3 +73,11 @@ def test_exactly_one_evidence_record_is_expired_at_as_of():
     expired = [e["evidence_id"] for r in RECORDS for e in r["evidence"]
                if e["valid_until"] and datetime.fromisoformat(e["valid_until"].replace("Z", "+00:00")) < as_of]
     assert expired == ["ev-008-notice"]
+
+
+def test_future_observation_unknown_type_and_missing_location_are_present():
+    as_of = datetime.fromisoformat(FIXTURE["as_of"].replace("Z", "+00:00"))
+    assert any(datetime.fromisoformat(r["observed_at"].replace("Z", "+00:00")) > as_of
+               for r in RECORDS)
+    assert any(r["type"] == "teleported" for r in RECORDS)
+    assert any("facility" not in r and "lane" not in r for r in RECORDS)

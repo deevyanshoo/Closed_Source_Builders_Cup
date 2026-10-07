@@ -25,8 +25,8 @@ answers; see below). Consequence: the fixture set has no positive example of an 
 |---|---|---|---|---|---|
 | Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07_deb0b144c75d44e0af79c69abdb32edb.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
 | Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07_38702aa4716a4d80b6bdc9ebbe58b090.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
-| Gemini, held-out (revision 204487d, key v1, API key) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | Superseded attempt: all 8 calls rejected by the free-tier quota. See the Vertex run below |
-| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Run before #24 and key v2; the one difference was the fixture's `[SYNTHETIC]` tag in the supplier name |
+| Gemini, held-out (revision 204487d, key v1, API key) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | Eight recorded real-call attempts had coarse `quota_exhausted` errors; every quote fell back to rules, so its numbers are the rules numbers. The record does not establish project tier, limit, cause or reset time. Superseded by the Vertex run below |
+| Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Recorded before the held-out quota errors and before the #24 merge and key v2; the cause and reset time are unverified. Only difference: supplier name without the fixture's `[SYNTHETIC]` tag, which the scorer now ignores |
 | Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | n/a | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
 
 Score files now carry input, manifest and source hashes and are never overwritten (#29). The unsuffixed
@@ -93,3 +93,14 @@ Findings:
 Real Gemini calls are now gated: they need `RUN_LIVE_GEMINI=1` and stay within `MAX_LIVE_CALLS` (default 0). Each
 score record includes `live_calls` (`used`, `max`, `enabled`). The rules runs above used 0 live calls.
 
+The historical API-key JSON records are preserved as recorded; they do not contain later whole-quote metrics or exact source/input hashes and cannot be retroactively relabeled as such.
+
+## Preserved historical demo record
+
+`e2e_demo_2026-10-07.json` is the original synthetic, offline record and is retained unchanged for history.
+Its Q01 `settlement_currency` annotation incorrectly says `verified_against_document`: Q01 documents USD
+as the **unit-price currency**, not the settlement currency. That annotation is superseded and must not be
+used as document evidence or as acceptance of the repaired demo. The current demo treats settlement USD
+as an explicit synthetic reviewer assertion without document evidence and writes a separate unique record.
+Neither the historical nor repaired local demo proves provider use, tenant-bound gateway integration,
+production authentication, or deployment.

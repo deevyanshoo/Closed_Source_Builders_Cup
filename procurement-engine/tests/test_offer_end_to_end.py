@@ -3,6 +3,8 @@ draft. Nothing is sent. Uses the seeded offline database (synthetic market data)
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import importlib.util
 import json
 from pathlib import Path
 
@@ -28,10 +30,56 @@ def saved_q01():
     offer = store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=TODAY, actor="buyer",
                                      allow_duplicate=True)["offer"]
     offer = store.correct_field(offer["offer_id"], field="settlement_currency", value="USD",
-                                evidence=[{"locator": "p1:l10", "quote": "USD"}], expected_version=1,
+                                evidence=None, expected_version=1,
                                 actor="reviewer", idempotency_key=key(), today=TODAY)
     return store.save_offer(offer["offer_id"], expected_version=offer["version"], actor="reviewer",
                             idempotency_key=key(), today=TODAY)
+
+
+def test_q01_settlement_is_an_uncited_reviewer_assertion_and_price_keeps_its_source():
+    offer = saved_q01()
+    settlement = offer["fields"]["settlement_currency"]
+    pricing = offer["items"][0]["pricing"]
+    assert settlement["source"] == "user"
+    assert settlement["evidence"] == []
+    assert settlement["evidence_status"] == "user_entered_without_document_evidence"
+    assert pricing["source"] == "rules"
+    assert any(e["locator"] == "p1:l10" for e in pricing["evidence"])
+
+
+def test_demo_second_same_day_run_preserves_the_first_completed_record(tmp_path, monkeypatch):
+    script = Path(__file__).parents[1] / "scripts" / "offer_e2e_demo.py"
+    spec = importlib.util.spec_from_file_location("offer_e2e_demo_test", script)
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    output_dir = tmp_path / "evaluation" / "offers"
+    output_dir.mkdir(parents=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(demo, "ROOT", tmp_path)
+        for name in ("PROCURE_DATA_DIR", "PROCURE_DB_PATH", "OFFLINE", "GEMINI_API_KEY"):
+            patch.setenv(name, "")
+        assert demo.main() == 0
+        first = list(output_dir.glob("e2e_demo_*.json"))
+        assert len(first) == 1
+        first_bytes = first[0].read_bytes()
+        assert demo.main() == 0
+    files = list(output_dir.glob("e2e_demo_*.json"))
+    assert len(files) == 2
+    assert first[0].read_bytes() == first_bytes
+    for file in files:
+        record = json.loads(file.read_text())
+        corrected = next(step for step in record["steps"] if step["step"] == "corrected")
+        assert corrected["evidence_status"] == "user_entered_without_document_evidence"
+        assert corrected["evidence"] == []
+        plan = next(step for step in record["steps"] if step["step"] == "planning_input")
+        assert plan["source_provenance"]["settlement_currency"]["evidence_refs"] == []
+        assert any(ref["locator"] == "p1:l10" for ref in
+                   plan["source_provenance"]["items[0].pricing"]["evidence_refs"])
+        assert "Offer prices, MOQ, capacity and payment terms are not inputs" in plan["limitations"][0]
+        assert next(step for step in record["steps"] if step["step"] == "rfq_drafted")["sent"] is False
+        assert record["input_sha256"]["quote_Q01"] == hashlib.sha256(
+            (FIXTURES / QUOTES["Q01"]["file"]).read_bytes()).hexdigest()
+        assert len(record["revision"]) == 40
 
 
 def rfq_count():

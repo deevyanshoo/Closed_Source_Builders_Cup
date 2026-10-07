@@ -75,3 +75,19 @@ def test_synthetic_label_is_not_part_of_the_supplier_name():
     ex = rules("Q01")
     ex.fields["supplier_name"].value = "Atacama Red Metals SpA"
     assert by_name(scoring.score_quote(ex, QUOTES["Q01"]))["supplier_name"]["correct"] is True
+
+
+def test_scoring_run_over_the_heldout_set_records_how_it_ran():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="rules", split="heldout")
+    assert report["split"] == "heldout" and report["mode"] == "rules"
+    assert report["summary"]["quotes"] == sum(q["split"] == "heldout" for q in QUOTES.values())
+    assert report["extractors_used"] == {"rules": report["summary"]["quotes"]}
+    assert report["calls"] == {"none": report["summary"]["quotes"]}
+    assert report["synthetic_inputs"] is True and report["revision"]
+    assert {"missing", "conflict", "expired", "embedded_instruction"} <= set(report["summary"]["flags"])

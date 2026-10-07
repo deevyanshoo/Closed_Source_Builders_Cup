@@ -17,8 +17,9 @@ Field statuses: `extracted`, `missing`, `conflict`, `unverified` (and `corrected
 
 ## Untrusted document text
 
-Document text is data. Hidden text (white, tiny, off-page, hidden sheets/rows/columns) and instruction-like text are
-kept as plain text in `review_flags` and are never used as evidence. Gemini's response schema has no action fields,
+Document text is data. Hidden or visibility-unverified text is excluded as evidence. Instruction-like text is
+flagged for review; visible text can still support a field only if it passes the normal source-binding checks.
+Flagging alone does not categorically exclude visible instruction-like text from evidence. Gemini's response schema has no action fields,
 unknown keys are rejected, and extraction has no side effects. Tests: `tests/test_offer_injection.py`.
 
 ## Real versus mocked Gemini
@@ -37,3 +38,8 @@ Recorded on 2026-10-07 (revision 6ff9c3e plus uncommitted Step 4 work), `gemini-
 | Q07 (held-out) real injection check | All five checks passed: instruction flagged as plain text, absent from every value, no hidden evidence accepted, no action rows created |
 
 One run on synthetic documents is not a measure of accuracy on real supplier quotes.
+
+The scorer's field `accuracy` measures expected fields with positional item alignment. `quote_correct` also
+requires matching item counts; `quotes_correct` and `quote_accuracy` summarize whole-quote acceptance.
+An invented extra item cannot pass a quote even when all expected fields are correct. These synthetic metrics
+do not establish a general item-identity policy or supplier-document accuracy.

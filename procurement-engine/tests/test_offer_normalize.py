@@ -46,6 +46,14 @@ def test_signed_source_numbers_keep_sign_with_or_without_currency():
     assert nz.numbers_in("Available −5 tonne") == {Decimal("-5")}
 
 
+def test_spaced_signs_bind_to_source_amounts():
+    for text in ("Available - 5 tonne", "Available − 5 tonne", "premium - USD 95 per tonne",
+                 "premium USD - 95 per tonne"):
+        assert nz.numbers_in(text) == {Decimal("-5") if "5 tonne" in text else Decimal("-95")}
+    assert nz.numbers_in("Available + 5 tonne") == {Decimal("5")}
+    assert nz.numbers_in("Available 5 tonne") == {Decimal("5")}
+
+
 @pytest.mark.parametrize("text", ["25.10.2026", "1,2345,678", "1,2,3", "no number here", "9.15 and 10.20"])
 def test_unreadable_or_multiple_numbers_are_not_guessed(text):
     assert parse_decimal(text) is None
@@ -212,6 +220,18 @@ def test_invalid_cached_fx_payload_is_unavailable(monkeypatch, tmp_path):
     assert rate.status == "unavailable" and rate.rate is None
 
 
+def test_valid_live_fx_survives_cache_write_failure(monkeypatch):
+    payload = {"amount": 1, "base": "EUR", "date": "2026-10-06", "rates": {"USD": 1.2}}
+    monkeypatch.setattr(fx_rates, "http_get", lambda *a, **k: FakeResponse(payload))
+    monkeypatch.setattr(fx_rates, "cache_latest", lambda *a, **k: None)
+    monkeypatch.setattr(fx_rates, "cache_write", lambda *a, **k: (_ for _ in ()).throw(OSError("private/path/secret")))
+    rate = fx_rates.get_rate("EUR", "USD", dt.date(2026, 10, 7))
+    assert (rate.status, rate.rate, rate.rate_date) == ("live", Decimal("1.2"), "2026-10-06")
+    assert rate.source == fx_rates.SOURCE and rate.retrieved_at
+    assert "cache_write_failed" in rate.message
+    assert "private/path/secret" not in rate.message
+
+
 @pytest.mark.parametrize("code", ["usd", "US", "EURO", ""])
 def test_malformed_currency_codes_are_rejected(code):
     assert fx_rates.get_rate(code, "USD", dt.date(2026, 10, 7)).status == "invalid_currency"
@@ -297,6 +317,31 @@ def test_injected_fx_lookup_cannot_bypass_identity_finiteness_or_date(bad_rate):
                             rate_lookup=lambda *_: bad_rate)
     assert out["reporting"]["status"] == "unavailable"
     assert out["reporting"]["per_kg"] is None
+
+
+@pytest.mark.parametrize("source,retrieved_at", [
+    (None, "2026-10-07T00:00:00+00:00"),
+    ("", "2026-10-07T00:00:00+00:00"),
+    ("x" * 65, "2026-10-07T00:00:00+00:00"),
+    ("mock", None),
+    ("mock", "2026-10-07T00:00:00"),
+    ("mock", "not-a-time"),
+])
+def test_injected_rate_without_bounded_source_and_aware_retrieval_cannot_convert(source, retrieved_at):
+    rate = fx_rates.FxRate("EUR", "USD", Decimal("1.2"), "2026-10-06", source, retrieved_at, "live", "")
+    out = normalize_pricing(fixed("9.15", "EUR", "kg"), reporting_currency="USD", as_of=dt.date(2026, 10, 7),
+                            rate_lookup=lambda *_: rate)
+    assert out["reporting"]["status"] == "unavailable"
+    assert out["reporting"]["per_kg"] is None
+
+
+def test_injected_rate_with_complete_provenance_converts():
+    rate = fx_rates.FxRate("EUR", "USD", Decimal("1.2"), "2026-10-06", "mock",
+                           "2026-10-07T00:00:00+00:00", "live", "")
+    out = normalize_pricing(fixed("9.15", "EUR", "kg"), reporting_currency="USD", as_of=dt.date(2026, 10, 7),
+                            rate_lookup=lambda *_: rate)
+    assert out["reporting"]["per_kg"] == {"amount": "10.98", "currency": "USD"}
+    assert out["reporting"]["fx"]["source"] == "mock"
 
 
 # ---------- expiry ----------

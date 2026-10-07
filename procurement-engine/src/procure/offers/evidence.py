@@ -178,8 +178,8 @@ def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[Evi
     for ref in refs:
         for clause in re.split(r"[;\n]", ref.segment_text):
             for expression in re.finditer(
-                    r"(?<![A-Za-z0-9])[-+−]?(?:[A-Z]{3}|US\$|€|£|₹)(?![A-Za-z])\s*"
-                    r"[-+−]?(?P<amount>\d[\d.,]*)\s*(?:/\s*(?:per\s*)?|per\s*)"
+                    r"(?<![A-Za-z0-9])(?:[-+−]\s*)?(?:[A-Z]{3}|US\$|€|£|₹)(?![A-Za-z])\s*"
+                    r"(?:[-+−]\s*)?(?P<amount>\d[\d.,]*)\s*(?:/\s*(?:per\s*)?|per\s*)"
                     r"(?:metric\s+)?(?:tonnes?|tons?|kilograms?|kgs?|pounds?|lbs?|t)\b",
                     clause, re.I):
                 written = expression.group(0)

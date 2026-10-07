@@ -290,6 +290,31 @@ def test_negative_fixed_price_is_never_verified():
     assert _status(doc, "pricing", "pricing", _price("-5"), "r2:c1").status == "unverified"
 
 
+@pytest.mark.parametrize("source", ["Available - 5 tonne", "Available − 5 tonne"])
+def test_spaced_negative_source_cannot_verify_positive_quantity(source):
+    doc = _csv(f'quote,other\n"{source}",x\n')
+    assert _status(doc, "quantity", "quantity", {"amount": "5", "unit": "tonne"},
+                   "r2:c1").status == "unverified"
+
+
+def test_spaced_negative_shipment_cannot_verify_positive_lot():
+    doc = _csv('quantity,window\n- 50 tonne,December 2026\n')
+    lot = [{"quantity": {"amount": "50", "unit": "tonne"}, "window": "2026-12"}]
+    assert _status(doc, "shipments", "shipments", lot, "r2:c1", "r2:c2").status == "unverified"
+
+
+@pytest.mark.parametrize("source", ["premium - USD 95 per tonne", "premium USD - 95 per tonne",
+                                     "premium − USD 95 per tonne", "premium USD − 95 per tonne"])
+def test_spaced_negative_premium_never_becomes_positive(source):
+    doc = _csv(f'quote,other\n"LME Copper official cash settlement; monthly average; {source}",x\n')
+    def premium(amount):
+        return {"type": "index_linked", "index": "LME Copper official cash settlement",
+                "averaging_period": "monthly average", "premium": {"amount": amount, "currency": "USD"},
+                "per_unit": "tonne"}
+    assert _status(doc, "pricing", "pricing", premium("95"), "r2:c1").status == "unverified"
+    assert _status(doc, "pricing", "pricing", premium("-95"), "r2:c1").status == "extracted"
+
+
 def test_reader_visibility_uncertainty_blocks_evidence():
     from fpdf import FPDF
 

@@ -89,14 +89,20 @@ def get_rate(base: str, quote: str, on: dt.date | None = None) -> FxRate:
         try:
             resp = http_get(url.format(day=day), params=params(base, quote), retries=2)
             rate, rate_date = _parse(resp.text, base, quote, on)
-            cache_write(prefix, ".json", resp.text.encode())
-            return FxRate(base, quote, rate, rate_date, SOURCE, now_iso(), "live", url.split("/{")[0])
         except OfflineError as exc:
             errors.append(str(exc))
             break
         except Exception as exc:  # noqa: BLE001 - provider or payload failure, try the next source
             errors.append(f"{url.split('/{')[0]}: {exc}")
             log.warning("FX %s/%s on %s failed at %s: %s", base, quote, day, url, exc)
+            continue
+        message = url.split("/{")[0]
+        try:
+            cache_write(prefix, ".json", resp.text.encode())
+        except Exception:  # cache persistence cannot invalidate a checked live response
+            message += "; cache_write_failed"
+            log.warning("FX cache_write_failed for validated %s/%s on %s", base, quote, day)
+        return FxRate(base, quote, rate, rate_date, SOURCE, now_iso(), "live", message)
 
     cached = cache_latest(prefix, ".json")
     if cached is not None:

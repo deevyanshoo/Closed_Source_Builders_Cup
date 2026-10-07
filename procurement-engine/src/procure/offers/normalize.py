@@ -21,11 +21,12 @@ _NUMBER = re.compile(r"(?<![\w.,])[+-]?\d[\d.,]*")
 
 
 def _signed_text(text: str) -> str:
-    """Move a sign before a currency marker onto its following amount."""
+    """Bind nearby explicit signs to amounts, including signs around currency markers."""
     text = text.replace("−", "-")  # the mathematical minus used in PDFs and spreadsheets
-    return re.sub(
+    text = re.sub(
         r"(?<![\w])([+-])\s*([A-Z]{3}|US\$|€|£|₹)\s*(\d[\d.,]*)",
         lambda match: f"{match.group(2)} {match.group(1)}{match.group(3)}", text)
+    return re.sub(r"(?<!\d\s)(?<![\w.,])([+-])\s+(\d[\d.,]*)", r"\1\2", text)
 
 
 def _tokens(text: str) -> list[str]:
@@ -250,7 +251,7 @@ def _currency_context(text: str, code: str) -> bool:
     if text.strip() == code:  # a dedicated table cell
         return True
     escaped = re.escape(code)
-    if re.search(rf"(?<![A-Za-z]){escaped}(?![A-Za-z])\s*[-+−]?\d[\d.,]*\s*(?:/\s*(?:per\s*)?|per\s*)"
+    if re.search(rf"(?<![A-Za-z]){escaped}(?![A-Za-z])\s*[-+−]?\s*\d[\d.,]*\s*(?:/\s*(?:per\s*)?|per\s*)"
                  rf"(?:metric\s+)?(?:t|tonne|kg|lb)\b", text, re.I):
         return True
     if re.search(rf"\b(?:price|premium|currency|settlement\s+currency|invoice\s+currency|quote\s+currency)\b"
@@ -352,6 +353,17 @@ def _usable_rate(rate, base: str, quote: str, as_of: dt.date) -> Decimal | None:
     if (getattr(rate, "base", None) != base or getattr(rate, "quote", None) != quote
             or getattr(rate, "status", None) not in {"live", "cache"}
             or not callable(getattr(rate, "to_dict", None))):
+        return None
+    source = getattr(rate, "source", None)
+    retrieved_at = getattr(rate, "retrieved_at", None)
+    if (not isinstance(source, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,63}", source)
+            or not isinstance(retrieved_at, str) or len(retrieved_at) > 64):
+        return None
+    try:
+        retrieved = dt.datetime.fromisoformat(retrieved_at)
+    except ValueError:
+        return None
+    if retrieved.tzinfo is None or retrieved.utcoffset() is None:
         return None
     number = _bounded_decimal(getattr(rate, "rate", None), allow_negative=False)
     date_text = getattr(rate, "rate_date", None)

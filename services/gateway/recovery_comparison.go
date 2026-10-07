@@ -253,6 +253,38 @@ func recoveryEqualOrders(expected map[string]bool, schedule any) bool {
 	return true
 }
 
+func recoveryKnownReferences(comparison, snapshot map[string]any, orders map[string]bool) bool {
+	for _, key := range []string{"potentially_exposed_order_ids", "disruption_changed_order_ids", "recovery_changed_order_ids"} {
+		ids, ok := comparison[key].([]any)
+		if !ok {
+			return false
+		}
+		for _, value := range ids {
+			id, ok := value.(string)
+			if !ok || !orders[id] {
+				return false
+			}
+		}
+	}
+	receipts := make(map[string]bool)
+	for _, value := range snapshot["receipts"].([]any) {
+		receipts[recoveryString(recoveryObject(value), "receipt_id")] = true
+	}
+	changes, ok := comparison["receipt_changes"].([]any)
+	if !ok {
+		return false
+	}
+	seen := make(map[string]bool, len(changes))
+	for _, value := range changes {
+		id := recoveryString(recoveryObject(value), "receipt_id")
+		if !receipts[id] || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
 func (s *stateServer) recoveryComparison(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != recoveryPath {
 		stateError(w, 404, "not_found", "Resource not found")
@@ -390,6 +422,10 @@ func (s *stateServer) recoveryComparison(w http.ResponseWriter, r *http.Request)
 				stateError(w, 502, "upstream_invalid_response", "Invalid recovery comparison response")
 				return
 			}
+		}
+		if !recoveryKnownReferences(comparison, snapshot, expected) {
+			stateError(w, 502, "upstream_invalid_response", "Invalid recovery comparison response")
+			return
 		}
 	}
 	if ctx.Err() != nil {

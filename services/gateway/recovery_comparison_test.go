@@ -279,3 +279,50 @@ func TestRecoveryComparisonRejectsOversizeRedirectAndMalformedUpstream(t *testin
 		}
 	}
 }
+
+func TestRecoveryComparisonRejectsUnknownSummaryReferences(t *testing.T) {
+	request := string(recoveryFixture(t, "recovery_request.json"))
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"unknown_potential_order", func(c map[string]any) {
+			c["potentially_exposed_order_ids"].([]any)[0] = "foreign-order"
+		}},
+		{"unknown_disruption_order", func(c map[string]any) {
+			c["disruption_changed_order_ids"].([]any)[0] = "foreign-order"
+		}},
+		{"unknown_recovery_order", func(c map[string]any) {
+			c["recovery_changed_order_ids"].([]any)[0] = "foreign-order"
+		}},
+		{"unknown_receipt_change", func(c map[string]any) {
+			c["receipt_changes"].([]any)[0].(map[string]any)["receipt_id"] = "foreign-receipt"
+		}},
+		{"duplicate_receipt_change", func(c map[string]any) {
+			rows := c["receipt_changes"].([]any)
+			c["receipt_changes"] = append(rows, rows[0])
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var payload map[string]any
+			if err := json.Unmarshal(recoveryFixture(t, "recovery_response.json"), &payload); err != nil {
+				t.Fatal(err)
+			}
+			comparison := payload["comparison"].(map[string]any)
+			tc.mutate(comparison)
+			if !recoveryValid(payload, recoveryDefinitions["RecoveryComparisonResponse"], 0) {
+				t.Fatal("mutation should remain schema-valid so membership is exercised")
+			}
+			s, calls := recoveryServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(payload)
+			})
+			response := recoveryCall(s, "valid", request, nil)
+			if response.Code != 502 || !strings.Contains(response.Body.String(), "upstream_invalid_response") ||
+				strings.Contains(response.Body.String(), "foreign-") || calls.Load() != 1 {
+				t.Fatalf("invalid summary reference returned status=%d calls=%d", response.Code, calls.Load())
+			}
+		})
+	}
+}

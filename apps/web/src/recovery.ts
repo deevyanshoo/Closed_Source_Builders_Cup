@@ -98,6 +98,16 @@ export function validateComparisonResponse(value: unknown, request: RecoveryComp
     const received = schedule.orders.map(item => item.order_id).sort();
     if (received.length !== orderIds.length || received.some((id, index) => id !== orderIds[index])) return invalid();
   }
+  const submittedOrders = new Set(orderIds);
+  for (const ids of [comparison.potentially_exposed_order_ids, comparison.disruption_changed_order_ids, comparison.recovery_changed_order_ids]) {
+    if (ids.some(id => !submittedOrders.has(id))) return invalid();
+  }
+  const submittedReceipts = new Set(request.snapshot.receipts.map(item => item.receipt_id));
+  const changedReceipts = new Set<string>();
+  for (const change of comparison.receipt_changes) {
+    if (!submittedReceipts.has(change.receipt_id) || changedReceipts.has(change.receipt_id)) return invalid();
+    changedReceipts.add(change.receipt_id);
+  }
   return result;
 }
 

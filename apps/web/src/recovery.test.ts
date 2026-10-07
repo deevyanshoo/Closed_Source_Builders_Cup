@@ -44,6 +44,30 @@ describe('recovery comparison boundary', () => {
     expect(() => validateComparisonResponse(duplicate, base)).toThrow(/invalid/i);
   });
 
+  it.each(['potentially_exposed_order_ids', 'disruption_changed_order_ids', 'recovery_changed_order_ids'] as const)(
+    'rejects an unknown order in %s despite a schema-valid shape', async field => {
+      const request = createExample('recovery', 'team-west');
+      const fixture = await import('../../../contracts/examples/recovery_response.json');
+      const body = structuredClone(fixture.default);
+      body.comparison.workspace_id = 'team-west';
+      body.comparison[field] = ['O-NOT-IN-SNAPSHOT'];
+      expect(() => validateComparisonResponse(body, request)).toThrow(/invalid/i);
+    },
+  );
+
+  it('rejects unknown and duplicate receipt change IDs', async () => {
+    const request = createExample('recovery', 'team-west');
+    const fixture = await import('../../../contracts/examples/recovery_response.json');
+    const body = structuredClone(fixture.default);
+    body.comparison.workspace_id = 'team-west';
+    const unknown = structuredClone(body);
+    unknown.comparison.receipt_changes[0].receipt_id = 'r-NOT-IN-SNAPSHOT';
+    expect(() => validateComparisonResponse(unknown, request)).toThrow(/invalid/i);
+    const duplicate = structuredClone(body);
+    duplicate.comparison.receipt_changes.push(structuredClone(duplicate.comparison.receipt_changes[0]));
+    expect(() => validateComparisonResponse(duplicate, request)).toThrow(/invalid/i);
+  });
+
   it('posts the exact request, handles unsupported separately, and fails closed on bad success', async () => {
     const base = createExample('recovery', 'team-west');
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ contract_version: '0.2.0', status: 'unsupported', reason: 'stale_receipt', details: [] }), { status: 422, headers: { 'Content-Type': 'application/json' } }))

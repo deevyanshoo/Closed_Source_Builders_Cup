@@ -13,11 +13,21 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 
 # ---------- numbers ----------
 
 _NUMBER = re.compile(r"(?<![\w.,])\d[\d.,]*")
+
+
+def _thousands_groups(groups: list[str]) -> bool:
+    return 1 <= len(groups[0]) <= 3 and all(len(g) == 3 for g in groups[1:])
+
+
+def _lakh_groups(groups: list[str]) -> bool:
+    """Indian grouping: 1,23,45,678 (groups of two, then a final group of three)."""
+    return (len(groups) > 2 and 1 <= len(groups[0]) <= 2 and all(len(g) == 2 for g in groups[1:-1])
+            and len(groups[-1]) == 3)
 
 
 def _decimal_separator(token: str, decimal_comma: bool) -> str | None:
@@ -42,7 +52,7 @@ def _parse(token: str, decimal_comma: bool) -> Decimal | None:
     if len(set(re.findall(r"[.,]", integer))) > 1:
         return None  # mixed thousands separators
     groups = re.split(r"[.,]", integer)
-    if len(groups) > 1 and (not 1 <= len(groups[0]) <= 3 or any(len(g) != 3 for g in groups[1:])):
+    if len(groups) > 1 and not (_thousands_groups(groups) or _lakh_groups(groups)):
         return None  # separators in the wrong places, for example a date like 25.10.2026
     digits = "".join(groups)
     if not digits.isdigit() or (fraction and not fraction.isdigit()):
@@ -183,3 +193,79 @@ def incoterms_in(text: str) -> set[str]:
 def squash(text: str) -> str:
     """Case-folded text with single spaces, for tolerant text comparison."""
     return " ".join(str(text).split()).casefold()
+
+
+# ---------- normalised values ----------
+
+DERIVED_PLACES = Decimal("1e-10")  # derived per-kg values are rounded half-even to 10 decimal places
+
+
+def fmt(value: Decimal) -> str:
+    """Plain decimal string without exponent; derived values longer than 10 places are rounded."""
+    if value.as_tuple().exponent < -10:
+        value = value.quantize(DERIVED_PLACES, rounding=ROUND_HALF_EVEN)
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _money(amount: Decimal, currency: str) -> dict:
+    return {"amount": fmt(amount), "currency": currency}
+
+
+def normalize_quantity(value: dict) -> dict:
+    """A quantity in kg, converted exactly. Unknown units are not converted."""
+    out = {"original": value, "kg": None, "status": "ok"}
+    try:
+        amount = Decimal(str(value["amount"]))
+    except (KeyError, TypeError, InvalidOperation):
+        return {**out, "status": "invalid_amount"}
+    unit = value.get("unit")
+    if unit not in KG_PER_UNIT:
+        return {**out, "status": "unsupported_unit"}
+    return {**out, "kg": fmt(amount * KG_PER_UNIT[unit])}
+
+
+def _reporting(amount_per_kg: Decimal, currency: str, reporting_currency: str, as_of: dt.date, rate_lookup) -> dict:
+    if currency == reporting_currency:
+        return {"currency": reporting_currency, "status": "not_needed", "fx": None,
+                "per_kg": _money(amount_per_kg, currency)}
+    rate = rate_lookup(currency, reporting_currency, as_of)
+    if rate.rate is None:
+        return {"currency": reporting_currency, "status": rate.status, "fx": rate.to_dict(), "per_kg": None}
+    return {"currency": reporting_currency, "status": rate.status, "fx": rate.to_dict(),
+            "per_kg": _money(amount_per_kg * rate.rate, reporting_currency)}
+
+
+def normalize_pricing(value: dict, *, reporting_currency: str, as_of: dt.date, rate_lookup=None) -> dict:
+    """Per-kg price in its own currency, plus the reporting-currency figure with the rate used.
+
+    Index-linked prices keep their index and averaging period; only the premium is converted.
+    No price is invented for an index that has not fixed yet.
+    """
+    if rate_lookup is None:
+        from .fx_rates import get_rate as rate_lookup
+    per_unit = value.get("per_unit")
+    if per_unit not in KG_PER_UNIT:
+        return {"type": value.get("type"), "original": value, "status": "unsupported_unit"}
+    kg = KG_PER_UNIT[per_unit]
+    if value.get("type") == "fixed":
+        money = value["unit_price"]
+        per_kg = Decimal(str(money["amount"])) / kg
+        return {"type": "fixed", "original": value, "status": "ok", "per_kg": _money(per_kg, money["currency"]),
+                "reporting": _reporting(per_kg, money["currency"], reporting_currency, as_of, rate_lookup)}
+    if value.get("type") == "index_linked":
+        money = value["premium"]
+        per_kg = Decimal(str(money["amount"])) / kg
+        reporting = _reporting(per_kg, money["currency"], reporting_currency, as_of, rate_lookup)
+        reporting["premium_per_kg"] = reporting.pop("per_kg")
+        return {"type": "index_linked", "original": value, "status": "ok", "index": value.get("index"),
+                "averaging_period": value.get("averaging_period"),
+                "premium_per_kg": _money(per_kg, money["currency"]), "reporting": reporting}
+    return {"type": value.get("type"), "original": value, "status": "unsupported_pricing_type"}
+
+
+def expiry_status(valid_until: str | None, as_of: dt.date) -> str:
+    """'expired' when the validity date is before `as_of`, 'valid' otherwise, 'unknown' without a date."""
+    if not valid_until:
+        return "unknown"
+    return "expired" if dt.date.fromisoformat(valid_until) < as_of else "valid"

@@ -1,0 +1,7 @@
+{
+  "contract_version": "0.2.0",
+  "error": {
+    "code": "voice_unavailable",
+    "message": "Local voice unavailable"
+  }
+}

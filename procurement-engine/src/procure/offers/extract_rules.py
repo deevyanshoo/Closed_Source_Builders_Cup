@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal, localcontext
 
 from ..documents import Document, Segment
 from ..settings import materials_config
@@ -169,6 +170,8 @@ def role(label: str) -> str | None:
     text = nz.squash(label.replace("_", " "))
     if not text:
         return None
+    if re.search(r"^(?:settlement|payment|invoice) currency$", text):
+        return "currency"
     m = re.fullmatch(r"(.+?) unit", text)
     if m and role(m.group(1)) in ("price", "quantity", "moq", "capacity"):
         return f"{role(m.group(1))}_unit"
@@ -294,22 +297,15 @@ def extract(doc: Document) -> dict:
 
     fields: dict[str, list[dict]] = defaultdict(list)
     items: list[dict[str, list[dict]]] = []
-    currency_cells = [e.value for e in entries
-                      if role(e.label) == "currency" and re.fullmatch(r"[A-Z]{3}", e.value.quote.strip())]
-
     def price_props(value_cell: Cell, label_cell: Cell | None, extra: list[Cell | None]) -> dict | None:
         texts = [value_cell.quote, label_cell.quote if label_cell else ""] + [c.quote for c in extra if c]
         amount = _amount(value_cell.quote, decimal_comma)
         currency = _currency_of(*texts)
-        cur_cell = None
-        if currency is None and currency_cells:
-            cur_cell = currency_cells[0]
-            currency = cur_cell.quote.strip()
         if amount is None or currency is None:
             return None
         per_unit = _per_unit(*texts)
         value = {"type": "fixed", "unit_price": {"amount": str(amount), "currency": currency}, "per_unit": per_unit}
-        return proposal(value, value_cell, label_cell, *extra, cur_cell)
+        return proposal(value, value_cell, label_cell, *extra)
 
     # ----- labelled entries -----
     single: dict[str, list[dict]] = defaultdict(list)
@@ -331,8 +327,9 @@ def extract(doc: Document) -> dict:
         elif r == "payment":
             _add(fields["payment_terms"], proposal(_text_value(text), e.value))
         elif r == "validity":
-            for d in sorted(nz.dates_in(text)):
-                _add(fields["valid_until"], proposal(d, e.value))
+            if not _relative_validity(text):
+                for d in sorted(nz.dates_in(text)):
+                    _add(fields["valid_until"], proposal(d, e.value))
         elif r == "lead_time":
             m = re.search(r"(\d+)\s*(?:calendar\s+)?days?\b", text, re.I)
             if m:
@@ -348,7 +345,7 @@ def extract(doc: Document) -> dict:
                 _add(fields["min_order" if r == "moq" else "capacity"], proposal(q, e.value, e.label_cell))
         elif r == "currency":
             code = text.strip()
-            if re.fullmatch(r"[A-Z]{3}", code):
+            if re.fullmatch(r"[A-Z]{3}", code) and not re.search(r"\bprice\b", e.label, re.I):
                 _add(fields["settlement_currency"], proposal(code, e.value))
         elif r == "incoterm":
             _incoterm(fields, e.value)
@@ -388,15 +385,22 @@ def extract(doc: Document) -> dict:
         amount = _amount(prem.quote, decimal_comma)
         currency = _currency_of(prem.quote)
         if amount is not None and currency:
-            index_text, averaging, cells = None, None, [prem]
+            index_text, averaging, fx_basis, cells = None, None, None, [prem]
             if index_basis is not None:
                 parts = [index_basis.value.quote] + [c.quote for c in index_basis.continuation if c is not prem]
                 joined = " ".join(p.strip() for p in parts).rstrip(",")
-                index_text, _, averaging = joined.partition(",")
+                clauses = [part.strip() for part in joined.split(",") if part.strip()]
+                index_text = clauses[0] if clauses else None
+                rest = clauses[1:]
+                fx_clauses = [part for part in rest if re.search(r"\b(?:convert(?:ed)?|FX|ECB|exchange rate)\b", part, re.I)]
+                averaging = ", ".join(part for part in rest if part not in fx_clauses)
+                fx_basis = ", ".join(fx_clauses) or None
                 cells = [index_basis.value, *[c for c in index_basis.continuation if c is not prem], prem]
             value = {"type": "index_linked", "index": (index_text or "").strip() or None,
                      "averaging_period": (averaging or "").strip().rstrip(",") or None,
                      "premium": {"amount": str(amount), "currency": currency}, "per_unit": _per_unit(prem.quote)}
+            if fx_basis:
+                value["fx_basis"] = fx_basis
             single["pricing"] = [proposal(value, *cells)]
 
     # ----- tables -----
@@ -435,17 +439,12 @@ def extract(doc: Document) -> dict:
                 _add(fields["supplier_name"], proposal(_text_value(seg.text), Cell(seg, seg.text)))
                 break
 
-    # ----- free-text validity ("valid until ...") and currency from prices -----
+    # ----- free-text validity ("valid until ...") -----
     if not fields["valid_until"]:
         for seg in visible:
-            if re.search(r"\bvalid", seg.text, re.I):
+            if re.search(r"\bvalid", seg.text, re.I) and not _relative_validity(seg.text):
                 for d in sorted(nz.dates_in(seg.text)):
                     _add(fields["valid_until"], proposal(d, Cell(seg, seg.text)))
-    for item in items:
-        for p in item.get("pricing", []):
-            money = p["value"].get("unit_price") or p["value"].get("premium")
-            if money and money.get("currency"):
-                _add(fields["settlement_currency"], {"value": money["currency"], "evidence": p["evidence"]})
 
     # ----- material from the description -----
     for item in items:
@@ -463,6 +462,8 @@ def _incoterm(fields, cell: Cell, labelled: bool = True, place_cell: Cell | None
         m = re.search(rf"(?<![A-Za-z]){code}(?![A-Za-z])\s*([^()\n]*)", cell.quote)
         place = (m.group(1) if m else "").strip().strip(",.;").strip()
         place = re.sub(r"\s*\(?Incoterms?\s*20\d\d\)?", "", place).strip(" ,")
+        if re.match(r"^(?:\d|[A-Z]{3}\s*\d|US\$\s*\d|[€£₹$]\s*\d)", place):
+            place = ""
         if not labelled and not place:
             continue
         if place_cell is not None and not place:
@@ -500,6 +501,12 @@ def _ordered_months(text: str) -> list[str]:
         else:
             found.append(f"{m.group(3)}-{m.group(4)}")
     return found
+
+
+def _relative_validity(text: str) -> bool:
+    """A date used as the anchor of a duration is not an expiry date."""
+    return bool(re.search(r"\b\d+\s+(?:(?:calendar|business|working)\s+)?"
+                          r"(?:days?|weeks?|months?)\s+(?:from|after|following)\b", text, re.I))
 
 
 def _lot_line(fields, cell: Cell, decimal_comma: bool) -> None:
@@ -582,7 +589,8 @@ def _table_items(table: Table, roles, decimal_comma, price_props, fields) -> lis
         cur_cell = cells.get("currency", (None, None))[0]
         p = price_props(pcell, phead, [unit_cell, cur_cell])
         product = cells.get("product")
-        key = (product[0].quote if product else None, pcell.quote, cur_cell.quote if cur_cell else None)
+        key = tuple((r, c.quote) for r, (c, _) in sorted(cells.items())
+                    if r not in {"quantity", "quantity_unit", "lot", "ship_window"})
         item = merged.get(key)
         if item is None:
             item = defaultdict(list)
@@ -628,8 +636,10 @@ def _table_items(table: Table, roles, decimal_comma, price_props, fields) -> lis
                         q["period"] = (m.group(1) or _PERIOD_WORD[m.group(2).lower()]).lower() if m else None
                     _add(fields["min_order" if r == "moq" else "capacity"], proposal(q, c, h, extra))
         if "validity" in cells:
-            for d in sorted(nz.dates_in(cells["validity"][0].quote)):
-                _add(fields["valid_until"], proposal(d, cells["validity"][0]))
+            validity_cell = cells["validity"][0]
+            if not _relative_validity(validity_cell.quote):
+                for d in sorted(nz.dates_in(validity_cell.quote)):
+                    _add(fields["valid_until"], proposal(d, validity_cell))
         if "lead_time" in cells:
             c, h = cells["lead_time"]
             if re.fullmatch(r"\d+", c.quote.strip()) and "day" in h.quote.lower():
@@ -639,10 +649,15 @@ def _table_items(table: Table, roles, decimal_comma, price_props, fields) -> lis
         if len(qs) == 1:
             q, cells = qs[0]
             _add(item["quantity"], proposal(q, *cells))
-        elif len(qs) > 1 and len({q["unit"] for q, _ in qs}) == 1:
-            total = sum(nz.parse_decimal(q["amount"]) for q, _ in qs)
-            cells = [c for _, cs in qs for c in cs]
-            _add(item["quantity"], proposal({"amount": str(total), "unit": qs[0][0]["unit"]}, *cells))
+        elif 1 < len(qs) <= 256 and len({q["unit"] for q, _ in qs}) == 1:
+            amounts = [nz._bounded_decimal(q["amount"], allow_negative=False) for q, _ in qs]
+            if all(amount is not None for amount in amounts):
+                with localcontext() as context:
+                    context.prec = nz.ARITHMETIC_PRECISION
+                    total = sum(amounts, Decimal(0))
+                if nz._bounded_decimal(str(total), allow_negative=False) is not None:
+                    cells = [c for _, cs in qs for c in cs]
+                    _add(item["quantity"], proposal({"amount": str(total), "unit": qs[0][0]["unit"]}, *cells))
     if lot_rows:
         _add(fields["shipments"], {"value": [l for l, _ in lot_rows],
                                    "evidence": [c.ev() for _, cs in lot_rows for c in cs if c is not None]})

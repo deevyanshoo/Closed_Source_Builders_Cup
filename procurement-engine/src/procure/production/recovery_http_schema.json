@@ -1,0 +1,1059 @@
+{
+  "components": {
+    "schemas": {
+      "RecoveryComparisonRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ProductionSnapshot"
+          },
+          "scenario": {
+            "$ref": "#/components/schemas/ReceiptArrivalScenario"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/RecoveryAssignment"
+          }
+        },
+        "required": [
+          "contract_version",
+          "snapshot",
+          "scenario",
+          "recovery"
+        ]
+      },
+      "ProductionSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "inventory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionInventoryComponent"
+            },
+            "minItems": 1
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionProduct"
+            },
+            "minItems": 1
+          },
+          "routings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionRouting"
+            },
+            "minItems": 1
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionResource"
+            },
+            "minItems": 1
+          },
+          "periods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionPeriod"
+            },
+            "minItems": 1
+          },
+          "maintenance": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaintenance"
+            }
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionReceipt"
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionOrder"
+            },
+            "minItems": 1
+          },
+          "baseline_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionAssignment"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "workspace_id",
+          "plan_version",
+          "snapshot_id",
+          "as_of",
+          "synthetic",
+          "inventory",
+          "products",
+          "routings",
+          "resources",
+          "periods",
+          "maintenance",
+          "receipts",
+          "orders",
+          "baseline_assignments"
+        ]
+      },
+      "ProductionInventoryComponent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "starting_stock": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "stock_as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "starting_stock",
+          "stock_as_of"
+        ]
+      },
+      "ProductionProduct": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "bom": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionBomComponent"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "product_id",
+          "output_unit",
+          "bom"
+        ]
+      },
+      "ProductionBomComponent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity_per_output_unit": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "quantity_per_output_unit"
+        ]
+      },
+      "ProductionRouting": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "run_seconds_per_output_unit": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "product_id",
+          "resource_id",
+          "output_unit",
+          "run_seconds_per_output_unit"
+        ]
+      },
+      "ProductionResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "capacity_model": {
+            "type": "string",
+            "const": "single_machine"
+          }
+        },
+        "required": [
+          "resource_id",
+          "capacity_model"
+        ]
+      },
+      "ProductionPeriod": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "start": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "end": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "period_id",
+          "resource_id",
+          "start",
+          "end"
+        ]
+      },
+      "ProductionMaintenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maintenance_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "start": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "end": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "maintenance_id",
+          "resource_id",
+          "start",
+          "end"
+        ]
+      },
+      "ProductionReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "receipt_id",
+          "component_id",
+          "unit",
+          "quantity",
+          "arrival_at"
+        ]
+      },
+      "ProductionOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "output_quantity": {
+            "type": "string",
+            "maxLength": 1025,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "due_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "order_id",
+          "product_id",
+          "output_unit",
+          "output_quantity",
+          "resource_id",
+          "due_at"
+        ]
+      },
+      "ProductionAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "order_id",
+          "period_id"
+        ]
+      },
+      "ReceiptArrivalScenario": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "arrival_replacements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptArrivalReplacement"
+            }
+          }
+        },
+        "required": [
+          "workspace_id",
+          "expected_plan_version",
+          "source_snapshot_id",
+          "scenario_id",
+          "synthetic",
+          "arrival_replacements"
+        ]
+      },
+      "ReceiptArrivalReplacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "arrival_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "receipt_id",
+          "expected_arrival_at",
+          "arrival_at"
+        ]
+      },
+      "RecoveryAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "expected_plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionAssignment"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "workspace_id",
+          "expected_plan_version",
+          "source_snapshot_id",
+          "scenario_id",
+          "synthetic",
+          "assignments"
+        ]
+      },
+      "RecoveryComparisonResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "comparison": {
+            "$ref": "#/components/schemas/ReceiptRecoveryComparison"
+          }
+        },
+        "required": [
+          "contract_version",
+          "comparison"
+        ]
+      },
+      "ReceiptRecoveryComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "compared"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "scenario_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_checks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "material_at_period_start",
+                "aggregate_single_machine_capacity",
+                "modeled_period_end_due"
+              ]
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "uniqueItems": true
+          },
+          "unmodeled_constraints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "minItems": 1
+          },
+          "original_baseline": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "disrupted_baseline": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "recovery": {
+            "$ref": "#/components/schemas/ProductionScheduleScreen"
+          },
+          "receipt_changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceiptArrivalChange"
+            }
+          },
+          "potentially_exposed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          },
+          "disruption_changed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          },
+          "recovery_changed_order_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "status",
+          "synthetic",
+          "workspace_id",
+          "plan_version",
+          "snapshot_id",
+          "scenario_id",
+          "as_of",
+          "modeled_checks",
+          "unmodeled_constraints",
+          "original_baseline",
+          "disrupted_baseline",
+          "recovery",
+          "receipt_changes",
+          "potentially_exposed_order_ids",
+          "disruption_changed_order_ids",
+          "recovery_changed_order_ids"
+        ]
+      },
+      "ProductionScheduleScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionOrderScreen"
+            },
+            "minItems": 1
+          },
+          "capacity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionCapacityScreen"
+            },
+            "minItems": 1
+          },
+          "material_balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaterialBalance"
+            },
+            "minItems": 1
+          },
+          "material_balance_end_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_checks_pass": {
+            "type": "boolean"
+          },
+          "failed_checks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        },
+        "required": [
+          "orders",
+          "capacity",
+          "material_balances",
+          "material_balance_end_at",
+          "modeled_checks_pass",
+          "failed_checks"
+        ]
+      },
+      "ProductionOrderScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "product_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "output_unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "output_quantity": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "material_required_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "modeled_completion_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "due_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "demands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductionMaterialDemand"
+            },
+            "minItems": 1
+          },
+          "material_pass": {
+            "type": "boolean"
+          },
+          "modeled_due_pass": {
+            "type": "boolean"
+          },
+          "late_by_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "order_id",
+          "product_id",
+          "output_unit",
+          "output_quantity",
+          "resource_id",
+          "period_id",
+          "material_required_at",
+          "modeled_completion_at",
+          "due_at",
+          "demands",
+          "material_pass",
+          "modeled_due_pass",
+          "late_by_seconds"
+        ]
+      },
+      "ProductionMaterialDemand": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "used": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "shortfall": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "remaining_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "quantity",
+          "used",
+          "shortfall",
+          "remaining_stock"
+        ]
+      },
+      "ProductionCapacityScreen": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "period_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "nominal_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "blocked_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "available_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "workload_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "excess_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "remaining_seconds": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "capacity_pass": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resource_id",
+          "period_id",
+          "nominal_seconds",
+          "blocked_seconds",
+          "available_seconds",
+          "workload_seconds",
+          "excess_seconds",
+          "remaining_seconds",
+          "capacity_pass"
+        ]
+      },
+      "ProductionMaterialBalance": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "component_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "starting_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "ending_stock": {
+            "type": "string",
+            "maxLength": 2050,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "component_id",
+          "unit",
+          "starting_stock",
+          "ending_stock"
+        ]
+      },
+      "ReceiptArrivalChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "before_arrival_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          },
+          "after_arrival_at": {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?\\+00:00$"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "before_arrival_at",
+          "after_arrival_at"
+        ]
+      },
+      "RecoveryComparisonUnsupportedResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "status": {
+            "type": "string",
+            "const": "unsupported"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid_quantity",
+              "invalid_timestamp",
+              "incomplete_snapshot",
+              "incomplete_assignment",
+              "unsupported_constraint",
+              "conflicting_snapshot",
+              "invalid_scope",
+              "incomplete_inventory",
+              "invalid_snapshot",
+              "incomplete_bom",
+              "incompatible_unit",
+              "incomplete_resource",
+              "incomplete_routing",
+              "incomplete_period",
+              "pre_as_of",
+              "invalid_period",
+              "overlapping_periods",
+              "incomplete_maintenance",
+              "incomplete_receipt",
+              "incomplete_order",
+              "resource_mismatch",
+              "workspace_mismatch",
+              "stale_plan_version",
+              "snapshot_mismatch",
+              "invalid_scenario",
+              "invalid_recovery",
+              "invalid_replacement",
+              "duplicate_replacement",
+              "unknown_receipt",
+              "stale_receipt"
+            ]
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "contract_version",
+          "status",
+          "reason",
+          "details"
+        ]
+      }
+    }
+  },
+  "limits": {
+    "request_bytes": 1048576,
+    "response_bytes": 2097152,
+    "max_depth": 16
+  }
+}

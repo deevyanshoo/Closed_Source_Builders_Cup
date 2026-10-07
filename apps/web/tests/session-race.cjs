@@ -19,7 +19,7 @@ const react = {
   useRef(initial) { const index = refCursor++; if (first) refs[index] = { current: initial }; return refs[index]; },
   useEffect(effect) { if (first) effects.push(effect); },
 };
-const stateApi = { fetchSession: () => sessionGate, listPlans: async () => ({ plans: [] }) };
+const stateApi = { fetchSession: () => sessionGate, listPlans: async () => { throw new Error('Saved-plan storage is offline.'); } };
 planning.exports.fetchMaterials = async () => ({ materials: [{ key: 'steel', display_name: 'Steel', source_series: 's', source_unit: 'kg' }], availability: { code: 'available', reason: '' } });
 const page = {};
 const customRequire = name => name === 'react' ? react
@@ -45,6 +45,22 @@ function find(node, predicate) {
   await new Promise(setImmediate);
   const after = render();
   assert.equal(find(after, node => node.type === 'input' && node.props.name === 'buyerId').props.value, 'buyer-edited-before-session');
-  assert.ok(find(after, node => node.type === 'p' && node.props.children === 'Workspace local-workspace · editor access'), 'session identity must appear after editing during session load');
-  console.log('session response survives an input edit and keeps the edited field');
+  assert.ok(find(after, node => node.type === 'p' && typeof node.props.children === 'string' && node.props.children.includes('Workspace local-workspace') && node.props.children.includes('local development identity')), 'session identity must appear after editing during session load');
+  assert.ok(find(after, node => node.type === 'strong' && node.props.children === 'Saved-plan storage unavailable'), 'failed plan listing must be labeled as storage failure');
+  assert.ok(find(after, node => node.type === 'button' && node.props.children === 'Retry list →'), 'failed plan listing must offer list retry');
+  assert.equal(find(after, node => node.type === 'button' && node.props.children === 'Retry session →'), null, 'valid identity must not be erased by storage failure');
+  stateApi.fetchSession = async () => { throw new Error('Session denied.'); };
+  effects[0]();
+  await new Promise(setImmediate);
+  const denied = render();
+  assert.ok(find(denied, node => node.type === 'p' && node.props.children === 'Interactive sign-in unavailable. Saved plans require an authenticated session.'), 'actual session failure must clear the old identity');
+  assert.equal(find(denied, node => node.type === 'button' && node.props.children === 'New plan'), null, 'old saved-plan controls must disappear');
+  stateApi.fetchSession = async () => ({ contract_version: '0.2.0', principal_id: 'other-editor', workspace_id: 'other-workspace', role: 'editor', development_only: true });
+  stateApi.listPlans = async () => ({ plans: [] });
+  find(denied, node => node.type === 'button' && node.props.children === 'Retry session →').props.onClick();
+  await new Promise(setImmediate);
+  const switched = render();
+  assert.ok(find(switched, node => node.type === 'p' && typeof node.props.children === 'string' && node.props.children.includes('Workspace other-workspace')), 'retry must show the new server session');
+  assert.equal(find(switched, node => node.type === 'strong' && node.props.children === 'Saved-plan storage unavailable'), null, 'new session must clear prior storage error');
+  console.log('session survives storage failure; actual session failure and switch clear old state');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -22,10 +22,13 @@ def by_name(score):
     return {f["field"]: f for f in score["fields"]}
 
 
-def test_matching_extraction_scores_every_field_correct():
+def test_rules_extraction_of_a_simple_quote_scores_all_but_settlement_currency():
+    # Since PR #24 a price currency is not taken as the settlement (invoice) currency. Q01 never
+    # states how it will be invoiced, so the field stays missing while the answer key assumes USD.
     score = scoring.score_quote(rules("Q01"), QUOTES["Q01"])
-    assert score["accuracy"] == 1.0
-    assert score["correct"] == score["total"] == 15  # 10 offer fields + 5 item fields
+    assert score["total"] == 15  # 10 offer fields + 5 item fields
+    assert [(f["field"], f["error"]) for f in score["fields"] if not f["correct"]] == [
+        ("settlement_currency", "not_extracted")]
 
 
 def test_wrong_value_is_counted_as_wrong():

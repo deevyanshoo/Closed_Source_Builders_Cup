@@ -1,0 +1,12 @@
+{
+  "contract_version": "0.2.0",
+  "session_id": "ssssssssssssssssssssssssssssssss",
+  "context_version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "context_fingerprint": "88a456e61be26b78dbe3c65784e9fe9b0744b8d7819cefd71a9d7e0a838f4042",
+  "read_only": true,
+  "synthetic": true,
+  "snapshot_id": "s1",
+  "plan_version": "v7",
+  "scenario_id": "voice-vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "status": "created"
+}

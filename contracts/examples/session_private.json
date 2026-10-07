@@ -1,0 +1,8 @@
+{
+  "contract_version": "0.2.0",
+  "principal_id": "synthetic-staging-machine-editor",
+  "workspace_id": "synthetic-staging-workspace",
+  "role": "editor",
+  "development_only": false,
+  "identity_mode": "private_machine"
+}

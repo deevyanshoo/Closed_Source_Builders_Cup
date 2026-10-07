@@ -1,0 +1,24 @@
+{
+  "contract_version": "0.2.0",
+  "context_version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "call": {
+    "name": "compare_receipt_recovery",
+    "arguments": {
+      "arrival_replacements": [],
+      "assignments": [
+        {
+          "order_id": "O-A",
+          "period_id": "P1"
+        },
+        {
+          "order_id": "O-B",
+          "period_id": "P2"
+        },
+        {
+          "order_id": "O-U",
+          "period_id": "P1"
+        }
+      ]
+    }
+  }
+}

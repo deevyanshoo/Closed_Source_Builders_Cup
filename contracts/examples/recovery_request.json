@@ -1,0 +1,192 @@
+{
+  "contract_version": "0.2.0",
+  "snapshot": {
+    "workspace_id": "W",
+    "plan_version": "v7",
+    "snapshot_id": "s1",
+    "as_of": "2026-10-09T00:00:00Z",
+    "synthetic": true,
+    "inventory": [
+      {
+        "component_id": "C",
+        "unit": "kg",
+        "starting_stock": "2",
+        "stock_as_of": "2026-10-09T00:00:00Z"
+      },
+      {
+        "component_id": "D",
+        "unit": "litre",
+        "starting_stock": "5",
+        "stock_as_of": "2026-10-09T00:00:00Z"
+      }
+    ],
+    "products": [
+      {
+        "product_id": "A",
+        "output_unit": "piece",
+        "bom": [
+          {
+            "component_id": "C",
+            "unit": "kg",
+            "quantity_per_output_unit": "3"
+          }
+        ]
+      },
+      {
+        "product_id": "U",
+        "output_unit": "piece",
+        "bom": [
+          {
+            "component_id": "D",
+            "unit": "litre",
+            "quantity_per_output_unit": "2"
+          }
+        ]
+      }
+    ],
+    "routings": [
+      {
+        "product_id": "A",
+        "resource_id": "R",
+        "output_unit": "piece",
+        "run_seconds_per_output_unit": "900"
+      },
+      {
+        "product_id": "U",
+        "resource_id": "R",
+        "output_unit": "piece",
+        "run_seconds_per_output_unit": "600"
+      }
+    ],
+    "resources": [
+      {
+        "resource_id": "R",
+        "capacity_model": "single_machine"
+      }
+    ],
+    "periods": [
+      {
+        "period_id": "P1",
+        "resource_id": "R",
+        "start": "2026-10-10T09:00:00Z",
+        "end": "2026-10-10T10:00:00Z"
+      },
+      {
+        "period_id": "P2",
+        "resource_id": "R",
+        "start": "2026-10-10T10:00:00Z",
+        "end": "2026-10-10T11:00:00Z"
+      }
+    ],
+    "maintenance": [
+      {
+        "maintenance_id": "m1",
+        "resource_id": "R",
+        "start": "2026-10-10T09:00:00Z",
+        "end": "2026-10-10T09:30:00Z"
+      },
+      {
+        "maintenance_id": "m2",
+        "resource_id": "R",
+        "start": "2026-10-10T09:15:00Z",
+        "end": "2026-10-10T09:45:00Z"
+      },
+      {
+        "maintenance_id": "m3",
+        "resource_id": "R",
+        "start": "2026-10-10T09:20:00Z",
+        "end": "2026-10-10T09:25:00Z"
+      },
+      {
+        "maintenance_id": "m4",
+        "resource_id": "R",
+        "start": "2026-10-10T10:00:00Z",
+        "end": "2026-10-10T10:15:00Z"
+      }
+    ],
+    "receipts": [
+      {
+        "receipt_id": "r-C",
+        "component_id": "C",
+        "unit": "kg",
+        "quantity": "4",
+        "arrival_at": "2026-10-10T09:00:00Z"
+      }
+    ],
+    "orders": [
+      {
+        "order_id": "O-A",
+        "product_id": "A",
+        "output_unit": "piece",
+        "output_quantity": "2",
+        "resource_id": "R",
+        "due_at": "2026-10-10T10:00:00Z"
+      },
+      {
+        "order_id": "O-B",
+        "product_id": "A",
+        "output_unit": "piece",
+        "output_quantity": "1",
+        "resource_id": "R",
+        "due_at": "2026-10-10T11:00:00Z"
+      },
+      {
+        "order_id": "O-U",
+        "product_id": "U",
+        "output_unit": "piece",
+        "output_quantity": "1",
+        "resource_id": "R",
+        "due_at": "2026-10-10T10:00:00Z"
+      }
+    ],
+    "baseline_assignments": [
+      {
+        "order_id": "O-A",
+        "period_id": "P1"
+      },
+      {
+        "order_id": "O-B",
+        "period_id": "P2"
+      },
+      {
+        "order_id": "O-U",
+        "period_id": "P1"
+      }
+    ]
+  },
+  "scenario": {
+    "workspace_id": "W",
+    "expected_plan_version": "v7",
+    "source_snapshot_id": "s1",
+    "scenario_id": "delay-1",
+    "synthetic": true,
+    "arrival_replacements": [
+      {
+        "receipt_id": "r-C",
+        "expected_arrival_at": "2026-10-10T09:00:00Z",
+        "arrival_at": "2026-10-10T10:00:00Z"
+      }
+    ]
+  },
+  "recovery": {
+    "workspace_id": "W",
+    "expected_plan_version": "v7",
+    "source_snapshot_id": "s1",
+    "scenario_id": "delay-1",
+    "synthetic": true,
+    "assignments": [
+      {
+        "order_id": "O-A",
+        "period_id": "P2"
+      },
+      {
+        "order_id": "O-B",
+        "period_id": "P2"
+      },
+      {
+        "order_id": "O-U",
+        "period_id": "P1"
+      }
+    ]
+  }
+}

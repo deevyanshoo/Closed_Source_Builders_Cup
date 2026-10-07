@@ -104,6 +104,8 @@ export class VoiceController {
   private current?: Run;
   private identityAbort?: AbortController;
   private cleanupBarrier: Promise<void> = Promise.resolve();
+  private readonly retired: Run[] = [];
+  private cleanupFailed = false;
   private disposed = false;
   private modified = false;
   constructor(options: Options = {}) { this.transport = options.transport ?? ((input, init) => globalThis.fetch(input, init)); this.loadSession = options.loadSession ?? fetchSession; this.pause = options.pause ?? defaultPause; this.now = options.now ?? Date.now; this.requestTimeoutMs = options.requestTimeoutMs ?? 12000; }
@@ -172,19 +174,34 @@ export class VoiceController {
     if (failure) throw new VoiceError('Could not confirm cleanup of the previous local session. Check the session before continuing.', 'cleanup');
     run.session = undefined; run.turn = undefined;
   }
+  private async drainRetired(): Promise<void> {
+    try {
+      while (this.retired.length) {
+        const run = this.retired[0];
+        await run.done;
+        await this.cleanup(run);
+        this.retired.shift();
+      }
+      this.cleanupFailed = false;
+    } catch (error) { this.cleanupFailed = true; throw error; }
+  }
   private retire(kind: VoiceKind): Promise<void> {
     ++this.generation; this.identityAbort?.abort();
     const old = this.current; this.current = undefined;
-    if (old) { old.revoked = true; old.readAbort.abort(); }
+    if (old) { old.revoked = true; old.readAbort.abort(); this.retired.push(old); }
     this.clear(kind);
-    this.cleanupBarrier = this.cleanupBarrier.then(async () => { if (old) { await old.done; await this.cleanup(old); } });
+    this.cleanupBarrier = this.cleanupBarrier.then(() => this.drainRetired());
     return this.cleanupBarrier;
   }
   async refreshIdentity(): Promise<void> {
+    const retryFailedCleanup = this.cleanupFailed;
     const cleanup = this.retire('checking'); const generation = this.generation;
     this.emit({ identity: undefined, base: undefined });
     try {
-      await cleanup;
+      if (retryFailedCleanup) {
+        this.cleanupBarrier = cleanup.catch(() => {}).then(() => this.drainRetired());
+        await this.cleanupBarrier;
+      } else await cleanup;
       if (generation !== this.generation || this.disposed) return;
       const identity = await this.checkIdentity();
       if (generation !== this.generation || this.disposed) return;

@@ -207,6 +207,68 @@ describe('typed voice lifecycle ownership', () => {
     expect(creates).toBe(1);
     void running;
   });
+  it('retries failed known cleanup only on explicit identity refresh before another create', async () => {
+    const latePoll = deferred<Response>(); const events: string[] = [];
+    let checks = 0; let creates = 0; let deletes = 0;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/voice/sessions' && init?.method === 'POST') {
+        events.push('create'); creates++;
+        return creates === 1 ? json(created(), 201) : json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503);
+      }
+      if (path.endsWith('/turns') && init?.method === 'POST') return json(accepted(), 202);
+      if (path.endsWith('/result')) return latePoll.promise;
+      if (path.endsWith('/cancel') && init?.method === 'POST') return json({ ...accepted(), status: 'cancelled' });
+      if (init?.method === 'DELETE') {
+        events.push('delete'); deletes++;
+        return deletes === 1 ? json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503)
+          : json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' });
+      }
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => { checks++; return identity; } });
+    await controller.refreshIdentity(); const running = controller.run();
+    await until(() => controller.state.kind === 'pending');
+    const cancelled = controller.cancel();
+    latePoll.resolve(json({ ...accepted(), state: 'pending', retry_after_ms: 100 }));
+    await Promise.all([running, cancelled]);
+    expect(controller.state.kind).toBe('failed');
+    expect(controller.state.session).toBeUndefined();
+    expect(controller.state.outcome).toBeUndefined();
+    expect({ checks, creates, deletes }).toEqual({ checks: 3, creates: 1, deletes: 1 });
+    await controller.run();
+    expect({ checks, creates, deletes }).toEqual({ checks: 3, creates: 1, deletes: 1 });
+    await controller.refreshIdentity();
+    expect({ checks, creates, deletes }).toEqual({ checks: 4, creates: 1, deletes: 2 });
+    expect(controller.state.kind).toBe('idle');
+    await controller.run();
+    expect(creates).toBe(2);
+    expect(events).toEqual(['create', 'delete', 'delete', 'create']);
+  });
+  it('keeps known cleanup unresolved across repeated explicit retry failures', async () => {
+    let creates = 0; let deletes = 0;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/voice/sessions' && init?.method === 'POST') { creates++; return json(created(), 201); }
+      if (path.endsWith('/turns') && init?.method === 'POST') return json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503);
+      if (init?.method === 'DELETE') {
+        deletes++;
+        return deletes < 3 ? json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503)
+          : json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' });
+      }
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => identity });
+    await controller.refreshIdentity(); await controller.run();
+    expect({ creates, deletes, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 1, kind: 'failed' });
+    await controller.refreshIdentity();
+    expect({ creates, deletes, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 2, kind: 'failed' });
+    expect(controller.state.comparison).toBeUndefined();
+    await controller.run();
+    expect(creates).toBe(1);
+    await controller.refreshIdentity();
+    expect({ creates, deletes, kind: controller.state.kind }).toEqual({ creates: 1, deletes: 3, kind: 'idle' });
+  });
   it('hides a ready result when the owner changes during the final identity check', async () => {
     const ready = JSON.parse(resultRaw) as Record<string, unknown> & { outcome: { ownership: { session_id: string } } };
     ready.session_id = id; ready.context_version = version; ready.context_fingerprint = fingerprint; ready.outcome.ownership.session_id = id;

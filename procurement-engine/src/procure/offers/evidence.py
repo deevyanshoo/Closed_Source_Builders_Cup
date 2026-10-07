@@ -468,26 +468,29 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
     if (not isinstance(value, str) or value not in nz.ISO_4217_CODES
             or value in nz._NON_SETTLEMENT_CODES):
         return False
-    code = re.escape(value)
-    # The code must be a standalone currency, not a pair, unit-price denominator,
-    # amount prefix or longer token. Inspect the full located clause, not only the
-    # model's shortened quote.
-    currency_token = rf"{code}(?![A-Za-z0-9]|\s*/|\s*,\s*[A-Z]{{3}}\b|\s+\d)"
-    role = (rf"\b(?:invoice|settlement|payment)[_ -]+currency\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
-            rf"|\bcurrency\s+of\s+settlement\b\s*(?:[:=\-–—]|\bis\b)?\s*{currency_token}"
-            rf"|\b(?:payable|settled|payment)\s+in\s+{currency_token}")
-    label_role = re.compile(r"(?:invoice|settlement|payment)[_ -]+currency|currency[_ ]+of[_ ]+settlement", re.I)
-    unsafe_clause = re.compile(
-        r"\b(?:not|never|no|non|cannot|can't|prohibited|forbidden|excluded|either|or|and)\b"
-        r"|\b(?:LME|benchmark|cash\s+settlement|unit\s+price)\b"
-        r"|(?:/\s*|\bper\s+)(?:metric\s+)?(?:tonnes?|tons?|kilograms?|kgs?|pounds?|lbs?|t)\b",
+    # Only a complete, affirmative statement assigns settlement currency. A
+    # prefix match would also accept a price denominator, a second currency or
+    # a later prohibition. Always inspect the whole located source, not the
+    # model's potentially shortened quotation.
+    role = r"(?:invoice|settlement|payment)[_ -]+currency|currency\s+of\s+settlement"
+    payment = r"(?:payable|settled|payment)\s+in"
+    relevant = re.compile(rf"\b(?:{role}|{payment})\b", re.I)
+    assertion = re.compile(
+        rf"\s*(?:(?:{role})\s*(?:[:=\-–—]|\bis\b)?\s*|(?:{payment})\s+)"
+        r"([A-Z]{3})\s*[.!]?\s*",
         re.I,
     )
+    label_role = re.compile(r"(?:invoice|settlement|payment)[_ -]+currency|currency[_ ]+of[_ ]+settlement", re.I)
+    supported = False
     for ref in refs:
         text = ref.segment_text.strip()
-        if any(re.search(role, clause, re.I) and not unsafe_clause.search(clause)
-               for clause in re.split(r"[;\n]", text)):
-            return True
+        for clause in re.split(r"[;\n]", text):
+            if not relevant.search(clause):
+                continue
+            match = assertion.fullmatch(clause)
+            if not match or match.group(1).upper() != value:
+                return False
+            supported = True
         if text != value:
             continue
         cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
@@ -508,8 +511,8 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
             if (label and not HIDDEN_FLAGS.intersection(label.flags)
                     and "formula_without_cached_value" not in label.flags
                     and label_role.fullmatch(label.text.strip())):
-                return True
-    return False
+                supported = True
+    return supported
 
 
 def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:

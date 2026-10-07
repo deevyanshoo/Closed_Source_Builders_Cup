@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -93,34 +95,6 @@ def test_synthetic_label_is_not_part_of_the_supplier_name():
     assert by_name(scoring.score_quote(ex, QUOTES["Q01"]))["supplier_name"]["correct"] is True
 
 
-def test_scoring_run_over_the_heldout_set_records_how_it_ran():
-    import importlib.util
-
-    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
-    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    report = module.run(mode="rules", split="heldout")
-    assert report["split"] == "heldout" and report["mode"] == "rules"
-    assert report["summary"]["quotes"] == sum(q["split"] == "heldout" for q in QUOTES.values())
-    assert report["extractors_used"] == {"rules": report["summary"]["quotes"]}
-    assert report["calls"] == {"none": report["summary"]["quotes"]}
-    assert report["synthetic_inputs"] is True and report["revision"]
-    assert {"missing", "conflict", "expired", "embedded_instruction"} <= set(report["summary"]["flags"])
-
-
-def test_gemini_run_that_never_used_gemini_is_labelled():
-    import importlib.util
-
-    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
-    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    report = module.run(mode="gemini", split="heldout")  # tests have no key, so every quote falls back
-    assert report["status"] == "gemini_not_used"
-    assert module.run(mode="rules", split="heldout")["status"] == "completed"
-
-
 @pytest.mark.parametrize("change", [
     {"index": "LME Aluminium official cash settlement"},
     {"averaging_period": "daily cash settlement on the invoice date"},
@@ -187,3 +161,67 @@ def test_real_q01_price_currency_cannot_count_as_verified_settlement():
     promoted = rules("Q01")
     promoted.fields["settlement_currency"].status, promoted.fields["settlement_currency"].value = "extracted", "USD"
     assert by_name(scoring.score_quote(promoted, QUOTES["Q01"]))["settlement_currency"]["error"] == "invented_value"
+
+
+def test_scoring_run_over_the_heldout_set_records_how_it_ran():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="rules", split="heldout")
+    assert report["split"] == "heldout" and report["mode"] == "rules"
+    assert report["summary"]["quotes"] == sum(q["split"] == "heldout" for q in QUOTES.values())
+    assert report["extractors_used"] == {"rules": report["summary"]["quotes"]}
+    assert report["calls"] == {"none": report["summary"]["quotes"]}
+    assert report["synthetic_inputs"] is True and report["revision"]
+    assert {"missing", "conflict", "expired", "embedded_instruction"} <= set(report["summary"]["flags"])
+    assert report["summary"]["field_accuracy"] == report["summary"]["accuracy"]
+    assert len(report["revision"].split("+", 1)[0]) == 40
+    assert report["manifest_sha256"] == hashlib.sha256((FIXTURES / "manifest.json").read_bytes()).hexdigest()
+    assert report["input_sha256"] == {
+        q["id"]: hashlib.sha256((FIXTURES / q["file"]).read_bytes()).hexdigest()
+        for q in QUOTES.values() if q["split"] == "heldout"
+    }
+    assert "src/procure/offers/scoring.py" in report["source_sha256"]
+    assert "scripts/score_offer_extraction.py" in report["source_sha256"]
+    assert report["source_sha256"]["src/procure/offers/scoring.py"] == hashlib.sha256(
+        (Path(__file__).parents[1] / "src/procure/offers/scoring.py").read_bytes()).hexdigest()
+    assert all(q["quote_correct"] in (True, False) and q["extra_items"] >= 0 for q in report["quotes"])
+    assert all(q["field_accuracy"] >= 0 for q in report["quotes"])
+
+
+def test_runner_labels_both_metrics_and_preserves_previous_run(tmp_path, monkeypatch, capsys):
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction_cli", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="rules", split="heldout")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "run", lambda *_: report)
+    monkeypatch.setattr(sys, "argv", ["score_offer_extraction.py", "--mode", "rules", "--split", "heldout"])
+    assert module.main() == 0
+    first = list((tmp_path / "evaluation" / "offers").glob("*.json"))
+    assert len(first) == 1
+    first_bytes = first[0].read_bytes()
+    printed = capsys.readouterr().out
+    assert '"field_accuracy"' in printed and '"quote_accuracy"' in printed
+    assert '"quotes_correct"' in printed and '"quotes"' in printed
+    assert module.main() == 0
+    files = list((tmp_path / "evaluation" / "offers").glob("*.json"))
+    assert len(files) == 2 and first[0].read_bytes() == first_bytes
+
+
+def test_gemini_run_that_never_used_gemini_is_labelled():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="gemini", split="heldout")  # tests have no key, so every quote falls back
+    assert report["status"] == "gemini_not_used"
+    assert module.run(mode="rules", split="heldout")["status"] == "completed"

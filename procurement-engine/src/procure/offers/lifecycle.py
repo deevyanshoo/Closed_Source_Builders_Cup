@@ -44,7 +44,9 @@ ITEM_FIELD_KINDS = {"material": "material", "description": "text", "grade": "tex
                     "pricing": "pricing"}
 _ITEM_FIELD = re.compile(r"^items\[(\d+)\]\.(\w+)$")
 _AMOUNT = re.compile(r"^(0|[1-9]\d*)(\.\d+)?$")
+_SIGNED_AMOUNT = re.compile(r"^-?(0|[1-9]\d*)(\.\d+)?$")
 _PERIODS = {"month", "quarter", "year", "week"}
+_INDEX_TERMS = {"fx_basis", "fx_terms", "fx_conversion", "quotational_period"}
 
 
 class OfferError(ValueError):
@@ -100,12 +102,22 @@ def usable(field: dict) -> Any:
 # ---------- correction values ----------
 
 def _amount_ok(value: Any) -> bool:
-    return isinstance(value, str) and bool(_AMOUNT.match(value)) and Decimal(value) > 0
+    return (isinstance(value, str) and bool(_AMOUNT.match(value))
+            and (amount := nz._bounded_decimal(value, allow_negative=False)) is not None and amount > 0)
 
 
 def _money_ok(money: Any) -> bool:
     return (isinstance(money, dict) and set(money) == {"amount", "currency"} and _amount_ok(money["amount"])
-            and isinstance(money["currency"], str) and re.fullmatch(r"[A-Z]{3}", money["currency"]) is not None)
+            and isinstance(money["currency"], str) and money["currency"] in nz.ISO_4217_CODES
+            and money["currency"] not in nz._NON_SETTLEMENT_CODES)
+
+
+def _premium_ok(money: Any) -> bool:
+    return (isinstance(money, dict) and set(money) == {"amount", "currency"}
+            and isinstance(money["amount"], str) and bool(_SIGNED_AMOUNT.match(money["amount"]))
+            and nz._bounded_decimal(money["amount"], allow_negative=True) is not None
+            and isinstance(money["currency"], str) and money["currency"] in nz.ISO_4217_CODES
+            and money["currency"] not in nz._NON_SETTLEMENT_CODES)
 
 
 def _quantity_problems(q: Any, allow_period: bool) -> list[str]:
@@ -113,7 +125,8 @@ def _quantity_problems(q: Any, allow_period: bool) -> list[str]:
     if not isinstance(q, dict) or not {"amount", "unit"} <= set(q) or set(q) - keys:
         return ["quantity must be {amount, unit" + (", period" if allow_period else "") + "}"]
     out = [] if _amount_ok(q["amount"]) else ["amount must be a positive decimal string"]
-    out += [] if q["unit"] in nz.KG_PER_UNIT else [f"unit must be one of {sorted(nz.KG_PER_UNIT)}"]
+    out += [] if isinstance(q["unit"], str) and q["unit"] in nz.KG_PER_UNIT else [
+        f"unit must be one of {sorted(nz.KG_PER_UNIT)}"]
     if q.get("period") is not None and q["period"] not in _PERIODS:
         out.append(f"period must be one of {sorted(_PERIODS)}")
     return out
@@ -141,16 +154,20 @@ def value_problems(kind: str, value: Any, name: str = "") -> list[str]:
               and (value.get("place") is None or isinstance(value["place"], str)))
         return [] if ok else [f"incoterm must be {{code, place}} with code in {list(nz.INCOTERMS_2020)}"]
     if kind == "pricing":
-        if not isinstance(value, dict) or value.get("per_unit") not in nz.KG_PER_UNIT:
+        if (not isinstance(value, dict) or not isinstance(value.get("per_unit"), str)
+                or value["per_unit"] not in nz.KG_PER_UNIT):
             return [f"pricing needs per_unit in {sorted(nz.KG_PER_UNIT)}"]
         if value.get("type") == "fixed":
             ok = set(value) == {"type", "unit_price", "per_unit"} and _money_ok(value["unit_price"])
             return [] if ok else ["fixed pricing is {type, unit_price{amount, currency}, per_unit}"]
         if value.get("type") == "index_linked":
-            ok = (set(value) <= {"type", "index", "averaging_period", "premium", "per_unit"}
+            ok = ({"type", "index", "averaging_period", "premium", "per_unit"} <= set(value)
+                  and set(value) <= {"type", "index", "averaging_period", "premium", "per_unit"} | _INDEX_TERMS
                   and isinstance(value.get("index"), str) and value["index"].strip()
-                  and _money_ok(value.get("premium")))
-            return [] if ok else ["index-linked pricing needs index and premium{amount, currency}"]
+                  and isinstance(value.get("averaging_period"), str) and value["averaging_period"].strip()
+                  and _premium_ok(value.get("premium"))
+                  and all(isinstance(value[k], str) and value[k].strip() for k in _INDEX_TERMS & set(value)))
+            return [] if ok else ["index-linked pricing needs full index, averaging period, finite signed premium and valid FX terms"]
         return ["pricing type must be fixed or index_linked"]
     if kind == "shipments":
         if not isinstance(value, list) or not value:
@@ -177,6 +194,14 @@ def blocking_reasons(payload: dict, today: dt.date) -> list[dict]:
     for name, f in all_fields(payload):
         if base_name(name) in CRITICAL_FIELDS and f["status"] not in USABLE:
             reasons.append({"code": f"field_{f['status']}", "field": name, "message": f"{name} is {f['status']}"})
+    normalized = payload.get("normalized") or {}
+    for i, item in enumerate(payload["items"]):
+        norm_item = (normalized.get("items") or [{}] * len(payload["items"]))[i]
+        for name in ("quantity", "pricing"):
+            if item[name]["status"] in USABLE and (norm_item.get(name) or {}).get("status") != "ok":
+                field = f"items[{i}].{name}"
+                reasons.append({"code": "invalid_normalization", "field": field,
+                                "message": f"{field} cannot be normalized"})
     valid_until = usable(payload["fields"]["valid_until"])
     if valid_until and nz.expiry_status(valid_until, today) == "expired":
         reasons.insert(0, {"code": "expired", "field": "valid_until",

@@ -144,10 +144,15 @@ class GeminiUnavailable(RuntimeError):
 
 def _error_kind(exc: Exception) -> str:
     """A coarse, text-free failure category: quota_exhausted, auth_error or provider_error."""
-    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    if code == 429 or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper():
-        return "quota_exhausted"
-    return "auth_error" if code in (401, 403) else "provider_error"
+    try:
+        codes = [code for code in (getattr(exc, name, None) for name in ("code", "status_code")) if type(code) is int]
+        if 429 in codes or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper():
+            return "quota_exhausted"
+        if any(code in (401, 403) for code in codes):
+            return "auth_error"
+    except Exception:  # noqa: BLE001 - even provider error accessors may fail
+        pass
+    return "provider_error"
 
 
 # ---------- credentials and the live-call gate ----------

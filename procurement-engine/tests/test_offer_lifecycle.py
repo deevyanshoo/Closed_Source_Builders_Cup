@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 from pathlib import Path
 
 import pytest
 
+from procure import db
 from procure.offers import store
 from procure.offers.lifecycle import TRANSITIONS, OfferError
 
@@ -257,3 +259,262 @@ def test_missing_buyer_inputs_make_the_legacy_request_unavailable():
     legacy = plan["legacy_recommend_requests"][0]
     assert legacy["status"] == "unavailable" and legacy["request"] is None
     assert "need_by_month" in legacy["reason"]
+
+
+@pytest.mark.parametrize("broken_table", ["offer_events", "offer_requests"])
+def test_save_failure_rolls_back_state_event_and_receipt_then_retries(monkeypatch, broken_table):
+    offer = ready_q01()
+    request_key = key()
+    original = db.insert_row
+
+    def fail_once(table, row):
+        if table == broken_table:
+            raise RuntimeError("injected write failure")
+        return original(table, row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "insert_row", fail_once)
+        with pytest.raises(RuntimeError, match="injected write failure"):
+            save(offer, idempotency_key=request_key)
+    unchanged = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert unchanged["status"] == "corrected" and unchanged["version"] == offer["version"]
+    assert [e["action"] for e in unchanged["events"]] == ["created", "correct"]
+    assert store._rows("SELECT * FROM offer_requests WHERE idempotency_key = ?", [request_key]) == []
+    saved = save(offer, idempotency_key=request_key)
+    assert saved["status"] == "saved" and saved["replayed"] is False
+    db.close()
+    assert save(offer, idempotency_key=request_key)["replayed"] is True
+    assert [e["action"] for e in store.get_offer(offer["offer_id"], include_events=True, today=TODAY)["events"]].count("save") == 1
+
+
+def test_second_offer_failure_rolls_back_entire_planning_batch(monkeypatch):
+    first, second = save(ready_q01()), save(ready_q01())
+    original = store._write
+    writes = 0
+
+    def fail_second(row, payload, status):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise RuntimeError("second offer failed")
+        return original(row, payload, status)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_write", fail_second)
+        with pytest.raises(RuntimeError, match="second offer failed"):
+            store.planning_input([first["offer_id"], second["offer_id"]], buyer=BUYER, actor="planner",
+                                 idempotency_key=key(), today=TODAY)
+    for offer in (first, second):
+        after = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+        assert after["status"] == "saved" and after["version"] == offer["version"]
+        assert [e["action"] for e in after["events"]].count("use_in_plan") == 0
+
+
+def test_as_of_preview_does_not_persist_expiry_or_resurrect_offer():
+    offer = ready_q01()
+    future = store.get_offer(offer["offer_id"], include_events=True, today=dt.date(2099, 1, 1))
+    assert future["status"] == "expired" and future["version"] == offer["version"]
+    assert future["normalized"]["as_of"] == "2099-01-01"
+    assert future["normalized"]["expiry"] == "expired"
+    assert [e["action"] for e in future["events"]].count("expire") == 0
+    past = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert past["status"] == "corrected" and past["version"] == offer["version"]
+    assert past["normalized"]["as_of"] == TODAY.isoformat()
+    assert past["normalized"]["expiry"] == "valid"
+    assert past["normalized"]["items"] == future["normalized"]["items"]
+    assert [e["action"] for e in past["events"]].count("expire") == 0
+
+
+def test_concurrent_default_upload_of_same_document_deduplicates_inside_lock(monkeypatch):
+    # Both callers must have passed the fast precheck before either inserts.
+    content = (f"supplier,Unique {key()}\nmaterial,Steel\nprice,USD 10 per tonne\n").encode()
+    barrier = threading.Barrier(2, timeout=10)
+    original = store.extract_offer
+    results, errors = [], []
+
+    def synced_extract(*args, **kwargs):
+        barrier.wait()
+        return original(*args, **kwargs)
+
+    def create():
+        try:
+            results.append(store.create_from_upload(content, "same.csv", mode="rules", as_of=TODAY))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "extract_offer", synced_extract)
+        threads = [threading.Thread(target=create) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=15)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert len(results) == 2
+    assert len({result["offer"]["offer_id"] for result in results}) == 1
+    assert sorted(result["deduplicated"] for result in results) == [False, True]
+    duplicate = store.create_from_upload(content, "same.csv", mode="rules", as_of=TODAY,
+                                         allow_duplicate=True)
+    assert duplicate["deduplicated"] is False
+    assert duplicate["offer"]["offer_id"] != results[0]["offer"]["offer_id"]
+
+
+def test_concurrent_authoritative_expiry_writes_one_event():
+    offer = ready_q01()
+    results = []
+
+    def expire():
+        results.append(store.expire_due(offer["offer_id"], today=dt.date(2099, 1, 1)))
+
+    threads = [threading.Thread(target=expire) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(results) == 2
+    after = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert after["status"] == "expired" and after["version"] == offer["version"] + 1
+    assert [e["action"] for e in after["events"]].count("expire") == 1
+
+
+def test_changed_actor_cannot_replay_a_mutation_receipt():
+    offer = ready_q01()
+    request_key = key()
+    save(offer, idempotency_key=request_key)
+    with pytest.raises(OfferError) as err:
+        store.save_offer(offer["offer_id"], expected_version=offer["version"], actor="another-reviewer",
+                         idempotency_key=request_key, today=TODAY)
+    assert err.value.code == "idempotency_conflict"
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "1e400", "-1", "oops"])
+def test_invalid_buyer_numbers_are_rejected_before_planning_effects(bad):
+    offer = save(ready_q01())
+    with pytest.raises(OfferError) as err:
+        store.planning_input([offer["offer_id"]], buyer={**BUYER, "current_stock_kg": bad}, actor="planner",
+                             idempotency_key=key(), today=TODAY)
+    assert err.value.code == "invalid_value"
+    after = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert after["status"] == "saved" and [e["action"] for e in after["events"]].count("use_in_plan") == 0
+
+
+def test_duplicate_ids_rejected_before_any_planning_effect():
+    offer = save(ready_q01())
+    with pytest.raises(OfferError) as err:
+        store.planning_input([offer["offer_id"], offer["offer_id"]], buyer=BUYER, actor="planner",
+                             idempotency_key=key(), today=TODAY)
+    assert err.value.code == "invalid_request"
+    assert store.get_offer(offer["offer_id"], today=TODAY)["status"] == "saved"
+
+
+@pytest.mark.parametrize("change", [
+    {"averaging_period": None}, {"averaging_period": "  "},
+    {"premium": {"amount": "1e400", "currency": "USD"}},
+    {"fx_basis": "  "},
+    {"per_unit": []},
+    {"premium": {"amount": "95.00", "currency": []}},
+])
+def test_incomplete_or_unrepresentable_index_correction_is_rejected(change):
+    offer = fresh("Q10")
+    original = offer["items"][0]["pricing"]["value"]
+    corrected = {**original, **change}
+    if change.get("averaging_period") is None:
+        corrected.pop("averaging_period")
+    with pytest.raises(OfferError) as err:
+        correct(offer, "items[0].pricing", corrected)
+    assert err.value.code == "invalid_value"
+    assert store.get_offer(offer["offer_id"], today=TODAY)["version"] == offer["version"]
+
+
+def test_complete_signed_index_correction_with_fx_basis_can_save_without_rate():
+    offer = fresh("Q10")
+    price = {**offer["items"][0]["pricing"]["value"],
+             "premium": {"amount": "-95.00", "currency": "EUR"},
+             "fx_basis": "ECB reference rate on invoice date"}
+    corrected = correct(offer, "items[0].pricing", price)
+    assert corrected["normalized"]["items"][0]["pricing"]["status"] == "ok"
+    assert corrected["items"][0]["pricing"]["value"]["premium"]["amount"] == "-95.00"
+    corrected = correct(corrected, "settlement_currency", "USD")
+    assert save(corrected)["status"] == "saved"
+
+
+def test_planning_entry_distinguishes_reviewer_assertion_from_document_evidence():
+    corrected = correct(fresh("Q01"), "settlement_currency", "USD")
+    saved = save(corrected)
+    plan = store.planning_input([saved["offer_id"]], buyer=BUYER, actor="planner", idempotency_key=key(), today=TODAY)
+    entry = plan["offers"][0]
+    asserted = entry["field_provenance"]["settlement_currency"]
+    assert asserted["source"] == "user" and asserted["corrected_by"] == "reviewer@example.test"
+    assert asserted["evidence_status"] == "user_entered_without_document_evidence"
+    assert asserted["evidence_refs"] == []
+    documented = entry["field_provenance"]["items[0].pricing"]
+    assert documented["source"] == "rules" and documented["evidence_refs"]
+
+
+def test_rfq_receipt_failure_rolls_back_recommendation_action_and_offer(monkeypatch, seeded_db):
+    offer = save(ready_q01())
+    before = {table: len(store._rows(f"SELECT * FROM {table}")) for table in ("recommendations", "actions")}
+    original = db.insert_row
+    request_key = key()
+
+    def fail_receipt(table, row):
+        if table == "offer_requests" and row["idempotency_key"] == request_key:
+            raise RuntimeError("RFQ receipt failed")
+        return original(table, row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "insert_row", fail_receipt)
+        with pytest.raises(RuntimeError, match="RFQ receipt failed"):
+            store.draft_rfq(offer["offer_id"], buyer=BUYER, actor="planner", idempotency_key=request_key, today=TODAY)
+    after = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert after["status"] == "saved" and after["version"] == offer["version"]
+    assert [e["action"] for e in after["events"]].count("draft_rfq") == 0
+    assert {table: len(store._rows(f"SELECT * FROM {table}")) for table in before} == before
+    assert store._rows("SELECT * FROM offer_requests WHERE idempotency_key = ?", [request_key]) == []
+
+
+def test_failed_system_expiry_event_rolls_back_expiry(monkeypatch):
+    offer = ready_q01()
+    original = db.insert_row
+
+    def fail_expiry(table, row):
+        if table == "offer_events" and row["action"] == "expire":
+            raise RuntimeError("expiry event failed")
+        return original(table, row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "insert_row", fail_expiry)
+        with pytest.raises(RuntimeError, match="expiry event failed"):
+            store.expire_due(offer["offer_id"], today=dt.date(2099, 1, 1))
+    after = store.get_offer(offer["offer_id"], include_events=True, today=TODAY)
+    assert after["status"] == "corrected" and after["version"] == offer["version"]
+    assert [e["action"] for e in after["events"]].count("expire") == 0
+
+
+def test_replay_keeps_accepted_response_after_clock_advances():
+    offer = ready_q01()
+    request_key = key()
+    first = save(offer, idempotency_key=request_key)
+    replay = store.save_offer(offer["offer_id"], expected_version=offer["version"], actor="reviewer@example.test",
+                              idempotency_key=request_key, today=dt.date(2099, 1, 1))
+    assert replay["replayed"] is True and replay["status"] == first["status"] == "saved"
+    assert replay["version"] == first["version"]
+    # A replay is the historical response, not a fresh eligibility check or a new expiry transition.
+    assert [e["action"] for e in store.get_offer(offer["offer_id"], include_events=True, today=TODAY)["events"]].count("expire") == 0
+
+
+def test_upload_event_failure_rolls_back_document_extraction_and_offer(monkeypatch):
+    store.ensure_schema()
+    before = {table: len(store._rows(f"SELECT * FROM {table}"))
+              for table in ("offer_documents", "offer_extractions", "offers", "offer_events")}
+    original = db.insert_row
+
+    def fail_created(table, row):
+        if table == "offer_events" and row["action"] == "created":
+            raise RuntimeError("created event failed")
+        return original(table, row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db, "insert_row", fail_created)
+        with pytest.raises(RuntimeError, match="created event failed"):
+            upload("Q01", allow_duplicate=True)
+    assert {table: len(store._rows(f"SELECT * FROM {table}")) for table in before} == before

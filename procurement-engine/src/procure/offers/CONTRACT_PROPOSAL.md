@@ -37,7 +37,10 @@ FieldState<T> {
 
 Pricing = Fixed | IndexLinked
   Fixed       {type: "fixed", unit_price: Money, per_unit: unit}
-  IndexLinked {type: "index_linked", index: string, averaging_period: string | null, premium: Money, per_unit: unit}
+  IndexLinked {type: "index_linked", index: nonblank string, averaging_period: nonblank string,
+               premium: signed finite decimal Money, per_unit: unit,
+               fx_basis?: nonblank string, fx_terms?: nonblank string,
+               fx_conversion?: nonblank string, quotational_period?: nonblank string}
 Incoterm    {code: one of EXW FCA FAS FOB CFR CIF CPT CIP DAP DPU DDP, place: string | null}
 Capacity    Quantity + {period: month | quarter | year | week | null}
 ShipmentLot {quantity: Quantity, window: "YYYY-MM" | "YYYY-MM-DD/YYYY-MM-DD"}
@@ -90,7 +93,9 @@ Moves:   correct     extracted|needs_review|corrected      -> corrected
          use_in_plan saved|used_in_plan                    -> used_in_plan
          draft_rfq   saved|used_in_plan                    -> rfq_drafted
          expire      any active status (system)            -> expired
-Save is blocked while expired or while any critical field is missing, conflict or unverified.
+Save is blocked while expired, while any critical field is missing/conflict/unverified, or while a usable
+critical quantity/price cannot be normalized. Unavailable reporting-currency FX alone does not invalidate
+an otherwise valid original price.
 ```
 
 ## 3. Examples (real output, trimmed)
@@ -156,25 +161,32 @@ the `/v2` convention and the existing workspace, principal and idempotency rules
 |---|---|---|
 | `POST /offers/extractions` | `POST /v2/offers/extractions` | JSON `{filename, content_base64, mode, as_of, reporting_currency}`. Same document returns the existing offer (`deduplicated: true`) |
 | `GET /offers/extractions/{id}` | `GET /v2/offers/extractions/{id}` | Extraction plus every located segment, for side-by-side evidence |
-| `GET /offers?status=` | `GET /v2/offers` | Summaries |
-| `GET /offers/{id}?include_events=true` | `GET /v2/offers/{id}` | Includes audit events: who, when, old, new, status move |
+| `GET /offers?status=&as_of=` | `GET /v2/offers` | Summaries; `as_of` previews expiry without changing stored status/version/events |
+| `GET /offers/{id}?include_events=true&as_of=` | `GET /v2/offers/{id}` | Includes audit events; `as_of` is a read-only expiry preview |
 | `POST /offers/{id}/corrections` | `POST /v2/offers/{id}/corrections` | `{field, value, evidence?, expected_version}`. Cited evidence is re-checked against the stored document |
 | `POST /offers/{id}/save` | `POST /v2/offers/{id}/save` | Save gate |
 | `POST /offers/{id}/reject` | `POST /v2/offers/{id}/reject` | Reason required |
 | `POST /offers/planning-input` | `POST /v2/offers/planning-input` | Saved offers become a planning input and are marked `used_in_plan` |
 | `POST /offers/{id}/rfq-draft` | via `/v2/actions` `prepare_rfq` | See section 7 |
 
-Every mutation takes `expected_version` and an idempotency key (body field or `Idempotency-Key` header). A replay
-returns the stored response with `replayed: true`; the same key with a different request returns
-`idempotency_conflict`. In the gateway, `actor` should come from the authenticated principal, not the body.
+Correction/save/reject take `expected_version`; planning input and RFQ draft take an idempotency key but no
+`expected_version` in this local prototype. Every mutation takes an idempotency key (body field or
+`Idempotency-Key` header). A replay returns the originally accepted response with `replayed: true`; it is
+historical evidence, not a fresh expiry/eligibility check. A changed body or supplied actor with the same key
+returns `idempotency_conflict`. The legacy mutation-body `as_of` field is ignored; mutations use the server
+clock. In the gateway, `actor` must come from the authenticated principal, not the body.
 
 ## 5. Persistence
 
 Local store: DuckDB tables in the Python service: `offer_documents` (located segments, not raw bytes),
 `offer_extractions`, `offers` (versioned JSON payload), `offer_events` (audit) and `offer_requests`
-(idempotency). For the shared PostgreSQL store, a migration owned by you could mirror these five tables
-one to one. Changes are serialised by the process database lock; cross-instance concurrency needs the
-PostgreSQL store.
+(idempotency). A local operation commits state, audit, any recommendation/action, and receipt in one DuckDB
+transaction; due expiry is a separate system transition and audit event under the server clock. Planning
+entries carry `field_provenance` by field path (`status`, `source`, `evidence_status`, `corrected_by`,
+`evidence_refs`), so a reviewer assertion without document evidence remains explicit. Planning rejects duplicate
+offer IDs and invalid/nonfinite buyer numbers before use. For the shared PostgreSQL store, a migration owned
+by you could mirror these five tables one to one. The process lock serialises local changes; cross-instance
+concurrency and authenticated workspace scoping need the PostgreSQL/gateway implementation.
 
 ## 6. Decisions needed
 

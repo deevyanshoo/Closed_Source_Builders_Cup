@@ -65,6 +65,8 @@ def _propose(doc: Document, mode: str, client) -> tuple[dict, str, dict]:
             detail["fallback_reason"] = exc.reason
             if exc.attempted:
                 detail.update({"call": exc.call, "attempted": True, "stage": exc.stage})
+            if exc.error_kind:
+                detail["error_kind"] = exc.error_kind
     return extract_rules.extract(doc), "rules", detail
 
 

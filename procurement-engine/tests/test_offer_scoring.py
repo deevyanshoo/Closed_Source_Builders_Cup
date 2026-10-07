@@ -91,3 +91,15 @@ def test_scoring_run_over_the_heldout_set_records_how_it_ran():
     assert report["calls"] == {"none": report["summary"]["quotes"]}
     assert report["synthetic_inputs"] is True and report["revision"]
     assert {"missing", "conflict", "expired", "embedded_instruction"} <= set(report["summary"]["flags"])
+
+
+def test_gemini_run_that_never_used_gemini_is_labelled():
+    import importlib.util
+
+    path = Path(__file__).parents[1] / "scripts" / "score_offer_extraction.py"
+    spec = importlib.util.spec_from_file_location("score_offer_extraction", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.run(mode="gemini", split="heldout")  # tests have no key, so every quote falls back
+    assert report["status"] == "gemini_not_used"
+    assert module.run(mode="rules", split="heldout")["status"] == "completed"

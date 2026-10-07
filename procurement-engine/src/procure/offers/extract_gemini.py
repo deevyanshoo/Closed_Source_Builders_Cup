@@ -122,12 +122,20 @@ class GeminiOffer(Strict):
 class GeminiUnavailable(RuntimeError):
     """Gemini cannot be used for this call; `reason` is a short machine-readable cause."""
 
-    def __init__(self, reason: str, *, call: str = "none", attempted: bool = False, stage: str | None = None):
+    def __init__(self, reason: str, *, call: str = "none", attempted: bool = False, stage: str | None = None,
+                 error_kind: str | None = None):
         super().__init__(reason)
         self.reason = reason
         self.call = call
         self.attempted = attempted
         self.stage = stage
+        self.error_kind = error_kind
+
+
+def _error_kind(exc: Exception) -> str:
+    """A coarse, text-free failure category: quota_exhausted or provider_error."""
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    return "quota_exhausted" if code == 429 or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper() else "provider_error"
 
 
 def response_schema() -> dict:
@@ -232,8 +240,9 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
     started = time.monotonic()
     try:
         resp = client.models.generate_content(model=model, contents=build_prompt(doc), config=config)
-    except Exception:  # noqa: BLE001 - provider, quota or network failure
-        raise GeminiUnavailable("call_failed", call=call_kind, attempted=True, stage="generate_content") from None
+    except Exception as exc:  # noqa: BLE001 - provider, quota or network failure; no exception text is kept
+        raise GeminiUnavailable("call_failed", call=call_kind, attempted=True, stage="generate_content",
+                                error_kind=_error_kind(exc)) from None
     latency_ms = round((time.monotonic() - started) * 1000)
     try:
         offer = GeminiOffer.model_validate(json.loads(resp.text))

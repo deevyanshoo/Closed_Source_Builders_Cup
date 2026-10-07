@@ -16,7 +16,7 @@ on all 18 quotes. **Key v2 corrects the answer key to match the agreed rule: set
 all 18**, because none of the synthetic quotes states an invoice or payment currency.
 
 This is a correction of the answer key, not a change to extraction rules: documents and extractor code are
-unchanged. It was made **before any Gemini held-out run** (the only Gemini held-out attempt returned no Gemini
+unchanged. It was made **before any successful Gemini held-out evaluation** (the earlier 204487d held-out attempt returned no Gemini
 answers; see below). Consequence: the fixture set has no positive example of an explicit settlement currency.
 
 ## Results (rules at revision 21d891b, key v2)
@@ -25,7 +25,7 @@ answers; see below). Consequence: the fixture set has no positive example of an 
 |---|---|---|---|---|---|
 | Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07_deb0b144c75d44e0af79c69abdb32edb.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
 | Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07_38702aa4716a4d80b6bdc9ebbe58b090.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
-| Gemini, held-out (revision 204487d, key v1) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | All 8 real calls rejected: free-tier quota exhausted. Every quote fell back to rules, so no Gemini score exists yet |
+| Gemini, held-out (revision 204487d, key v1) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | Eight recorded attempts returned coarse `quota_exhausted` errors and fell back to rules. Project tier, cause and reset are unverified; this record contains no Gemini answers |
 | Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Run before #24 and key v2; the one difference was the fixture's `[SYNTHETIC]` tag in the supplier name |
 | Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | n/a | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
 
@@ -56,3 +56,13 @@ score record includes `live_calls` (`used`, `max`, `enabled`). The rules runs ab
 
 **To do:** run `RUN_LIVE_GEMINI=1 MAX_LIVE_CALLS=8 .venv/bin/python scripts/score_offer_extraction.py --mode gemini
 --split heldout` once quota or a Vertex project allows, to get the first real Gemini held-out score against key v2.
+
+## Preserved historical demo record
+
+`e2e_demo_2026-10-07.json` is the original synthetic, offline record and is retained unchanged for history.
+Its Q01 `settlement_currency` annotation incorrectly says `verified_against_document`: Q01 documents USD
+as the **unit-price currency**, not the settlement currency. That annotation is superseded and must not be
+used as document evidence or as acceptance of the repaired demo. The current demo treats settlement USD
+as an explicit synthetic reviewer assertion without document evidence and writes a separate unique record.
+Neither the historical nor repaired local demo proves provider use, tenant-bound gateway integration,
+production authentication, or deployment.

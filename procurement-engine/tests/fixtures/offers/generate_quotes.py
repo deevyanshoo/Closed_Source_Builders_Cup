@@ -54,7 +54,7 @@ def price_currency_only():
     """Settlement (invoice or payment) currency is present only when a document states it explicitly.
 
     These quotes state price currencies only, so the key marks the field missing (agreed rule since #24;
-    corrected in answer key version 2, before any Gemini held-out run).
+    corrected in answer key version 2, before any successful Gemini held-out evaluation).
     """
     return missing()
 
@@ -1103,7 +1103,7 @@ def generate(out_dir: Path = HERE) -> dict:
         "answer_key_changes": [
             "v2: settlement_currency is missing unless the document explicitly states the invoice or payment "
             "currency (agreed rule since #24). Corrects the answer key only; documents and extraction rules are "
-            "unchanged. Made before any Gemini held-out run.",
+            "unchanged. Made before any successful Gemini held-out evaluation.",
         ],
         "as_of": AS_OF,
         "locators": {"pdf": "p<page>:l<line>", "xlsx": "<Sheet>!<Cell>", "csv": "r<row>:c<col>"},

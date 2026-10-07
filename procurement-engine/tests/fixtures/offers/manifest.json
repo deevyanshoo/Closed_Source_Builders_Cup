@@ -4,7 +4,7 @@
   "generator": "tests/fixtures/offers/generate_quotes.py",
   "manifest_version": 2,
   "answer_key_changes": [
-    "v2: settlement_currency is missing unless the document explicitly states the invoice or payment currency (agreed rule since #24). Corrects the answer key only; documents and extraction rules are unchanged. Made before any Gemini held-out run."
+    "v2: settlement_currency is missing unless the document explicitly states the invoice or payment currency (agreed rule since #24). Corrects the answer key only; documents and extraction rules are unchanged. Made before any successful Gemini held-out evaluation."
   ],
   "as_of": "2026-10-07",
   "locators": {

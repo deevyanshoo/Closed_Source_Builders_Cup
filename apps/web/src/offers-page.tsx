@@ -10,6 +10,10 @@ const statusLabel = (s: string) => s.replaceAll('_', ' ');
 const fieldLabel = (name: string) => name.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const UNITS = ['tonne', 'kg', 'lb'];
 const INCOTERMS = ['EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'];
+const PRICE_TERMS = [
+  ['fx_basis', 'FX basis'], ['fx_terms', 'FX terms'], ['fx_conversion', 'FX conversion'],
+  ['quotational_period', 'Quotational period'],
+] as const;
 
 function Quote({ text, quote }: { text: string; quote: string }) {
   const at = quote ? text.toLowerCase().indexOf(quote.toLowerCase()) : -1;
@@ -17,17 +21,21 @@ function Quote({ text, quote }: { text: string; quote: string }) {
   return <>{text.slice(0, at)}<mark>{text.slice(at, at + quote.length)}</mark>{text.slice(at + quote.length)}</>;
 }
 
-function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean }) {
+export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean }) {
   const v = (field.value ?? {}) as Record<string, any>;
   const [text, setText] = useState(typeof field.value === 'string' || typeof field.value === 'number' ? String(field.value) : '');
   const [amount, setAmount] = useState<string>(v.amount ?? v.unit_price?.amount ?? v.premium?.amount ?? '');
   const [unit, setUnit] = useState<string>(v.unit ?? v.per_unit ?? 'tonne');
   const [period, setPeriod] = useState<string>(v.period ?? '');
   const [currency, setCurrency] = useState<string>(v.unit_price?.currency ?? v.premium?.currency ?? '');
+  const [priceType, setPriceType] = useState<'fixed' | 'index_linked'>(v.type === 'index_linked' ? 'index_linked' : 'fixed');
   const [index, setIndex] = useState<string>(v.index ?? '');
+  const [averaging, setAveraging] = useState<string>(v.averaging_period ?? '');
+  const [priceTerms, setPriceTerms] = useState<Record<string, string>>(
+    Object.fromEntries(PRICE_TERMS.map(([name]) => [name, typeof v[name] === 'string' ? v[name] : ''])));
   const [code, setCode] = useState<string>(v.code ?? 'FOB');
   const [place, setPlace] = useState<string>(v.place ?? '');
-  const indexLinked = field.kind === 'pricing' && v.type === 'index_linked';
+  const indexLinked = field.kind === 'pricing' && priceType === 'index_linked';
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -37,7 +45,9 @@ function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (
       case 'quantity': return onSubmit({ amount: amount.trim(), unit, ...(field.name.endsWith('capacity') && period ? { period } : {}) });
       case 'incoterm': return onSubmit({ code, place: place.trim() || null });
       case 'pricing': return onSubmit(indexLinked
-        ? { type: 'index_linked', index: index.trim(), averaging_period: v.averaging_period ?? null, premium: { amount: amount.trim(), currency: currency.trim() }, per_unit: unit }
+        ? { type: 'index_linked', index: index.trim(), averaging_period: averaging.trim(),
+          premium: { amount: amount.trim(), currency: currency.trim() }, per_unit: unit,
+          ...Object.fromEntries(PRICE_TERMS.filter(([name]) => priceTerms[name].trim()).map(([name]) => [name, priceTerms[name].trim()])) }
         : { type: 'fixed', unit_price: { amount: amount.trim(), currency: currency.trim() }, per_unit: unit });
       default: return onSubmit(trimmed);
     }
@@ -47,9 +57,12 @@ function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (
   let inputs;
   if (field.kind === 'quantity') inputs = <><label className="field"><span className="field-label">Amount</span><input inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} /></label>{unitSelect}
     {field.name.endsWith('capacity') && <label className="field"><span className="field-label">Per</span><select value={period} onChange={e => setPeriod(e.target.value)}><option value="">(none)</option>{['week', 'month', 'quarter', 'year'].map(p => <option key={p}>{p}</option>)}</select></label>}</>;
-  else if (field.kind === 'pricing') inputs = <>{indexLinked && <label className="field offers-wide"><span className="field-label">Index</span><input value={index} onChange={e => setIndex(e.target.value)} /></label>}
+  else if (field.kind === 'pricing') inputs = <><label className="field"><span className="field-label">Price type</span><select value={priceType} onChange={e => setPriceType(e.target.value as 'fixed' | 'index_linked')}><option value="fixed">Fixed</option><option value="index_linked">Index-linked</option></select></label>
+    {indexLinked && <><label className="field offers-wide"><span className="field-label">Index</span><input value={index} onChange={e => setIndex(e.target.value)} /></label>
+      <label className="field offers-wide"><span className="field-label">Averaging period</span><input value={averaging} onChange={e => setAveraging(e.target.value)} /></label></>}
     <label className="field"><span className="field-label">{indexLinked ? 'Premium' : 'Price'}</span><input inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} /></label>
-    <label className="field"><span className="field-label">Currency</span><input value={currency} maxLength={3} onChange={e => setCurrency(e.target.value.toUpperCase())} /></label>{unitSelect}</>;
+    <label className="field"><span className="field-label">Currency</span><input value={currency} maxLength={3} onChange={e => setCurrency(e.target.value.toUpperCase())} /></label>{unitSelect}
+    {indexLinked && PRICE_TERMS.map(([name, label]) => <label className="field offers-wide" key={name}><span className="field-label">{label}</span><input value={priceTerms[name]} onChange={e => setPriceTerms({ ...priceTerms, [name]: e.target.value })} /></label>)}</>;
   else if (field.kind === 'incoterm') inputs = <><label className="field"><span className="field-label">Code</span><select value={code} onChange={e => setCode(e.target.value)}>{INCOTERMS.map(c => <option key={c}>{c}</option>)}</select></label>
     <label className="field offers-wide"><span className="field-label">Named place</span><input value={place} onChange={e => setPlace(e.target.value)} /></label></>;
   else if (field.kind === 'material') inputs = <label className="field"><span className="field-label">Material</span><select value={text} onChange={e => setText(e.target.value)}><option value="">Choose</option>{fixtureInfo.materials.map(m => <option key={m}>{m}</option>)}</select></label>;
@@ -57,7 +70,7 @@ function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (
 
   return <form className="offers-editor" onSubmit={submit} aria-label={`Correct ${fieldLabel(field.name)}`}>
     <div className="offers-editor-grid">{inputs}</div>
-    <p className="field-hint">Amounts stay exactly as typed (decimal text). Your value is recorded as a reviewer entry.</p>
+    <p className="field-hint">Amounts stay exactly as typed (decimal text). Your value is recorded as a reviewer entry. Economic corrections need service revalidation before save.</p>
     <div className="offers-editor-actions"><button className="secondary-button" type="submit" disabled={busy}>Apply correction</button><button className="text-button" type="button" onClick={onCancel}>Cancel</button></div>
   </form>;
 }
@@ -116,6 +129,7 @@ export function OffersPage() {
       const err = error instanceof OffersError ? error : null;
       // A refused change (blocked save, invalid value) leaves the shown offer current; other failures may not.
       const current = err && ['save_blocked', 'invalid_value', 'invalid_transition'].includes(err.kind);
+      if (current && err.kind === 'save_blocked') show(adapter.get(offer.offer_id));
       setMessage({ text: error instanceof Error ? error.message : 'The change failed.', reasons: err?.reasons, stale: !current });
     } finally {
       setBusy(false);
@@ -139,7 +153,7 @@ export function OffersPage() {
 
     <div className="offers-adapter" role="note">
       <strong>SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY</strong>
-      <span>{fixtureInfo.notice} Extracted with the rules pipeline at revision {fixtureInfo.revision}, as of {fixtureInfo.asOf}. Corrections and saves stay in this browser tab.</span>
+      <span>{fixtureInfo.notice} Extracted with the rules pipeline at revision {fixtureInfo.revision}, as of {fixtureInfo.asOf}. Eligibility is previewed against the current UTC date when you act. Corrections and saves stay in this browser tab.</span>
       {age.old && <span className="offers-old">Old data: these fixtures are {age.days} days old. Re-export them before relying on what you see.</span>}
     </div>
 
@@ -167,6 +181,7 @@ export function OffersPage() {
       </div>
 
       {offer.blocking_reasons.length > 0 && <Reasons reasons={offer.blocking_reasons} title="Save is blocked until these are resolved" />}
+      {offer.revalidation_required?.length ? <div className="notice notice-error" role="note">Derived quantity, price, currency or validity values affected by a correction are unavailable. This local adapter cannot recompute Python normalization or FX. Authoritative service revalidation is required before save.</div> : null}
       {message && <div className={`notice ${message.reasons?.length || message.stale ? 'notice-error' : ''}`} role="status">
         <strong>{message.text}</strong>
         {message.reasons && message.reasons.length > 0 && <p>See the blocking reasons above.</p>}
@@ -212,7 +227,7 @@ export function OffersPage() {
         <button className="primary-button" type="button" disabled={busy || !['extracted', 'needs_review', 'corrected'].includes(offer.status)}
           onClick={() => run(() => adapter.save(offer.offer_id, offer.version), 'Offer saved in this browser tab.')}>
           Save offer <span>→</span></button>
-        <p className="limit-note">Saving here is local to the fixture adapter. In the service, saving is blocked by the same rules and recorded with who, when, old and new values. Nothing is sent to a supplier.</p>
+        <p className="limit-note">Saving here is local to the fixture adapter. This preview checks the current UTC date, but cannot replace service normalization, source checks, or audit. Corrected economic values cannot be saved here until authoritative revalidation. Nothing is sent to a supplier.</p>
       </div>
     </section>}
     <footer><span>Synthetic quotes only</span><span>No supplier messages, orders or purchases</span></footer>

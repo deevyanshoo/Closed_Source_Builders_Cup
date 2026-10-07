@@ -15,8 +15,8 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/planning" element={<PlanningPage />} />
         <Route path="/recovery" element={<RecoveryPage />} />
-        <Route path="/scenarios" element={<VoicePage />} />
         <Route path="/offers" element={<Suspense fallback={<p className="notice">Loading offers…</p>}><OffersPage /></Suspense>} />
+        <Route path="/scenarios" element={<VoicePage />} />
         <Route path="*" element={<Navigate to="/planning" replace />} />
       </Routes>
     </BrowserRouter>

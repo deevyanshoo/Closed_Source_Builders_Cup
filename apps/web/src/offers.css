@@ -45,3 +45,12 @@
 @media(max-width:1000px){.offers-grid{grid-template-columns:1fr}.offers-grid>.table-scroll{border-right:0;padding:0 16px}.offers-document{max-height:420px;border-top:1px solid #111}}
 @media(max-width:700px){.offers-load{grid-template-columns:1fr;padding:18px 16px}.offers-adapter{padding:12px 16px}.offers-head{flex-direction:column;padding:18px 16px}.offers-flags{margin:0 16px 16px}.offers-editor-grid{grid-template-columns:1fr}.offers-wide{grid-column:auto}.offers-actions{padding:18px 16px 0}}
 .offers-table td:last-child .text-button{white-space:nowrap;padding:0}
+@media(max-width:700px){
+  .offers-table{min-width:0;table-layout:fixed}
+  .offers-table thead{display:none}
+  .offers-table tbody,.offers-table tbody tr,.offers-table tbody th,.offers-table tbody td{display:block;width:100%;box-sizing:border-box}
+  .offers-table tbody tr{padding:12px 0;border-bottom:1px solid #bbb}
+  .offers-table tbody th,.offers-table tbody td{border:0;padding:5px 8px;overflow-wrap:anywhere}
+  .offers-editor{width:100%;box-sizing:border-box}
+  .offers-editor input,.offers-editor select{width:100%;box-sizing:border-box}
+}

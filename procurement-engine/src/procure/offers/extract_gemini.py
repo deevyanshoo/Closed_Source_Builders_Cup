@@ -134,8 +134,16 @@ class GeminiUnavailable(RuntimeError):
 
 def _error_kind(exc: Exception) -> str:
     """A coarse, text-free failure category: quota_exhausted or provider_error."""
-    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    return "quota_exhausted" if code == 429 or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper() else "provider_error"
+    try:
+        for name in ("code", "status_code"):
+            code = getattr(exc, name, None)
+            if type(code) is int and code == 429:
+                return "quota_exhausted"
+        if "RESOURCE_EXHAUSTED" in type(exc).__name__.upper():
+            return "quota_exhausted"
+    except Exception:  # noqa: BLE001 - even provider error accessors may fail
+        pass
+    return "provider_error"
 
 
 def response_schema() -> dict:

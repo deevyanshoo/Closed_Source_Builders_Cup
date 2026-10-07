@@ -52,7 +52,7 @@ function Schedule({ title, value }: { title: string; value: ProductionScheduleSc
   </section>;
 }
 
-function Comparison({ value, noop }: { value: ReceiptRecoveryComparison; noop: boolean }) {
+export function Comparison({ value, noop }: { value: ReceiptRecoveryComparison; noop: boolean }) {
   return <div data-result="comparison" className="recovery-result">
     <div className="recovery-result-head"><p className="eyebrow">SYNTHETIC COMPARISON · CALLER SUPPLIED RECOVERY</p><h2>{noop ? 'No changes in this comparison' : 'Three schedules, one set of inputs'}</h2><p>Snapshot {value.snapshot_id} · version {value.plan_version} · as of {utcLabel(value.as_of)}. These IDs check caller consistency; they do not prove this is the current saved plan.</p></div>
     <div className="recovery-three">
@@ -159,7 +159,7 @@ export function RecoveryPage() {
   }
 
   return <div className="shell recovery-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link></header>
+    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/scenarios">Typed scenarios</Link></header>
     <main>
       <div className="recovery-intro"><p className="eyebrow">SYNTHETIC RECEIPT RECOVERY</p><h1>Compare the change.</h1><p>Move a supplied receipt arrival, then assign each order to a production period. Compare the original, disrupted, and supplied recovery schedules. This view makes no operational change.</p></div>
       <section className="recovery-session" aria-label="Session">

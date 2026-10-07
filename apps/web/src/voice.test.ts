@@ -102,6 +102,60 @@ describe('typed voice lifecycle ownership', () => {
     expect(controller.state.selected?.revision).toBe(2);
     expect(controller.state.base?.snapshot.plan_version).toBe(`production-plan-${contextId}-r2`);
   });
+  it.each(['identity recheck', 'context GET 401', 'context GET 403'] as const)('clears saved workspace data after %s session failure during selection', async failure => {
+    const contextId = 'd'.repeat(32);
+    const summary = { context_id: contextId, workspace_id: 'W', revision: 1, snapshot_id: 'saved', plan_version: 'saved-v1', as_of: '2026-10-07T00:00:00Z',
+      metadata: { synthetic: true, source: 'caller_supplied_synthetic', syntactic_validation: 'accepted', numerical_acceptance: 'not_claimed' },
+      created_by: 'p', updated_by: 'p', created_at: '2026-10-07T00:00:00Z', updated_at: '2026-10-07T00:00:00Z' };
+    let checks = 0;
+    const transport: typeof fetch = async (input) => {
+      const path = String(input);
+      if (path === '/v2/workspaces/W/production-contexts') return json({ contract_version: '0.2.0', contexts: [summary], has_more: false });
+      if (path === `/v2/production-contexts/${contextId}`) return json({ contract_version: '0.2.0', error: { code: 'unauthorized', message: 'private detail' } }, failure === 'context GET 403' ? 403 : 401);
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => { if (++checks === 3 && failure === 'identity recheck') throw new Error('private detail'); return identity; } });
+    await controller.refreshIdentity(); controller.selectSource('saved');
+    await until(() => controller.state.contexts.length === 1);
+    await controller.selectSaved(contextId);
+    expect(controller.state.kind).toBe('signed_out');
+    expect(controller.state.identity).toBeUndefined();
+    expect(controller.state.contexts).toEqual([]);
+    expect(controller.state.selected).toBeUndefined();
+    expect(controller.state.base).toBeUndefined();
+    expect(controller.state.snapshotText).toBe('');
+    expect(controller.state.message).not.toContain('private detail');
+  });
+  it.each([401, 403])('clears saved input after a successful write followed by list %s session failure', async status => {
+    const contextId = 'd'.repeat(32);
+    const supplied = voiceExample('recovery', 'W').snapshot;
+    const snapshot = { ...supplied, snapshot_id: `production-${contextId}-r1`, plan_version: `production-plan-${contextId}-r1` };
+    let writes = 0;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/workspaces/W/production-contexts' && init?.method === 'POST') {
+        writes++;
+        return json({ contract_version: '0.2.0', context: { context_id: contextId, workspace_id: 'W', revision: 1,
+          snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, as_of: snapshot.as_of,
+          metadata: { synthetic: true, source: 'caller_supplied_synthetic', syntactic_validation: 'accepted', numerical_acceptance: 'not_claimed' },
+          created_by: 'p', updated_by: 'p', created_at: snapshot.as_of, updated_at: snapshot.as_of, snapshot } }, 201);
+      }
+      if (path === '/v2/workspaces/W/production-contexts' && init?.method === 'GET') return json({ contract_version: '0.2.0', error: { code: 'unauthorized', message: 'private detail' } }, status);
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => ({ ...identity, role: 'editor' }) });
+    await controller.refreshIdentity();
+    controller.editSnapshot(JSON.stringify(supplied));
+    await controller.saveContext(false);
+    expect(writes).toBe(1);
+    expect(controller.state.kind).toBe('signed_out');
+    expect(controller.state.identity).toBeUndefined();
+    expect(controller.state.contexts).toEqual([]);
+    expect(controller.state.selected).toBeUndefined();
+    expect(controller.state.base).toBeUndefined();
+    expect(controller.state.snapshotText).toBe('');
+    expect(controller.state.message).not.toContain('private detail');
+  });
   it('calls the default native transport with the global receiver', async () => {
     let requests = 0;
     vi.stubGlobal('fetch', function (this: typeof globalThis, input: RequestInfo | URL) {

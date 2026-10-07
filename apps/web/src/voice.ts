@@ -273,7 +273,8 @@ export class VoiceController {
       this.setBase(savedScenario(selected.snapshot));
     } catch (error) {
       if (generation !== this.generation || this.disposed) return;
-      this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Could not read the saved context.' });
+      if (error instanceof VoiceError && error.kind === 'session') this.signedOut(error.message);
+      else this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Could not read the saved context.' });
     }
   }
   async saveContext(replace: boolean): Promise<void> {
@@ -301,7 +302,11 @@ export class VoiceController {
       try {
         const list = await this.request<ProductionContextsResponse>('GET', this.contextPath(identity.workspace_id), 'ProductionContextsResponse');
         if (generation === this.generation && !this.disposed && list.contexts.every(item => item.workspace_id === identity.workspace_id)) this.emit({ contexts: list.contexts, hasMore: list.has_more });
-      } catch { /* The successful write remains selected; the list can be refreshed explicitly. */ }
+      } catch (error) {
+        if (generation !== this.generation || this.disposed) return;
+        if (error instanceof VoiceError && error.kind === 'session') this.signedOut(error.message);
+        // The write succeeded. Other list failures leave it selected for an explicit refresh.
+      }
     } catch (error) {
       if (generation !== this.generation || this.disposed) return;
       if (error instanceof VoiceError && error.kind === 'session') this.signedOut(error.message);

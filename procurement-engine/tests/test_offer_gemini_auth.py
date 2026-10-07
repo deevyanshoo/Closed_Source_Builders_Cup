@@ -6,6 +6,7 @@ check which credentials path would be used without contacting Google.
 from __future__ import annotations
 
 import datetime as dt
+import importlib.util
 import json
 from pathlib import Path
 
@@ -104,6 +105,133 @@ def test_incomplete_vertex_config_falls_back_without_building_a_client(env, monk
     ex = run()
     assert (ex.extractor, ex.extractor_detail["fallback_reason"]) == ("rules", "vertex_config_incomplete")
     assert FakeGenaiClient.instances == []
+
+
+@pytest.mark.parametrize("missing", ["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"])
+def test_explicit_vertex_missing_config_never_switches_to_dummy_api_key(env, monkeypatch, missing):
+    env(**VERTEX, GEMINI_API_KEY="test-key-not-real", **LIVE)
+    monkeypatch.delenv(missing)
+    ex = run()
+    assert (ex.extractor, ex.extractor_detail["fallback_reason"]) == ("rules", "vertex_config_incomplete")
+    assert FakeGenaiClient.instances == []
+
+
+def test_hostile_provider_status_accessor_is_coarsely_classified_without_leaking_text():
+    class HostileError(Exception):
+        @property
+        def status_code(self):
+            raise RuntimeError("synthetic-secret-accessor")
+
+    assert extract_gemini._error_kind(HostileError()) == "provider_error"
+
+
+def _live_check_module():
+    path = Path(__file__).parents[1] / "scripts" / "gemini_live_check.py"
+    spec = importlib.util.spec_from_file_location("gemini_live_check_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_disabled_live_gate_records_not_run_without_overwriting_same_day_record(env, monkeypatch, tmp_path):
+    env(GEMINI_API_KEY="test-key-not-real", RUN_LIVE_GEMINI="0", MAX_LIVE_CALLS="0")
+    module = _live_check_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(extract_gemini, "_client", lambda *_: pytest.fail("provider client must not be created"))
+    assert module.main() == 0
+    files = list((tmp_path / "evaluation" / "offers").glob("gemini_live_*.json"))
+    assert len(files) == 1
+    first_bytes = files[0].read_bytes()
+    first = json.loads(first_bytes)
+    assert first["status"] == "not_run"
+    assert first["verified_real_calls"] == 0
+    assert module.main() == 0
+    files_after = list((tmp_path / "evaluation" / "offers").glob("gemini_live_*.json"))
+    assert len(files_after) == 2
+    assert files[0].read_bytes() == first_bytes
+
+
+def test_one_real_result_and_one_rules_fallback_records_partial(env, monkeypatch, tmp_path):
+    env(GEMINI_API_KEY="test-key-not-real", RUN_LIVE_GEMINI="1", MAX_LIVE_CALLS="1")
+    module = _live_check_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(extract_gemini, "_client", lambda *_: pytest.fail("provider client must not be created"))
+    from procure.offers.extraction import extract_offer as actual_extract_offer
+
+    def simulated_extraction(doc, *, mode, as_of):
+        ex = actual_extract_offer(doc, mode="rules", as_of=as_of)
+        if "Q01" in doc.filename:
+            ex.extractor = "gemini"
+            ex.extractor_detail = {"requested": "gemini", "call": "real", "auth": "api_key"}
+        else:
+            ex.extractor_detail = {"requested": "gemini", "call": "none",
+                                   "fallback_reason": "live_call_budget_exhausted"}
+        return ex
+
+    monkeypatch.setattr(module, "extract_offer", simulated_extraction)
+    assert module.main() == 0
+    files = list((tmp_path / "evaluation" / "offers").glob("gemini_live_*.json"))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record["status"] == "partial"
+    assert record["verified_real_calls"] == 1
+    assert record["extraction"]["extractor"] == "gemini"
+    assert record["injection"]["extractor"] == "rules"
+
+
+@pytest.mark.parametrize("outcome,expected_status,expected_verified", [
+    ("attempts_failed", "failed", 0),
+    ("both_real", "completed", 2),
+])
+def test_live_diagnostic_status_counts_verified_extractions_not_reserved_slots(
+    env, monkeypatch, tmp_path, outcome, expected_status, expected_verified
+):
+    env(GEMINI_API_KEY="test-key-not-real", RUN_LIVE_GEMINI="1", MAX_LIVE_CALLS="2")
+    module = _live_check_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(extract_gemini, "_client", lambda *_: pytest.fail("provider client must not be created"))
+    monkeypatch.setattr(extract_gemini, "live_call_stats", lambda: {"used": 2, "max": 2, "enabled": True})
+    from procure.offers.extraction import extract_offer as actual_extract_offer
+
+    def simulated_extraction(doc, *, mode, as_of):
+        ex = actual_extract_offer(doc, mode="rules", as_of=as_of)
+        if outcome == "both_real":
+            ex.extractor = "gemini"
+            ex.extractor_detail = {"requested": "gemini", "call": "real", "auth": "api_key"}
+        else:
+            ex.extractor_detail = {"requested": "gemini", "call": "real", "attempted": True,
+                                   "fallback_reason": "call_failed", "error_kind": "provider_error"}
+        return ex
+
+    monkeypatch.setattr(module, "extract_offer", simulated_extraction)
+    assert module.main() == 0
+    files = list((tmp_path / "evaluation" / "offers").glob("gemini_live_*.json"))
+    assert len(files) == 1
+    record = json.loads(files[0].read_text())
+    assert record["status"] == expected_status
+    assert record["reserved_attempts"] == 2
+    assert record["verified_real_calls"] == expected_verified
+
+
+def test_live_diagnostic_labels_credential_setup_failure_without_provider_call(env, monkeypatch, tmp_path):
+    env(GEMINI_API_KEY="test-key-not-real", RUN_LIVE_GEMINI="1", MAX_LIVE_CALLS="2")
+    module = _live_check_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+
+    def rejected_client(*_args):
+        raise RuntimeError("synthetic credential setup failure; do not serialize this text")
+
+    monkeypatch.setattr(extract_gemini, "_client", rejected_client)
+    assert module.main() == 0
+    files = list((tmp_path / "evaluation" / "offers").glob("gemini_live_*.json"))
+    assert len(files) == 1
+    raw = files[0].read_text()
+    record = json.loads(raw)
+    assert record["status"] == "failed"
+    assert record["reserved_attempts"] == 2
+    assert record["verified_real_calls"] == 0
+    assert record["extraction"]["detail"]["fallback_reason"] == "credentials_unavailable"
+    assert "synthetic credential setup failure" not in raw
 
 
 @pytest.mark.parametrize("config", [VERTEX, {"GEMINI_API_KEY": "test-key-not-real"}])

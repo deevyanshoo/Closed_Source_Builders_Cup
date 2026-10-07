@@ -10,11 +10,12 @@ Document text is untrusted. The system instruction says so, hidden segments are 
 the evidence check rejects hidden content whatever the model returns.
 
 Credentials: Vertex AI with Application Default Credentials when GOOGLE_GENAI_USE_VERTEXAI is
-true and GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are set; otherwise GEMINI_API_KEY.
+true and GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are set. Incomplete explicit Vertex
+configuration fails closed; API-key mode is used only when Vertex is not selected.
 OFFLINE=1 blocks both. Real calls also need RUN_LIVE_GEMINI=1 and stay within MAX_LIVE_CALLS
 per process (default 0, so none). Audit records name the path (vertex_adc or api_key) and
-whether the call was real or mocked; tokens, keys, project IDs and credential paths are never
-recorded.
+whether the call was real or mocked; credential/token values, keys, project IDs and credential
+paths are never recorded. Aggregate token counts may be retained.
 """
 from __future__ import annotations
 
@@ -163,12 +164,10 @@ _live_used = 0
 
 
 def _auth_path(settings) -> tuple[str | None, str | None]:
-    """(path, problem). Vertex/ADC when fully configured, else the API key, else why neither works."""
+    """(path, problem). Explicit Vertex must be complete; API key is a separate mode."""
     if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in _TRUE:
         if os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() and os.getenv("GOOGLE_CLOUD_LOCATION", "").strip():
             return "vertex_adc", None
-        if settings.gemini_api_key:
-            return "api_key", None
         return None, "vertex_config_incomplete"
     return ("api_key", None) if settings.gemini_api_key else (None, "no_api_key")
 

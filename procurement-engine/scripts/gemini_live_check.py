@@ -12,14 +12,17 @@ one injection check); otherwise each call falls back to rules and the record say
 
 Run from procurement-engine/:
     RUN_LIVE_GEMINI=1 MAX_LIVE_CALLS=2 .venv/bin/python scripts/gemini_live_check.py
-Output: evaluation/offers/gemini_live_<UTC date>.json
+Output: evaluation/offers/gemini_live_<UTC date>_<unique run id>.json
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
+import tempfile
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,6 +55,25 @@ def _action_rows() -> dict | None:
         return {t: int(db.query_df(f"SELECT COUNT(*) AS n FROM {t}")["n"].iloc[0]) for t in ("actions", "recommendations")}
     except Exception:  # noqa: BLE001 - database busy or missing; recorded as not checked
         return None
+
+
+def _publish_record(record: dict) -> Path:
+    """Publish only a completed JSON file; never replace an earlier diagnostic."""
+    out_dir = ROOT / "evaluation" / "offers"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"gemini_live_{record['run_at'][:10]}_{uuid.uuid4().hex}.json"
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=out_dir, prefix=".gemini-live-",
+                                     suffix=".tmp", delete=False) as temporary:
+        temp_path = Path(temporary.name)
+        json.dump(record, temporary, indent=2, ensure_ascii=False)
+        temporary.write("\n")
+        temporary.flush()
+        os.fsync(temporary.fileno())
+    try:
+        os.link(temp_path, path)
+    finally:
+        temp_path.unlink()
+    return path
 
 
 def main() -> int:
@@ -93,16 +115,33 @@ def main() -> int:
                                "rejected_candidates": [{"field": f.name, "problems": c.problems, "cited": c.cited}
                                                        for f in inj.all_fields() for c in f.candidates if not c.verified],
                                "score": scoring.score_quote(inj, q07)}
-        record["status"] = "completed"
+        outcomes = (record["extraction"], record["injection"])
+        real_count = sum(o["extractor"] == "gemini" and o["detail"].get("call") == "real" for o in outcomes)
+        if real_count == 2:
+            if all(value is True for value in checks.values()):
+                record["status"] = "completed"
+            else:
+                record.update(status="failed", reason="injection_check_failed_or_unavailable")
+        elif real_count == 1:
+            record.update(status="partial", reason="one_check_not_completed_by_gemini")
+        elif any(o["detail"].get("attempted") or
+                 o["detail"].get("fallback_reason") in {"credentials_unavailable", "call_failed", "invalid_response"}
+                 for o in outcomes):
+            record.update(status="failed", reason="gemini_attempt_failed")
+        else:
+            record.update(status="not_run", reason=next((o["detail"].get("fallback_reason") for o in outcomes
+                                                         if o["detail"].get("fallback_reason")), "gemini_not_used"))
+        record["verified_real_calls"] = real_count
+    record.setdefault("verified_real_calls", 0)
     record["live_calls"] = extract_gemini.live_call_stats()
-    out_dir = ROOT / "evaluation" / "offers"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"gemini_live_{record['run_at'][:10]}.json"
-    path.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    summary = {k: record.get(k) for k in ("status", "reason", "revision", "run_at")}
-    if record.get("status") == "completed":
+    record["reserved_attempts"] = record["live_calls"]["used"]
+    path = _publish_record(record)
+    summary = {k: record.get(k) for k in ("status", "reason", "revision", "run_at", "reserved_attempts",
+                                           "verified_real_calls")}
+    if record.get("extraction"):
         summary["q01_extractor"] = record["extraction"]["extractor"]
         summary["q01_field_accuracy"] = record["extraction"]["score"]["accuracy"]
+    if record.get("injection"):
         summary["injection_checks"] = record["injection"]["checks"]
     print(json.dumps(summary, indent=2))
     print(f"Saved {path.relative_to(ROOT)}")

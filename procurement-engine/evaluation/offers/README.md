@@ -19,16 +19,18 @@ This is a correction of the answer key, not a change to extraction rules: docume
 unchanged. It was made **before any Gemini held-out run** (the only Gemini held-out attempt returned no Gemini
 answers; see below). Consequence: the fixture set has no positive example of an explicit settlement currency.
 
-## Results (rules at revision a96e840, key v2)
+## Results (rules at revision 21d891b, key v2)
 
 | Run | File | Status | Field accuracy | Whole quotes | Notes |
 |---|---|---|---|---|---|
-| Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
-| Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
+| Rules, held-out (8 quotes, 130 fields) | `score_rules_heldout_2026-10-07_deb0b144c75d44e0af79c69abdb32edb.json` | completed | **88.5%** (115/130) | 1/8 | 13 `not_extracted`, 1 `wrong_status`, 1 `wrong_value`, 0 invented values |
+| Rules, training (10 quotes, 150 fields) | `score_rules_train_2026-10-07_38702aa4716a4d80b6bdc9ebbe58b090.json` | completed | **89.3%** (134/150) | 4/10 | 14 `not_extracted`, 1 `wrong_status`, 1 `invented_value` |
 | Gemini, held-out (revision 204487d, key v1) | `score_gemini_heldout_2026-10-07.json` | **gemini_not_used** | n/a | n/a | All 8 real calls rejected: free-tier quota exhausted. Every quote fell back to rules, so no Gemini score exists yet |
 | Gemini, Q01 training (real) | `gemini_live_2026-10-07.json` | completed | 14/15 (key v1) | n/a | Run before #24 and key v2; the one difference was the fixture's `[SYNTHETIC]` tag in the supplier name |
 | Gemini, Q07 injection (real) | `gemini_live_2026-10-07.json` | completed | 5/5 checks | n/a | Instruction kept as plain text, in no value, no hidden evidence, no action rows |
 
+Score files now carry input, manifest and source hashes and are never overwritten (#29). The unsuffixed
+`score_rules_*_2026-10-07.json` files are the same key-v2 results from revision a96e840, before the #29 merge.
 Earlier key-v1 rules scores (held-out 83.1%, training 84.7%) are superseded; they counted the price currency as a
 settlement currency the extractor correctly left missing.
 

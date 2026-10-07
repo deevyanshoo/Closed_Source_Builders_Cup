@@ -22,6 +22,16 @@ flagged for review; visible text can still support a field only if it passes the
 Flagging alone does not categorically exclude visible instruction-like text from evidence. Gemini's response schema has no action fields,
 unknown keys are rejected, and extraction has no side effects. Tests: `tests/test_offer_injection.py`.
 
+## Credentials and the live-call gate
+
+- Vertex AI with Application Default Credentials when `GOOGLE_GENAI_USE_VERTEXAI=true` and `GOOGLE_CLOUD_PROJECT` and
+  `GOOGLE_CLOUD_LOCATION` are set (`api_version=v1`, 15 s timeout); otherwise `GEMINI_API_KEY`. `OFFLINE=1` blocks both.
+- Real calls also need `RUN_LIVE_GEMINI=1` and stay within `MAX_LIVE_CALLS` per process (default 0, so none).
+  Otherwise extraction falls back to rules with `live_calls_disabled` or `live_call_budget_exhausted`.
+- Missing or failed credentials fall back with `vertex_config_incomplete`, `no_api_key` or `credentials_unavailable`.
+  Audit records show `auth` (`vertex_adc` or `api_key`), `call` (`real` or `mocked`) and live-call counts; never
+  tokens, keys, project IDs or credential paths.
+
 ## Real versus mocked Gemini
 
 - The default test suite never calls Google. `tests/conftest.py` removes any key loaded from `.env`; mocked

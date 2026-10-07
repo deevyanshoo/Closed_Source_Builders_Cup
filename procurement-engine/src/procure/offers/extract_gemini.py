@@ -8,10 +8,19 @@ extractor, so a value Gemini cannot point to in the document is reported as unve
 
 Document text is untrusted. The system instruction says so, hidden segments are marked, and
 the evidence check rejects hidden content whatever the model returns.
+
+Credentials: Vertex AI with Application Default Credentials when GOOGLE_GENAI_USE_VERTEXAI is
+true and GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION are set; otherwise GEMINI_API_KEY.
+OFFLINE=1 blocks both. Real calls also need RUN_LIVE_GEMINI=1 and stay within MAX_LIVE_CALLS
+per process (default 0, so none). Audit records name the path (vertex_adc or api_key) and
+whether the call was real or mocked; tokens, keys, project IDs and credential paths are never
+recorded.
 """
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from typing import Literal
 
@@ -123,19 +132,79 @@ class GeminiUnavailable(RuntimeError):
     """Gemini cannot be used for this call; `reason` is a short machine-readable cause."""
 
     def __init__(self, reason: str, *, call: str = "none", attempted: bool = False, stage: str | None = None,
-                 error_kind: str | None = None):
+                 error_kind: str | None = None, auth: str | None = None):
         super().__init__(reason)
         self.reason = reason
         self.call = call
         self.attempted = attempted
         self.stage = stage
         self.error_kind = error_kind
+        self.auth = auth
 
 
 def _error_kind(exc: Exception) -> str:
-    """A coarse, text-free failure category: quota_exhausted or provider_error."""
+    """A coarse, text-free failure category: quota_exhausted, auth_error or provider_error."""
     code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-    return "quota_exhausted" if code == 429 or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper() else "provider_error"
+    if code == 429 or "RESOURCE_EXHAUSTED" in type(exc).__name__.upper():
+        return "quota_exhausted"
+    return "auth_error" if code in (401, 403) else "provider_error"
+
+
+# ---------- credentials and the live-call gate ----------
+
+_TRUE = {"1", "true", "yes"}
+_live_lock = threading.Lock()
+_live_used = 0
+
+
+def _auth_path(settings) -> tuple[str | None, str | None]:
+    """(path, problem). Vertex/ADC when fully configured, else the API key, else why neither works."""
+    if os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in _TRUE:
+        if os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() and os.getenv("GOOGLE_CLOUD_LOCATION", "").strip():
+            return "vertex_adc", None
+        if settings.gemini_api_key:
+            return "api_key", None
+        return None, "vertex_config_incomplete"
+    return ("api_key", None) if settings.gemini_api_key else (None, "no_api_key")
+
+
+def _max_live_calls() -> int:
+    try:
+        return max(0, int(os.getenv("MAX_LIVE_CALLS", "0")))
+    except ValueError:
+        return 0
+
+
+def live_call_stats() -> dict:
+    return {"used": _live_used, "max": _max_live_calls(), "enabled": os.getenv("RUN_LIVE_GEMINI") == "1"}
+
+
+def reset_live_calls() -> None:
+    global _live_used
+    with _live_lock:
+        _live_used = 0
+
+
+def _reserve_live_call(auth: str) -> None:
+    """Allow one real call if RUN_LIVE_GEMINI=1 and the per-process budget is not spent."""
+    global _live_used
+    if os.getenv("RUN_LIVE_GEMINI") != "1":
+        raise GeminiUnavailable("live_calls_disabled", auth=auth)
+    with _live_lock:
+        if _live_used >= _max_live_calls():
+            raise GeminiUnavailable("live_call_budget_exhausted", auth=auth)
+        _live_used += 1
+
+
+def _client(auth: str, settings):
+    from google import genai  # imported lazily so the service runs without the package
+    from google.genai import types
+
+    if auth == "vertex_adc":
+        return genai.Client(vertexai=True, project=os.environ["GOOGLE_CLOUD_PROJECT"].strip(),
+                            location=os.environ["GOOGLE_CLOUD_LOCATION"].strip(),
+                            http_options=types.HttpOptions(api_version="v1", timeout=15000))
+    return genai.Client(api_key=settings.gemini_api_key)
 
 
 def response_schema() -> dict:
@@ -218,19 +287,23 @@ def to_proposals(offer: GeminiOffer) -> dict:
 def extract(doc: Document, client=None) -> tuple[dict, dict]:
     """(proposals, call record). Raises GeminiUnavailable when Gemini cannot be used.
 
-    With `client=None` a real google-genai client is created from GEMINI_API_KEY and the call
-    is recorded as `real`. An injected client (tests) is always recorded as `mocked`.
+    With `client=None` a real google-genai client is created (Vertex/ADC or API key) and the call
+    is recorded as `real`. An injected client (tests) is always recorded as `mocked` and spends no
+    live-call budget.
     """
     settings = get_settings()
-    if client is None and not settings.gemini_api_key:
-        raise GeminiUnavailable("no_api_key")
+    auth, problem = _auth_path(settings)
+    if client is None and auth is None:
+        raise GeminiUnavailable(problem)
     if settings.offline:
-        raise GeminiUnavailable("offline")
+        raise GeminiUnavailable("offline", auth=auth)
     call_kind = "mocked" if client is not None else "real"
     if client is None:
-        from google import genai  # imported lazily so the service runs without the package
-
-        client = genai.Client(api_key=settings.gemini_api_key)
+        _reserve_live_call(auth)
+        try:
+            client = _client(auth, settings)
+        except Exception:  # noqa: BLE001 - missing or invalid credentials; no text is kept (may name paths)
+            raise GeminiUnavailable("credentials_unavailable", auth=auth, stage="client_setup") from None
     from google.genai import types
 
     model = assumptions()["news"]["gemini_model"]
@@ -242,7 +315,7 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
         resp = client.models.generate_content(model=model, contents=build_prompt(doc), config=config)
     except Exception as exc:  # noqa: BLE001 - provider, quota or network failure; no exception text is kept
         raise GeminiUnavailable("call_failed", call=call_kind, attempted=True, stage="generate_content",
-                                error_kind=_error_kind(exc)) from None
+                                error_kind=_error_kind(exc), auth=auth) from None
     latency_ms = round((time.monotonic() - started) * 1000)
     try:
         offer = GeminiOffer.model_validate(json.loads(resp.text))
@@ -250,8 +323,11 @@ def extract(doc: Document, client=None) -> tuple[dict, dict]:
         prompt_tokens = getattr(usage, "prompt_token_count", None)
         output_tokens = getattr(usage, "candidates_token_count", None)
     except Exception:  # noqa: BLE001 - malformed SDK response or accessor failure
-        raise GeminiUnavailable("invalid_response", call=call_kind, attempted=True, stage="response_validation") from None
-    record = {"provider": "google-genai", "model": model, "call": call_kind, "latency_ms": latency_ms,
+        raise GeminiUnavailable("invalid_response", call=call_kind, attempted=True, stage="response_validation",
+                                auth=auth) from None
+    stats = live_call_stats()
+    record = {"provider": "google-genai", "model": model, "call": call_kind, "auth": auth or "none",
+              "live_calls": {"used": stats["used"], "max": stats["max"]}, "latency_ms": latency_ms,
               "prompt_tokens": prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else None,
               "output_tokens": output_tokens if type(output_tokens) is int and output_tokens >= 0 else None}
     return to_proposals(offer), record

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from procure.documents import read_document  # noqa: E402
-from procure.offers import scoring  # noqa: E402
+from procure.offers import extract_gemini, scoring  # noqa: E402
 from procure.offers.extraction import extract_offer  # noqa: E402
 from procure.settings import get_settings, reset_caches  # noqa: E402
 
@@ -65,6 +65,7 @@ def run(mode: str = "rules", split: str = "heldout") -> dict:
     return {"kind": "offer_extraction_score", "status": status, "mode": mode, "split": split,
             "run_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(), "revision": _revision(),
             "manifest_as_of": manifest["as_of"], "key_configured": bool(settings.gemini_api_key),
+            "live_calls": extract_gemini.live_call_stats(),
             "offline": settings.offline, "synthetic_inputs": True,
             "extractors_used": dict(used),
             "calls": dict(Counter(d["call"] for d in details)),

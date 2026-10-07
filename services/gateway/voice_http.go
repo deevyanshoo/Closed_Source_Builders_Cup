@@ -129,6 +129,12 @@ func (a *voiceHTTPAdapter) sample() time.Time {
 	a.mu.Unlock()
 	return t
 }
+func (a *voiceHTTPAdapter) currentSampleLocked(t time.Time) time.Time {
+	if t.Before(a.last) {
+		return a.last
+	}
+	return t
+}
 func (a *voiceHTTPAdapter) sweepLocked(t time.Time) {
 	for id, s := range a.sessions {
 		if !t.Before(s.last.Add(voiceIdle)) {
@@ -144,6 +150,7 @@ func (a *voiceHTTPAdapter) Sweep() {
 	}
 	t := a.sample()
 	a.mu.Lock()
+	t = a.currentSampleLocked(t)
 	if !a.closed {
 		a.sweepLocked(t)
 	}
@@ -332,6 +339,7 @@ func (a *voiceHTTPAdapter) create(w http.ResponseWriter, r *http.Request, p prin
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
 	a.mu.Lock()
+	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	if a.closed {
 		a.mu.Unlock()
@@ -390,6 +398,7 @@ func (a *voiceHTTPAdapter) closeSession(w http.ResponseWriter, r *http.Request, 
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
 	a.mu.Lock()
+	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
 	if s == nil {
@@ -419,6 +428,7 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
 	a.mu.Lock()
+	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
 	if s == nil {
@@ -567,6 +577,7 @@ func (a *voiceHTTPAdapter) cancelTurn(w http.ResponseWriter, r *http.Request, p 
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
 	a.mu.Lock()
+	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
 	if s != nil && s.lease != nil && !a.manager.IsCurrent(owner, s.lease) {
@@ -601,6 +612,7 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	now := a.sample()
 	a.mu.Lock()
+	now = a.currentSampleLocked(now)
 	a.sweepLocked(now)
 	s := a.currentLocked(owner, id)
 	if s != nil && s.lease != nil && !a.manager.IsCurrent(owner, s.lease) {

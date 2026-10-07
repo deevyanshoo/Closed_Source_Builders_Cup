@@ -468,15 +468,14 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
     if (not isinstance(value, str) or value not in nz.ISO_4217_CODES
             or value in nz._NON_SETTLEMENT_CODES):
         return False
-    # Only a complete, affirmative statement assigns settlement currency. A
-    # prefix match would also accept a price denominator, a second currency or
-    # a later prohibition. Always inspect the whole located source, not the
-    # model's potentially shortened quotation.
+    # Only complete affirmative assertions assign settlement currency. Every
+    # nonempty clause of every cited located segment must agree: otherwise an
+    # unfamiliar prohibition or qualifier could be silently skipped after a
+    # positive clause. Complex source text stays unverified for human review.
     role = r"(?:invoice|settlement|payment)[_ -]+currency|currency\s+of\s+settlement"
     payment = r"(?:payable|settled|payment)\s+in"
-    relevant = re.compile(rf"\b(?:{role}|{payment})\b", re.I)
     assertion = re.compile(
-        rf"\s*(?:(?:{role})\s*(?:[:=\-–—]|\bis\b)?\s*|(?:{payment})\s+)"
+        rf"\s*(?:(?:{role})(?:\s*[:=\-–—]\s*|\s+is\s+|\s+)|(?:{payment})\s+)"
         r"([A-Z]{3})\s*[.!]?\s*",
         re.I,
     )
@@ -484,34 +483,38 @@ def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> b
     supported = False
     for ref in refs:
         text = ref.segment_text.strip()
-        for clause in re.split(r"[;\n]", text):
-            if not relevant.search(clause):
-                continue
+        if text == value:
+            cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
+            if cell:
+                cell_supported = False
+                row, column = map(int, cell.groups())
+                locators = [f"r{row}:c{column - 1}"]
+                for previous_row in range(row - 1, max(0, row - 8), -1):
+                    above = doc.segment(f"r{previous_row}:c{column}")
+                    if above is None:
+                        continue
+                    if above.text.strip() == value:
+                        continue  # repeated table data below a shared header
+                    locators.append(above.locator)
+                    break
+                for locator in locators:
+                    label = doc.segment(locator)
+                    if (label and not HIDDEN_FLAGS.intersection(label.flags)
+                            and "formula_without_cached_value" not in label.flags
+                            and label_role.fullmatch(label.text.strip())):
+                        cell_supported = True
+                        break
+                if cell_supported:
+                    supported = True
+                    continue
+        clauses = [clause for clause in re.split(r"[;\n]", text) if clause.strip()]
+        if not clauses:
+            return False
+        for clause in clauses:
             match = assertion.fullmatch(clause)
             if not match or match.group(1).upper() != value:
                 return False
             supported = True
-        if text != value:
-            continue
-        cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
-        if not cell:
-            continue  # an isolated code needs an explicit role label
-        row, column = map(int, cell.groups())
-        locators = [f"r{row}:c{column - 1}"]
-        for previous_row in range(row - 1, max(0, row - 8), -1):
-            above = doc.segment(f"r{previous_row}:c{column}")
-            if above is None:
-                continue
-            if above.text.strip() == value:
-                continue  # repeated table data below a shared header
-            locators.append(above.locator)
-            break
-        for locator in locators:
-            label = doc.segment(locator)
-            if (label and not HIDDEN_FLAGS.intersection(label.flags)
-                    and "formula_without_cached_value" not in label.flags
-                    and label_role.fullmatch(label.text.strip())):
-                supported = True
     return supported
 
 

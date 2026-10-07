@@ -220,7 +220,15 @@ def test_strict_q01_gemini_price_currency_cannot_verify_settlement_or_unlock_sav
     ("Invoice currency: USD; settlement currency: EUR", False),
     ("Settlement currency: USD per MT", False),
     ("Invoice currency: USD & EUR", False),
+    ("Invoice currency: USD; USD payments prohibited", False),
+    ("Invoice currency: USD; payment must be in EUR", False),
+    ("Invoice currency: USD; do not pay in USD", False),
+    ("Invoice currency: USD; invoices must be paid in EUR", False),
+    ("Invoice currency: USD; settlement in EUR", False),
+    ("Invoice currency: USD; terms to follow", False),
+    ("Invoice currency: USD. Terms to follow", False),
     ("Invoice currency: USD", True),
+    ("Invoice currency: USD; Payment currency: USD", True),
 ])
 def test_strict_q01_located_settlement_clause_controls_save(monkeypatch, text, expected):
     monkeypatch.setattr(extract_gemini, "get_settings", lambda: SimpleNamespace(gemini_api_key=None, offline=False))
@@ -253,6 +261,7 @@ def _located_currency(text: str, *, locator: str = "p1:l1"):
     "Payment terms: 30 days from invoice date; price USD 9,412.50",
     "Invoice currency: USD/INR",
     "Invoice currency: USDT",
+    "Invoice currencyUSD",
     "Settlement: USD",
     "LME Copper cash settlement: USD 9,412.50 per tonne",
     "Settlement: USD/tonne",
@@ -269,6 +278,13 @@ def _located_currency(text: str, *, locator: str = "p1:l1"):
     "Invoice currency: USD; payment in USD is prohibited",
     "Invoice currency: USD\nNot payable in USD",
     "Invoice currency: USD; settlement currency: EUR",
+    "Invoice currency: USD; USD payments prohibited",
+    "Invoice currency: USD; payment must be in EUR",
+    "Invoice currency: USD; do not pay in USD",
+    "Invoice currency: USD; invoices must be paid in EUR",
+    "Invoice currency: USD; settlement in EUR",
+    "Invoice currency: USD; terms to follow",
+    "Invoice currency: USD. Terms to follow",
 ])
 def test_settlement_currency_rejects_price_generic_fx_or_nonexact_code(text):
     document = _located_currency(text)
@@ -303,6 +319,13 @@ def test_settlement_currency_accepts_explicit_located_statement(text):
     "Invoice currency: USD; payment in USD is prohibited",
     "Invoice currency: USD\nNot payable in USD",
     "Invoice currency: USD; settlement currency: EUR",
+    "Invoice currency: USD; USD payments prohibited",
+    "Invoice currency: USD; payment must be in EUR",
+    "Invoice currency: USD; do not pay in USD",
+    "Invoice currency: USD; invoices must be paid in EUR",
+    "Invoice currency: USD; settlement in EUR",
+    "Invoice currency: USD; terms to follow",
+    "Invoice currency: USD. Terms to follow",
 ])
 def test_ambiguous_or_negated_settlement_source_cannot_unlock_save(text):
     document = _located_currency(text)
@@ -328,6 +351,25 @@ def test_settlement_currency_checks_every_cited_located_statement():
     assert not evidence.check_candidate(document, "currency", proposal).verified
 
 
+@pytest.mark.parametrize("second,expected", [
+    ("USD payments prohibited", False),
+    ("payment must be in EUR", False),
+    ("Settlement in EUR", False),
+    ("Terms to follow", False),
+    ("Payment currency: USD", True),
+])
+def test_settlement_currency_requires_every_cited_segment_to_assert_same_code(second, expected):
+    document_id = "sha256:synthetic-settlement-closed-source"
+    segments = (
+        make_segment(document_id, "pdf_line", "p1:l1", "Invoice currency: USD", page=1, line=1),
+        make_segment(document_id, "pdf_line", "p1:l2", second, page=1, line=2),
+    )
+    document = Document(document_id=document_id, filename="synthetic.pdf", media_type="application/pdf",
+                        byte_size=0, segments=segments)
+    proposal = {"value": "USD", "evidence": [*ev("p1:l1", "USD"), *ev("p1:l2", second)]}
+    assert evidence.check_candidate(document, "currency", proposal).verified is expected
+
+
 @pytest.mark.parametrize("label,expected", [
     ("Invoice currency", True), ("settlement_currency", True), ("Payment Currency", True),
     ("Currency", False), ("Price currency", False), ("FX basis invoice date", False),
@@ -341,6 +383,21 @@ def test_isolated_currency_cell_needs_explicit_settlement_role_label(label, expe
     candidate = evidence.check_candidate(document, "currency", {"value": "USD",
                                                                "evidence": ev("r1:c2", "USD")})
     assert candidate.verified is expected
+
+
+def test_labeled_currency_cell_does_not_skip_other_cited_source():
+    document_id = "sha256:synthetic-cell-with-qualifier"
+    segments = (
+        make_segment(document_id, "csv_cell", "r1:c1", "Invoice currency", row=1, column=1),
+        make_segment(document_id, "csv_cell", "r1:c2", "USD", row=1, column=2),
+        make_segment(document_id, "csv_cell", "r2:c1", "Terms to follow", row=2, column=1),
+    )
+    document = Document(document_id=document_id, filename="synthetic.csv", media_type="text/csv",
+                        byte_size=0, segments=segments)
+    candidate = evidence.check_candidate(document, "currency", {"value": "USD", "evidence": [
+        *ev("r1:c2", "USD"), *ev("r2:c1", "Terms to follow"),
+    ]})
+    assert not candidate.verified
 
 
 def test_gemini_receives_located_segments_not_the_raw_file(with_key):

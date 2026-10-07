@@ -1,4 +1,5 @@
 """Shipment milestone ingestion: raw provider or scenario records become validated events."""
 from .milestones import EVENT_TYPES, normalize_milestones
+from .scenarios import build_arrival_scenarios
 
-__all__ = ["EVENT_TYPES", "normalize_milestones"]
+__all__ = ["EVENT_TYPES", "build_arrival_scenarios", "normalize_milestones"]

@@ -1,0 +1,49 @@
+{
+  "notice": "SYNTHETIC plan snapshot in the events/propagation/projection.py schema, for testing milestone-to-scenario conversion only.",
+  "workspace_id": "synthetic-workspace",
+  "plan_version": "synthetic-plan-v1",
+  "snapshot_id": "synthetic-snapshot-1",
+  "as_of": "2026-10-08T12:00:00Z",
+  "synthetic": true,
+  "nodes": [
+    {"id": "SHP-SYN-002", "kind": "shipment"},
+    {"id": "SHP-SYN-004", "kind": "shipment"},
+    {"id": "SHP-SYN-005", "kind": "shipment"},
+    {"id": "PO-SYN-002", "kind": "purchase_order"},
+    {"id": "PO-SYN-004", "kind": "purchase_order"},
+    {"id": "PO-SYN-005", "kind": "purchase_order"},
+    {"id": "CMP-COPPER", "kind": "component"},
+    {"id": "CMP-ALUMINIUM", "kind": "component"},
+    {"id": "PROD-SYN-1", "kind": "production_order"},
+    {"id": "COMMIT-SYN-1", "kind": "commitment"}
+  ],
+  "edges": [
+    {"from": "SHP-SYN-002", "to": "PO-SYN-002"},
+    {"from": "SHP-SYN-004", "to": "PO-SYN-004"},
+    {"from": "SHP-SYN-005", "to": "PO-SYN-005"},
+    {"from": "PO-SYN-002", "to": "CMP-COPPER"},
+    {"from": "PO-SYN-004", "to": "CMP-ALUMINIUM"},
+    {"from": "PO-SYN-005", "to": "CMP-ALUMINIUM"},
+    {"from": "CMP-COPPER", "to": "PROD-SYN-1"},
+    {"from": "CMP-ALUMINIUM", "to": "PROD-SYN-1"},
+    {"from": "PROD-SYN-1", "to": "COMMIT-SYN-1"}
+  ],
+  "inventory": [
+    {"component_id": "CMP-COPPER", "unit": "kg", "starting_stock": "0"},
+    {"component_id": "CMP-ALUMINIUM", "unit": "kg", "starting_stock": "1000"}
+  ],
+  "arrival_lines": [
+    {"line_id": "LINE-002-A", "shipment_id": "SHP-SYN-002", "purchase_order_id": "PO-SYN-002",
+     "component_id": "CMP-COPPER", "quantity": "3000", "unit": "kg", "arrival_at": "2026-10-10T00:00:00Z"},
+    {"line_id": "LINE-004-A", "shipment_id": "SHP-SYN-004", "purchase_order_id": "PO-SYN-004",
+     "component_id": "CMP-ALUMINIUM", "quantity": "4000", "unit": "kg", "arrival_at": "2026-10-13T00:00:00Z"},
+    {"line_id": "LINE-005-A", "shipment_id": "SHP-SYN-005", "purchase_order_id": "PO-SYN-005",
+     "component_id": "CMP-ALUMINIUM", "quantity": "2000", "unit": "kg", "arrival_at": "2026-10-10T00:00:00Z"}
+  ],
+  "commitments": [
+    {"commitment_id": "COMMIT-SYN-1", "production_order_id": "PROD-SYN-1",
+     "required_at": "2026-10-14T00:00:00Z", "due_at": "2026-10-16T00:00:00Z",
+     "demands": [{"component_id": "CMP-COPPER", "quantity": "3000", "unit": "kg"},
+                 {"component_id": "CMP-ALUMINIUM", "quantity": "6000", "unit": "kg"}]}
+  ]
+}

@@ -75,3 +75,5 @@ Run Go tests with `PLAN_ACTIONS_TEST_DATABASE_URL_FILE` pointing to the private 
 Browser screenshots and the exact tested revision/DB/ports belong in the task report. Mocked numerical responses, actual Python connectivity and real provider results are distinct. Saved snapshots remain advisory; soft shortage scoring does not certify inventory feasibility. Initial coverage is India destination, USD commodity quote, INR settlement/reporting and kg; other contexts return explicit unavailability. Decimal strings survive the state boundary, while the existing Python adapter has documented binary-float/rounding limits.
 
 No cloud resources are created here. The approved later hosting target is Mumbai (`asia-south1`), with co-located app/database/storage where supported; exact free-trial and model/speech regional eligibility must be verified before any provisioning. A US/global endpoint is not evidence of Mumbai hosting.
+
+For operator-only export, empty-target restore and rollback rehearsal, see [Local State Recovery](Local_State_Recovery.md). Cloud SQL activation remains held.

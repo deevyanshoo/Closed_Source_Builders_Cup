@@ -460,36 +460,62 @@ def _price_binding_problem(amount: Any, currency: Any, unit: Any, refs: list[Evi
 
 
 def _currency_supported(value: Any, refs: list[EvidenceRef], doc: Document) -> bool:
-    if not isinstance(value, str):
+    """Bind a settlement currency to an explicit payment/invoice/settlement statement.
+
+    A unit-price currency, generic Currency heading or FX pair has no settlement role.
+    Pricing uses its separate amount/currency/unit binding and is unaffected here.
+    """
+    if (not isinstance(value, str) or value not in nz.ISO_4217_CODES
+            or value in nz._NON_SETTLEMENT_CODES):
         return False
+    # Only complete affirmative assertions assign settlement currency. Every
+    # nonempty clause of every cited located segment must agree: otherwise an
+    # unfamiliar prohibition or qualifier could be silently skipped after a
+    # positive clause. Complex source text stays unverified for human review.
+    role = r"(?:invoice|settlement|payment)[_ -]+currency|currency\s+of\s+settlement"
+    payment = r"(?:payable|settled|payment)\s+in"
+    assertion = re.compile(
+        rf"\s*(?:(?:{role})(?:\s*[:=\-–—]\s*|\s+is\s+|\s+)|(?:{payment})\s+)"
+        r"([A-Z]{3})\s*[.!]?\s*",
+        re.I,
+    )
+    label_role = re.compile(r"(?:invoice|settlement|payment)[_ -]+currency|currency[_ ]+of[_ ]+settlement", re.I)
+    supported = False
     for ref in refs:
         text = ref.segment_text.strip()
-        if value not in nz.currencies_in(text):
-            continue
-        if text != value:
-            return True
-        cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
-        if not cell:
-            continue  # an isolated code needs a labeled cell, not an inferred role
-        row, column = map(int, cell.groups())
-        locators = [f"r{row}:c{column - 1}"]
-        for previous_row in range(row - 1, max(0, row - 8), -1):
-            above = doc.segment(f"r{previous_row}:c{column}")
-            if above is None:
-                continue
-            if above.text.strip() == value:
-                continue  # repeated table data below a shared header
-            locators.append(above.locator)
-            break
-        for locator in locators:
-            label = doc.segment(locator)
-            if (label and not HIDDEN_FLAGS.intersection(label.flags)
-                    and "formula_without_cached_value" not in label.flags
-                    and re.search(r"\b(?:price[_ ]currency|settlement[_ ]currency|currency)\b", label.text, re.I)
-                    and (not re.search(r"\b(?:payment|terms|method)\b", label.text, re.I)
-                         or bool(re.fullmatch(r"payment[_ ]currency", label.text.strip(), re.I)))):
-                return True
-    return False
+        if text == value:
+            cell = re.fullmatch(r"r(\d+):c(\d+)", ref.locator)
+            if cell:
+                cell_supported = False
+                row, column = map(int, cell.groups())
+                locators = [f"r{row}:c{column - 1}"]
+                for previous_row in range(row - 1, max(0, row - 8), -1):
+                    above = doc.segment(f"r{previous_row}:c{column}")
+                    if above is None:
+                        continue
+                    if above.text.strip() == value:
+                        continue  # repeated table data below a shared header
+                    locators.append(above.locator)
+                    break
+                for locator in locators:
+                    label = doc.segment(locator)
+                    if (label and not HIDDEN_FLAGS.intersection(label.flags)
+                            and "formula_without_cached_value" not in label.flags
+                            and label_role.fullmatch(label.text.strip())):
+                        cell_supported = True
+                        break
+                if cell_supported:
+                    supported = True
+                    continue
+        clauses = [clause for clause in re.split(r"[;\n]", text) if clause.strip()]
+        if not clauses:
+            return False
+        for clause in clauses:
+            match = assertion.fullmatch(clause)
+            if not match or match.group(1).upper() != value:
+                return False
+            supported = True
+    return supported
 
 
 def _shipments_problems(value: Any, refs: list[EvidenceRef]) -> list[str]:

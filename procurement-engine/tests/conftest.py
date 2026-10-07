@@ -18,9 +18,11 @@ os.environ.pop("GEMINI_API_KEY", None)
 from procure import db  # noqa: E402
 from procure.settings import reset_caches  # noqa: E402
 
-# Importing procure loads procurement-engine/.env, which may hold a developer's real key.
-# Remove it again so tests never see a real key and never call a provider.
-os.environ.pop("GEMINI_API_KEY", None)
+# Importing procure loads procurement-engine/.env, which may hold a developer's real key or
+# Vertex settings. Remove them again so tests never see real credentials or call a provider.
+for _name in ("GEMINI_API_KEY", "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION",
+              "GOOGLE_APPLICATION_CREDENTIALS", "RUN_LIVE_GEMINI", "MAX_LIVE_CALLS"):
+    os.environ.pop(_name, None)
 reset_caches()
 
 

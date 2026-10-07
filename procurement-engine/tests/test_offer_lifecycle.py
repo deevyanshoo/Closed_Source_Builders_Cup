@@ -50,7 +50,7 @@ def save(offer, **kw):
 def ready_q01():
     """Q01 needs only its settlement currency confirmed before it can be saved."""
     offer = fresh("Q01")
-    return correct(offer, "settlement_currency", "USD", [{"locator": "p1:l10", "quote": "USD"}])
+    return correct(offer, "settlement_currency", "USD")
 
 
 # ---------- statuses ----------
@@ -116,6 +116,20 @@ def test_correction_is_checked_against_the_document():
         correct(offer, "settlement_currency", "EUR", [{"locator": "p1:l10", "quote": "USD"}])
     assert err.value.code == "evidence_not_verified"
     assert store.get_offer(offer["offer_id"])["version"] == 1
+
+
+def test_price_line_cannot_document_verify_settlement_but_uncited_reviewer_assertion_can_save():
+    offer = fresh("Q01")
+    with pytest.raises(OfferError) as err:
+        correct(offer, "settlement_currency", "USD", [{"locator": "p1:l10", "quote": "USD"}])
+    assert err.value.code == "evidence_not_verified"
+    unchanged = store.get_offer(offer["offer_id"], today=TODAY)
+    assert unchanged["status"] == "needs_review" and unchanged["version"] == 1
+    assert "save" not in unchanged["allowed_actions"]
+    asserted = correct(offer, "settlement_currency", "USD")
+    field = asserted["fields"]["settlement_currency"]
+    assert field["evidence_status"] == "user_entered_without_document_evidence" and field["evidence"] == []
+    assert save(asserted)["status"] == "saved"
 
 
 def test_correction_value_must_be_well_formed():

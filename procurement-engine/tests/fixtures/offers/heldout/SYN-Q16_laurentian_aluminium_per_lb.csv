@@ -1,0 +1,14 @@
+SYNTHETIC TEST DOCUMENT - fictional supplier quote for software testing. Not a real offer.
+Item,Detail
+Supplier,Laurentian Smelting Inc. [SYNTHETIC]
+Product,Primary aluminium ingot P1020A
+Origin,Canada
+Quantity,110 metric tons
+Unit price (US$/lb),1.21
+Delivery,"CIF Nhava Sheva, India"
+Minimum order,22 metric tons
+Capacity,500 metric tons per month
+Lead time,50 days
+Payment,Net 30 days after arrival
+Quote date,"Oct 2, 2026"
+Valid until,"Nov 5, 2026"

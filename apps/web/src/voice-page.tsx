@@ -1,0 +1,66 @@
+import { useEffect, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { Comparison } from './recovery-page';
+import { VoiceController } from './voice';
+import type { VoiceExample, VoiceView } from './voice';
+import './voice.css';
+
+const labels: Record<VoiceExample, string> = {
+  recovery: 'Receipt arrives late', recovery_noop: 'No changes',
+  recovery_precision: 'Fractional quantities', recovery_unsupported: 'Unsupported inputs',
+};
+const date = (value: string) => value.replace('T', ' ').replace('Z', ' UTC').replace('+00:00', ' UTC');
+const text = (value: string) => value.replaceAll('_', ' ');
+const busy = new Set(['checking', 'closing', 'creating', 'created', 'starting', 'pending']);
+
+export function VoicePage() {
+  const controllerRef = useRef<VoiceController | null>(null);
+  const [view, setView] = useState<VoiceView>({ kind: 'checking', example: 'recovery', arrivals: {}, assignments: {} });
+  useEffect(() => {
+    const controller = new VoiceController();
+    controllerRef.current = controller;
+    const unsubscribe = controller.subscribe(setView);
+    void controller.refreshIdentity();
+    const onFocus = () => { void controller.refreshIdentity(); };
+    window.addEventListener('focus', onFocus);
+    return () => { window.removeEventListener('focus', onFocus); unsubscribe(); controller.dispose(); if (controllerRef.current === controller) controllerRef.current = null; };
+  }, []);
+  const controller = controllerRef.current;
+  const base = view.base;
+  const submit = (event: FormEvent) => { event.preventDefault(); void controller?.run(); };
+  const noop = view.comparison ? view.comparison.receipt_changes.length === 0 && view.comparison.disruption_changed_order_ids.length === 0 && view.comparison.recovery_changed_order_ids.length === 0 : false;
+  return <div className="shell voice-shell">
+    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SCENARIOS</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link></header>
+    <main>
+      <div className="recovery-intro"><p className="eyebrow">LOCAL · TYPED · SYNTHETIC</p><h1>Try a receipt scenario.</h1><p>Supply a complete synthetic production snapshot, move receipt arrivals and assign every order to a period. The local comparison checks three schedules. Speech is unavailable; no plan is applied.</p></div>
+      <section className="recovery-session" aria-label="Local session">
+        {view.kind === 'checking' && <p role="status">Checking the current identity before showing a result…</p>}
+        {view.kind === 'signed_out' && <div className="notice notice-error" role="alert"><strong>Local session unavailable</strong><p>{view.message || 'An authenticated local session is required.'}</p><button type="button" className="text-button" onClick={() => void controller?.refreshIdentity()}>Check session again</button></div>}
+        {view.identity && view.kind !== 'checking' && <p><strong>{view.identity.identity_mode === 'private_machine' ? 'Private machine service caller' : 'Local development identity'}</strong> · workspace {view.identity.workspace_id} · {view.identity.role}. This comparison does not confirm a current saved plan.</p>}
+      </section>
+      {base && view.identity && <form className="recovery-form voice-form" aria-label="Typed synthetic scenario" onSubmit={submit}>
+        <div className="recovery-form-head"><div><h2>Snapshot and inputs</h2><p>Snapshot {base.snapshot.snapshot_id} · version {base.snapshot.plan_version} · as of {date(base.snapshot.as_of)}. All values below are caller supplied.</p></div><label className="field"><span className="field-label">Synthetic example</span><select value={view.example} onChange={event => controller?.selectExample(event.target.value as VoiceExample)}>{Object.entries(labels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label></div>
+        <div className="recovery-input-grid">
+          <section><h3>Stock and product demand</h3><ul>{base.snapshot.inventory.map(item => <li key={item.component_id}>{item.component_id}: {item.starting_stock} {item.unit} at {date(item.stock_as_of)}</li>)}</ul><ul>{base.snapshot.products.map(product => <li key={product.product_id}>{product.product_id}: {product.bom.map(part => `${part.quantity_per_output_unit} ${part.unit} ${part.component_id} per ${product.output_unit}`).join('; ')}</li>)}</ul></section>
+          <section><h3>Receipts · UTC arrivals</h3>{base.snapshot.receipts.map(receipt => <label className="field" key={receipt.receipt_id}><span className="field-label">{receipt.receipt_id} · {receipt.quantity} {receipt.unit} {receipt.component_id}</span><span className="field-hint">Snapshot arrival {date(receipt.arrival_at)}{base.scenario.arrival_replacements.find(item => item.receipt_id === receipt.receipt_id)?.expected_arrival_at !== undefined && ` · supplied expected ${date(base.scenario.arrival_replacements.find(item => item.receipt_id === receipt.receipt_id)!.expected_arrival_at)}`}</span><input type="text" value={view.arrivals[receipt.receipt_id] ?? receipt.arrival_at} onChange={event => controller?.editArrival(receipt.receipt_id, event.target.value)} aria-describedby={`voice-date-${receipt.receipt_id}`} /><small id={`voice-date-${receipt.receipt_id}`} className="field-hint">Complete UTC time: YYYY-MM-DDTHH:mm:ssZ</small></label>)}</section>
+          <section><h3>Resources and periods</h3><ul>{base.snapshot.resources.map(resource => <li key={resource.resource_id}>{resource.resource_id}: {text(resource.capacity_model)}</li>)}</ul><ul>{base.snapshot.routings.map(route => <li key={`${route.product_id}:${route.resource_id}`}>{route.product_id} on {route.resource_id}: {route.run_seconds_per_output_unit} s per {route.output_unit}</li>)}</ul><ul>{base.snapshot.periods.map(period => <li key={period.period_id}>{period.period_id} · {period.resource_id}: {date(period.start)} to {date(period.end)}</li>)}</ul>{base.snapshot.maintenance.length > 0 && <ul>{base.snapshot.maintenance.map(item => <li key={item.maintenance_id}>Maintenance {item.maintenance_id} · {item.resource_id}: {date(item.start)} to {date(item.end)}</li>)}</ul>}</section>
+          <section><h3>Orders · complete recovery assignment</h3>{base.snapshot.orders.map(order => <label className="field" key={order.order_id}><span className="field-label">{order.order_id} · {order.output_quantity} {order.output_unit} {order.product_id}</span><span className="field-hint">Due {date(order.due_at)} · original {base.snapshot.baseline_assignments.find(item => item.order_id === order.order_id)?.period_id}</span><select value={view.assignments[order.order_id] ?? ''} onChange={event => controller?.editAssignment(order.order_id, event.target.value)}><option value="">Choose a period</option>{base.snapshot.periods.filter(period => period.resource_id === order.resource_id).map(period => <option key={period.period_id} value={period.period_id}>{period.period_id} · {date(period.start)}</option>)}</select></label>)}</section>
+        </div>
+        <div className="recovery-controls"><button type="submit" className="primary-button" disabled={busy.has(view.kind) || view.kind === 'failed' && view.message?.includes('cleanup')}>Run local comparison</button>{['creating', 'created', 'starting', 'pending'].includes(view.kind) && <button type="button" className="secondary-button" onClick={() => void controller?.run()}>Replace comparison</button>}{view.kind !== 'idle' && view.kind !== 'cancelled' && view.kind !== 'closing' && <button type="button" className="secondary-button" onClick={() => void controller?.cancel()}>Cancel and close session</button>}<button type="button" className="text-button" onClick={() => void controller?.refreshIdentity()}>Refresh identity</button></div>
+      </form>}
+      <div className="recovery-feedback voice-feedback" aria-live="polite">
+        {view.kind === 'idle' && view.identity && <p role="status">Ready for a typed comparison. Reloading starts a fresh ephemeral session.</p>}
+        {['creating', 'created', 'starting', 'pending'].includes(view.kind) && <p role="status">{view.kind === 'pending' ? 'Comparing the supplied schedules…' : 'Preparing an isolated local session…'}</p>}
+        {view.kind === 'closing' && <p role="status">Stopping the previous comparison and closing its known session…</p>}
+        {view.kind === 'cancelled' && <p role="status">The comparison was cancelled. Cleanup requests finished; inaccessible sessions expire on the server.</p>}
+        {['failed', 'expired', 'capacity', 'unavailable'].includes(view.kind) && <div className="notice notice-error" role="alert"><strong>{view.kind === 'capacity' ? 'Local capacity reached' : view.kind === 'expired' ? 'Session expired' : view.kind === 'failed' ? 'Review scenario inputs' : 'Comparison unavailable'}</strong><p>{view.message || 'Start a new local comparison after checking the session.'}</p></div>}
+        {view.kind === 'unsupported' && view.outcome?.status === 'unsupported' && <div className="notice notice-error" role="alert"><strong>Input unsupported</strong><p>{text(view.outcome.result.reason)}</p></div>}
+        {view.kind === 'clarification' && view.outcome?.status === 'clarification_required' && <div className="notice notice-error" role="alert"><strong>Complete the arguments</strong><p>{text(view.outcome.reason)} · {view.outcome.missing_fields.join(', ')}</p></div>}
+        {view.kind === 'rejected' && view.outcome?.status === 'rejected' && <div className="notice notice-error" role="alert"><strong>Comparison rejected</strong><p>{text(view.outcome.reason)}</p></div>}
+        {view.kind === 'compared' && view.comparison && <Comparison value={view.comparison} noop={noop} />}
+      </div>
+    </main>
+    <footer>Closed Source / typed synthetic scenario <span>Speech unavailable · no plan applied · no supplier contacted.</span></footer>
+  </div>;
+}

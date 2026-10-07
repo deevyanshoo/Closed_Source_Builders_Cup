@@ -1,0 +1,393 @@
+{
+  "contract_version": "0.2.0",
+  "comparison": {
+    "status": "compared",
+    "synthetic": true,
+    "workspace_id": "W",
+    "plan_version": "v7",
+    "snapshot_id": "s1",
+    "scenario_id": "delay-1",
+    "as_of": "2026-10-09T00:00:00+00:00",
+    "modeled_checks": [
+      "material_at_period_start",
+      "aggregate_single_machine_capacity",
+      "modeled_period_end_due"
+    ],
+    "unmodeled_constraints": [
+      "Setup/changeover and intra-period sequencing are not modeled.",
+      "Work in process, parallel lanes beyond the declared single machine, and multistage BOM/routing are not modeled.",
+      "Cash, alternate supply, optimization, dispatch and customer promises are not modeled.",
+      "Ingestion, permissions, persisted approval and replay are not modeled."
+    ],
+    "original_baseline": {
+      "orders": [
+        {
+          "order_id": "O-A",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.2",
+          "resource_id": "R",
+          "period_id": "P1",
+          "material_required_at": "2026-10-10T09:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T10:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.02",
+              "used": "0.02",
+              "shortfall": "0",
+              "remaining_stock": "1000000000000000003.980000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        },
+        {
+          "order_id": "O-B",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.1",
+          "resource_id": "R",
+          "period_id": "P2",
+          "material_required_at": "2026-10-10T10:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T11:00:00+00:00",
+          "due_at": "2026-10-10T11:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.01",
+              "used": "0.01",
+              "shortfall": "0",
+              "remaining_stock": "1000000000000000003.970000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        },
+        {
+          "order_id": "O-U",
+          "product_id": "U",
+          "output_unit": "piece",
+          "output_quantity": "1",
+          "resource_id": "R",
+          "period_id": "P1",
+          "material_required_at": "2026-10-10T09:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T10:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "D",
+              "unit": "litre",
+              "quantity": "2",
+              "used": "2",
+              "shortfall": "0",
+              "remaining_stock": "3"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        }
+      ],
+      "capacity": [
+        {
+          "resource_id": "R",
+          "period_id": "P1",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "2700",
+          "available_seconds": "900",
+          "workload_seconds": "600.06",
+          "excess_seconds": "0",
+          "remaining_seconds": "299.94",
+          "capacity_pass": true
+        },
+        {
+          "resource_id": "R",
+          "period_id": "P2",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "900",
+          "available_seconds": "2700",
+          "workload_seconds": "0.03",
+          "excess_seconds": "0",
+          "remaining_seconds": "2699.97",
+          "capacity_pass": true
+        }
+      ],
+      "material_balances": [
+        {
+          "component_id": "C",
+          "unit": "kg",
+          "starting_stock": "1000000000000000000.000000000000000001",
+          "ending_stock": "1000000000000000003.970000000000000001"
+        },
+        {
+          "component_id": "D",
+          "unit": "litre",
+          "starting_stock": "5",
+          "ending_stock": "3"
+        }
+      ],
+      "material_balance_end_at": "2026-10-10T10:00:00+00:00",
+      "modeled_checks_pass": true,
+      "failed_checks": []
+    },
+    "disrupted_baseline": {
+      "orders": [
+        {
+          "order_id": "O-A",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.2",
+          "resource_id": "R",
+          "period_id": "P1",
+          "material_required_at": "2026-10-10T09:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T10:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.02",
+              "used": "0.02",
+              "shortfall": "0",
+              "remaining_stock": "999999999999999999.980000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        },
+        {
+          "order_id": "O-B",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.1",
+          "resource_id": "R",
+          "period_id": "P2",
+          "material_required_at": "2026-10-10T10:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T11:00:00+00:00",
+          "due_at": "2026-10-10T11:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.01",
+              "used": "0.01",
+              "shortfall": "0",
+              "remaining_stock": "1000000000000000003.970000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        },
+        {
+          "order_id": "O-U",
+          "product_id": "U",
+          "output_unit": "piece",
+          "output_quantity": "1",
+          "resource_id": "R",
+          "period_id": "P1",
+          "material_required_at": "2026-10-10T09:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T10:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "D",
+              "unit": "litre",
+              "quantity": "2",
+              "used": "2",
+              "shortfall": "0",
+              "remaining_stock": "3"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        }
+      ],
+      "capacity": [
+        {
+          "resource_id": "R",
+          "period_id": "P1",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "2700",
+          "available_seconds": "900",
+          "workload_seconds": "600.06",
+          "excess_seconds": "0",
+          "remaining_seconds": "299.94",
+          "capacity_pass": true
+        },
+        {
+          "resource_id": "R",
+          "period_id": "P2",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "900",
+          "available_seconds": "2700",
+          "workload_seconds": "0.03",
+          "excess_seconds": "0",
+          "remaining_seconds": "2699.97",
+          "capacity_pass": true
+        }
+      ],
+      "material_balances": [
+        {
+          "component_id": "C",
+          "unit": "kg",
+          "starting_stock": "1000000000000000000.000000000000000001",
+          "ending_stock": "1000000000000000003.970000000000000001"
+        },
+        {
+          "component_id": "D",
+          "unit": "litre",
+          "starting_stock": "5",
+          "ending_stock": "3"
+        }
+      ],
+      "material_balance_end_at": "2026-10-10T10:00:00+00:00",
+      "modeled_checks_pass": true,
+      "failed_checks": []
+    },
+    "recovery": {
+      "orders": [
+        {
+          "order_id": "O-A",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.2",
+          "resource_id": "R",
+          "period_id": "P2",
+          "material_required_at": "2026-10-10T10:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T11:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.02",
+              "used": "0.02",
+              "shortfall": "0",
+              "remaining_stock": "1000000000000000003.980000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": false,
+          "late_by_seconds": "3600"
+        },
+        {
+          "order_id": "O-B",
+          "product_id": "A",
+          "output_unit": "piece",
+          "output_quantity": "0.1",
+          "resource_id": "R",
+          "period_id": "P2",
+          "material_required_at": "2026-10-10T10:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T11:00:00+00:00",
+          "due_at": "2026-10-10T11:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "C",
+              "unit": "kg",
+              "quantity": "0.01",
+              "used": "0.01",
+              "shortfall": "0",
+              "remaining_stock": "1000000000000000003.970000000000000001"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        },
+        {
+          "order_id": "O-U",
+          "product_id": "U",
+          "output_unit": "piece",
+          "output_quantity": "1",
+          "resource_id": "R",
+          "period_id": "P1",
+          "material_required_at": "2026-10-10T09:00:00+00:00",
+          "modeled_completion_at": "2026-10-10T10:00:00+00:00",
+          "due_at": "2026-10-10T10:00:00+00:00",
+          "demands": [
+            {
+              "component_id": "D",
+              "unit": "litre",
+              "quantity": "2",
+              "used": "2",
+              "shortfall": "0",
+              "remaining_stock": "3"
+            }
+          ],
+          "material_pass": true,
+          "modeled_due_pass": true,
+          "late_by_seconds": "0"
+        }
+      ],
+      "capacity": [
+        {
+          "resource_id": "R",
+          "period_id": "P1",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "2700",
+          "available_seconds": "900",
+          "workload_seconds": "600",
+          "excess_seconds": "0",
+          "remaining_seconds": "300",
+          "capacity_pass": true
+        },
+        {
+          "resource_id": "R",
+          "period_id": "P2",
+          "nominal_seconds": "3600",
+          "blocked_seconds": "900",
+          "available_seconds": "2700",
+          "workload_seconds": "0.09",
+          "excess_seconds": "0",
+          "remaining_seconds": "2699.91",
+          "capacity_pass": true
+        }
+      ],
+      "material_balances": [
+        {
+          "component_id": "C",
+          "unit": "kg",
+          "starting_stock": "1000000000000000000.000000000000000001",
+          "ending_stock": "1000000000000000003.970000000000000001"
+        },
+        {
+          "component_id": "D",
+          "unit": "litre",
+          "starting_stock": "5",
+          "ending_stock": "3"
+        }
+      ],
+      "material_balance_end_at": "2026-10-10T10:00:00+00:00",
+      "modeled_checks_pass": false,
+      "failed_checks": [
+        "due:O-A"
+      ]
+    },
+    "receipt_changes": [
+      {
+        "receipt_id": "r-C",
+        "before_arrival_at": "2026-10-10T09:00:00+00:00",
+        "after_arrival_at": "2026-10-10T10:00:00+00:00"
+      }
+    ],
+    "potentially_exposed_order_ids": [
+      "O-A",
+      "O-B"
+    ],
+    "disruption_changed_order_ids": [
+      "O-A"
+    ],
+    "recovery_changed_order_ids": [
+      "O-A"
+    ]
+  }
+}

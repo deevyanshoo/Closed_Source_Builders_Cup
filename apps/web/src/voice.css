@@ -1,0 +1,7 @@
+.voice-shell .voice-form { margin-top: 1.5rem; }
+.voice-shell .voice-feedback { margin-top: 1.5rem; }
+.voice-shell .recovery-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.voice-shell input:focus-visible, .voice-shell select:focus-visible, .voice-shell button:focus-visible, .voice-shell a:focus-visible { outline: 3px solid #e7b968; outline-offset: 3px; }
+.voice-shell .field { min-width: 0; }
+.voice-shell .field input, .voice-shell .field select { max-width: 100%; }
+@media (max-width: 680px) { .voice-shell .recovery-controls > button { width: 100%; } .voice-shell .recovery-form-head { align-items: stretch; } }

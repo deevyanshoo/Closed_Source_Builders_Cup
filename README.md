@@ -9,6 +9,7 @@ The project starts from Taher Afsar's procurement prototype. Its history is pres
 - [Daily work plan and domain ownership](docs/Work_Plan.md)
 - [Product design and acceptance gates](docs/Product_Design.md)
 - [Voice architecture research](docs/Voice_Architecture.md)
+- [Local typed synthetic scenario workspace](docs/Voice_Local_Browser.md)
 - [Public API integration priorities](docs/API_Integration_Guide.md)
 - [Implementation tickets](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues)
 - [Existing engine setup and reference interface](procurement-engine/README.md)

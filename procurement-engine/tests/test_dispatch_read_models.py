@@ -89,6 +89,54 @@ def test_quantity_sum_is_exact_under_low_ambient_precision(normalized, precision
                    "tonne": "12345678901234567890.12345678901234567891"}
 
 
+@pytest.mark.parametrize("precision", [4, 28])
+def test_two_allowed_long_amounts_sum_without_combined_integer_string_conversion(precision):
+    first = copy.deepcopy(RECORDS[3])
+    first["quantity"] = {"amount": "9" * 3999, "unit": "tonne"}
+    second = copy.deepcopy(first)
+    second.update(event_id="long-fraction", occurred_at="2026-10-07T16:00:00+05:30",
+                  observed_at="2026-10-07T11:00:00Z",
+                  quantity={"amount": "0." + "0" * 3997 + "1", "unit": "tonne"})
+    second["evidence"][0].update(evidence_id="long-fraction-evidence", retrieved_at="2026-10-07T11:00:00Z")
+    other_unit = copy.deepcopy(second)
+    other_unit.update(event_id="long-other-unit", quantity={"amount": "0.125", "unit": "kg"})
+    other_unit["evidence"][0]["evidence_id"] = "long-other-unit-evidence"
+    data = normalize_milestones([first, second, other_unit], as_of=FIXTURE["as_of"])
+    assert len(data["events"]) == 3 and data["rejected"] == []
+    with localcontext() as ctx:
+        ctx.prec = precision
+        got = shipment_timeline(data, "SHP-SYN-003", now=NOW)
+    assert got["status"] == "ok"
+    assert got["current"]["delivered_quantity"] == {
+        "kg": "0.125", "tonne": "9" * 3999 + "." + "0" * 3997 + "1"}
+
+
+def test_missing_rejection_event_id_is_controlled_for_both_views(normalized):
+    data = copy.deepcopy(normalized)
+    data["rejected"] = [{"record_index": 0, "reason": "missing_identifier", "details": ["event_id"]}]
+    for got in (shipment_timeline(data, "SHP-SYN-002", now=NOW, records=RECORDS),
+                affected_shipments(data, "evt-002-hold", now=NOW)):
+        assert got["status"] == "error" and got["reasons"] == ["invalid_normalized_input"]
+        assert got.get("events", got.get("affected")) == []
+    data["rejected"][0]["event_id"] = None
+    assert shipment_timeline(data, "SHP-SYN-002", now=NOW)["status"] == "ok"
+    assert affected_shipments(data, "evt-002-hold", now=NOW)["status"] == "ok"
+
+
+def test_timeline_retains_caller_claimed_synthetic_label(normalized):
+    data = copy.deepcopy(normalized)
+    own = next(e for e in data["events"] if e["event_id"] == "evt-002-hold")
+    own["synthetic"] = False
+    entry = shipment_timeline(data, "SHP-SYN-002", now=NOW)["events"][0]
+    assert entry["synthetic"] is False
+    for bad in (None, "false"):
+        own["synthetic"] = bad
+        got = shipment_timeline(data, "SHP-SYN-002", now=NOW)
+        assert got["status"] == "error" and got["reasons"] == ["invalid_normalized_input"]
+    own.pop("synthetic")
+    assert shipment_timeline(data, "SHP-SYN-002", now=NOW)["status"] == "error"
+
+
 def test_nonoperating_arrival_and_release_do_not_close_operating_eta_or_hold(normalized):
     data = copy.deepcopy(normalized)
     hold = next(e for e in data["events"] if e["event_id"] == "evt-002-hold")

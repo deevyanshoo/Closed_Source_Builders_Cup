@@ -33,6 +33,11 @@ _MAX_ROWS = 10_000
 _MAX_EVIDENCE = 100
 _MAX_TEXT = 16_384
 _MAX_AMOUNT_DIGITS = 4_000
+_MAX_AGGREGATE_DIGITS = _MAX_AMOUNT_DIGITS + len(str(_MAX_ROWS))
+
+
+class _QuantityBoundsError(ValueError):
+    """A validated quantity aggregate exceeded its local output bound."""
 
 
 def _text(value: object) -> bool:
@@ -62,7 +67,7 @@ def _valid_event(event: object) -> bool:
         return False
     if event.get("eta") is not None and _instant(event["eta"]) is None:
         return False
-    if type(event.get("operating_evidence")) is not bool:
+    if type(event.get("operating_evidence")) is not bool or type(event.get("synthetic")) is not bool:
         return False
     flags = event.get("flags")
     if type(flags) is not list or len(flags) > _MAX_EVIDENCE or not all(_text(flag) for flag in flags):
@@ -101,6 +106,7 @@ def _valid_event(event: object) -> bool:
 
 def _valid_rejection(row: object) -> bool:
     return (type(row) is dict and type(row.get("record_index")) is int and row["record_index"] >= 0
+            and "event_id" in row
             and (row.get("event_id") is None or _identifier(row["event_id"]))
             and _text(row.get("reason")) and type(row.get("details")) is list
             and len(row["details"]) <= _MAX_EVIDENCE
@@ -130,7 +136,8 @@ def _snapshot(normalized: dict) -> dict:
     events = []
     for event in normalized["events"]:
         row = {key: event[key] for key in ("event_id", "shipment_id", "event_type", "raw_type", "occurred_at",
-                                             "occurred_at_offset", "observed_at", "eta", "operating_evidence")}
+                                             "occurred_at_offset", "observed_at", "eta", "operating_evidence",
+                                             "synthetic")}
         row["flags"] = list(event["flags"])
         row["quantity"] = None if event["quantity"] is None else {k: event["quantity"][k] for k in ("amount", "unit")}
         row["facility"] = None if event["facility"] is None else {
@@ -181,7 +188,7 @@ def _frame(normalized: object, now: object, max_age_seconds: int) -> tuple[dict,
 
 def _entry(event: dict) -> dict:
     keys = ("event_id", "event_type", "raw_type", "occurred_at", "occurred_at_offset", "observed_at", "eta",
-            "quantity", "facility", "lane", "source", "operating_evidence", "flags")
+            "quantity", "facility", "lane", "source", "operating_evidence", "synthetic", "flags")
     entry = {k: event.get(k) for k in keys}
     entry["evidence"] = [{k: e[k] for k in ("evidence_id", "kind", "locator", "content_sha256",
                                            "retrieved_at", "valid_until", "status")}
@@ -213,8 +220,15 @@ def _current(events: list[dict]) -> dict:
                                + number * 10 ** (new_scale - scale), new_scale)
     def format_amount(total: tuple[int, int]) -> str:
         number, scale = total
-        digits = str(number).zfill(scale + 1)
-        return digits if not scale else digits[:-scale] + "." + digits[-scale:]
+        if scale > _MAX_AMOUNT_DIGITS:
+            raise _QuantityBoundsError
+        whole, fractional = divmod(number, 10 ** scale)
+        # At most _MAX_ROWS input amounts, each with <= _MAX_AMOUNT_DIGITS characters.
+        # Format each side separately: the combined scaled integer may exceed Python's
+        # integer-to-string digit limit even though neither output side can.
+        if whole >= 10 ** _MAX_AGGREGATE_DIGITS:
+            raise _QuantityBoundsError
+        return str(whole) if not scale else str(whole) + "." + str(fractional).zfill(scale)
     return {"last_event_type": events[-1]["event_type"] if events else None,
             "open_eta": {"eta": latest_eta["eta"], "event_id": latest_eta["event_id"]} if latest_eta else None,
             "on_hold": bool(holds),
@@ -248,7 +262,11 @@ def shipment_timeline(normalized: Mapping, shipment_id: str, *, now: str,
     result["flags"] = list(data["shipments"].get(shipment_id, {}).get("flags", []))
     if not own:
         return {**result, "status": "empty", "reasons": ["no_accepted_events", *result["reasons"]]}
-    result.update(events=[_entry(e) for e in own], current=_current(own))
+    try:
+        current = _current(own)
+    except _QuantityBoundsError:
+        return {**result, "status": "error", "reasons": ["invalid_normalized_input"]}
+    result.update(events=[_entry(e) for e in own], current=current)
     return result
 
 

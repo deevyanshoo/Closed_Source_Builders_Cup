@@ -161,6 +161,63 @@ def test_future_snapshot_cannot_make_historical_eta_delayed():
     assert current["expected_arrival"]["basis"] == "eta"
 
 
+@pytest.mark.parametrize("bad_row", [
+    {"shipment_id": "SHP-SYN-004", "arrival_at": "2026-99-99T00:00:00Z"},
+    {"shipment_id": "", "arrival_at": "2026-10-13T00:00:00Z"},
+    {"shipment_id": "SHP-SYN-004", "arrival_at": "2026-10-13T00:00:00Z", "line_id": " bad "},
+])
+def test_future_snapshot_still_rejects_malformed_arrival_rows(bad_row):
+    snapshot = copy.deepcopy(SNAPSHOT)
+    snapshot["arrival_lines"] = [bad_row]
+    past = normalize_milestones([eta_record("2026-10-15T06:00:00Z")], as_of="2026-10-05T12:00:00Z")
+    listing = shipment_list(past, now="2026-10-05T12:01:00Z", snapshot=snapshot)
+    assert (listing["status"], listing["reasons"], listing["shipments"]) == ("error", ["invalid_snapshot"], [])
+
+
+@pytest.mark.parametrize("route_cutoff", ["2026-10-05T11:59:59Z", "2026-10-08T12:00:00Z",
+                                        "2026-10-05T12:00:00.000001Z"])
+def test_route_evidence_requires_exact_milestone_cutoff(route_cutoff):
+    cutoff = "2026-10-05T12:00:00Z"
+    past = normalize_milestones([eta_record("2026-10-15T06:00:00Z")], as_of=cutoff)
+    route = normalize_route_evidence(HAZARDS["records"], as_of=route_cutoff)
+    listing = shipment_list(past, now="2026-10-08T13:00:00Z", route_evidence=route)
+    assert (listing["status"], listing["reasons"], listing["shipments"]) == ("error", ["invalid_route_evidence"], [])
+
+
+@pytest.mark.parametrize("invalid_as_of", [None, "not-a-time"])
+def test_missing_or_invalid_route_cutoff_fails_even_with_no_shipments(invalid_as_of):
+    route = copy.deepcopy(evidence())
+    route["as_of"] = invalid_as_of
+    listing = shipment_list(normalized([]), now=NOW, route_evidence=route)
+    assert (listing["status"], listing["reasons"], listing["shipments"]) == ("error", ["invalid_route_evidence"], [])
+
+
+def test_mismatched_route_cutoff_fails_before_empty_shipment_result():
+    past = normalize_milestones([], as_of="2026-10-05T12:00:00Z")
+    route = normalize_route_evidence(HAZARDS["records"], as_of="2026-10-08T12:00:00Z")
+    listing = shipment_list(past, now=NOW, route_evidence=route)
+    assert (listing["status"], listing["reasons"], listing["shipments"]) == ("error", ["invalid_route_evidence"], [])
+
+
+def test_equivalent_offset_and_full_microsecond_route_cutoff_is_accepted():
+    cutoff = "2026-10-08T12:00:00.123456Z"
+    milestones = normalize_milestones([eta_record("2026-10-15T06:00:00Z")], as_of=cutoff)
+    route = normalize_route_evidence(HAZARDS["records"], as_of="2026-10-08T17:30:00.123456+05:30")
+    listing = shipment_list(milestones, now=NOW, route_evidence=route)
+    assert listing["status"] == "ok"
+    assert listing["shipments"][0]["status"] == "at_risk"
+    assert "route_exposure" in listing["shipments"][0]["signals"]
+
+
+def test_noncanonical_route_envelope_remains_invalid_even_if_instant_is_equivalent():
+    cutoff = "2026-10-08T12:00:00.123456Z"
+    milestones = normalize_milestones([eta_record("2026-10-15T06:00:00Z")], as_of=cutoff)
+    route = normalize_route_evidence(HAZARDS["records"], as_of=cutoff)
+    route["as_of"] = "2026-10-08T17:30:00.123456+05:30"
+    listing = shipment_list(milestones, now=NOW, route_evidence=route)
+    assert (listing["status"], listing["reasons"], listing["shipments"]) == ("error", ["invalid_route_evidence"], [])
+
+
 def test_snapshot_at_cutoff_retains_baseline_and_late_signal():
     listing = shipment_list(normalized([eta_record("2026-10-15T06:00:00Z")]), now=NOW, snapshot=SNAPSHOT)
     current = listing["shipments"][0]

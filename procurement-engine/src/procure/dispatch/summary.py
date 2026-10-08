@@ -36,8 +36,6 @@ def _baselines(snapshot: object, cutoff: str) -> tuple[dict[str, set[str]] | Non
     lines = snapshot.get("arrival_lines")
     if snapshot_time is None or type(lines) is not list or len(lines) > _MAX_ROWS:
         return None, False
-    if snapshot_time > _instant(cutoff):
-        return {}, True
     out: dict[str, set[str]] = {}
     for line in lines:
         if not isinstance(line, Mapping) or not _identifier(line.get("shipment_id")) or (
@@ -48,6 +46,8 @@ def _baselines(snapshot: object, cutoff: str) -> tuple[dict[str, set[str]] | Non
         if instant is None:
             return None, False
         out.setdefault(line["shipment_id"], set()).add(instant.isoformat())
+    if snapshot_time > _instant(cutoff):
+        return {}, True
     return out, False
 
 
@@ -130,8 +130,11 @@ def shipment_list(normalized: Mapping, *, now: str, snapshot: Mapping | None = N
     baselines, future_baseline = _baselines(snapshot, result["as_of"])
     if baselines is None:
         return {**result, "status": "error", "reasons": ["invalid_snapshot"]}
-    if route_evidence is not None and evidence_for_locations(route_evidence, [])["status"] == "error":
-        return {**result, "status": "error", "reasons": ["invalid_route_evidence"]}
+    if route_evidence is not None:
+        validated_route = evidence_for_locations(route_evidence, [])
+        if (validated_route["status"] == "error"
+                or _instant(validated_route["as_of"]) != _instant(result["as_of"])):
+            return {**result, "status": "error", "reasons": ["invalid_route_evidence"]}
     shipment_ids = sorted({e["shipment_id"] for e in data["events"]})
     if not shipment_ids:
         return {**result, "status": "empty", "reasons": ["no_accepted_events", *result["reasons"]]}

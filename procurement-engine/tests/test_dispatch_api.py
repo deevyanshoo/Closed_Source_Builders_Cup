@@ -138,3 +138,16 @@ def test_impossible_now_is_400_before_sample_loading(client, monkeypatch, stamp)
     response = client.get(f"/dispatch/shipments?as_of={AS_OF}&now={stamp}")
     assert response.status_code == 400
     assert response.json()["reasons"] == ["invalid_now"]
+
+
+def test_historical_http_list_rejects_malformed_future_snapshot(client, monkeypatch):
+    import copy
+
+    data = copy.deepcopy(samples.load_samples())
+    data["snapshot"]["arrival_lines"] = [{"shipment_id": "SHP-SYN-004", "arrival_at": "2026-99-99T00:00:00Z"}]
+    monkeypatch.setattr(samples, "load_samples", lambda: data)
+    response = client.get("/dispatch/shipments?as_of=2026-10-05T12:00:00Z&now=2026-10-05T12:01:00Z")
+    assert response.status_code == 400
+    assert response.json()["status"] == "error"
+    assert response.json()["reasons"] == ["invalid_snapshot"]
+    assert response.json()["shipments"] == []

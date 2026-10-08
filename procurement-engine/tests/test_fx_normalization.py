@@ -231,7 +231,7 @@ class SyntheticFxTests(unittest.TestCase):
         with self.assertRaises(fx.FxPanelError):
             fx.verify_fx_panel(self.output, "partial-panel", pair, SCHEMA, COVERAGE)
 
-    def test_marker_fsync_failure_does_not_leave_complete_receipt(self):
+    def test_marker_fsync_failure_is_durably_disqualified(self):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
         real_fsync = os.fsync
@@ -243,10 +243,11 @@ class SyntheticFxTests(unittest.TestCase):
                 raise OSError("synthetic fsync fault")
             return real_fsync(fd)
         with patch.object(fx.os, "fsync", side_effect=injected):
-            with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_IO"):
+            with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
                 fx.publish_fx_panel(candidate, PROVENANCE, self.output, "fault")
-        self.assertFalse((self.output / "complete/fault.json").exists())
-        with self.assertRaises(fx.FxPanelError):
+        self.assertTrue((self.output / "complete/fault.json").exists())
+        self.assertTrue((self.output / "incomplete/fault.json").exists())
+        with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
             fx.verify_fx_panel(self.output, "fault", pair, SCHEMA, COVERAGE)
 
     def test_complete_synthetic_panel_is_no_clobber_and_rehashes(self):
@@ -299,7 +300,7 @@ class SyntheticFxTests(unittest.TestCase):
         with self.assertRaisesRegex(fx.FxPanelError, "COVERAGE_INVALID"):
             fx.normalize_ecb_pair(pair, SCHEMA, legacy)
 
-    def test_postlink_real_verifier_tamper_cannot_leave_complete_marker(self):
+    def test_postlink_real_verifier_tamper_is_disqualified(self):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
         real_verify = fx.verify_fx_panel
@@ -310,23 +311,30 @@ class SyntheticFxTests(unittest.TestCase):
         with patch.object(fx, "verify_fx_panel", side_effect=tamper_then_verify):
             with self.assertRaises(fx.FxPanelError):
                 fx.publish_fx_panel(candidate, PROVENANCE, self.output, "postlink-tamper")
-        self.assertFalse((self.output / "complete/postlink-tamper.json").exists())
+        self.assertTrue((self.output / "complete/postlink-tamper.json").exists())
+        self.assertTrue((self.output / "incomplete/postlink-tamper.json").exists())
+        with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
+            real_verify(self.output, "postlink-tamper", pair, SCHEMA, COVERAGE)
 
-    def test_postlink_verifier_error_cannot_leave_complete_marker(self):
+    def test_postlink_verifier_error_is_disqualified(self):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
         with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
             with self.assertRaises(fx.FxPanelError):
                 fx.publish_fx_panel(candidate, PROVENANCE, self.output, "postlink-error")
-        self.assertFalse((self.output / "complete/postlink-error.json").exists())
+        self.assertTrue((self.output / "complete/postlink-error.json").exists())
+        self.assertTrue((self.output / "incomplete/postlink-error.json").exists())
+        with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
+            fx.verify_fx_panel(self.output, "postlink-error", pair, SCHEMA, COVERAGE)
 
-    def test_postlink_cancellation_removes_owned_marker(self):
+    def test_postlink_cancellation_is_disqualified(self):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
         with patch.object(fx, "verify_fx_panel", side_effect=KeyboardInterrupt):
-            with self.assertRaises(KeyboardInterrupt):
+            with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
                 fx.publish_fx_panel(candidate, PROVENANCE, self.output, "cancelled")
-        self.assertFalse((self.output / "complete/cancelled.json").exists())
+        self.assertTrue((self.output / "complete/cancelled.json").exists())
+        self.assertTrue((self.output / "incomplete/cancelled.json").exists())
 
     def test_prelink_staged_tamper_never_creates_complete_marker(self):
         pair = self.archive_pair()
@@ -347,10 +355,11 @@ class SyntheticFxTests(unittest.TestCase):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
         with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
-            with patch.object(fx.os, "unlink", side_effect=PermissionError("synthetic EPERM")):
+            with patch.object(fx.os, "unlink", side_effect=PermissionError("synthetic EPERM")) as denied:
                 with self.assertRaisesRegex(fx.FxPanelError,
                                             "PUBLICATION_INCOMPLETE"):
                     fx.publish_fx_panel(candidate, PROVENANCE, self.output, "cleanup-fault")
+        denied.assert_not_called()
         self.assertTrue((self.output / "complete/cleanup-fault.json").exists())
         self.assertTrue((self.output / "incomplete/cleanup-fault.json").exists())
         with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
@@ -359,20 +368,16 @@ class SyntheticFxTests(unittest.TestCase):
     def test_cleanup_and_disqualifier_os_failures_are_reported_uncertain(self):
         pair = self.archive_pair()
         candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
-        real_link = os.link
-        calls = 0
-        def link_once(*args, **kwargs):
-            nonlocal calls
-            calls += 1
-            if calls > 1:
+        real_open = os.open
+        def deny_disqualifier(path, flags, *args, **kwargs):
+            if path == "both-fault.json" and flags & os.O_EXCL:
                 raise PermissionError("synthetic disqualifier EPERM")
-            return real_link(*args, **kwargs)
+            return real_open(path, flags, *args, **kwargs)
         with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
-            with patch.object(fx.os, "unlink", side_effect=PermissionError("synthetic unlink EPERM")):
-                with patch.object(fx.os, "link", side_effect=link_once):
-                    with self.assertRaisesRegex(fx.FxPanelError,
-                                                "PUBLICATION_CLEANUP_UNRESOLVED"):
-                        fx.publish_fx_panel(candidate, PROVENANCE, self.output, "both-fault")
+            with patch.object(fx.os, "open", side_effect=deny_disqualifier):
+                with self.assertRaisesRegex(fx.FxPanelError,
+                                            "PUBLICATION_CLEANUP_UNRESOLVED"):
+                    fx.publish_fx_panel(candidate, PROVENANCE, self.output, "both-fault")
         self.assertTrue((self.output / "complete/both-fault.json").exists())
         self.assertFalse((self.output / "incomplete/both-fault.json").exists())
 
@@ -387,9 +392,124 @@ class SyntheticFxTests(unittest.TestCase):
             raise fx.FxPanelError("PUBLICATION_INVALID")
         with patch.object(fx, "verify_fx_panel", side_effect=replace_then_fail):
             with self.assertRaisesRegex(fx.FxPanelError,
-                                        "PUBLICATION_CLEANUP_UNRESOLVED"):
+                                        "PUBLICATION_INCOMPLETE"):
                 fx.publish_fx_panel(candidate, PROVENANCE, self.output, "foreign")
         self.assertEqual((self.output / "complete/foreign.json").read_bytes(), foreign)
+        self.assertTrue((self.output / "incomplete/foreign.json").exists())
+
+    def test_replacement_during_cleanup_keeps_foreign_marker_without_unlink(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        name = "replacement-race"
+        foreign = b"foreign replacement bytes\n"
+        marker = self.output / "complete" / (name + ".json")
+        real_unlink, real_open = os.unlink, os.open
+        unlink_calls = 0
+        def replace_marker():
+            real_unlink(marker)
+            marker.write_bytes(foreign)
+        def unlink_hook(*args, **kwargs):
+            nonlocal unlink_calls
+            unlink_calls += 1
+            replace_marker()  # V2 gap: ownership was already stat-checked.
+            return real_unlink(*args, **kwargs)
+        def open_hook(path, flags, *args, **kwargs):
+            if path == name + ".json" and flags & os.O_EXCL:
+                replace_marker()  # V3 disqualifier publication interleaving.
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(fx, "verify_fx_panel",
+                          side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
+            with patch.object(fx.os, "unlink", side_effect=unlink_hook):
+                with patch.object(fx.os, "open", side_effect=open_hook):
+                    with self.assertRaisesRegex(fx.FxPanelError,
+                                                "PUBLICATION_INCOMPLETE"):
+                        fx.publish_fx_panel(candidate, PROVENANCE, self.output, name)
+        self.assertEqual(unlink_calls, 0)
+        self.assertEqual(marker.read_bytes(), foreign)
+        self.assertTrue((self.output / "incomplete" / (name + ".json")).exists())
+
+    def test_preexisting_foreign_incomplete_entry_is_preserved(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        foreign = b"preexisting incomplete evidence\n"
+        def place_foreign_then_fail(output_root, run_id, originals, schema, coverage):
+            (Path(output_root) / "incomplete" / (run_id + ".json")).write_bytes(foreign)
+            raise fx.FxPanelError("PUBLICATION_INVALID")
+        with patch.object(fx, "verify_fx_panel", side_effect=place_foreign_then_fail):
+            with self.assertRaisesRegex(fx.FxPanelError,
+                                        "PUBLICATION_CLEANUP_UNRESOLVED"):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "foreign-incomplete")
+        self.assertEqual((self.output / "incomplete/foreign-incomplete.json").read_bytes(),
+                         foreign)
+        with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
+            fx.verify_fx_panel(self.output, "foreign-incomplete", pair, SCHEMA, COVERAGE)
+
+    def test_disqualifier_write_failure_is_unresolved(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_write = os.write
+        armed = False
+        def final_fail(*args):
+            nonlocal armed
+            armed = True
+            raise fx.FxPanelError("PUBLICATION_INVALID")
+        def fail_write(fd, data):
+            if armed:
+                raise OSError("synthetic write fault")
+            return real_write(fd, data)
+        with patch.object(fx, "verify_fx_panel", side_effect=final_fail):
+            with patch.object(fx.os, "write", side_effect=fail_write):
+                with self.assertRaisesRegex(fx.FxPanelError,
+                                            "PUBLICATION_CLEANUP_UNRESOLVED"):
+                    fx.publish_fx_panel(candidate, PROVENANCE, self.output, "write-fault")
+        self.assertTrue((self.output / "complete/write-fault.json").exists())
+
+    def test_disqualifier_file_and_directory_fsync_failures_are_unresolved(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_fsync = os.fsync
+        for fault_at in (1, 2):
+            with self.subTest(fault_at=fault_at):
+                armed = False
+                calls = 0
+                def final_fail(*args):
+                    nonlocal armed
+                    armed = True
+                    raise fx.FxPanelError("PUBLICATION_INVALID")
+                def fail_fsync(fd):
+                    nonlocal calls
+                    if armed:
+                        calls += 1
+                        if calls == fault_at:
+                            raise OSError("synthetic fsync fault")
+                    return real_fsync(fd)
+                name = f"fsync-disqualifier-{fault_at}"
+                with patch.object(fx, "verify_fx_panel", side_effect=final_fail):
+                    with patch.object(fx.os, "fsync", side_effect=fail_fsync):
+                        with self.assertRaisesRegex(fx.FxPanelError,
+                                                    "PUBLICATION_CLEANUP_UNRESOLVED"):
+                            fx.publish_fx_panel(candidate, PROVENANCE, self.output, name)
+                self.assertTrue((self.output / "complete" / (name + ".json")).exists())
+
+    def test_disqualifier_readback_mismatch_is_unresolved(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_read = fx._read_fd
+        armed = False
+        def final_fail(*args):
+            nonlocal armed
+            armed = True
+            raise fx.FxPanelError("PUBLICATION_INVALID")
+        def bad_read(fd, maximum):
+            if armed and maximum == 4096:
+                return b"mismatched synthetic readback"
+            return real_read(fd, maximum)
+        with patch.object(fx, "verify_fx_panel", side_effect=final_fail):
+            with patch.object(fx, "_read_fd", side_effect=bad_read):
+                with self.assertRaisesRegex(fx.FxPanelError,
+                                            "PUBLICATION_CLEANUP_UNRESOLVED"):
+                    fx.publish_fx_panel(candidate, PROVENANCE, self.output, "readback-fault")
+        self.assertTrue((self.output / "complete/readback-fault.json").exists())
 
 
 if __name__ == "__main__":

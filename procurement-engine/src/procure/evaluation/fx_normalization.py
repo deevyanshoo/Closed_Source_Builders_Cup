@@ -404,37 +404,48 @@ def normalize_ecb_pair(verified_originals, approved_schema, approved_date_covera
             "schema": SCHEMA, "coverage": approved_date_coverage, "months": months}
 
 
-def _remove_owned_marker(root_fd, marker_fd, marker_kind, run_id, owned_identity):
-    """Disqualify only our hard link; a replaced or unverified marker is foreign."""
+def _publish_incomplete_disqualifier(root_fd, run_id):
+    """Create independent failure evidence; never delete any publication marker."""
     name = run_id + ".json"
-    try:
-        current = os.stat(name, dir_fd=marker_fd, follow_symlinks=False)
-        if (current.st_dev, current.st_ino) != owned_identity:
-            _fail("PUBLICATION_CLEANUP_UNRESOLVED")
-    except (OSError, FxPanelError):
-        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
-    try:
-        os.unlink(name, dir_fd=marker_fd)
-        os.fsync(marker_fd)
-        return
-    except OSError:
-        pass
-    if marker_kind != "complete":
-        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+    body = _json({"status": "SYNTHETIC_OFFLINE_INCOMPLETE",
+                  "run_id": run_id, "synthetic": True,
+                  "execution_authorized": False,
+                  "reason": "POSTLINK_FINALIZATION_FAILED"})
     try:
         incomplete_fd = _directory(root_fd, "incomplete")
         try:
-            os.link(f"objects/{run_id}/manifest.json", name, src_dir_fd=root_fd,
-                    dst_dir_fd=incomplete_fd, follow_symlinks=False)
-            disqualifier = os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)
-            if (disqualifier.st_dev, disqualifier.st_ino) != owned_identity:
-                _fail("PUBLICATION_CLEANUP_UNRESOLVED")
-            os.fsync(incomplete_fd)
+            fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=incomplete_fd)
+            try:
+                created = os.fstat(fd)
+                if not stat.S_ISREG(created.st_mode):
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                remaining = memoryview(body)
+                while remaining:
+                    count = os.write(fd, remaining)
+                    if count <= 0:
+                        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                    remaining = remaining[count:]
+                os.fsync(fd)
+                os.lseek(fd, 0, os.SEEK_SET)
+                if _read_fd(fd, 4096) != body:
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                for entry in (os.fstat(fd),
+                              os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)):
+                    if (entry.st_dev, entry.st_ino, entry.st_size) != (
+                            created.st_dev, created.st_ino, len(body)):
+                        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                os.fsync(incomplete_fd)
+                final = os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)
+                if (final.st_dev, final.st_ino, final.st_size) != (
+                        created.st_dev, created.st_ino, len(body)):
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+            finally:
+                os.close(fd)
         finally:
             os.close(incomplete_fd)
-    except (OSError, FxPanelError):
+    except BaseException:
         _fail("PUBLICATION_CLEANUP_UNRESOLVED")
-    _fail("PUBLICATION_INCOMPLETE")
 
 
 def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
@@ -543,9 +554,6 @@ def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
             marker_fd = _directory(root_fd, marker_name)
             try:
                 linked = False
-                owned = os.stat(f"objects/{run_id}/manifest.json", dir_fd=root_fd,
-                                follow_symlinks=False)
-                owned_identity = (owned.st_dev, owned.st_ino)
                 try:
                     os.link(f"objects/{run_id}/manifest.json", run_id + ".json",
                             src_dir_fd=root_fd, dst_dir_fd=marker_fd, follow_symlinks=False)
@@ -558,8 +566,10 @@ def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
                             _fail("PUBLICATION_INVALID")
                 except BaseException:
                     if linked:
-                        _remove_owned_marker(root_fd, marker_fd, marker_name,
-                                             run_id, owned_identity)
+                        if marker_name != "complete":
+                            _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                        _publish_incomplete_disqualifier(root_fd, run_id)
+                        _fail("PUBLICATION_INCOMPLETE")
                     raise
             finally:
                 os.close(marker_fd)

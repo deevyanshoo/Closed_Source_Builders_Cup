@@ -39,6 +39,10 @@ SCHEMA = {
 SOURCE_IDS = tuple(sorted(source_transport.SOURCES))
 DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 MONTH = re.compile(r"[0-9]{4}-[0-9]{2}\Z")
+INSTANT = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})\Z"
+)
 NUMBER = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\Z")
 RUN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 CODE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -196,15 +200,27 @@ def _iso_day(token):
     return parsed
 
 
+def _utc_instant(token):
+    if type(token) is not str or len(token) > 35 or not INSTANT.fullmatch(token):
+        _fail("COVERAGE_INVALID")
+    try:
+        parsed = datetime.fromisoformat(token.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            _fail("COVERAGE_INVALID")
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        _fail("COVERAGE_INVALID")
+
+
 def _coverage(value):
     if type(value) is not dict or set(value) != {
             "schema_version", "synthetic", "as_of", "required_months", "dates_by_month"
-    } or value["schema_version"] != "synthetic-date-mask.v1" or value["synthetic"] is not True:
+    } or value["schema_version"] != "synthetic-date-mask.v2" or value["synthetic"] is not True:
         _fail("COVERAGE_INVALID")
     if (type(value["dates_by_month"]) is not dict
             or any(type(key) is not str for key in value["dates_by_month"])):
         _fail("COVERAGE_INVALID")
-    as_of = _iso_day(value["as_of"])
+    as_of = _utc_instant(value["as_of"])
     months = value["required_months"]
     masks = value["dates_by_month"]
     if (type(months) is not list or not 1 <= len(months) <= MAX_MONTHS
@@ -350,7 +366,7 @@ def normalize_ecb_pair(verified_originals, approved_schema, approved_date_covera
         if usd != set(expected) or inr != set(expected):
             reasons.append("EXPECTED_DATE_MISSING")
         proxy = _proxy(month)
-        if _iso_day(proxy[:10]) > as_of:
+        if _utc_instant(proxy) > as_of:
             reasons.append("PROXY_AFTER_ASOF")
         value = None
         daily_hash = None
@@ -386,6 +402,39 @@ def normalize_ecb_pair(verified_originals, approved_schema, approved_date_covera
             "schema_sha256": _sha(_json(SCHEMA)),
             "coverage_sha256": _sha(_json(approved_date_coverage)),
             "schema": SCHEMA, "coverage": approved_date_coverage, "months": months}
+
+
+def _remove_owned_marker(root_fd, marker_fd, marker_kind, run_id, owned_identity):
+    """Disqualify only our hard link; a replaced or unverified marker is foreign."""
+    name = run_id + ".json"
+    try:
+        current = os.stat(name, dir_fd=marker_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != owned_identity:
+            _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+    except (OSError, FxPanelError):
+        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+    try:
+        os.unlink(name, dir_fd=marker_fd)
+        os.fsync(marker_fd)
+        return
+    except OSError:
+        pass
+    if marker_kind != "complete":
+        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+    try:
+        incomplete_fd = _directory(root_fd, "incomplete")
+        try:
+            os.link(f"objects/{run_id}/manifest.json", name, src_dir_fd=root_fd,
+                    dst_dir_fd=incomplete_fd, follow_symlinks=False)
+            disqualifier = os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)
+            if (disqualifier.st_dev, disqualifier.st_ino) != owned_identity:
+                _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+            os.fsync(incomplete_fd)
+        finally:
+            os.close(incomplete_fd)
+    except (OSError, FxPanelError):
+        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+    _fail("PUBLICATION_INCOMPLETE")
 
 
 def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
@@ -486,22 +535,31 @@ def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
             finally:
                 os.close(objects_fd)
             os.fsync(root_fd)
+            staged = _verify_panel(root, run_id, fresh, SCHEMA, candidate["coverage"],
+                                   require_marker=False, expected_complete=complete)
+            if staged != manifest:
+                _fail("PUBLICATION_INVALID")
             marker_name = "complete" if complete else "incomplete"
             marker_fd = _directory(root_fd, marker_name)
             try:
                 linked = False
+                owned = os.stat(f"objects/{run_id}/manifest.json", dir_fd=root_fd,
+                                follow_symlinks=False)
+                owned_identity = (owned.st_dev, owned.st_ino)
                 try:
                     os.link(f"objects/{run_id}/manifest.json", run_id + ".json",
                             src_dir_fd=root_fd, dst_dir_fd=marker_fd, follow_symlinks=False)
                     linked = True
                     os.fsync(marker_fd)
+                    if complete:
+                        verified = verify_fx_panel(root, run_id, fresh, SCHEMA,
+                                                   candidate["coverage"])
+                        if verified != manifest:
+                            _fail("PUBLICATION_INVALID")
                 except BaseException:
                     if linked:
-                        try:
-                            os.unlink(run_id + ".json", dir_fd=marker_fd)
-                            os.fsync(marker_fd)
-                        except OSError:
-                            pass
+                        _remove_owned_marker(root_fd, marker_fd, marker_name,
+                                             run_id, owned_identity)
                     raise
             finally:
                 os.close(marker_fd)
@@ -513,14 +571,16 @@ def publish_fx_panel(candidate, provenance_decision, output_root, run_id):
         raise
     except OSError:
         _fail("PUBLICATION_IO")
-    if complete:
-        verified = verify_fx_panel(output_root, run_id, fresh, SCHEMA, candidate["coverage"])
-        if verified != manifest:
-            _fail("PUBLICATION_INVALID")
     return manifest
 
 
 def verify_fx_panel(output_root, run_id, verified_originals, approved_schema, approved_date_coverage):
+    return _verify_panel(output_root, run_id, verified_originals, approved_schema,
+                         approved_date_coverage, require_marker=True, expected_complete=True)
+
+
+def _verify_panel(output_root, run_id, verified_originals, approved_schema,
+                  approved_date_coverage, *, require_marker, expected_complete):
     _run(run_id)
     _synthetic(verified_originals)
     _schema(approved_schema)
@@ -531,36 +591,43 @@ def verify_fx_panel(output_root, run_id, verified_originals, approved_schema, ap
         root = Path(output_root)
         root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            incomplete_fd = _directory(root_fd, "incomplete")
-            try:
+            marker = None
+            marker_stat = None
+            for marker_kind in ("incomplete", "complete"):
+                marker_dir_fd = _directory(root_fd, marker_kind)
                 try:
-                    os.stat(run_id + ".json", dir_fd=incomplete_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    _fail("PUBLICATION_INCOMPLETE")
-            finally:
-                os.close(incomplete_fd)
-            complete_fd = _directory(root_fd, "complete")
-            try:
-                marker_fd = _file(complete_fd, run_id + ".json")
-                try:
-                    marker_stat = os.fstat(marker_fd)
-                    marker = _read_fd(marker_fd, 65536)
+                    try:
+                        marker_path_stat = os.stat(run_id + ".json", dir_fd=marker_dir_fd,
+                                                   follow_symlinks=False)
+                    except FileNotFoundError:
+                        if require_marker and marker_kind == "complete":
+                            _fail("PUBLICATION_INVALID")
+                        continue
+                    if marker_kind == "incomplete" or not require_marker:
+                        _fail("PUBLICATION_INCOMPLETE")
+                    marker_fd = _file(marker_dir_fd, run_id + ".json")
+                    try:
+                        marker_stat = os.fstat(marker_fd)
+                        if (marker_stat.st_dev, marker_stat.st_ino) != (
+                                marker_path_stat.st_dev, marker_path_stat.st_ino):
+                            _fail("PUBLICATION_INVALID")
+                        marker = _read_fd(marker_fd, 65536)
+                    finally:
+                        os.close(marker_fd)
                 finally:
-                    os.close(marker_fd)
-            finally:
-                os.close(complete_fd)
+                    os.close(marker_dir_fd)
             objects_fd = _directory(root_fd, "objects")
             try:
                 object_fd = _directory(objects_fd, run_id)
                 try:
                     manifest_fd = _file(object_fd, "manifest.json")
                     try:
-                        if (os.fstat(manifest_fd).st_dev, os.fstat(manifest_fd).st_ino) != (
+                        if require_marker and (
+                                os.fstat(manifest_fd).st_dev, os.fstat(manifest_fd).st_ino) != (
                                 marker_stat.st_dev, marker_stat.st_ino):
                             _fail("PUBLICATION_INVALID")
-                        if _read_fd(manifest_fd, 65536) != marker:
+                        manifest_body = _read_fd(manifest_fd, 65536)
+                        if require_marker and manifest_body != marker:
                             _fail("PUBLICATION_INVALID")
                     finally:
                         os.close(manifest_fd)
@@ -575,8 +642,8 @@ def verify_fx_panel(output_root, run_id, verified_originals, approved_schema, ap
                 os.close(objects_fd)
         finally:
             os.close(root_fd)
-        manifest = json.loads(marker)
-        if type(manifest) is not dict or _json(manifest) != marker:
+        manifest = json.loads(manifest_body)
+        if type(manifest) is not dict or _json(manifest) != manifest_body:
             _fail("PUBLICATION_INVALID")
         fresh = load_verified_originals(verified_originals["archive_root"],
                                         verified_originals["run_id"],
@@ -599,8 +666,10 @@ def verify_fx_panel(output_root, run_id, verified_originals, approved_schema, ap
                              row["daily_basis_sha256"] or "", ";".join(row["reasons"])))
         if panel != expected_lines.getvalue().encode("utf-8"):
             _fail("PUBLICATION_INVALID")
-        if (manifest.get("status") != "SYNTHETIC_OFFLINE_ONLY"
-                or any(row["status"] != "complete" for row in recomputed["months"])
+        if (manifest.get("status") != ("SYNTHETIC_OFFLINE_ONLY" if expected_complete
+                                     else "SYNTHETIC_OFFLINE_INCOMPLETE")
+                or all(row["status"] == "complete" for row in recomputed["months"])
+                    is not expected_complete
                 or manifest.get("synthetic") is not True
                 or manifest.get("source_authenticity") is not False
                 or manifest.get("observed_eligible") is not False

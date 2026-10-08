@@ -27,8 +27,8 @@ SCHEMA = {
     },
 }
 COVERAGE = {
-    "schema_version": "synthetic-date-mask.v1", "synthetic": True,
-    "as_of": "2026-10-08", "required_months": ["2026-08"],
+    "schema_version": "synthetic-date-mask.v2", "synthetic": True,
+    "as_of": "2026-10-08T00:00:00Z", "required_months": ["2026-08"],
     "dates_by_month": {"2026-08": ["2026-08-03", "2026-08-04"]},
 }
 PROVENANCE = {
@@ -267,6 +267,129 @@ class SyntheticFxTests(unittest.TestCase):
         panel.write_bytes(b"tampered\n")
         with self.assertRaises(fx.FxPanelError):
             fx.verify_fx_panel(self.output, "panel", pair, SCHEMA, COVERAGE)
+
+    def test_v2_asof_exact_proxy_microsecond_boundary(self):
+        pair = self.archive_pair()
+        for instant, expected in (
+            ("2026-09-30T23:59:59.999998Z", "unavailable"),
+            ("2026-09-30T23:59:59.999999Z", "complete"),
+            ("2026-10-01T00:00:00Z", "complete"),
+            ("2026-10-01T05:29:59.999999+05:30", "complete"),
+        ):
+            with self.subTest(instant=instant):
+                coverage = {**COVERAGE, "schema_version": "synthetic-date-mask.v2",
+                            "as_of": instant}
+                month = fx.normalize_ecb_pair(pair, SCHEMA, coverage)["months"][0]
+                self.assertEqual(month["status"], expected)
+                self.assertEqual(month["value"], "40" if expected == "complete" else None)
+
+    def test_v2_rejects_date_only_and_naive_asof(self):
+        pair = self.archive_pair()
+        for instant in ("2026-09-30", "2026-09-30T23:59:59.999999"):
+            with self.subTest(instant=instant):
+                coverage = {**COVERAGE, "schema_version": "synthetic-date-mask.v2",
+                            "as_of": instant}
+                with self.assertRaisesRegex(fx.FxPanelError, "COVERAGE_INVALID"):
+                    fx.normalize_ecb_pair(pair, SCHEMA, coverage)
+
+    def test_v1_date_only_contract_is_no_longer_accepted(self):
+        pair = self.archive_pair()
+        legacy = {**COVERAGE, "schema_version": "synthetic-date-mask.v1",
+                  "as_of": "2026-10-08"}
+        with self.assertRaisesRegex(fx.FxPanelError, "COVERAGE_INVALID"):
+            fx.normalize_ecb_pair(pair, SCHEMA, legacy)
+
+    def test_postlink_real_verifier_tamper_cannot_leave_complete_marker(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_verify = fx.verify_fx_panel
+        def tamper_then_verify(output_root, run_id, originals, schema, coverage):
+            panel = Path(output_root) / "objects" / run_id / "panel.csv"
+            panel.write_bytes(b"tampered after marker\n")
+            return real_verify(output_root, run_id, originals, schema, coverage)
+        with patch.object(fx, "verify_fx_panel", side_effect=tamper_then_verify):
+            with self.assertRaises(fx.FxPanelError):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "postlink-tamper")
+        self.assertFalse((self.output / "complete/postlink-tamper.json").exists())
+
+    def test_postlink_verifier_error_cannot_leave_complete_marker(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
+            with self.assertRaises(fx.FxPanelError):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "postlink-error")
+        self.assertFalse((self.output / "complete/postlink-error.json").exists())
+
+    def test_postlink_cancellation_removes_owned_marker(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        with patch.object(fx, "verify_fx_panel", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "cancelled")
+        self.assertFalse((self.output / "complete/cancelled.json").exists())
+
+    def test_prelink_staged_tamper_never_creates_complete_marker(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_staged = fx._verify_panel
+        def tamper_before_readback(output_root, run_id, originals, schema, coverage,
+                                   *, require_marker, expected_complete):
+            if not require_marker:
+                (Path(output_root) / "objects" / run_id / "panel.csv").write_bytes(b"bad\n")
+            return real_staged(output_root, run_id, originals, schema, coverage,
+                               require_marker=require_marker, expected_complete=expected_complete)
+        with patch.object(fx, "_verify_panel", side_effect=tamper_before_readback):
+            with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INVALID"):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "prelink-tamper")
+        self.assertFalse((self.output / "complete/prelink-tamper.json").exists())
+
+    def test_postlink_cleanup_permission_failure_creates_incomplete_disqualifier(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
+            with patch.object(fx.os, "unlink", side_effect=PermissionError("synthetic EPERM")):
+                with self.assertRaisesRegex(fx.FxPanelError,
+                                            "PUBLICATION_INCOMPLETE"):
+                    fx.publish_fx_panel(candidate, PROVENANCE, self.output, "cleanup-fault")
+        self.assertTrue((self.output / "complete/cleanup-fault.json").exists())
+        self.assertTrue((self.output / "incomplete/cleanup-fault.json").exists())
+        with self.assertRaisesRegex(fx.FxPanelError, "PUBLICATION_INCOMPLETE"):
+            fx.verify_fx_panel(self.output, "cleanup-fault", pair, SCHEMA, COVERAGE)
+
+    def test_cleanup_and_disqualifier_os_failures_are_reported_uncertain(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        real_link = os.link
+        calls = 0
+        def link_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise PermissionError("synthetic disqualifier EPERM")
+            return real_link(*args, **kwargs)
+        with patch.object(fx, "verify_fx_panel", side_effect=fx.FxPanelError("PUBLICATION_INVALID")):
+            with patch.object(fx.os, "unlink", side_effect=PermissionError("synthetic unlink EPERM")):
+                with patch.object(fx.os, "link", side_effect=link_once):
+                    with self.assertRaisesRegex(fx.FxPanelError,
+                                                "PUBLICATION_CLEANUP_UNRESOLVED"):
+                        fx.publish_fx_panel(candidate, PROVENANCE, self.output, "both-fault")
+        self.assertTrue((self.output / "complete/both-fault.json").exists())
+        self.assertFalse((self.output / "incomplete/both-fault.json").exists())
+
+    def test_postlink_foreign_replacement_is_preserved(self):
+        pair = self.archive_pair()
+        candidate = fx.normalize_ecb_pair(pair, SCHEMA, COVERAGE)
+        foreign = b"foreign-marker\n"
+        def replace_then_fail(output_root, run_id, originals, schema, coverage):
+            marker = Path(output_root) / "complete" / (run_id + ".json")
+            marker.unlink()
+            marker.write_bytes(foreign)
+            raise fx.FxPanelError("PUBLICATION_INVALID")
+        with patch.object(fx, "verify_fx_panel", side_effect=replace_then_fail):
+            with self.assertRaisesRegex(fx.FxPanelError,
+                                        "PUBLICATION_CLEANUP_UNRESOLVED"):
+                fx.publish_fx_panel(candidate, PROVENANCE, self.output, "foreign")
+        self.assertEqual((self.output / "complete/foreign.json").read_bytes(), foreign)
 
 
 if __name__ == "__main__":

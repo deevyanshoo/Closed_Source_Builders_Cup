@@ -750,3 +750,35 @@ export interface VoiceHTTPSavedSessionRequest {
   context_id: string;
   expected_revision: number;
 }
+
+export interface ShipmentRecoveryRequest {
+  contract_version: "0.2.0";
+  context_id: string;
+  expected_revision: number;
+}
+
+export interface ShipmentRecoveryContext {
+  context_id: string;
+  revision: number;
+  workspace_id: string;
+  plan_version: string;
+  propagation_snapshot_id: string;
+  production_snapshot_id: string;
+  as_of: string;
+  synthetic: true;
+  source: "host_configured_synthetic";
+  persistence: "ephemeral";
+  source_authenticity: "not_verified";
+  request_sha256: string;
+}
+
+export interface ShipmentRecoveryContextsResponse {
+  contract_version: "0.2.0";
+  contexts: (ShipmentRecoveryContext)[];
+}
+
+export interface ShipmentRecoveryResponse {
+  contract_version: "0.2.0";
+  context: ShipmentRecoveryContext;
+  outcome_json: string;
+}

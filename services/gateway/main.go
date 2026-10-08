@@ -38,7 +38,11 @@ func main() {
 	if err != nil {
 		log.Fatal("invalid gateway configuration")
 	}
-	cfg, err = withVoiceLocalFlags(cfg, os.Args[1:])
+	cfg, remaining, err := withShipmentLocalFlags(cfg, os.Args[1:])
+	if err != nil {
+		log.Fatal("invalid local shipment configuration")
+	}
+	cfg, err = withVoiceLocalFlags(cfg, remaining)
 	if err != nil {
 		log.Fatal("invalid local voice configuration")
 	}

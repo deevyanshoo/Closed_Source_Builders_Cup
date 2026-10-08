@@ -121,13 +121,23 @@ def test_two_verified_different_values_are_a_conflict_without_a_value():
 
 
 def test_same_value_twice_is_one_extraction_with_both_evidence():
-    d = doc("Q09")
+    # Two rows under an explicit invoice-currency header (#33 needs a settlement label).
+    d = read_document(b"SYNTHETIC quote,x\ninvoice_currency,lot\nUSD,1\nUSD,2\n", filename="lots.csv")
     result = resolve_field(d, "settlement_currency", "currency", [
+        cand("USD", ("r3:c1", "USD")),
+        cand("USD", ("r4:c1", "USD")),
+    ])
+    assert result.status == "extracted"
+    assert [e.locator for e in result.evidence] == ["r3:c1", "r4:c1"]
+
+
+def test_price_currency_column_is_not_settlement_evidence():
+    # Q09's price_currency column states the unit-price currency only (#33).
+    result = resolve_field(doc("Q09"), "settlement_currency", "currency", [
         cand("USD", ("r3:c11", "USD")),
         cand("USD", ("r4:c11", "USD")),
     ])
-    assert result.status == "extracted"
-    assert [e.locator for e in result.evidence] == ["r3:c11", "r4:c11"]
+    assert (result.status, result.value) == ("unverified", None)
 
 
 def test_unverified_candidate_does_not_override_a_verified_one():
@@ -146,10 +156,16 @@ def test_unverified_candidate_does_not_override_a_verified_one():
     ("quantity", {"amount": "25", "unit": "tonne"}, ("p1:l12", "25 MT")),
     ("incoterm", {"code": "CIF", "place": "Nhava Sheva, India"}, ("p1:l11", "CIF Nhava Sheva, India")),
     ("text", "Atacama Red Metals SpA [SYNTHETIC]", ("p1:l2", "Atacama Red Metals SpA [SYNTHETIC]")),
-    ("currency", "USD", Q01_PRICE),
 ])
 def test_each_value_kind_is_checked_against_its_evidence(kind, value, evidence):
     assert resolve_field(doc("Q01"), "f", kind, [cand(value, evidence)]).status == "extracted"
+
+
+@pytest.mark.parametrize("line", ["Invoice currency: USD", "Payable in USD", "Settlement currency is USD"])
+def test_currency_kind_needs_an_explicit_invoice_payment_or_settlement_statement(line):
+    d = read_document(f'SYNTHETIC quote,other\n"{line}",x\n'.encode(), filename="terms.csv")
+    assert resolve_field(d, "settlement_currency", "currency", [cand("USD", ("r2:c1", line))]).status == "extracted"
+    assert resolve_field(doc("Q01"), "settlement_currency", "currency", [cand("USD", Q01_PRICE)]).status == "unverified"
 
 
 @pytest.mark.parametrize("kind,value,evidence", [

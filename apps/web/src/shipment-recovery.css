@@ -1,0 +1,18 @@
+.shipment-intro{padding:42px 30px;border-bottom:1px solid #111}
+.shipment-intro .eyebrow,.shipment-result-head .eyebrow{color:#aa1010}
+.shipment-intro h1{font-size:clamp(34px,4.6vw,68px);letter-spacing:-.06em;line-height:1.03;text-transform:uppercase;margin:12px 0}
+.shipment-intro>p:last-child{max-width:790px;font-size:14px;line-height:1.6}
+.shipment-session,.shipment-controls,.shipment-result-head,.shipment-evidence-group,.shipment-comparison,.shipment-raw,.shipment-limit,.shipment-status{padding:22px 30px;border-bottom:1px solid #111}
+.shipment-session,.shipment-controls,.shipment-result-head,.shipment-evidence-group,.shipment-comparison,.shipment-raw,.shipment-limit{font-size:12px;line-height:1.6}
+.shipment-controls .field{display:block;max-width:760px}.shipment-controls select{width:100%}.shipment-controls>p{overflow-wrap:anywhere}
+.shipment-actions{display:flex;gap:12px;margin-top:16px}.shipment-actions button{width:auto;min-width:190px}
+.shipment-result-head h2,.shipment-comparison h3{font-size:25px;letter-spacing:-.04em;text-transform:uppercase;margin:8px 0}
+.shipment-evidence-group h3{font-size:16px;text-transform:uppercase}.shipment-evidence,.shipment-detail-grid details,.shipment-raw{min-width:0}
+.shipment-evidence summary,.shipment-detail-grid summary,.shipment-raw summary{font-weight:700;cursor:pointer;padding:8px 0}
+.shipment-evidence ol{padding-left:24px}.shipment-evidence li{margin:8px 0}
+.shipment-detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.shipment-detail-grid details{border:1px solid #bbb;background:#fbfbf8;padding:10px}
+.shipment-shell pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+.shipment-raw pre{max-height:520px}.shipment-limit{color:#444}
+@media(max-width:850px){.shipment-detail-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.shipment-intro,.shipment-session,.shipment-controls,.shipment-result-head,.shipment-evidence-group,.shipment-comparison,.shipment-raw,.shipment-limit,.shipment-status{padding:18px 16px}.shipment-actions{flex-direction:column}.shipment-actions button{width:100%}}

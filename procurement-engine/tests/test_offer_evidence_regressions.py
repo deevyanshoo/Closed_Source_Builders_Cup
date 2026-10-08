@@ -110,11 +110,14 @@ def test_quantity_unit_must_bind_to_claimed_amount():
     assert _status(doc, "pricing", "pricing", _price("10"), "r2:c1").status == "extracted"
 
 
-def test_currency_requires_price_context_not_payment_or_incoterm_acronym():
+def test_currency_requires_a_settlement_label_not_price_payment_or_incoterm_acronym():
     doc = _doc("Q09")
     assert _status(doc, "settlement_currency", "currency", "CAD", "r3:c19").status == "unverified"
-    assert _status(doc, "settlement_currency", "currency", "USD", "r3:c11", "r2:c11").status == "extracted"
+    # A price_currency column is unit-price context, not a settlement statement (#33).
+    assert _status(doc, "settlement_currency", "currency", "USD", "r3:c11", "r2:c11").status == "unverified"
     assert _status(doc, "settlement_currency", "currency", "FOB", "r3:c13").status == "unverified"
+    labelled = _csv('quote,payment_currency\nx,USD\n')
+    assert _status(labelled, "settlement_currency", "currency", "USD", "r2:c2").status == "extracted"
 
 
 def test_payment_cad_with_a_number_is_not_currency_evidence():
@@ -230,9 +233,10 @@ def test_total_lot_quantity_is_not_each_lot_quantity():
 
 
 def test_bare_currency_cell_uses_its_header_context():
-    doc = _csv('Payment terms,Price currency\nCAD,USD\n')
+    doc = _csv('Payment terms,Price currency,Invoice currency\nCAD,USD,EUR\n')
     assert _status(doc, "settlement_currency", "currency", "CAD", "r2:c1").status == "unverified"
-    assert _status(doc, "settlement_currency", "currency", "USD", "r2:c2").status == "extracted"
+    assert _status(doc, "settlement_currency", "currency", "USD", "r2:c2").status == "unverified"
+    assert _status(doc, "settlement_currency", "currency", "EUR", "r2:c3").status == "extracted"
 
 
 def test_extra_quantity_keys_and_nested_amounts_are_structured_unverified():

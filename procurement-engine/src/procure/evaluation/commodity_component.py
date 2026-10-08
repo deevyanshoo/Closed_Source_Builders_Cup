@@ -348,15 +348,41 @@ def _write_new(parent_fd, name, body):
 def _disqualify(root_fd, run_id):
     body = _json({"status": "SYNTHETIC_OFFLINE_INCOMPLETE", "run_id": run_id,
                   **FLAGS, "reason": "POSTLINK_FINALIZATION_FAILED"})
+    name = run_id + ".json"
     try:
         incomplete_fd = _directory(root_fd, "incomplete")
         try:
             _private(incomplete_fd)
-            _write_new(incomplete_fd, run_id + ".json", body)
-            os.fsync(incomplete_fd)
-            if _read_bound(incomplete_fd, run_id + ".json", MAX_RECEIPT) != body:
-                _fail("PUBLICATION_CLEANUP_UNRESOLVED")
-            os.fsync(incomplete_fd)
+            marker_fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                0o600, dir_fd=incomplete_fd)
+            try:
+                created = os.fstat(marker_fd)
+                if (not stat.S_ISREG(created.st_mode) or created.st_uid != os.getuid()
+                        or stat.S_IMODE(created.st_mode) & 0o077):
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                remaining = memoryview(body)
+                while remaining:
+                    count = os.write(marker_fd, remaining)
+                    if count <= 0:
+                        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                    remaining = remaining[count:]
+                os.fsync(marker_fd)
+                os.lseek(marker_fd, 0, os.SEEK_SET)
+                if os.read(marker_fd, len(body) + 1) != body:
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                expected = (created.st_dev, created.st_ino, len(body))
+                for details in (os.fstat(marker_fd),
+                                os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)):
+                    if (details.st_dev, details.st_ino, details.st_size) != expected:
+                        _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                if _read_bound(incomplete_fd, name, MAX_RECEIPT) != body:
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+                os.fsync(incomplete_fd)
+                final = os.stat(name, dir_fd=incomplete_fd, follow_symlinks=False)
+                if (final.st_dev, final.st_ino, final.st_size) != expected:
+                    _fail("PUBLICATION_CLEANUP_UNRESOLVED")
+            finally:
+                os.close(marker_fd)
         finally:
             os.close(incomplete_fd)
     except BaseException:
@@ -472,6 +498,8 @@ def publish_commodity_component(candidate, verified, output_root, run_id):
         linked_complete = False
         disqualified = False
         try:
+            original_root = os.fstat(root_fd)
+            original_root_identity = (original_root.st_dev, original_root.st_ino)
             objects_fd = _directory(root_fd, "objects")
             try:
                 os.mkdir(run_id, 0o700, dir_fd=objects_fd)
@@ -535,6 +563,9 @@ def publish_commodity_component(candidate, verified, output_root, run_id):
                         recovery_fd = os.open(output_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
                         try:
                             _private(recovery_fd)
+                            recovered = os.fstat(recovery_fd)
+                            if (recovered.st_dev, recovered.st_ino) != original_root_identity:
+                                _fail("PUBLICATION_CLEANUP_UNRESOLVED")
                             _disqualify(recovery_fd, run_id)
                             disqualified = True
                         finally:

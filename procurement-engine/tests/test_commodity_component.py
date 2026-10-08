@@ -316,6 +316,75 @@ class CommodityComponentTests(unittest.TestCase):
         self.assertTrue((self.output / "complete" / "run.json").exists())
         self.assertTrue((self.output / "incomplete" / "run.json").exists())
 
+    def test_v1_root_replacement_during_close_never_disqualifies_foreign_root(self):
+        verified, candidate = self.candidate()
+        layout, close = component._ensure_layout, os.close
+        root_fd = None
+        moved = self.root / "moved-original-panel"
+        replaced = False
+        def track(path):
+            nonlocal root_fd
+            root_fd = layout(path)
+            return root_fd
+        def replace_after_close(fd):
+            nonlocal replaced
+            close(fd)
+            if fd == root_fd and not replaced:
+                replaced = True
+                os.replace(self.output, moved)
+                self.output.mkdir(mode=0o700)
+                (self.output / "incomplete").mkdir(mode=0o700)
+                raise OSError("synthetic close error after root replacement")
+        with patch.object(component, "_ensure_layout", side_effect=track), \
+             patch.object(component.os, "close", side_effect=replace_after_close):
+            with self.assertRaisesRegex(component.CommodityComponentError,
+                                        "PUBLICATION_CLEANUP_UNRESOLVED"):
+                component.publish_commodity_component(candidate, verified, self.output, "run")
+        self.assertTrue(replaced)
+        self.assertTrue((moved / "complete" / "run.json").exists())
+        self.assertFalse((moved / "incomplete" / "run.json").exists())
+        self.assertEqual(list((self.output / "incomplete").iterdir()), [])
+        self.assertEqual(component.verify_commodity_component(moved, "run", verified, SCHEMA,
+                                                              ["2026-08"], "2026-10-08T00:00:00Z")["status"],
+                         "SYNTHETIC_OFFLINE_ONLY")
+
+    def test_v1_same_byte_replacement_disqualifier_is_unresolved(self):
+        verified, candidate = self.candidate()
+        open_file, fsync = os.open, os.fsync
+        marker_fd = None
+        original_inode = None
+        foreign_inode = None
+        def track_open(path, flags, *args, **kwargs):
+            nonlocal marker_fd
+            fd = open_file(path, flags, *args, **kwargs)
+            if path == "run.json" and flags & os.O_CREAT and flags & os.O_EXCL:
+                marker_fd = fd
+            return fd
+        def replace_after_file_fsync(fd):
+            nonlocal original_inode, foreign_inode
+            fsync(fd)
+            if fd == marker_fd and original_inode is None:
+                marker = self.output / "incomplete" / "run.json"
+                witness = self.root / "original-disqualifier-witness"
+                os.link(marker, witness)
+                original_inode = witness.stat().st_ino
+                replacement = self.root / "same-byte-foreign-marker"
+                replacement.write_bytes(marker.read_bytes())
+                replacement.chmod(0o600)
+                foreign_inode = replacement.stat().st_ino
+                os.replace(replacement, marker)
+        with patch.object(component.os, "open", side_effect=track_open), \
+             patch.object(component.os, "fsync", side_effect=replace_after_file_fsync), \
+             patch.object(component, "verify_commodity_component",
+                          side_effect=component.CommodityComponentError("PUBLICATION_INVALID")):
+            with self.assertRaisesRegex(component.CommodityComponentError,
+                                        "PUBLICATION_CLEANUP_UNRESOLVED"):
+                component.publish_commodity_component(candidate, verified, self.output, "run")
+        marker = self.output / "incomplete" / "run.json"
+        self.assertNotEqual(original_inode, foreign_inode)
+        self.assertEqual(marker.stat().st_ino, foreign_inode)
+        self.assertEqual(marker.read_bytes(), (self.root / "original-disqualifier-witness").read_bytes())
+
     def test_disqualified_postlink_close_error_keeps_incomplete_priority(self):
         verified, candidate = self.candidate()
         directory = component._directory
@@ -357,18 +426,64 @@ class CommodityComponentTests(unittest.TestCase):
 
     def test_disqualifier_write_failure_is_fatal_and_preserves_complete_marker(self):
         verified, candidate = self.candidate()
-        write = component._write_new
-        def fail_disqualifier(fd, name, body):
-            if name == "run.json":
+        open_file, write = os.open, os.write
+        marker_fd = None
+        def track_open(path, flags, *args, **kwargs):
+            nonlocal marker_fd
+            fd = open_file(path, flags, *args, **kwargs)
+            if path == "run.json" and flags & os.O_CREAT and flags & os.O_EXCL:
+                marker_fd = fd
+            return fd
+        def fail_disqualifier(fd, body):
+            if fd == marker_fd:
                 raise PermissionError("synthetic denied")
-            return write(fd, name, body)
+            return write(fd, body)
         with patch.object(component, "verify_commodity_component",
                           side_effect=component.CommodityComponentError("PUBLICATION_INVALID")), \
-             patch.object(component, "_write_new", side_effect=fail_disqualifier):
+             patch.object(component.os, "open", side_effect=track_open), \
+             patch.object(component.os, "write", side_effect=fail_disqualifier):
             with self.assertRaisesRegex(component.CommodityComponentError,
                                         "PUBLICATION_CLEANUP_UNRESOLVED"):
                 component.publish_commodity_component(candidate, verified, self.output, "run")
         self.assertTrue((self.output / "complete" / "run.json").exists())
+
+    def test_v1_disqualifier_create_fsync_readback_close_faults_unresolved(self):
+        verified, candidate = self.candidate()
+        for fault in ("create", "fsync", "readback", "close"):
+            with self.subTest(fault=fault):
+                self.output = self.root / ("panel-fault-" + fault)
+                open_file, fsync, read, close = os.open, os.fsync, os.read, os.close
+                marker_fd = None
+                def open_hook(path, flags, *args, **kwargs):
+                    nonlocal marker_fd
+                    if path == "run.json" and flags & os.O_CREAT and fault == "create":
+                        raise PermissionError("synthetic creation denied")
+                    fd = open_file(path, flags, *args, **kwargs)
+                    if path == "run.json" and flags & os.O_CREAT:
+                        marker_fd = fd
+                    return fd
+                def fsync_hook(fd):
+                    if fd == marker_fd and fault == "fsync":
+                        raise OSError("synthetic fsync failure")
+                    return fsync(fd)
+                def read_hook(fd, size):
+                    if fd == marker_fd and fault == "readback":
+                        return b"different"
+                    return read(fd, size)
+                def close_hook(fd):
+                    close(fd)
+                    if fd == marker_fd and fault == "close":
+                        raise OSError("synthetic close failure")
+                with patch.object(component, "verify_commodity_component",
+                                  side_effect=component.CommodityComponentError("PUBLICATION_INVALID")), \
+                     patch.object(component.os, "open", side_effect=open_hook), \
+                     patch.object(component.os, "fsync", side_effect=fsync_hook), \
+                     patch.object(component.os, "read", side_effect=read_hook), \
+                     patch.object(component.os, "close", side_effect=close_hook):
+                    with self.assertRaisesRegex(component.CommodityComponentError,
+                                                "PUBLICATION_CLEANUP_UNRESOLVED"):
+                        component.publish_commodity_component(candidate, verified, self.output, "run")
+                self.assertTrue((self.output / "complete" / "run.json").exists())
 
     def test_preexisting_foreign_incomplete_marker_is_preserved(self):
         verified, candidate = self.candidate()

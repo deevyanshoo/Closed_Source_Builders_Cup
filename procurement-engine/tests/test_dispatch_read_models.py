@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import json
+from decimal import localcontext
 from pathlib import Path
 
 import pytest
@@ -64,8 +65,110 @@ def test_timeline_includes_evidence_and_location(normalized):
     e = shipment_timeline(normalized, "SHP-SYN-001", now=NOW)["events"][0]
     assert e["facility"]["code"] == "CLVAP" and e["lane"]["destination"] == "INNSA"
     assert e["source"]["provider_id"] == "synthetic-carrier-feed"
-    assert e["evidence"] == [{"evidence_id": "ev-001-bl", "kind": "bill_of_lading",
-                              "locator": "synthetic://docs/SYN-BL-0001#p1", "status": "no_stated_expiry"}]
+    assert e["evidence"] == normalized["events"][0]["evidence"]
+    assert set(e["evidence"][0]) == {"evidence_id", "kind", "locator", "content_sha256",
+                                     "retrieved_at", "valid_until", "status"}
+
+
+@pytest.mark.parametrize("precision", [4, 28])
+def test_quantity_sum_is_exact_under_low_ambient_precision(normalized, precision):
+    data = copy.deepcopy(normalized)
+    part = next(e for e in data["events"] if e["event_type"] == "partially_delivered")
+    part["quantity"] = {"amount": "12345678901234567890.12345678901234567890", "unit": "tonne"}
+    tiny = copy.deepcopy(part)
+    tiny["event_id"] = "tiny-tonne"
+    tiny["quantity"] = {"amount": "0.00000000000000000001", "unit": "tonne"}
+    other = copy.deepcopy(part)
+    other["event_id"] = "tiny-kg"
+    other["quantity"] = {"amount": "0.00000000000000000001", "unit": "kg"}
+    data["events"].extend((tiny, other))
+    with localcontext() as ctx:
+        ctx.prec = precision
+        got = shipment_timeline(data, part["shipment_id"], now=NOW)["current"]["delivered_quantity"]
+    assert got == {"kg": "0.00000000000000000001",
+                   "tonne": "12345678901234567890.12345678901234567891"}
+
+
+def test_nonoperating_arrival_and_release_do_not_close_operating_eta_or_hold(normalized):
+    data = copy.deepcopy(normalized)
+    hold = next(e for e in data["events"] if e["event_id"] == "evt-002-hold")
+    hold["flags"].append("superseded_by_arrival")
+    for event_type in ("arrived", "port_released"):
+        later = copy.deepcopy(hold)
+        later.update(event_id=f"unusable-{event_type}", event_type=event_type,
+                     occurred_at="2026-10-08T11:00:00+00:00", operating_evidence=False,
+                     flags=["evidence_expired"])
+        data["events"].append(later)
+    current = shipment_timeline(data, "SHP-SYN-002", now=NOW)["current"]
+    assert current["open_eta"]["event_id"] == "evt-002-hold"
+    assert current["on_hold"] is True
+    assert current["unusable_event_ids"] == ["unusable-arrived", "unusable-port_released"]
+
+
+@pytest.mark.parametrize("kind", ["location", "delivery"])
+def test_nonoperating_peer_does_not_create_or_remove_exposure(normalized, kind):
+    data = copy.deepcopy(normalized)
+    data["events"] = [e for e in data["events"] if e["shipment_id"] == "SHP-SYN-002"]
+    trigger = data["events"][0]
+    peer = copy.deepcopy(trigger)
+    peer.update(event_id=f"peer-{kind}", shipment_id="SHP-SYN-FOREIGN",
+                event_type="departed", operating_evidence=kind == "delivery")
+    if kind == "delivery":
+        terminal = copy.deepcopy(peer)
+        terminal.update(event_id="expired-delivery", event_type="delivered", operating_evidence=False)
+        data["events"].extend((peer, terminal))
+    else:
+        data["events"].append(peer)
+    got = affected_shipments(data, trigger["event_id"], now=NOW)
+    foreign = [row for row in got["affected"] if row["shipment_id"] == "SHP-SYN-FOREIGN"]
+    assert (len(foreign) == 1) == (kind == "delivery")
+    assert not any(row["shipment_id"] == "SHP-SYN-FOREIGN" for row in got["excluded"])
+    if foreign:
+        assert foreign[0]["latest_event_type"] == "departed"
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda d: d["events"].append("broken"),
+    lambda d: d["events"][0].pop("occurred_at"),
+    lambda d: d["events"][0].pop("operating_evidence"),
+    lambda d: d["events"][0].update(event_type=[]),
+    lambda d: d["events"][0].update(evidence=[None]),
+    lambda d: d["events"][0]["evidence"][0].update(status=[]),
+    lambda d: d["events"][0]["evidence"][0].pop("valid_until"),
+    lambda d: d["events"][0].update(facility={"kind": "port"}),
+    lambda d: d["events"][0].update(quantity={"amount": "NaN", "unit": "tonne"}),
+    lambda d: d["events"][0].update(quantity={"amount": "9" * 4_001, "unit": "tonne"}),
+    lambda d: d["shipments"].update({"SHP-SYN-001": None}),
+    lambda d: d["rejected"].append({"event_id": "bad"}),
+    lambda d: d["rejected"].append({"record_index": True, "event_id": None,
+                                     "reason": "bad", "details": []}),
+])
+def test_malformed_consumed_nested_input_returns_controlled_error(normalized, mutation):
+    data = copy.deepcopy(normalized)
+    mutation(data)
+    for result in (shipment_timeline(data, "SHP-SYN-001", now=NOW, records=RECORDS),
+                   affected_shipments(data, "evt-002-hold", now=NOW)):
+        assert result["status"] == "error"
+        assert result["reasons"] == ["invalid_normalized_input"]
+        assert result.get("events", result.get("affected")) == []
+
+
+@pytest.mark.parametrize("limit", [-1, True, "86400", None])
+def test_invalid_age_limit_is_controlled(normalized, limit):
+    assert shipment_timeline(normalized, "SHP-SYN-002", now=NOW,
+                             max_age_seconds=limit)["status"] == "error"
+    assert affected_shipments(normalized, "evt-002-hold", now=NOW,
+                              max_age_seconds=limit)["status"] == "error"
+
+
+def test_age_limit_uses_full_precision(normalized):
+    assert shipment_timeline(normalized, "SHP-SYN-002", now="2026-10-09T12:00:00Z")["status"] == "ok"
+    assert shipment_timeline(normalized, "SHP-SYN-002", now="2026-10-09T12:00:00.000001Z")["status"] == "stale"
+
+
+def test_records_shape_is_controlled(normalized):
+    got = shipment_timeline(normalized, "SHP-SYN-002", now=NOW, records="not-a-list")
+    assert got["status"] == "error" and got["reasons"] == ["invalid_records"] and got["events"] == []
 
 
 def test_shipment_with_only_rejected_records_is_empty_and_says_why(normalized):

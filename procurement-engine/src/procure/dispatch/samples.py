@@ -39,5 +39,22 @@ def load_samples() -> dict:
     return data
 
 
+REPLAY_FILE = PROJECT_ROOT / "tests" / "fixtures" / "shipments" / "replay_events.json"
+
+
+def load_replay_samples() -> dict:
+    """The labelled synthetic replay events, keyed by sample ID, with the file notice."""
+    try:
+        content = json.loads(Path(REPLAY_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SampleUnavailable("replay_events") from exc
+    if not isinstance(content, dict) or content.get("synthetic") is not True or \
+            not isinstance(content.get("samples"), list) or \
+            not all(isinstance(s, dict) and isinstance(s.get("record"), dict) and s["record"].get("synthetic") is True
+                    for s in content["samples"]):
+        raise SampleUnavailable("replay_events")
+    return content
+
+
 def source_info() -> dict:
     return {**SOURCE, "files": [str(Path(p).relative_to(PROJECT_ROOT)) for p in SAMPLE_FILES.values()]}

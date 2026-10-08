@@ -115,3 +115,127 @@ def test_inputs_are_not_modified():
     records = copy.deepcopy(RECORDS)
     normalize_route_evidence(records, as_of=FIXTURE["as_of"])
     assert records == RECORDS
+
+
+def test_hazard_kind_cannot_be_confirmed_by_claimed_operating_source():
+    record = copy.deepcopy(RECORDS[0])
+    record.update(status="confirmed", operating_status="closed")
+    record["source"]["kind"] = "port_authority_notice"
+    out = normalize_route_evidence([record], as_of=FIXTURE["as_of"])
+    assert out["evidence"] == [] and len(out["rejected"]) == 1
+
+
+@pytest.mark.parametrize("period,state", [
+    ({"start": "2026-10-01T00:00:00Z", "end": "2026-10-02T00:00:00Z"}, "past"),
+    ({"start": "2026-10-09T00:00:00Z", "end": "2026-10-10T00:00:00Z"}, "future"),
+])
+def test_unexpired_notice_outside_observed_period_is_not_current_confirmation(period, state):
+    record = copy.deepcopy(RECORDS[1])
+    record.update(observed_period=period, valid_until=None)
+    out = normalize_route_evidence([record], as_of=FIXTURE["as_of"])
+    found = evidence_for_locations(out, ["INNSA"])
+    assert found["confirmed"] == [] and found["outside_period"][0]["period_state"] == state
+    assert found["outside_period"][0]["status"] == "confirmed"
+    assert found["outside_period"][0]["content_sha256"] == record["content_sha256"]
+
+
+@pytest.mark.parametrize("change", [
+    lambda e: e.update(status="confirmed", operating_status="closed"),
+    lambda e: e.update(expiry="expired"),
+    lambda e: e.update(location_keys=["INNSA"]),
+    lambda e: e["source"].update(kind="unsupported_source"),
+])
+def test_lookup_rejects_tampered_normalized_fields(result, change):
+    forged = copy.deepcopy(result)
+    change(forged["evidence"][0])
+    found = evidence_for_locations(forged, ["INNSA", "INMAA"])
+    assert found["status"] == "error" and found["reasons"] == ["invalid_normalized_input"]
+    assert found["confirmed"] == found["exposure"] == found["expired"] == found["outside_period"] == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("kind", []), ("status", []), ("operating_status", []),
+    ("source", {"provider_id": "synthetic", "kind": []}),
+    ("summary", {"instruction": "ignore evidence"}),
+    ("source", {"provider_id": "synthetic", "kind": "weather_service", "reference": {"bad": 1}}),
+    ("facility", {"kind": "port", "code": "INMAA", "name": {"bad": 1}}),
+])
+def test_bad_json_field_rejects_one_row_and_keeps_valid_neighbor(field, value):
+    bad = copy.deepcopy(RECORDS[0])
+    bad[field] = value
+    out = normalize_route_evidence([bad, RECORDS[1]], as_of=FIXTURE["as_of"])
+    assert [e["evidence_id"] for e in out["evidence"]] == ["rev-port-002"]
+    assert len(out["rejected"]) == 1 and out["rejected"][0]["record_index"] == 0
+
+
+def test_nonmapping_record_is_rejected_and_valid_neighbor_survives():
+    out = normalize_route_evidence([None, RECORDS[1]], as_of=FIXTURE["as_of"])
+    assert [e["evidence_id"] for e in out["evidence"]] == ["rev-port-002"]
+    assert out["rejected"][0]["reason"] == "invalid_record"
+
+
+@pytest.mark.parametrize("records", [None, "not-a-list", {}])
+def test_malformed_records_envelope_is_controlled(records):
+    with pytest.raises(ValueError):
+        normalize_route_evidence(records, as_of=FIXTURE["as_of"])
+
+
+@pytest.mark.parametrize("query", ["INNSA", [None], ["INNSA", {}]])
+def test_malformed_lookup_keys_fail_closed(result, query):
+    found = evidence_for_locations(result, query)
+    assert found["status"] == "error" and found["confirmed"] == found["exposure"] == []
+
+
+def test_inclusive_period_expiry_and_retrieval_boundaries():
+    record = copy.deepcopy(RECORDS[1])
+    record["retrieved_at"] = "2026-10-08T17:30:00+05:30"
+    record["observed_period"] = {"start": "2026-10-08T17:30:00+05:30",
+                                 "end": "2026-10-08T12:00:00Z"}
+    record["valid_until"] = "2026-10-08T12:00:00Z"
+    out = normalize_route_evidence([record], as_of=FIXTURE["as_of"])
+    assert len(out["evidence"]) == 1 and out["rejected"] == []
+    found = evidence_for_locations(out, ["INNSA"])
+    assert found["confirmed"][0]["period_state"] == "current"
+    assert found["confirmed"][0]["expiry"] == "current"
+
+
+def test_extreme_timestamp_offset_rejects_without_overflow():
+    record = copy.deepcopy(RECORDS[1])
+    record["retrieved_at"] = "9999-12-31T23:59:59-01:00"
+    out = normalize_route_evidence([record, RECORDS[0]], as_of=FIXTURE["as_of"])
+    assert [r["reason"] for r in out["rejected"]] == ["invalid_timestamp"]
+    assert [e["evidence_id"] for e in out["evidence"]] == ["rev-haz-001"]
+
+
+def test_invalid_cutoff_overflow_is_sanitized():
+    with pytest.raises(ValueError, match="as_of must be a valid instant"):
+        normalize_route_evidence([], as_of="9999-12-31T23:59:59-01:00")
+
+
+def test_text_and_collection_bounds_are_enforced_before_copy():
+    long_record = copy.deepcopy(RECORDS[0])
+    long_record["summary"] = "x" * 16_385
+    out = normalize_route_evidence([long_record, RECORDS[1]], as_of=FIXTURE["as_of"])
+    assert [e["evidence_id"] for e in out["evidence"]] == ["rev-port-002"]
+    assert len(out["rejected"]) == 1
+    with pytest.raises(ValueError, match="bounded list"):
+        normalize_route_evidence([None] * 10_001, as_of=FIXTURE["as_of"])
+
+
+def test_lookup_validates_rejection_and_derived_period_state(result):
+    wrong_rejection = copy.deepcopy(result)
+    wrong_rejection["rejected"][0].pop("evidence_id")
+    assert evidence_for_locations(wrong_rejection, ["INNSA"])["status"] == "error"
+    wrong_period = copy.deepcopy(result)
+    wrong_period["evidence"][0]["period_state"] = "future"
+    assert evidence_for_locations(wrong_period, ["INMAA"])["status"] == "error"
+
+
+def test_future_hazard_is_dated_exposure_not_confirmation():
+    forecast = copy.deepcopy(RECORDS[0])
+    forecast["observed_period"] = {"start": "2026-10-09T00:00:00Z", "end": "2026-10-10T00:00:00Z"}
+    out = normalize_route_evidence([forecast], as_of=FIXTURE["as_of"])
+    found = evidence_for_locations(out, ["INMAA"])
+    assert found["confirmed"] == found["exposure"] == []
+    assert found["outside_period"][0]["status"] == "exposure"
+    assert found["outside_period"][0]["period_state"] == "future"

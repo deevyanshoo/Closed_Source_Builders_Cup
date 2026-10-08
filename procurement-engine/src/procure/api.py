@@ -17,6 +17,7 @@ from .backtest import run_backtest
 from .decision import PurchaseRequest, headline_impact, price_weather, recommend
 from .production.http_comparison import router as recovery_comparison_router
 from .offers.http import router as offers_router
+from .dispatch.http import router as dispatch_router
 from .features import load_series
 from .forecast.models import GBM_BACKEND
 from .forecast.simulate import PlanningCalendarUnavailable
@@ -324,6 +325,7 @@ app = FastAPI(title="AI Procurement Engine", version="0.1.0", lifespan=lifespan,
               description="When to buy imported raw materials, how much, and why. Prototype.")
 app.include_router(recovery_comparison_router)
 app.include_router(offers_router)
+app.include_router(dispatch_router)
 
 
 @app.exception_handler(PlanningCalendarUnavailable)

@@ -12,11 +12,13 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"closedsource/gateway/internal/contract"
@@ -38,13 +40,27 @@ func main() {
 	if err != nil {
 		log.Fatal("invalid gateway configuration")
 	}
-	cfg, remaining, err := withShipmentLocalFlags(cfg, os.Args[1:])
+	demoFDs, arguments, err := localDemoFlags(cfg.Mode, os.Args[1:])
+	if err != nil {
+		log.Fatal("invalid local demo configuration")
+	}
+	if demoFDs != nil && addr != "127.0.0.1:8844" {
+		log.Fatal("invalid local demo address")
+	}
+	cfg, remaining, err := withShipmentLocalFlags(cfg, arguments)
 	if err != nil {
 		log.Fatal("invalid local shipment configuration")
 	}
 	cfg, err = withVoiceLocalFlags(cfg, remaining)
 	if err != nil {
 		log.Fatal("invalid local voice configuration")
+	}
+	listener, err := adoptLocalDemoListener(demoFDs, addr)
+	if err != nil {
+		log.Fatal("local demo listener unavailable")
+	}
+	if listener != nil {
+		defer listener.Close()
 	}
 	var handler http.Handler
 	if cfg.Mode == "private_machine" {
@@ -60,7 +76,14 @@ func main() {
 		}
 		handler = newStateHandler(cfg)
 	}
-	if err := serveGateway(addr, handler); err != nil {
+	if listener != nil {
+		signals, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		err = serveGatewayWithContext(signals, listener, handler, 5*time.Second)
+	} else {
+		err = serveGateway(addr, handler)
+	}
+	if err != nil {
 		log.Fatal("gateway server unavailable")
 	}
 }

@@ -101,13 +101,6 @@ def get_route_evidence(as_of: str | None = Query(None), location: list[str] = Qu
     return _respond(evidence_for_locations(evidence, location), now, now_source)
 
 
-def _sample_view(sample: dict) -> dict:
-    record = sample["record"]
-    return {"sample_id": sample.get("sample_id"), "title": sample.get("title"), "description": sample.get("description"),
-            "event_id": record.get("event_id"), "shipment_id": record.get("shipment_id"),
-            "event_type": record.get("type"), "synthetic": True}
-
-
 @router.get("/replay/samples")
 def list_replay_samples():
     try:
@@ -115,7 +108,7 @@ def list_replay_samples():
     except samples.SampleUnavailable:
         return _error(503, "sample_data_unavailable")
     return {"status": "ok", "reasons": [], "synthetic": True, "notice": content.get("notice"),
-            "samples": [_sample_view(s) for s in content["samples"]]}
+            "samples": [samples.sample_view(s) for s in content["samples"]]}
 
 
 @router.get("/replay")
@@ -135,4 +128,4 @@ def replay_sample(sample: str | None = Query(None), as_of: str | None = Query(No
         return _error(404, "unknown_sample")
     result = replay_event(data["milestones"]["records"], chosen["record"], as_of=as_of, now=now,
                           snapshot=data["snapshot"], route_evidence_records=data["route_evidence"]["records"])
-    return _respond({**result, "sample": _sample_view(chosen)}, now, now_source)
+    return _respond({**result, "sample": samples.sample_view(chosen)}, now, now_source)

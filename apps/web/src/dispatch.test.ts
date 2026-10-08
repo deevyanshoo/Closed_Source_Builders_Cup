@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, statusLabel } from './dispatch';
+import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatQuantities, freshness, replayReason, statusLabel } from './dispatch';
 import type { ShipmentStatus } from './dispatch';
 
 describe('local dispatch fixture adapter', () => {
@@ -69,5 +69,57 @@ describe('display helpers', () => {
   it('marks data older than a day as stale', () => {
     expect(freshness('2026-10-08T12:00:00+00:00', new Date('2026-10-08T13:00:00Z'))).toEqual({ ageSeconds: 3600, stale: false });
     expect(freshness('2026-10-08T12:00:00+00:00', new Date('2026-10-10T12:00:01Z')).stale).toBe(true);
+  });
+});
+
+describe('port-delay replay (local adapter)', () => {
+  const adapter = createDispatchFixtureAdapter();
+
+  it('offers labelled synthetic sample events', async () => {
+    const samples = await adapter.replaySamples();
+    expect(samples.notice).toContain('SYNTHETIC');
+    expect(samples.samples.map(s => s.sample_id)).toEqual(['innsa-hold-new-eta', 'innsa-release', 'inmaa-hold-no-eta', 'eta-after-cutoff']);
+    expect(samples.samples.every(s => s.synthetic)).toBe(true);
+  });
+
+  it('returns before and after with the injected event labelled', async () => {
+    const r = await adapter.replay('innsa-release');
+    expect(r.status).toBe('ok');
+    expect(r.injected).toEqual({ event_id: 'rpl-innsa-release', shipment_id: 'SHP-SYN-002', event_type: 'port_released', synthetic: true, label: 'Synthetic replay event, not observed data' });
+    expect(r.changes.map(c => [c.shipment_id, c.before?.status, c.after?.status])).toEqual([['SHP-SYN-002', 'on_hold', 'delayed']]);
+    expect(r.timeline?.after.filter(e => e.replay_injected).map(e => e.event_id)).toEqual(['rpl-innsa-release']);
+    expect(r.recovery_link).toBe('/shipment-recovery');
+  });
+
+  it('keeps the material screen from the propagation projection', async () => {
+    const r = await adapter.replay('innsa-hold-new-eta');
+    const screen = r.material_screen;
+    if (screen?.status !== 'screened') throw new Error('expected a screened material result');
+    expect(screen.arrival_changes[0]).toMatchObject({ line_id: 'LINE-002-A', quantity: '3000', unit: 'kg', changed_at: '2026-10-16T02:30:00+00:00' });
+    expect((await adapter.replay('inmaa-hold-no-eta')).material_screen).toEqual({ status: 'not_run', reason: 'hold_without_new_eta', event_id: 'rpl-inmaa-hold' });
+  });
+
+  it('shows the cutoff rejection as an error, and rejects unknown samples', async () => {
+    const r = await adapter.replay('eta-after-cutoff');
+    expect([r.status, r.reasons]).toEqual(['error', ['event_after_as_of']]);
+    await expect(adapter.replay('nope')).rejects.toBeInstanceOf(DispatchError);
+  });
+
+  it('explains what changed and why', async () => {
+    const release = (await adapter.replay('innsa-release')).changes[0];
+    expect(explainChange(release)).toEqual([
+      'Status: On hold → Delayed',
+      'Signals added: none · removed: on hold',
+      'On hold: yes → no',
+      'Last milestone: port hold → port released',
+    ]);
+    const hold = (await adapter.replay('innsa-hold-new-eta')).changes[0];
+    expect(explainChange(hold)).toEqual(['Expected arrival: 2026-10-12 02:30 UTC (stated ETA) → 2026-10-16 02:30 UTC (stated ETA)']);
+  });
+
+  it('describes reasons in plain words', () => {
+    expect(replayReason('event_after_as_of')).toMatch(/after the data cutoff/);
+    expect(replayReason('hold_without_new_eta')).toMatch(/not a measured delay/);
+    expect(replayReason('something_new')).toBe('something new');
   });
 });

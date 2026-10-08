@@ -56,5 +56,13 @@ def load_replay_samples() -> dict:
     return content
 
 
+def sample_view(sample: dict) -> dict:
+    """What a client needs to offer a replay sample, without the full record."""
+    record = sample["record"]
+    return {"sample_id": sample.get("sample_id"), "title": sample.get("title"), "description": sample.get("description"),
+            "event_id": record.get("event_id"), "shipment_id": record.get("shipment_id"),
+            "event_type": record.get("type"), "synthetic": True}
+
+
 def source_info() -> dict:
     return {**SOURCE, "files": [str(Path(p).relative_to(PROJECT_ROOT)) for p in SAMPLE_FILES.values()]}

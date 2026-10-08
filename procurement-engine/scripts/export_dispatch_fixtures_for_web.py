@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from procure.dispatch import affected_shipments, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.dispatch import affected_shipments, replay_event, samples, shipment_list, shipment_timeline  # noqa: E402
 from procure.events.ingest import normalize_milestones  # noqa: E402
 from procure.route_evidence import evidence_for_locations, normalize_route_evidence  # noqa: E402
 
@@ -36,13 +36,21 @@ def main() -> int:
     affected = {e["event_id"]: affected_shipments(normalized, e["event_id"], now=AS_OF) for e in normalized["events"]}
     route = {row["shipment_id"]: evidence_for_locations(evidence, row["location_keys"])
              for row in listing["shipments"] if row["location_keys"]}
+    replay_content = samples.load_replay_samples()
+    replay = {"notice": replay_content["notice"],
+              "samples": [samples.sample_view(sample) for sample in replay_content["samples"]],
+              "results": {sample["sample_id"]: {
+                  **replay_event(data["milestones"]["records"], sample["record"], as_of=AS_OF, now=AS_OF,
+                                 snapshot=data["snapshot"], route_evidence_records=data["route_evidence"]["records"]),
+                  "sample": samples.sample_view(sample)} for sample in replay_content["samples"]}}
     revision = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
                               text=True).stdout.strip()
     out = {"synthetic": True, "source": "local_fixture_adapter", "generated_from_revision": revision,
            "as_of": listing["as_of"], "notice": samples.SOURCE["notice"], "files": samples.source_info()["files"],
-           "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route}
+           "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route,
+           "replay": replay}
     OUT.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
-    print(f"Wrote {len(timelines)} shipments, {len(affected)} events to {OUT} ({OUT.stat().st_size // 1024} KiB)")
+    print(f"Wrote {len(timelines)} shipments, {len(affected)} events, {len(replay['results'])} replays to {OUT} ({OUT.stat().st_size // 1024} KiB)")
     return 0
 
 

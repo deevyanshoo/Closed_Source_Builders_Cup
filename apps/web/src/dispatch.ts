@@ -28,9 +28,18 @@ export type TimelineCurrent = {
   last_event_type: string | null; open_eta: { eta: string; event_id: string } | null; on_hold: boolean;
   delivered_quantity: Record<string, string>; unusable_event_ids: string[];
 };
+export type LeadTime = {
+  status: 'ok' | 'not_available' | 'unsupported_country' | 'unsupported_year' | 'source_unavailable' | 'invalid_range';
+  reason: string | null; basis: 'departure_to_arrival' | 'cutoff_to_expected_arrival' | null; country: string | null;
+  location: string | null; start: string | null; end: string | null; working_days: number | null;
+  calendar_days: number | null; weekend_days: number | null; holidays: { date: string; name: string }[];
+  not_applied: { date: string; name: string; reason: string }[]; synthetic: boolean | null;
+  source: { provider_id: string; kind: string } | null; convention: string; note: string;
+};
 export type TimelineResponse = {
   status: ReadStatus; reasons: string[]; as_of: string | null; shipment_id: string; events: TimelineEvent[];
   current: TimelineCurrent | null; flags: string[]; rejected_records: { record_index: number; event_id: string | null; reason: string }[];
+  lead_time?: LeadTime;
 };
 export type AffectedRow = { shipment_id: string; relation: 'self' | 'shares_location'; basis: string[]; latest_event_type: string; status: 'exposure' };
 export type AffectedResponse = {
@@ -194,3 +203,33 @@ const REPLAY_REASONS: Record<string, string> = {
   no_snapshot: 'No plan snapshot, so the material screen was not run.',
 };
 export const replayReason = (reason: string) => REPLAY_REASONS[reason] ?? humanize(reason);
+
+const LEAD_TIME_UNAVAILABLE: Record<string, string> = {
+  not_available: 'No departure and arrival, or cutoff and ETA, to count between.',
+  unsupported_country: 'No approved holiday calendar for this country',
+  unsupported_year: 'No holiday calendar for that year',
+  source_unavailable: 'The holiday calendar source is unavailable',
+  invalid_range: 'The expected arrival is before the start date',
+};
+
+/** Lead time as display text. Never shows a number unless the calendar supports the country and year. */
+export function formatLeadTime(lead: LeadTime): { headline: string; detail: string; source: string } {
+  const source = lead.synthetic
+    ? 'Synthetic holiday table: invented dates, not real public holidays.'
+    : lead.source ? `Holidays from ${lead.source.provider_id}.` : '';
+  if (lead.status !== 'ok' || lead.working_days === null) {
+    const where = lead.country ? ` (${lead.country})` : '';
+    const reason = lead.reason && lead.status !== 'not_available' ? `: ${humanize(lead.reason)}` : '';
+    return { headline: 'Not available', detail: `${LEAD_TIME_UNAVAILABLE[lead.status] ?? humanize(lead.status)}${where}${reason}`, source };
+  }
+  const span = lead.basis === 'departure_to_arrival' ? `Departure ${lead.start} to arrival ${lead.end}` : `Cutoff ${lead.start} to expected arrival ${lead.end}`;
+  const holidays = lead.holidays.length
+    ? `${lead.holidays.length} ${lead.holidays.length === 1 ? 'holiday' : 'holidays'} (${lead.holidays.map(h => h.name).join(', ')})`
+    : 'no holidays';
+  const where = lead.location ? ` (${humanize(lead.location)})` : '';
+  return {
+    headline: `${lead.working_days} working ${lead.working_days === 1 ? 'day' : 'days'}`,
+    detail: `${span} in ${lead.country}${where}: ${lead.calendar_days} calendar days, ${lead.weekend_days} weekend days, ${holidays}.`,
+    source,
+  };
+}

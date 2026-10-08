@@ -65,3 +65,6 @@
 .dispatch-replay-route p,.dispatch-material{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .dispatch-material ul{padding-left:18px;margin:0}
 @media(max-width:800px){.dispatch-replay{padding:16px}.dispatch-changes .dispatch-event-head{flex-direction:column;align-items:flex-start}}
+.dispatch-lead-time{grid-column:1/-1}
+.dispatch-lead-time small{display:block;color:#555;font-size:11px;line-height:1.5;margin-top:2px}
+.dispatch-lead-time[data-status=ok] strong{font-size:15px}

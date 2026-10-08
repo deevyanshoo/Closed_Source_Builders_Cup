@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatQuantities, freshness, replayReason, statusLabel } from './dispatch';
-import type { ShipmentStatus } from './dispatch';
+import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness, replayReason, statusLabel } from './dispatch';
+import type { LeadTime, ShipmentStatus } from './dispatch';
 
 describe('local dispatch fixture adapter', () => {
   const adapter = createDispatchFixtureAdapter();
@@ -121,5 +121,37 @@ describe('port-delay replay (local adapter)', () => {
     expect(replayReason('event_after_as_of')).toMatch(/after the data cutoff/);
     expect(replayReason('hold_without_new_eta')).toMatch(/not a measured delay/);
     expect(replayReason('something_new')).toBe('something new');
+  });
+});
+
+describe('working-day lead time', () => {
+  const adapter = createDispatchFixtureAdapter();
+
+  it('carries the Python lead time for each timeline', async () => {
+    const t = await adapter.timeline('SHP-SYN-004');
+    expect(t.lead_time).toMatchObject({ status: 'ok', basis: 'cutoff_to_expected_arrival', country: 'IN', working_days: 4, synthetic: true });
+    expect(formatLeadTime(t.lead_time!)).toEqual({
+      headline: '4 working days',
+      detail: 'Cutoff 2026-10-08 to expected arrival 2026-10-15 in IN (lane destination: INMAA): 7 calendar days, 2 weekend days, 1 holiday (Synthetic closure day IN-A).',
+      source: 'Synthetic holiday table: invented dates, not real public holidays.',
+    });
+    expect(formatLeadTime((await adapter.timeline('SHP-SYN-001')).lead_time!).detail).toMatch(/^Departure 2026-09-20 to arrival 2026-10-06 in IN/);
+  });
+
+  it('says plainly when no lead time can be given', async () => {
+    const none = (await adapter.timeline('SHP-SYN-003')).lead_time!;
+    expect(formatLeadTime(none).headline).toBe('Not available');
+    expect(formatLeadTime(none).detail).toMatch(/No departure and arrival, or cutoff and ETA/);
+    const base = (await adapter.timeline('SHP-SYN-004')).lead_time!;
+    const states: [LeadTime['status'], string][] = [
+      ['unsupported_country', 'No approved holiday calendar for this country'],
+      ['unsupported_year', 'No holiday calendar for that year'],
+      ['source_unavailable', 'The holiday calendar source is unavailable'],
+    ];
+    for (const [status, text] of states) {
+      const view = formatLeadTime({ ...base, status, reason: 'x', working_days: null });
+      expect(view.headline).toBe('Not available');
+      expect(view.detail).toContain(text);
+    }
   });
 });

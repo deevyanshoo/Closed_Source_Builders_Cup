@@ -1,7 +1,8 @@
 """Read-only HTTP routes for the dispatch workspace, mounted under /dispatch.
 
 GET only: shipment list, one shipment's timeline, shipments affected by an event, route
-evidence for locations, and a before-and-after replay of one bundled synthetic sample event
+evidence for locations (the timeline adds a working-day lead time over the synthetic holiday
+table), and a before-and-after replay of one bundled synthetic sample event
 (``/replay``; ``/replay/samples`` lists them). Nothing is written. ``as_of`` is required and is the information cutoff:
 records observed or retrieved after it are not used. ``now`` (for staleness) is optional and
 defaults to the server's UTC clock; the response says which was used.
@@ -18,9 +19,11 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
+from ..calendars import SyntheticHolidayProvider
 from ..events.ingest import normalize_milestones
 from ..route_evidence import evidence_for_locations, normalize_route_evidence
 from . import samples
+from .lead_time import shipment_lead_time
 from .read_models import affected_shipments, shipment_timeline
 from .replay import replay_event
 from .summary import shipment_list
@@ -76,6 +79,8 @@ def get_shipment(shipment_id: str, as_of: str | None = Query(None), now: str | N
         return ctx
     data, normalized, now, now_source = ctx
     result = shipment_timeline(normalized, shipment_id, now=now, records=data["milestones"]["records"])
+    if result["status"] != "error":
+        result["lead_time"] = shipment_lead_time(result, SyntheticHolidayProvider())
     return _respond(result, now, now_source)
 
 

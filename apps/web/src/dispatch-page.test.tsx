@@ -26,6 +26,17 @@ describe('dispatch workspace components', () => {
     expect(html).toContain('does not preselect');
   });
 
+  it('shows the working-day lead time with its synthetic calendar, or why it is not available', async () => {
+    const list = await adapter.listShipments();
+    const render = async (id: string) => renderToStaticMarkup(<MemoryRouter><ShipmentDetail row={list.shipments.find(s => s.shipment_id === id)!} timeline={await adapter.timeline(id)} onShowAffected={() => {}} /></MemoryRouter>);
+    const ok = await render('SHP-SYN-004');
+    expect(ok).toContain('Working-day lead time');
+    expect(ok).toContain('4 working days');
+    expect(ok).toContain('Synthetic holiday table');
+    const none = await render('SHP-SYN-003');
+    expect(none).toContain('Not available');
+  });
+
   it('labels route evidence as confirmed or exposure with source, times and expiry', async () => {
     const html = renderToStaticMarkup(<RouteEvidencePanel evidence={await adapter.routeEvidence('SHP-SYN-002')} />);
     expect(html).toContain('Confirmed operating status');

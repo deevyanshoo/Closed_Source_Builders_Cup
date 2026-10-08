@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatQuantities, freshness, humanize,
+  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness, humanize,
   replayReason, statusLabel,
 } from './dispatch';
 import type {
-  AffectedResponse, DispatchAdapter, EvidenceItem, EvidenceResponse, ListResponse, MaterialScreen, ReplayResponse, ReplaySample,
+  AffectedResponse, DispatchAdapter, EvidenceItem, EvidenceResponse, LeadTime, ListResponse, MaterialScreen, ReplayResponse, ReplaySample,
   ReplaySamplesResponse, ShipmentRow, TimelineEvent, TimelineResponse,
 } from './dispatch';
 import './dispatch.css';
@@ -39,6 +39,14 @@ function location(event: TimelineEvent): string {
   return parts.join('; ');
 }
 
+function LeadTimeFact({ lead }: { lead: LeadTime }) {
+  const view = formatLeadTime(lead);
+  return <div className="dispatch-lead-time" data-status={lead.status}>
+    <dt>Working-day lead time</dt>
+    <dd><strong>{view.headline}</strong><small>{view.detail}</small>{view.source && <small>{view.source}</small>}</dd>
+  </div>;
+}
+
 export function ShipmentDetail({ row, timeline, onShowAffected }: { row: ShipmentRow; timeline: TimelineResponse; onShowAffected: (eventId: string) => void }) {
   const current = timeline.current;
   return <section className="dispatch-detail" aria-label={`Shipment ${row.shipment_id}`}>
@@ -51,6 +59,7 @@ export function ShipmentDetail({ row, timeline, onShowAffected }: { row: Shipmen
       <div><dt>Plan baseline</dt><dd>{row.baseline_arrival_at ? formatInstant(row.baseline_arrival_at) : 'No plan baseline'}</dd></div>
       <div><dt>Delivered so far</dt><dd>{formatQuantities(current?.delivered_quantity ?? row.delivered_quantity)}</dd></div>
       <div><dt>On hold</dt><dd>{(current?.on_hold ?? row.on_hold) ? 'Yes' : 'No'}</dd></div>
+      {timeline.lead_time && <LeadTimeFact lead={timeline.lead_time} />}
     </dl>
     <p className="dispatch-recovery">
       <Link className="secondary-button" to="/shipment-recovery">View recovery options</Link>

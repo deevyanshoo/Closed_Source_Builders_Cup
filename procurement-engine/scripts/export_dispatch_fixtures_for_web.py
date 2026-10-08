@@ -17,7 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from procure.calendars import SyntheticHolidayProvider  # noqa: E402
 from procure.dispatch import affected_shipments, replay_event, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.dispatch.lead_time import shipment_lead_time  # noqa: E402
 from procure.events.ingest import normalize_milestones  # noqa: E402
 from procure.route_evidence import evidence_for_locations, normalize_route_evidence  # noqa: E402
 
@@ -33,6 +35,9 @@ def main() -> int:
     timelines = {row["shipment_id"]: shipment_timeline(normalized, row["shipment_id"], now=AS_OF,
                                                        records=data["milestones"]["records"])
                  for row in listing["shipments"]}
+    calendar = SyntheticHolidayProvider()
+    for timeline in timelines.values():
+        timeline["lead_time"] = shipment_lead_time(timeline, calendar)
     affected = {e["event_id"]: affected_shipments(normalized, e["event_id"], now=AS_OF) for e in normalized["events"]}
     route = {row["shipment_id"]: evidence_for_locations(evidence, row["location_keys"])
              for row in listing["shipments"] if row["location_keys"]}

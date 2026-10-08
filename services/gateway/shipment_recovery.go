@@ -110,7 +110,7 @@ func (s *stateServer) shipmentHTTPRoute(w http.ResponseWriter, r *http.Request) 
 			shipmentErr(w, 405, "method_not_allowed", "Method not allowed")
 			return
 		}
-		if r.ContentLength > 0 || len(r.TransferEncoding) > 0 {
+		if r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
 			shipmentErr(w, 422, "invalid_request", "Invalid shipment recovery request")
 			return
 		}
@@ -146,10 +146,14 @@ func (s *stateServer) shipmentHTTPRoute(w http.ResponseWriter, r *http.Request) 
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4097))
 	if err != nil {
+		if errors.Is(budget.Err(), context.DeadlineExceeded) || !time.Now().Before(intakeDeadline) {
+			shipmentErr(w, 504, "shipment_recovery_timeout", "Shipment recovery timed out")
+			return
+		}
 		if errors.Is(r.Context().Err(), context.Canceled) {
 			return
 		}
-		if budget.Err() != nil || !time.Now().Before(intakeDeadline) {
+		if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			shipmentErr(w, 504, "shipment_recovery_timeout", "Shipment recovery timed out")
 			return
 		}

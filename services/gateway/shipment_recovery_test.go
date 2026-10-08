@@ -19,6 +19,10 @@ type shipmentAuth struct {
 	allowed   bool
 }
 
+type shipmentReadFunc func([]byte) (int, error)
+
+func (f shipmentReadFunc) Read(p []byte) (int, error) { return f(p) }
+
 type shipmentBlockingWriter struct {
 	*httptest.ResponseRecorder
 	entered chan struct{}
@@ -159,6 +163,33 @@ func TestShipmentHTTPValidatedNoEligibleAndChildTamper(t *testing.T) {
 	}
 }
 
+func TestShipmentContextListRejectsUnknownLengthBodyWithoutLeakingMetadata(t *testing.T) {
+	spec := shipmentTestSpec(t)
+	a := newShipmentAdapter(shipmentExecutorFunc(shipmentFakeChild))
+	meta, err := a.InstallHostContext(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &stateServer{auth: shipmentAuth{principal{"P", "W", "viewer"}, true}, shipment: a}
+	path := "/v2/workspaces/W/shipment-recovery/contexts"
+	knownZero := shipmentRequest(t, http.MethodGet, path, "")
+	knownZero.ContentLength = 0
+	good := httptest.NewRecorder()
+	s.shipmentHTTPRoute(good, knownZero)
+	if good.Code != 200 || !strings.Contains(good.Body.String(), meta.ContextID) {
+		t.Fatalf("known-zero list status=%d", good.Code)
+	}
+	unknown := shipmentRequest(t, http.MethodGet, path, "")
+	unknown.Body = io.NopCloser(strings.NewReader("x"))
+	unknown.ContentLength = -1
+	unknown.TransferEncoding = nil
+	bad := httptest.NewRecorder()
+	s.shipmentHTTPRoute(bad, unknown)
+	if bad.Code != 422 || strings.Contains(bad.Body.String(), meta.ContextID) {
+		t.Fatalf("unknown-length body status=%d", bad.Code)
+	}
+}
+
 func TestShipmentReplacementWinsBeforeLateFakePublication(t *testing.T) {
 	spec := shipmentTestSpec(t)
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -263,6 +294,23 @@ func TestShipmentSlowLoopbackBodyHonorsShorterHandlerDeadline(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != 504 {
 		t.Fatalf("status=%d want504", response.StatusCode)
+	}
+}
+
+func TestShipmentIntakeClientCancellationBeforeDeadlineWritesNothing(t *testing.T) {
+	s := &stateServer{auth: shipmentAuth{principal{"P", "W", "viewer"}, true}}
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := shipmentRequest(t, http.MethodPost, "/v2/workspaces/W/shipment-recovery/comparisons", "")
+	r.Body = io.NopCloser(shipmentReadFunc(func([]byte) (int, error) {
+		cancel()
+		return 0, io.ErrUnexpectedEOF
+	}))
+	r = r.WithContext(parent)
+	w := httptest.NewRecorder()
+	s.shipmentHTTPRoute(w, r)
+	if w.Body.Len() != 0 {
+		t.Fatalf("early client cancellation wrote %d bytes", w.Body.Len())
 	}
 }
 

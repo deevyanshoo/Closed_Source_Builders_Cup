@@ -1,0 +1,18 @@
+{
+  "contract_version": "0.2.0",
+  "context": {
+    "context_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": 1,
+    "workspace_id": "W",
+    "plan_version": "v7",
+    "propagation_snapshot_id": "graph-1",
+    "production_snapshot_id": "s1",
+    "as_of": "2026-10-09T00:00:00Z",
+    "synthetic": true,
+    "source": "host_configured_synthetic",
+    "persistence": "ephemeral",
+    "source_authenticity": "not_verified",
+    "request_sha256": "adeb765f53e3b996602b44cc127b8162286babf7b0516e45a27e79ef7eb68d04"
+  },
+  "outcome_json": "{\"adapter_version\":\"1\",\"status\":\"no_eligible_scenario\",\"synthetic\":true,\"binding\":{\"adapter_version\":\"1\",\"as_of\":\"2026-10-09T00:00:00Z\",\"assignments_sha256\":\"11e0bee6e1da1f658812fa51fa6e5ec9216f9ed46da103a146eef49ba862eae8\",\"joins_sha256\":\"acf2ca98441fb3def2f139504aa3d24ca32ee1fa71c60685a97f57832a1718b2\",\"plan_version\":\"v7\",\"production_sha256\":\"88a456e61be26b78dbe3c65784e9fe9b0744b8d7819cefd71a9d7e0a838f4042\",\"production_snapshot_id\":\"s1\",\"propagation_sha256\":\"d744ab5b47c6110fe3312a8c990739cd22bbb97748a8ed11f3ab3276814260d4\",\"propagation_snapshot_id\":\"graph-1\",\"raw_sha256\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\",\"synthetic\":true,\"workspace_id\":\"W\",\"binding_sha256\":\"f5e53d9cd8ffc834a9f0670bca3d66fb7c97062222dc1570aebc90582f474839\"},\"evidence\":{\"scenarios\":[],\"excluded\":[],\"normalization_rejected\":[],\"normalization_duplicates\":[]},\"comparisons\":[]}"
+}

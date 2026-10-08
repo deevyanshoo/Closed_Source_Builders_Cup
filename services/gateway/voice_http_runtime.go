@@ -134,11 +134,36 @@ func serveGatewayWithContext(parent context.Context, listener net.Listener, hand
 	}
 }
 func (s *stateServer) Shutdown(ctx context.Context) error {
-	if s == nil || s.voice == nil {
+	if s == nil {
 		return nil
 	}
-	return s.voice.Shutdown(ctx)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// Start both cancellations before waiting for either component to reap.
+	done := make(chan error, 2)
+	pending := 0
+	if s.shipment != nil {
+		pending++
+		go func() { done <- s.shipment.Shutdown(ctx) }()
+	}
+	if s.voice != nil {
+		pending++
+		go func() { done <- s.voice.Shutdown(ctx) }()
+	}
+	var result error
+	for pending > 0 {
+		select {
+		case err := <-done:
+			result = errors.Join(result, err)
+			pending--
+		case <-ctx.Done():
+			return errors.Join(result, ctx.Err())
+		}
+	}
+	return result
 }
+
 func (s *stateServer) voiceHTTPRoute(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !voiceHeaders(r) {

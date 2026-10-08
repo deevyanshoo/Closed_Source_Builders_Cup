@@ -26,6 +26,7 @@ import (
 const stateVersion = "0.2.0"
 
 type stateConfig struct {
+	ShipmentContextsPath, ShipmentPythonPath, ShipmentSourcePath            string
 	VoicePythonPath, VoiceSourcePath                                        string
 	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
 	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string
@@ -48,6 +49,7 @@ type identityFile struct {
 	Identities []identity `json:"identities"`
 }
 type stateServer struct {
+	shipment      *shipmentAdapter
 	voice         *voiceHTTPAdapter
 	cfg           stateConfig
 	db            *pgx.ConnConfig
@@ -136,6 +138,7 @@ func newLocalStateServer(cfg stateConfig) *stateServer {
 	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(cfg.Schema) {
 		s.db = nil
 	}
+	s.shipment = initShipmentHTTP(cfg)
 	s.voice = initVoiceHTTP(cfg)
 	if s.voice != nil {
 		s.voice.production = s
@@ -152,6 +155,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		machine = p
 		r = r.WithContext(context.WithValue(r.Context(), machinePrincipalKey{}, p))
+	}
+	if shipmentRouteCandidate(r.URL.Path) {
+		s.shipmentHTTPRoute(w, r)
+		return
 	}
 	if r.URL.Path == "/v2/voice/sessions" || strings.HasPrefix(r.URL.Path, "/v2/voice/sessions/") || r.URL.Path == "/v2/voice/saved-context-sessions" {
 		s.voiceHTTPRoute(w, r)

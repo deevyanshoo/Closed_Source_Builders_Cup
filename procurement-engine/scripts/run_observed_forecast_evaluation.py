@@ -20,7 +20,9 @@ def main() -> int:
     args = parser.parse_args()
     try:
         run_offline_evaluation(args.protocol, args.source_manifest, args.source_file, args.output_dir, args.as_of)
-    except (ValueError, OSError, RuntimeError) as exc:
+    except OSError:
+        parser.exit(2, "offline forecast runner: local source or output unavailable\n")
+    except (ValueError, RuntimeError) as exc:
         parser.exit(2, f"offline forecast runner: {exc}\n")
     print(f"Completed {args.output_dir}")
     return 0

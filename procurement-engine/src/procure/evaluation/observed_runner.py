@@ -9,8 +9,10 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections import defaultdict
+from decimal import Decimal
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +25,20 @@ ARTIFACTS = ("predictions.json", "metrics.csv", "manifest.json", "report.md")
 GRID = (0.8, 0.9, 1.0, 1.1, 1.2, 1.35, 1.5)
 MONTHS = {"training_start": "2016-09", "validation_start": "2021-09", "validation_end": "2023-08",
           "test_start": "2024-03", "test_end": "2026-02"}
+PROTOCOL_FIELDS = {
+    "schema_version": "observed-forecast-runner.v1", "as_of": "2026-10-08",
+    **MONTHS, "purge_start": "2023-09", "purge_end": "2024-02",
+    "latest_eligible_actual": "2026-08",
+    "availability_proxy": "month_m_available_at_end_of_m_plus_1; not historical publication proof",
+    "horizons": [1, 3, 6], "model_leads_from_last_training_month": [2, 4, 7],
+    "training_cutoff": "origin_minus_1", "minimum_consecutive_training_months": 60,
+    "validation_effective_origins": 24, "purged_origins": 6, "test_origins": 24,
+    "base_seed": 42, "n_paths": 1000, "fit_steps": 7, "gbm_refit_every": 1,
+    "bootstrap_rng": "numpy.PCG64", "quantile_method": "linear",
+    "calibration_grid": list(GRID), "selection_relative_improvement": 0.02,
+    "fit_timeout_seconds": 60, "per_series_deadline_seconds": 900,
+    "total_deadline_seconds": 1800,
+}
 
 
 def _sha(raw: bytes) -> str:
@@ -78,15 +94,22 @@ def _check_protocol(protocol: dict, as_of: str) -> None:
         date.fromisoformat(as_of)
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid as_of") from exc
-    for field, expected in MONTHS.items():
-        if protocol.get(field) != expected:
+    for field, expected in PROTOCOL_FIELDS.items():
+        actual = protocol.get(field)
+        if type(actual) is not type(expected) or actual != expected or (
+                isinstance(expected, list) and any(type(a) is not type(e) for a, e in zip(actual, expected))):
             raise ValueError(f"protocol {field} mismatch")
-    if protocol.get("horizons") != [1, 3, 6] or protocol.get("base_seed") != 42 or protocol.get("n_paths") != 1000:
-        raise ValueError("protocol sampling/calendar mismatch")
-    for field in ("snapshot_sha256", "protocol_sha256"):
+    status = protocol.get("status")
+    authorized = protocol.get("observed_execution_authorized")
+    if type(authorized) is not bool or (status, authorized) not in {
+        ("INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD", False),
+        ("APPROVED_OBSERVED_EXECUTION", True),
+    }:
+        raise ValueError("protocol authorization mismatch")
+    for field in ("snapshot_sha256", "protocol_sha256", "source_sha256"):
         value = protocol.get(field)
         if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
-            raise ValueError(f"invalid {field}")
+            raise ValueError(f"protocol invalid {field}")
 
 
 def _check_series(series: dict, start: str, end: str) -> None:
@@ -188,9 +211,13 @@ def _scaled_interval(row: dict, multiplier: float) -> dict:
     p10, p50, p90 = row["p10"], row["p50"], row["p90"]
     if min(p10, p50, p90) <= 0 or not all(math.isfinite(x) for x in (p10, p50, p90)):
         raise ValueError("invalid interval")
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        low = float(p50 * np.exp(multiplier * np.log(p10 / p50)))
-        high = float(p50 * np.exp(multiplier * np.log(p90 / p50)))
+    try:
+        low = p50 if p10 == p50 else min(
+            p50, math.exp(math.log(p50) + multiplier * (math.log(p10) - math.log(p50))))
+        high = p50 if p90 == p50 else max(
+            p50, math.exp(math.log(p50) + multiplier * (math.log(p90) - math.log(p50))))
+    except OverflowError as exc:
+        raise ValueError("calibrated interval overflow") from exc
     if not math.isfinite(low) or not math.isfinite(high) or low <= 0 or high <= 0:
         raise ValueError("calibrated interval overflow")
     return {**row, "p10": low, "p90": high}
@@ -201,9 +228,14 @@ def calibrate_intervals(validation_rows: list[dict]) -> tuple[float, list[dict]]
         raise ValueError("calibration requires 24 distinct validation origins")
     candidates = []
     for multiplier in GRID:
-        rows = [_scaled_interval(row, multiplier) for row in validation_rows]
+        try:
+            rows = [_scaled_interval(row, multiplier) for row in validation_rows]
+        except ValueError:
+            continue
         coverage = sum(row["p10"] <= row["actual"] <= row["p90"] for row in rows) / 24
         candidates.append((abs(coverage - 0.8), multiplier, rows))
+    if not candidates:
+        raise ValueError("calibration_unavailable")
     _, multiplier, rows = min(candidates, key=lambda item: (item[0], item[1]))
     return multiplier, rows
 
@@ -214,7 +246,7 @@ def select_models(validation_rows: list[dict]) -> dict[tuple[str, int], str]:
         key = (row["series_id"], row["horizon"])
         if row["origin"] in grouped[key][row["model"]]:
             raise ValueError("duplicate validation cell")
-        grouped[key][row["model"]][row["origin"]] = abs(row["p50"] - row["actual"])
+        grouped[key][row["model"]][row["origin"]] = abs(Decimal(str(row["p50"])) - Decimal(str(row["actual"])))
     selections = {}
     for key, models in grouped.items():
         naive = models.get("naive", {})
@@ -227,10 +259,35 @@ def select_models(validation_rows: list[dict]) -> dict[tuple[str, int], str]:
             if set(cells) != set(naive):
                 continue  # whole candidate unavailable; caller ledger records why
             error = sum(cells.values()) / 24
-            if naive_mae > 0 and error < 0.98 * naive_mae:
+            if naive_mae > 0 and error < Decimal("0.98") * naive_mae:
                 eligible.append((error, 0 if model == "ets" else 1, model))
         selections[key] = min(eligible)[2] if eligible else "naive"
     return selections
+
+
+def _finalize_cohorts(validation_rows: list[dict], test_rows: dict, failed: dict,
+                      ledger: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Retain only complete model cohorts; a missing naive removes its series."""
+    unavailable_series = {series_id for (series_id, model), _ in failed.items() if model == "naive"}
+    available = set(test_rows) - set(failed)
+    available -= {(series_id, model) for series_id, model in available if series_id in unavailable_series}
+    for item in ledger:
+        if item["status"] != "pending":
+            continue
+        key = (item["series_id"], item["model"])
+        if key in failed and item["model"] == "naive":
+            item.update(status="not_evaluated", reason=failed[key])
+        elif item["series_id"] in unavailable_series:
+            item.update(status="not_evaluated", reason="naive_baseline_unavailable")
+        elif key in failed:
+            item.update(status="not_evaluated", reason=failed[key])
+        elif key in available:
+            item.update(status="scored", reason=None)
+        else:
+            item.update(status="not_evaluated", reason="missing_cohort")
+    rows = [row for row in validation_rows if (row["series_id"], row["model"]) in available]
+    rows += [row for key, cohort in test_rows.items() if key in available for row in cohort]
+    return rows, ledger
 
 
 def verify_stage1_run(run: str | Path, expected_input_sha256: str) -> bool:
@@ -280,15 +337,26 @@ def load_verified_native_series(manifest: dict, series_id: str, source_file: str
         sheet = book[manifest["sheet"]]
         if sheet.cell(5, column).value != spec["label"] or sheet.cell(6, column).value != spec["unit"]:
             raise ValueError("source header/unit mismatch")
+        declared = manifest.get("month_range")
+        if not isinstance(declared, str) or len(declared) != 15 or declared[7] != "-":
+            raise ValueError("invalid declared month range")
+        def source_month(label):
+            if not isinstance(label, str) or len(label) != 7 or label[4] != "M":
+                raise ValueError("invalid monthly source label")
+            month = label[:4] + "-" + label[5:]
+            _month(month)
+            return month
+        declared_months = _range(source_month(declared[:7]), source_month(declared[8:]))
+        labels = [source_month(row[0]) for row in sheet.iter_rows(min_row=7, min_col=1, max_col=1, values_only=True)
+                  if row[0] is not None]
+        if labels != declared_months:
+            raise ValueError("source month range mismatch")
         series = {}
         for row in sheet.iter_rows(min_row=7, min_col=1, max_col=column, values_only=True):
             label = row[0]
             if label is None and row[column - 1] is None:
                 continue
-            if not isinstance(label, str) or len(label) != 7 or label[4] != "M":
-                raise ValueError("invalid monthly source label")
-            month = label[:4] + "-" + label[5:]
-            _month(month)
+            month = source_month(label)
             if through_month is not None and _month(month) > _month(through_month):
                 break
             value = row[column - 1]
@@ -310,28 +378,62 @@ def run_bounded_child(command: list[str], payload: bytes, *, timeout: float = 60
         raise ValueError("invalid owned-child bounds")
     src_root = Path(__file__).resolve().parents[2]
     environment = {"PATH": os.defpath, "PYTHONPATH": str(src_root), "PYTHONNOUSERSITE": "1"}
-    child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, env=environment, start_new_session=True)
+    armed = threading.current_thread() is threading.main_thread()
+    interrupted = False
+    if armed:
+        previous = signal.getsignal(signal.SIGTERM)
+        def interrupt(_signum, _frame):
+            nonlocal interrupted
+            interrupted = True
+        signal.signal(signal.SIGTERM, interrupt)
+    child = None
     try:
-        stdout, _stderr = child.communicate(payload, timeout=timeout)
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, env=environment, start_new_session=True)
+        deadline = time.monotonic() + timeout
+        pending_input = payload
+        while True:
+            if interrupted:
+                raise InterruptedError("owned fit interrupted")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                stdout, _stderr = child.communicate(pending_input, timeout=min(0.2, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                pending_input = None
+                continue
+        if interrupted:
+            raise InterruptedError("owned fit interrupted")
+    except (subprocess.TimeoutExpired, KeyboardInterrupt, InterruptedError) as exc:
+        if child is None:
+            raise
         try:
             os.killpg(child.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
         try:
-            child.communicate(timeout=2)
+            child.wait(timeout=0.3)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            child.communicate()
-        if child.returncode is None:
-            child.wait()
-        if sys.exc_info()[0] is KeyboardInterrupt:
+            pass
+        # A grandchild may retain stdout/stderr after the direct child exits.
+        # Kill the owned session group and close pipes instead of waiting in communicate().
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        for pipe in (child.stdin, child.stdout, child.stderr):
+            if pipe is not None:
+                pipe.close()
+        if child.poll() is None:
+            child.wait(timeout=2)
+        if isinstance(exc, (KeyboardInterrupt, InterruptedError)):
             raise
         raise TimeoutError("owned child fit timed out and was reaped")
+    finally:
+        if armed:
+            signal.signal(signal.SIGTERM, previous)
     if child.returncode != 0 or len(stdout) > 1024 * 1024:
         raise RuntimeError("owned child failed; stderr suppressed")
     return stdout
@@ -476,7 +578,7 @@ def verify_runner_run(output_dir: str | Path) -> bool:
 
 def _publish_incomplete_run(output_dir: str | Path, ledger: list[dict], reason: str) -> None:
     """Leave a sanitized, explicitly incomplete receipt after a failed fit."""
-    if reason not in {"fit_deadline", "fit_unavailable", "backend_changed", "calibration_unavailable"}:
+    if reason not in {"fit_deadline", "fit_unavailable", "backend_changed", "calibration_unavailable", "fit_interrupted"}:
         reason = "fit_unavailable"
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=False)
@@ -488,6 +590,16 @@ def _publish_incomplete_run(output_dir: str | Path, ledger: list[dict], reason: 
 
 def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str | Path,
                            source_file: str | Path, output_dir: str | Path, as_of: str) -> dict:
+    try:
+        return _run_offline_evaluation_inner(protocol_path, source_manifest_path, source_file, output_dir, as_of)
+    except (InterruptedError, KeyboardInterrupt):
+        if not Path(output_dir).exists():
+            _publish_incomplete_run(output_dir, [], "fit_interrupted")
+        raise RuntimeError("runner incomplete: fit_interrupted") from None
+
+
+def _run_offline_evaluation_inner(protocol_path: str | Path, source_manifest_path: str | Path,
+                                  source_file: str | Path, output_dir: str | Path, as_of: str) -> dict:
     """Guarded future execution path. Shipped protocol and manifest both HOLD."""
     protocol, protocol_raw = strict_json(protocol_path)
     if protocol.get("observed_execution_authorized") is not True or protocol.get("status") != "APPROVED_OBSERVED_EXECUTION":
@@ -556,8 +668,13 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                     if remaining <= 0:
                         raise TimeoutError("fit_deadline")
                     def bounded(model_name, log_series, lead, name, refit_every):
-                        fit = fit_in_owned_child(model_name, log_series, lead, name, refit_every,
-                                                 remaining_seconds=remaining)
+                        try:
+                            fit = fit_in_owned_child(model_name, log_series, lead, name, refit_every,
+                                                     remaining_seconds=remaining)
+                        except TimeoutError as exc:
+                            if remaining < 60 or time.monotonic() - started >= 1800 or time.monotonic() - series_started >= 900:
+                                raise TimeoutError("fit_deadline") from exc
+                            raise
                         cohort = (series_id, model_name)
                         if cohort in backend_by_cohort and backend_by_cohort[cohort] != fit.backend:
                             raise ValueError("backend_changed")
@@ -572,9 +689,16 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                     provenance["source_slice_sha256"][f"{series_id}:{origin}"] = _sha(json.dumps(source_slice, sort_keys=True, separators=(",", ":")).encode())
                     provenance["model_fit_seeds"][f"{series_id}:{model}"] = 0 if model == "gbm" else None
             except (ValueError, RuntimeError, TimeoutError) as exc:
-                failed[key] = str(exc) if str(exc) in {"unsupported_unpinned_backend", "fit_deadline", "backend_changed"} else "fit_unavailable"
-                fatal_reason = "fit_deadline" if isinstance(exc, TimeoutError) else "backend_changed" if str(exc) == "backend_changed" else "fit_unavailable"
-                break
+                failed[key] = ("fit_timeout" if isinstance(exc, TimeoutError) and str(exc) != "fit_deadline"
+                               else str(exc) if str(exc) in {"unsupported_unpinned_backend", "fit_deadline", "backend_changed"}
+                               else "fit_unavailable")
+                if str(exc) == "fit_deadline":
+                    fatal_reason = "fit_deadline"
+                    break
+                if model == "naive":
+                    for challenger in ("ets", "gbm"):
+                        failed[(series_id, challenger)] = "naive_baseline_unavailable"
+                    break
             else:
                 validation_rows[key] = rows
         if fatal_reason is not None:
@@ -593,12 +717,14 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                 calibrated_validation.extend(adjusted)
         except ValueError:
             failed[(series_id, model)] = "calibration_unavailable"
-            fatal_reason = "calibration_unavailable"
-            break
-    if fatal_reason is not None:
-        _publish_incomplete_run(output_dir, ledger, fatal_reason)
-        raise RuntimeError(f"runner incomplete: {fatal_reason}")
+            calibration = {key: value for key, value in calibration.items() if not key.startswith(f"{series_id}:{model}:")}
+            if model == "naive":
+                for challenger in ("ets", "gbm"):
+                    failed[(series_id, challenger)] = "naive_baseline_unavailable"
     calibrated_validation = [row for row in calibrated_validation if (row["series_id"], row["model"]) not in failed]
+    eligible_series = {series_id for (series_id, model), _ in validation_rows.items()
+                       if model == "naive" and (series_id, model) not in failed}
+    calibrated_validation = [row for row in calibrated_validation if row["series_id"] in eligible_series]
     selections = select_models(calibrated_validation) if calibrated_validation else {}
     # Test actuals are first opened after validation calibration/selection freeze.
     series_by_id = {name: load_verified_native_series(manifest, name, source_file) for name in ("copper", "aluminum")}
@@ -622,8 +748,14 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                 if remaining <= 0:
                     raise TimeoutError("fit_deadline")
                 def bounded(model_name, log_series, lead, name, refit_every):
-                    fit = fit_in_owned_child(model_name, log_series, lead, name, refit_every,
-                                             remaining_seconds=remaining)
+                    try:
+                        fit = fit_in_owned_child(model_name, log_series, lead, name, refit_every,
+                                                 remaining_seconds=remaining)
+                    except TimeoutError as exc:
+                        if (remaining < 60 or time.monotonic() - started >= 1800 or
+                                series_validation_elapsed[series_id] + time.monotonic() - series_test_started_at[series_id] >= 900):
+                            raise TimeoutError("fit_deadline") from exc
+                        raise
                     cohort = (series_id, model_name)
                     if cohort in backend_by_cohort and backend_by_cohort[cohort] != fit.backend:
                         raise ValueError("backend_changed")
@@ -639,29 +771,19 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                 provenance["source_slice_sha256"][f"{series_id}:{origin}"] = _sha(json.dumps(source_slice, sort_keys=True, separators=(",", ":")).encode())
                 provenance["model_fit_seeds"][f"{series_id}:{model}"] = 0 if model == "gbm" else None
         except (ValueError, RuntimeError, TimeoutError) as exc:
-            failed[(series_id, model)] = "fit_deadline" if isinstance(exc, TimeoutError) else "backend_changed" if str(exc) == "backend_changed" else "fit_unavailable"
-            fatal_reason = "fit_deadline" if isinstance(exc, TimeoutError) else "backend_changed" if str(exc) == "backend_changed" else "fit_unavailable"
-            break
+            failed[(series_id, model)] = ("fit_deadline" if str(exc) == "fit_deadline"
+                                          else "fit_timeout" if isinstance(exc, TimeoutError)
+                                          else "backend_changed" if str(exc) == "backend_changed"
+                                          else "fit_unavailable")
+            if str(exc) == "fit_deadline":
+                fatal_reason = "fit_deadline"
+                break
+            if model == "naive":
+                for challenger in ("ets", "gbm"):
+                    failed[(series_id, challenger)] = "naive_baseline_unavailable"
         else:
             test_rows[(series_id, model)] = rows
-    for item in ledger:
-        key = (item["series_id"], item["model"])
-        if item["status"] != "pending":
-            continue
-        if key in failed:
-            item.update(status="not_evaluated", reason=failed[key])
-        elif key in test_rows:
-            item.update(status="scored", reason=None)
-        else:
-            item.update(status="not_evaluated", reason="missing_cohort")
-    if any(item["model"] == "naive" and item["status"] != "scored" for item in ledger if item["series_kind"] == "commodity" and item["series_id"] in series_by_id):
-        # A failed naive baseline makes the whole corresponding series ineligible.
-        for item in ledger:
-            if item["series_id"] in series_by_id and any(entry["series_id"] == item["series_id"] and entry["model"] == "naive" and entry["status"] != "scored" for entry in ledger):
-                item.update(status="not_evaluated", reason="naive_baseline_unavailable")
-    supported = {(item["series_id"], item["model"]) for item in ledger if item["status"] == "scored"}
-    all_rows = [row for row in calibrated_validation if (row["series_id"], row["model"]) in supported]
-    all_rows += [row for key, rows in test_rows.items() if key in supported for row in rows]
+    all_rows, ledger = _finalize_cohorts(calibrated_validation, test_rows, failed, ledger)
     selection_json = {f"{series}:{horizon}": model for (series, horizon), model in selections.items()}
     stage1_input = {"schema_version": "forecast-scorecard.v1", "metadata": {
         "snapshot_sha256": manifest["sha256"], "protocol_sha256": _sha(protocol_raw),

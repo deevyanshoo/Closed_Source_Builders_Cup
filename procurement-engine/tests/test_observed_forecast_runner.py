@@ -6,6 +6,8 @@ import math
 import os
 import sys
 import subprocess
+import signal
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +22,7 @@ from procure.evaluation.observed_runner import (
     canonical_seed, strict_json,
     _publish_incomplete_run,
 )
+from procure.evaluation import observed_runner
 from procure.evaluation.forecast_scorecard import write_run
 
 
@@ -29,10 +32,8 @@ def months():
 
 
 def protocol():
-    return {"as_of": "2026-10-08", "training_start": "2016-09", "validation_start": "2021-09",
-            "validation_end": "2023-08", "test_start": "2024-03", "test_end": "2026-02",
-            "horizons": [1, 3, 6], "base_seed": 42, "n_paths": 1000,
-            "snapshot_sha256": "a" * 64, "protocol_sha256": "b" * 64}
+    frozen = json.loads((Path(__file__).parents[1] / "evaluation/forecast/protocol.json").read_text())
+    return {**frozen, "snapshot_sha256": "a" * 64, "protocol_sha256": "b" * 64}
 
 
 def test_exact_calendar_cutoff_purge_and_common_gap_rejection():
@@ -118,6 +119,60 @@ def test_selection_threshold_and_test_values_are_irrelevant():
     assert select_models(better)[("copper", 1)] == "ets"
 
 
+def test_selection_uses_representable_mean_when_error_sum_overflows():
+    rows = []
+    for i in range(24):
+        origin = f"{2022 + i // 12}-{i % 12 + 1:02d}"
+        for model, actual in (("naive", 1e308), ("ets", 9e307)):
+            rows.append({"series_id": "copper", "horizon": 1, "origin": origin,
+                         "model": model, "p50": 1.0, "actual": actual})
+    assert select_models(rows)[("copper", 1)] == "ets"
+
+
+def test_interval_scaling_avoids_ratio_underflow():
+    rows = [{"origin": f"{2022 + i // 12}-{i % 12 + 1:02d}",
+             "p10": 1e-308, "p50": 1e308, "p90": 1e308, "actual": 1e308}
+            for i in range(24)]
+    multiplier, calibrated = calibrate_intervals(rows)
+    assert multiplier == 0.8
+    assert all(math.isfinite(row["p10"]) and row["p10"] > 0 and
+               row["p50"] == 1e308 for row in calibrated)
+
+
+def test_zero_width_calibration_keeps_exact_median_order():
+    rows = [{"origin": f"{2022 + i // 12}-{i % 12 + 1:02d}",
+             "p10": 100.0, "p50": 100.0, "p90": 100.0, "actual": 100.0}
+            for i in range(24)]
+    _, calibrated = calibrate_intervals(rows)
+    assert all(row["p10"] == row["p50"] == row["p90"] == 100.0 for row in calibrated)
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("model_leads_from_last_training_month", [1, 3, 6]),
+    ("training_cutoff", "origin"),
+    ("calibration_grid", [1.0]),
+    ("selection_relative_improvement", 0.2),
+    ("n_paths", True),
+    ("fit_timeout_seconds", 60.0),
+    ("availability_proxy", "same_month"),
+    ("observed_execution_authorized", 1),
+])
+def test_protocol_rejects_behavioral_or_type_drift(field, bad):
+    altered = protocol()
+    altered[field] = bad
+    with pytest.raises(ValueError, match="protocol"):
+        plan_common_origins({"copper": months()}, "2026-10-08", altered)
+
+
+def test_every_declared_behavioral_protocol_field_is_bound():
+    for field, original in observed_runner.PROTOCOL_FIELDS.items():
+        altered = protocol()
+        altered[field] = original + ["drift"] if isinstance(original, list) else (
+            original + 1 if type(original) is int else original + 0.01 if type(original) is float else original + "-drift")
+        with pytest.raises(ValueError, match="protocol"):
+            plan_common_origins({"copper": months()}, "2026-10-08", altered)
+
+
 def test_stage1_consumer_requires_complete_four_hashes(tmp_path):
     raw = json.dumps({"schema_version": "forecast-scorecard.v1", "metadata": {}, "predictions": []}).encode()
     input_path = tmp_path / "input.json"
@@ -141,7 +196,8 @@ def test_synthetic_workbook_loader_requires_exact_hash_header_and_hold_gate(tmp_
     source = tmp_path / "fixture.xlsx"
     book.save(source)
     manifest = {"eligibility_status": "HOLD", "is_synthetic": True, "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-                "bytes": source.stat().st_size, "sheet": "Monthly Prices", "series": {"copper": {"label": "Copper", "column": "B", "unit": "($/mt)"}}}
+                "bytes": source.stat().st_size, "sheet": "Monthly Prices", "month_range": "2020M01-2020M02",
+                "series": {"copper": {"label": "Copper", "column": "B", "unit": "($/mt)"}}}
     with pytest.raises(ValueError, match="HOLD|synthetic"):
         load_verified_native_series(manifest, "copper", source)
     assert load_verified_native_series(manifest, "copper", source, allow_synthetic_fixture=True) == {"2020-01": 10.0, "2020-02": 11.0}
@@ -149,6 +205,9 @@ def test_synthetic_workbook_loader_requires_exact_hash_header_and_hold_gate(tmp_
         load_verified_native_series(dict(manifest, sha256="0" * 64), "copper", source, allow_synthetic_fixture=True)
     with pytest.raises(ValueError, match="header|unit"):
         load_verified_native_series(dict(manifest, series={"copper": {"label": "Copper", "column": "B", "unit": "($/dmtu)"}}), "copper", source, allow_synthetic_fixture=True)
+    with pytest.raises(ValueError, match="month range"):
+        load_verified_native_series(dict(manifest, month_range="2020M01-2020M03"),
+                                    "copper", source, allow_synthetic_fixture=True, through_month="2020-01")
 
 
 def test_workbook_validation_read_stops_before_test_actuals(tmp_path):
@@ -163,7 +222,8 @@ def test_workbook_validation_read_stops_before_test_actuals(tmp_path):
     book.save(source)
     manifest = {"eligibility_status": "HOLD", "is_synthetic": True,
                 "sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "bytes": source.stat().st_size,
-                "sheet": "Monthly Prices", "series": {"copper": {"label": "Copper", "column": "B", "unit": "($/mt)"}}}
+                "sheet": "Monthly Prices", "month_range": "2024M02-2024M03",
+                "series": {"copper": {"label": "Copper", "column": "B", "unit": "($/mt)"}}}
     assert load_verified_native_series(manifest, "copper", source, allow_synthetic_fixture=True,
                                        through_month="2024-02") == {"2024-02": 10.0}
     with pytest.raises(ValueError, match="source price"):
@@ -181,6 +241,40 @@ def test_owned_child_timeout_and_sanitized_environment(tmp_path):
     pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_sigterm_reaps_owned_child_group_with_inherited_pipe(tmp_path):
+    pid_file = tmp_path / "owned.pid"
+    child_code = ("import os,signal,subprocess,sys,time;"
+                  f"open({str(pid_file)!r},'w').write(str(os.getpid()));"
+                  "subprocess.Popen([sys.executable,'-c','import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(30)']);"
+                  "time.sleep(30)")
+    parent_code = ("from procure.evaluation.observed_runner import run_bounded_child;"
+                   f"run_bounded_child([{sys.executable!r},'-c',{child_code!r}],b'',timeout=60)")
+    parent = subprocess.Popen([sys.executable, "-c", parent_code], env={**os.environ, "PYTHONPATH": "src"},
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert pid_file.exists()
+        child_pid = int(pid_file.read_text())
+        os.kill(parent.pid, signal.SIGTERM)
+        parent.wait(timeout=5)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    finally:
+        if pid_file.exists():
+            try:
+                os.killpg(int(pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=2)
+        for pipe in (parent.stdout, parent.stderr):
+            if pipe is not None:
+                pipe.close()
 
 
 def test_strict_json_rejects_duplicate_and_nonfinite(tmp_path):
@@ -262,3 +356,57 @@ def test_cli_static_hold_stops_before_source_open_or_output(tmp_path):
     assert result.returncode == 2
     assert "HOLD" in result.stderr
     assert not (tmp_path / "out").exists()
+
+
+def test_cli_missing_input_never_echoes_sensitive_path(tmp_path):
+    project = Path(__file__).parents[1]
+    secret_path = tmp_path / "private-customer-source.xlsx"
+    result = subprocess.run([sys.executable, str(project / "scripts/run_observed_forecast_evaluation.py"),
+                             "--protocol", str(secret_path), "--source-manifest", str(secret_path),
+                             "--source-file", str(secret_path), "--output-dir", str(tmp_path / "out"),
+                             "--as-of", "2026-10-08"], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert str(secret_path) not in result.stderr
+
+
+def test_failed_test_challenger_removes_both_splits_without_reselection():
+    origins = [f"{2022 + i // 12}-{i % 12 + 1:02d}" for i in range(24)]
+    validation = []
+    for origin in origins:
+        for model, median in (("naive", 90.0), ("ets", 99.0), ("gbm", 95.0)):
+            validation.append({"series_id": "copper", "horizon": 1, "origin": origin,
+                               "model": model, "p50": median, "actual": 100.0, "split": "validation"})
+    selected = select_models(validation)
+    assert selected[("copper", 1)] == "ets"
+    ledger = [{"series_id": "copper", "model": model, "split": split,
+               "status": "pending", "reason": None}
+              for model in ("naive", "ets", "gbm") for split in ("validation", "test")]
+    test = {("copper", "naive"): [{"model": "naive", "split": "test", "series_id": "copper"}],
+            ("copper", "gbm"): [{"model": "gbm", "split": "test", "series_id": "copper"}]}
+    rows, final = observed_runner._finalize_cohorts(validation, test, {("copper", "ets"): "fit_unavailable"}, ledger)
+    assert selected[("copper", 1)] == "ets"  # selection stays frozen despite test failure
+    assert not any(row["model"] == "ets" for row in rows)
+    assert [item["reason"] for item in final if item["model"] == "ets"] == ["fit_unavailable"] * 2
+    assert all(item["status"] == "scored" for item in final if item["model"] in {"naive", "gbm"})
+
+
+def test_failed_naive_disqualifies_entire_series():
+    ledger = [{"series_id": "copper", "model": model, "split": split,
+               "status": "pending", "reason": None}
+              for model in ("naive", "ets") for split in ("validation", "test")]
+    rows, final = observed_runner._finalize_cohorts([{"series_id": "copper", "model": "ets", "split": "validation"}],
+                                    {("copper", "ets"): [{"series_id": "copper", "model": "ets", "split": "test"}]},
+                                    {("copper", "naive"): "fit_unavailable"}, ledger)
+    assert rows == []
+    assert all(item["status"] == "not_evaluated" for item in final)
+
+
+def test_global_interruption_leaves_incomplete_receipt(monkeypatch, tmp_path):
+    def interrupted(*_args):
+        raise InterruptedError("synthetic owned-child interruption")
+    monkeypatch.setattr(observed_runner, "_run_offline_evaluation_inner", interrupted)
+    out = tmp_path / "interrupted"
+    with pytest.raises(RuntimeError, match="fit_interrupted"):
+        observed_runner.run_offline_evaluation("unused", "unused", "unused", out, "2026-10-08")
+    assert json.loads((out / "RUN_STATE.json").read_text())["status"] == "incomplete"
+    assert not (out / "scorecard").exists()

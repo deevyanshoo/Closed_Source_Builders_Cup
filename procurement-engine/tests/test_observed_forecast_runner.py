@@ -277,6 +277,59 @@ def test_sigterm_reaps_owned_child_group_with_inherited_pipe(tmp_path):
                 pipe.close()
 
 
+def test_term_responsive_descendant_closes_inherited_pipe_without_permission_leak(tmp_path):
+    pid_file = tmp_path / "leader.pid"
+    child_code = ("import os,subprocess,sys;"
+                  f"open({str(pid_file)!r},'w').write(str(os.getpid()));"
+                  "subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])")
+    try:
+        with pytest.raises(TimeoutError, match="owned child fit timed out"):
+            run_bounded_child([sys.executable, "-c", child_code], b"", timeout=0.5)
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
+    finally:
+        if pid_file.exists():
+            try:
+                os.killpg(int(pid_file.read_text()), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+
+@pytest.mark.parametrize("deny_term", [False, True])
+def test_unverified_group_cleanup_is_fatal_incomplete_and_sanitized(monkeypatch, tmp_path, deny_term):
+    pid_file = tmp_path / "leader.pid"
+    child_code = ("import os,time;"
+                  f"open({str(pid_file)!r},'w').write(str(os.getpid()));time.sleep(30)")
+    real_killpg = os.killpg
+    targeted = []
+    def denied_group(pgid, sig):
+        targeted.append((pgid, sig))
+        if sig in (signal.SIGKILL, 0) or (deny_term and sig == signal.SIGTERM):
+            raise PermissionError(1, "synthetic owned-group cleanup denial")
+        return real_killpg(pgid, sig)
+    monkeypatch.setattr(observed_runner.os, "killpg", denied_group)
+    def fake_inner(*_args):
+        run_bounded_child([sys.executable, "-c", child_code], b"", timeout=0.5)
+    monkeypatch.setattr(observed_runner, "_run_offline_evaluation_inner", fake_inner)
+    out = tmp_path / "incomplete"
+    try:
+        with pytest.raises(RuntimeError, match="owned_child_cleanup_unverified") as error:
+            observed_runner.run_offline_evaluation("unused", "unused", "unused", out, "2026-10-08")
+        assert str(pid_file) not in str(error.value)
+        assert json.loads((out / "RUN_STATE.json").read_text()) == {
+            "status": "incomplete", "reason": "owned_child_cleanup_unverified"}
+        assert not (out / "scorecard").exists()
+        assert {pid for pid, _ in targeted} == {int(pid_file.read_text())}
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
+    finally:
+        if pid_file.exists():
+            try:
+                real_killpg(int(pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 def test_strict_json_rejects_duplicate_and_nonfinite(tmp_path):
     path = tmp_path / "bad.json"
     path.write_text('{"a":1,"a":2}')

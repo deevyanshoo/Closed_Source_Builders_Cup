@@ -372,6 +372,10 @@ def load_verified_native_series(manifest: dict, series_id: str, source_file: str
         book.close()
 
 
+class OwnedChildCleanupError(OSError):
+    """An owned fit group could not be confirmed cleaned up."""
+
+
 def run_bounded_child(command: list[str], payload: bytes, *, timeout: float = 60.0) -> bytes:
     """Run one owned child with a clean environment; terminate/reap its group."""
     if not command or timeout <= 0 or timeout > 60 or len(payload) > 1024 * 1024:
@@ -409,25 +413,62 @@ def run_bounded_child(command: list[str], payload: bytes, *, timeout: float = 60
     except (subprocess.TimeoutExpired, KeyboardInterrupt, InterruptedError) as exc:
         if child is None:
             raise
+        cleanup_unverified = False
         try:
-            os.killpg(child.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            child.wait(timeout=0.3)
-        except subprocess.TimeoutExpired:
-            pass
-        # A grandchild may retain stdout/stderr after the direct child exits.
-        # Kill the owned session group and close pipes instead of waiting in communicate().
-        try:
-            os.killpg(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            if pipe is not None:
-                pipe.close()
-        if child.poll() is None:
-            child.wait(timeout=2)
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except OSError:
+                # The later KILL/status check resolves a TERM race or denial.
+                pass
+            try:
+                child.wait(timeout=0.3)
+            except subprocess.TimeoutExpired:
+                pass
+            except OSError:
+                cleanup_unverified = True
+            # A descendant may retain stdout/stderr after the leader exits.
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                # EPERM can race with the last member exiting. Only ESRCH
+                # establishes that the owned group is gone.
+                for _ in range(5):
+                    try:
+                        os.killpg(child.pid, 0)
+                    except ProcessLookupError:
+                        break
+                    except OSError:
+                        pass
+                    time.sleep(0.05)
+                else:
+                    cleanup_unverified = True
+        finally:
+            try:
+                direct_alive = child.poll() is None
+            except OSError:
+                direct_alive = True
+                cleanup_unverified = True
+            if direct_alive:
+                try:
+                    child.kill()
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    cleanup_unverified = True
+            try:
+                child.wait(timeout=2)
+            except (subprocess.TimeoutExpired, OSError):
+                cleanup_unverified = True
+            for pipe in (child.stdin, child.stdout, child.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.close()
+                    except OSError:
+                        cleanup_unverified = True
+        if cleanup_unverified:
+            raise OwnedChildCleanupError("owned_child_cleanup_unverified") from None
         if isinstance(exc, (KeyboardInterrupt, InterruptedError)):
             raise
         raise TimeoutError("owned child fit timed out and was reaped")
@@ -578,7 +619,7 @@ def verify_runner_run(output_dir: str | Path) -> bool:
 
 def _publish_incomplete_run(output_dir: str | Path, ledger: list[dict], reason: str) -> None:
     """Leave a sanitized, explicitly incomplete receipt after a failed fit."""
-    if reason not in {"fit_deadline", "fit_unavailable", "backend_changed", "calibration_unavailable", "fit_interrupted"}:
+    if reason not in {"fit_deadline", "fit_unavailable", "backend_changed", "calibration_unavailable", "fit_interrupted", "owned_child_cleanup_unverified"}:
         reason = "fit_unavailable"
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=False)
@@ -592,6 +633,10 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                            source_file: str | Path, output_dir: str | Path, as_of: str) -> dict:
     try:
         return _run_offline_evaluation_inner(protocol_path, source_manifest_path, source_file, output_dir, as_of)
+    except OwnedChildCleanupError:
+        if not Path(output_dir).exists():
+            _publish_incomplete_run(output_dir, [], "owned_child_cleanup_unverified")
+        raise RuntimeError("runner incomplete: owned_child_cleanup_unverified") from None
     except (InterruptedError, KeyboardInterrupt):
         if not Path(output_dir).exists():
             _publish_incomplete_run(output_dir, [], "fit_interrupted")

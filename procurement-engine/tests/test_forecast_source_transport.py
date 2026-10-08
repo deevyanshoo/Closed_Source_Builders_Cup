@@ -61,6 +61,16 @@ class TransportTests(unittest.TestCase):
         with tempfile.TemporaryFile(dir=self.root) as witness:
             evidence=self.m.capture_response(Response(raw.read_bytes()),witness.fileno())
         return {'offline_only':True,'settled':True,'captures':{'ecb_usd_eur':evidence}}
+    def two_originals_and_settlement(self):
+        stage=self.root/'stage'; stage.mkdir(exist_ok=True)
+        originals={}
+        captures={}
+        for source_id, body in [('ecb_usd_eur',b'fake,usd\n'),('ecb_inr_eur',b'fake,inr\n')]:
+            raw=stage/(source_id+'.raw'); raw.write_bytes(body)
+            originals[source_id]=raw
+            with tempfile.TemporaryFile(dir=self.root) as witness:
+                captures[source_id]=self.m.capture_response(Response(body),witness.fileno())
+        return originals, {'offline_only':True,'settled':True,'captures':captures}
     def test_schema_boolean_never_authorizes_acquisition(self):
         result = self.m.acquire_sources({'root_authorized': True, 'historical_ownership': 'SETTLED'}, self.root/'forbidden')
         self.assertEqual(result['error'], 'NO_OPERATIONAL_GRANT')
@@ -166,20 +176,61 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(sum(x is not None for x in outcomes), 1)
         self.assertEqual(len(budgets[0].read()['attempts']), 1)
     def test_immutable_no_clobber_publication_and_tamper_detection(self):
-        stage=self.root/'stage'; stage.mkdir()
-        raw=stage/'usd'; raw.write_bytes(b'synthetic')
+        originals, settlement=self.two_originals_and_settlement()
         output=self.root/'archive'
-        receipt=self.m.publish_offline(output, 'r1', {'ecb_usd_eur':raw}, self.settlement(raw))
+        receipt=self.m.publish_offline(output, 'r1', originals, settlement)
         manifest=output/'committed/r1.json'
         self.assertTrue(manifest.is_file())
         self.assertEqual(self.m.verify_publication(output,'r1')['status'], 'OFFLINE_COMPLETE')
+        self.assertEqual({row['source_id'] for row in receipt['originals']},set(self.m.SOURCES))
         before=manifest.read_bytes()
         with self.assertRaises(self.m.TransportError):
-            self.m.publish_offline(output,'r1',{'ecb_usd_eur':raw},self.settlement(raw))
+            self.m.publish_offline(output,'r1',originals,settlement)
         self.assertEqual(manifest.read_bytes(), before)
         original=output/receipt['originals'][0]['path']; original.chmod(0o600); original.write_bytes(b'tampered')
         with self.assertRaisesRegex(self.m.TransportError,'HASH_MISMATCH'):
             self.m.verify_publication(output,'r1')
+    def test_one_genuine_capture_is_incomplete_and_retains_only_real_original(self):
+        raw=self.root/'usd'; raw.write_bytes(b'fake,usd\n')
+        receipt=self.m.publish_offline(self.root/'archive','partial',{'ecb_usd_eur':raw},self.settlement(raw))
+        self.assertEqual(receipt['status'],'OFFLINE_INCOMPLETE')
+        self.assertEqual([row['source_id'] for row in receipt['originals']],['ecb_usd_eur'])
+        self.assertEqual(receipt['originals'][0]['sha256'],hashlib.sha256(raw.read_bytes()).hexdigest())
+        self.assertFalse((self.root/'archive/committed/partial.json').exists())
+        self.assertTrue((self.root/'archive/incomplete/partial.json').exists())
+        with self.assertRaises(self.m.TransportError): self.m.verify_publication(self.root/'archive','partial')
+    def test_verifier_rejects_forged_single_source_committed_receipt(self):
+        originals, settlement=self.two_originals_and_settlement()
+        self.m.publish_offline(self.root/'archive','forged',originals,settlement)
+        manifest=self.root/'archive/objects/forged/manifest.json'
+        receipt=json.loads(manifest.read_bytes())
+        receipt['originals']=receipt['originals'][:1]
+        manifest.chmod(0o600); manifest.write_bytes(self.m._json(receipt)); manifest.chmod(0o400)
+        with self.assertRaisesRegex(self.m.TransportError,'PUBLICATION_INVALID'):
+            self.m.verify_publication(self.root/'archive','forged')
+    def test_verifier_rejects_duplicate_or_unknown_original_identity(self):
+        originals, settlement=self.two_originals_and_settlement()
+        for kind in ('duplicate','unknown'):
+            with self.subTest(kind=kind):
+                run_id='forged-'+kind
+                self.m.publish_offline(self.root/'archive',run_id,originals,settlement)
+                manifest=self.root/'archive/objects'/run_id/'manifest.json'
+                receipt=json.loads(manifest.read_bytes())
+                if kind=='duplicate':
+                    receipt['originals'][1]=receipt['originals'][0].copy()
+                else:
+                    receipt['originals'][1]['source_id']='unexpected_source'
+                manifest.chmod(0o600); manifest.write_bytes(self.m._json(receipt)); manifest.chmod(0o400)
+                with self.assertRaisesRegex(self.m.TransportError,'PUBLICATION_INVALID'):
+                    self.m.verify_publication(self.root/'archive',run_id)
+    def test_two_originals_with_one_missing_capture_stay_incomplete(self):
+        originals, settlement=self.two_originals_and_settlement()
+        del settlement['captures']['ecb_inr_eur']
+        receipt=self.m.publish_offline(self.root/'archive','missing-capture',originals,settlement)
+        self.assertEqual(receipt['status'],'OFFLINE_INCOMPLETE')
+        self.assertEqual({row['source_id'] for row in receipt['originals']},set(self.m.SOURCES))
+        self.assertFalse((self.root/'archive/committed/missing-capture.json').exists())
+        self.assertTrue((self.root/'archive/incomplete/missing-capture.json').exists())
     def test_settlement_boolean_alone_cannot_publish_unverified_entity(self):
         raw=self.root/'raw'; raw.write_bytes(b'truncated')
         result=self.m.publish_offline(self.root/'archive','unverified',{'ecb_usd_eur':raw},{'offline_only':True,'settled':True})
@@ -193,14 +244,14 @@ class TransportTests(unittest.TestCase):
         self.assertFalse((self.root/'archive/committed/r2.json').exists())
         self.assertTrue((self.root/'archive/incomplete/r2.json').exists())
     def test_publication_sync_failure_cannot_leave_a_success_marker(self):
-        raw=self.root/'raw'; raw.write_bytes(b'synthetic')
+        originals, settlement=self.two_originals_and_settlement()
         actual=self.m._sync_dir
         def fail_commit(directory):
             if Path(directory).name=='committed': raise OSError('synthetic injected fsync denial')
             return actual(directory)
         with mock.patch.object(self.m,'_sync_dir',side_effect=fail_commit):
             with self.assertRaisesRegex(self.m.TransportError,'IO_FAILURE'):
-                self.m.publish_offline(self.root/'archive','syncfail',{'ecb_usd_eur':raw},self.settlement(raw))
+                self.m.publish_offline(self.root/'archive','syncfail',originals,settlement)
         self.assertFalse((self.root/'archive/committed/syncfail.json').exists())
         self.assertTrue((self.root/'archive/incomplete/syncfail.json').exists())
     def test_mutated_or_missing_ledger_never_resets_consumed_budget(self):
@@ -213,10 +264,10 @@ class TransportTests(unittest.TestCase):
         response=Response(body=b'',headers=[('Content-Type','text/csv')])
         with self.assertRaisesRegex(self.m.TransportError,'INCOMPLETE_ENTITY'): self.capture(response)
     def test_post_link_verification_failure_is_incomplete_not_committed(self):
-        raw=self.root/'raw'; raw.write_bytes(b'synthetic')
+        originals, settlement=self.two_originals_and_settlement()
         with mock.patch.object(self.m,'verify_publication',side_effect=self.m.TransportError('HASH_MISMATCH')):
             with self.assertRaisesRegex(self.m.TransportError,'HASH_MISMATCH'):
-                self.m.publish_offline(self.root/'archive','postlink',{'ecb_usd_eur':raw},self.settlement(raw))
+                self.m.publish_offline(self.root/'archive','postlink',originals,settlement)
         self.assertFalse((self.root/'archive/committed/postlink.json').exists())
         self.assertTrue((self.root/'archive/incomplete/postlink.json').exists())
     def test_reservation_sync_error_is_sanitized_and_no_reset(self):
@@ -323,6 +374,59 @@ class OwnedChildrenTests(unittest.TestCase):
         finally:
             for child in handles:
                 if child.returncode is None: child.kill(); child.wait(timeout=2)
+    def test_sigterm_during_cleanup_cannot_complete_child(self):
+        signalled=[]
+        def exited_leader(_child):
+            if not signalled:
+                os.kill(os.getpid(),signal.SIGTERM)  # this test process while owned handler is installed
+                signalled.append(True)
+            return True
+        with mock.patch.object(self.m,'_owned_group_only_exited_leader',side_effect=exited_leader):
+            result=self.m.run_owned_child(self.command('pass'),self.root,timeout=1,term_grace=0.02)
+        self.assertEqual(signalled,[True])
+        self.assertEqual(result['status'],'OFFLINE_INCOMPLETE')
+        self.assertEqual(result['error'],'CANCELLED')
+        self.assertEqual(result['returncode'],0)
+        self.assertTrue(result['settled']); self.assertTrue(result['direct_reaped'])
+    def test_callback_cancellation_at_direct_wait_cannot_complete_child(self):
+        cancelled=threading.Event()
+        def spawn(*args,**kwargs):
+            child=subprocess.Popen(*args,**kwargs)
+            actual_wait=child.wait
+            def wait(*a,**kw):
+                code=actual_wait(*a,**kw); cancelled.set(); return code
+            child.wait=wait
+            return child
+        with mock.patch.object(self.m,'_owned_group_only_exited_leader',return_value=True):
+            result=self.m.run_owned_child(self.command('pass'),self.root,timeout=1,cancelled=cancelled.is_set,spawn=spawn,term_grace=0.02)
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual((result['status'],result['error']),('OFFLINE_INCOMPLETE','CANCELLED'))
+        self.assertEqual(result['returncode'],0)
+        self.assertTrue(result['settled']); self.assertTrue(result['direct_reaped'])
+    def test_callback_cancellation_during_handler_restoration_cannot_complete_child(self):
+        cancelled=threading.Event()
+        actual_signal=signal.signal
+        old_term=signal.getsignal(signal.SIGTERM)
+        def intercept(sig,handler):
+            if sig==signal.SIGTERM and handler is old_term:
+                cancelled.set()
+            return actual_signal(sig,handler)
+        with mock.patch.object(self.m,'_owned_group_only_exited_leader',return_value=True), mock.patch.object(self.m.signal,'signal',side_effect=intercept):
+            result=self.m.run_owned_child(self.command('pass'),self.root,timeout=1,cancelled=cancelled.is_set,term_grace=0.02)
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual((result['status'],result['error']),('OFFLINE_INCOMPLETE','CANCELLED'))
+        self.assertEqual(result['returncode'],0)
+        self.assertTrue(result['settled']); self.assertTrue(result['direct_reaped'])
+    def test_cleanup_failure_outweighs_concurrent_callback_cancellation(self):
+        cancelled=threading.Event()
+        def denied_signal(_pid,_sig):
+            cancelled.set(); raise PermissionError('synthetic cleanup denial')
+        with mock.patch.object(self.m,'_owned_group_only_exited_leader',return_value=False), mock.patch.object(self.m.os,'killpg',side_effect=denied_signal):
+            result=self.m.run_owned_child(self.command('pass'),self.root,timeout=1,cancelled=cancelled.is_set,term_grace=0.02)
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual(result['status'],'OFFLINE_INCOMPLETE')
+        self.assertEqual(result['error'],'CLEANUP_UNRESOLVED')
+        self.assertFalse(result['settled']); self.assertTrue(result['direct_reaped'])
     def test_child_environment_drops_credentials_proxy_and_home(self):
         code="import os,sys; sys.exit(0 if set(os.environ)<={'PATH','HOME','TMPDIR','LANG','LC_ALL','TZ','__CF_USER_TEXT_ENCODING'} and 'TOKEN' not in os.environ else 4)"
         with mock.patch.dict(os.environ,{'TOKEN':'synthetic-only','HTTPS_PROXY':'synthetic.invalid'}):

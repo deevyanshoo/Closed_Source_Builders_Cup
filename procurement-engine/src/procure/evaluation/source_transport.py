@@ -370,12 +370,16 @@ def run_owned_child(command, directory, *, timeout=30, cancelled=lambda: False,
     child, authority, cleanup_failed = None, False, False
     end = time.monotonic()+timeout
     # Only the owning main thread installs handlers; explicit callback covers tests/threads.
-    latch = threading.Event(); old_handlers={}
+    latch = threading.Event(); old_handlers={}; cancellation_seen=False
+    def cancellation_pending():
+        nonlocal cancellation_seen
+        cancellation_seen = cancellation_seen or latch.is_set() or bool(cancelled())
+        return cancellation_seen
     if threading.current_thread() is threading.main_thread():
         for sig in (signal.SIGINT, signal.SIGTERM):
             old_handlers[sig]=signal.signal(sig, lambda _s,_f: latch.set())
     try:
-        if latch.is_set() or cancelled():
+        if cancellation_pending():
             result['error']='CANCELLED'; result['settled']=True; return result
         try:
             # Return/registration is protected by latching handlers, not exceptions.
@@ -386,7 +390,7 @@ def run_owned_child(command, directory, *, timeout=30, cancelled=lambda: False,
             authority = child.returncode is None and os.getpgid(child.pid) == child.pid
             if not authority: raise TransportError('CLEANUP_UNRESOLVED')
             while True:
-                if latch.is_set() or cancelled(): result['error']='CANCELLED'; break
+                if cancellation_pending(): result['error']='CANCELLED'; break
                 if time.monotonic() >= end: result['error']='DEADLINE'; break
                 info=os.waitid(os.P_PID,child.pid,os.WEXITED | os.WNOHANG | os.WNOWAIT)
                 if info is not None and info.si_pid == child.pid: break
@@ -420,11 +424,14 @@ def run_owned_child(command, directory, *, timeout=30, cancelled=lambda: False,
                 except Exception: cleanup_failed=True
                 result['settled']=result['direct_reaped'] and authority and not cleanup_failed
                 if cleanup_failed: result['error']='CLEANUP_UNRESOLVED'
+                if result['error'] != 'CLEANUP_UNRESOLVED' and cancellation_pending(): result['error']='CANCELLED'
                 if result['error'] is None and result['returncode'] != 0: result['error']='CHILD_FAILED'
                 if result['error'] is None and result['settled']: result['status']='OFFLINE_CHILD_COMPLETE'
         return result
     finally:
         for sig, handler in old_handlers.items(): signal.signal(sig,handler)
+        if result['error'] != 'CLEANUP_UNRESOLVED' and cancellation_pending():
+            result['error']='CANCELLED'; result['status']='OFFLINE_INCOMPLETE'
 
 
 def _valid_run(run_id):
@@ -445,7 +452,9 @@ def publish_offline(directory, run_id, originals, settlement):
     if type(settlement) is not dict or settlement.get('offline_only') is not True:
         raise TransportError('PUBLICATION_INVALID')
     captures=settlement.get('captures')
-    complete=settlement.get('settled') is True and type(captures) is dict and set(captures)==set(originals) and all(isinstance(x,_CapturedEntity) for x in captures.values())
+    complete=(set(originals)==set(SOURCES) and settlement.get('settled') is True
+              and type(captures) is dict and set(captures)==set(originals)
+              and all(isinstance(x,_CapturedEntity) for x in captures.values()))
     linked=None
     object_created=False
     rows=[]
@@ -526,6 +535,7 @@ def verify_publication(directory,run_id):
             if type(row.get('bytes')) is not int or row['bytes']!=len(body) or row.get('sha256')!=hashlib.sha256(body).hexdigest():
                 raise TransportError('HASH_MISMATCH')
             if stat.S_IMODE(path.stat().st_mode)&0o222: raise TransportError('PUBLICATION_INVALID')
+        if seen != set(SOURCES): raise TransportError('PUBLICATION_INVALID')
         return receipt
     except TransportError: raise
     except Exception: raise TransportError('PUBLICATION_INVALID') from None

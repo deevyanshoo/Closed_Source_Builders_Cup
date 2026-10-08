@@ -309,21 +309,21 @@ class JoinTests(unittest.TestCase):
                 raise OSError("injected final marker fsync failure")
             real_sync(fd)
         def close(fd):
-            marker = root / "incomplete/run.json"
+            marker = root / "disqualified/run.json"
             target = marker.exists() and os.fstat(fd).st_ino == marker.stat().st_ino
             real_close(fd)
             if target and not replaced:
                 body = marker.read_bytes()
-                marker.rename(root / "incomplete/retained-created.json")
+                marker.rename(root / "disqualified/retained-created.json")
                 private_file(marker, body)
                 foreign_inode.append(marker.stat().st_ino)
                 replaced.append(True)
         with patch.object(join.os, "fsync", side_effect=sync), patch.object(join.os, "close", side_effect=close):
             with self.assertRaisesRegex(join.JoinError, "PUBLICATION_CLEANUP_UNRESOLVED"):
                 join.publish_joined_panel(out, b, p, root, "run")
-        self.assertEqual((root / "incomplete/run.json").stat().st_ino, foreign_inode[0])
-        self.assertEqual((root / "incomplete/run.json").read_bytes(),
-                         (root / "incomplete/retained-created.json").read_bytes())
+        self.assertEqual((root / "disqualified/run.json").stat().st_ino, foreign_inode[0])
+        self.assertEqual((root / "disqualified/run.json").read_bytes(),
+                         (root / "disqualified/retained-created.json").read_bytes())
 
     def test_same_byte_original_and_directory_replacement_refuse(self):
         for directory in (False, True):
@@ -408,6 +408,257 @@ class JoinTests(unittest.TestCase):
         with self.assertRaisesRegex(join.JoinError, "ARITHMETIC_LIMIT"):
             join._render(Fraction(1 << 4096, 1))
 
+    def test_v1_failed_incomplete_fsync_refuses_diagnostic(self):
+        b, p, out = self.candidate(missing=True)
+        root = self.root / "failed-incomplete"
+        real_sync = os.fsync
+        failed = []
+        def sync(fd):
+            directory = root / "incomplete"
+            if directory.exists() and os.fstat(fd).st_ino == directory.stat().st_ino and not failed:
+                failed.append(True); raise OSError("synthetic postlink fsync fault")
+            real_sync(fd)
+        with patch.object(join.os, "fsync", side_effect=sync):
+            with self.assertRaises(join.JoinError):join.publish_joined_panel(out, b, p, root, "run")
+        self.assertTrue(failed)
+        self.assertTrue((root / "incomplete/run.json").exists())
+        with self.assertRaises(join.JoinError):join.inspect_joined_panel(root, "run", b, p)
+
+    def test_v1_ambiguous_complete_link_refuses_verification(self):
+        b, p, out = self.candidate()
+        root = self.root / "ambiguous-complete"
+        real_link = os.link
+        attempted = []
+        def link(*args, **kwargs):
+            real_link(*args, **kwargs)
+            attempted.append(True)
+            raise OSError("synthetic side effect then error")
+        with patch.object(join.os, "link", side_effect=link):
+            with self.assertRaises(join.JoinError):join.publish_joined_panel(out, b, p, root, "run")
+        self.assertTrue(attempted)
+        self.assertTrue((root / "complete/run.json").exists())
+        with self.assertRaises(join.JoinError):join.verify_joined_panel(root, "run", b, p)
+
+    def test_v1_link_attempt_error_cancel_matrix(self):
+        for missing in (False, True):
+            for side_effect in (False, True):
+                for cancelled in (False, True):
+                    with self.subTest(missing=missing, side_effect=side_effect, cancelled=cancelled):
+                        b, p, out = self.candidate(missing=missing)
+                        root = self.root / ("attempt-%s-%s-%s" % (missing, side_effect, cancelled))
+                        real_link = os.link
+                        def link(*args, **kwargs):
+                            if side_effect:real_link(*args, **kwargs)
+                            raise KeyboardInterrupt() if cancelled else OSError("synthetic attempted link failure")
+                        with patch.object(join.os, "link", side_effect=link), \
+                             patch.object(join.os, "unlink", side_effect=AssertionError("deletion")), \
+                             patch.object(join.os, "rename", side_effect=AssertionError("rename")), \
+                             patch.object(join.os, "replace", side_effect=AssertionError("replace")):
+                            with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                                join.publish_joined_panel(out, b, p, root, "run")
+                        marker = root / ("incomplete" if missing else "complete") / "run.json"
+                        self.assertEqual(marker.exists(), side_effect)
+                        failure = root / "disqualified/run.json"
+                        self.assertEqual(failure.stat().st_mode & 0o777, 0o600)
+                        self.assertEqual(json.loads(failure.read_bytes()), {
+                            "schema_version": "synthetic-commodity-fx-join-failure.v1", **FLAGS,
+                            "run_id": "run", "status": join.INCOMPLETE,
+                            "reason": "PUBLICATION_LINK_OR_FINALIZATION_FAILED"})
+                        for reader in (join.verify_joined_panel, join.inspect_joined_panel):
+                            with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                                reader(root, "run", b, p)
+
+    def test_v1_failed_incomplete_final_read_and_close_refuse(self):
+        for fault in ("read", "verify_close", "publisher_close"):
+            with self.subTest(fault=fault):
+                b, p, out = self.candidate(missing=True)
+                root = self.root / ("incomplete-final-" + fault)
+                real_read, real_close = os.read, os.close
+                fired, closes = [], []
+                def read(fd, size):
+                    marker = root / "incomplete/run.json"
+                    if fault == "read" and marker.exists() and os.fstat(fd).st_ino == marker.stat().st_ino and not fired:
+                        fired.append(True); raise OSError("synthetic final read")
+                    return real_read(fd, size)
+                def close(fd):
+                    target = root.exists() and os.fstat(fd).st_ino == root.stat().st_ino
+                    real_close(fd)
+                    if target:
+                        closes.append(True)
+                        if len(closes) == (2 if fault == "verify_close" else 3) and fault != "read":
+                            fired.append(True); raise OSError("synthetic final close")
+                with patch.object(join.os, "read", side_effect=read), patch.object(join.os, "close", side_effect=close):
+                    with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                        join.publish_joined_panel(out, b, p, root, "run")
+                self.assertTrue(fired)
+                self.assertTrue((root / "incomplete/run.json").exists())
+                self.assertTrue((root / "disqualified/run.json").exists())
+                with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                    join.inspect_joined_panel(root, "run", b, p)
+
+    def test_v1_any_disqualified_entry_blocks_both_readers(self):
+        for missing in (False, True):
+            for kind in ("invalid_file", "directory", "symlink", "fifo"):
+                with self.subTest(missing=missing, kind=kind):
+                    b, p, out = self.candidate(missing=missing)
+                    root = self.root / ("priority-%s-%s" % (missing, kind))
+                    join.publish_joined_panel(out, b, p, root, "run")
+                    entry = root / "disqualified/run.json"
+                    if kind == "invalid_file":private_file(entry, b"not a failure schema")
+                    elif kind == "directory":entry.mkdir(mode=0o700)
+                    elif kind == "symlink":entry.symlink_to("absent-foreign-target")
+                    else:os.mkfifo(entry, 0o600)
+                    inode = entry.lstat().st_ino
+                    for reader in (join.verify_joined_panel, join.inspect_joined_panel):
+                        with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                            reader(root, "run", b, p)
+                    self.assertEqual(entry.lstat().st_ino, inode)
+
+    def test_v1_disqualified_appearance_through_reader_close(self):
+        for missing in (False, True):
+            for reader in (join.verify_joined_panel, join.inspect_joined_panel):
+                if missing and reader is join.verify_joined_panel:continue
+                b, p, out = self.candidate(missing=missing)
+                root = self.root / ("reader-close-%s-%s" % (missing, reader.__name__))
+                join.publish_joined_panel(out, b, p, root, "run")
+                inode, real_close, fired = root.stat().st_ino, os.close, []
+                def close(fd):
+                    target = os.fstat(fd).st_ino == inode
+                    real_close(fd)
+                    if target and not fired:
+                        fired.append(True); private_file(root / "disqualified/run.json", b"foreign late failure")
+                with patch.object(join.os, "close", side_effect=close):
+                    with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                        reader(root, "run", b, p)
+                self.assertTrue(fired)
+                self.assertEqual((root / "disqualified/run.json").read_bytes(), b"foreign late failure")
+
+    def test_v1_foreign_disqualified_during_publication_close_preserved(self):
+        for close_number in (1, 2, 3):
+            b, p, out = self.candidate()
+            root = self.root / ("publication-close-%s" % close_number)
+            closes, foreign_inode, real_close = [], [], os.close
+            def close(fd):
+                target = root.exists() and os.fstat(fd).st_ino == root.stat().st_ino
+                real_close(fd)
+                if target:
+                    closes.append(True)
+                    if len(closes) == close_number:
+                        path = root / "disqualified/run.json"
+                        private_file(path, b"foreign staged/final failure"); foreign_inode.append(path.stat().st_ino)
+            with patch.object(join.os, "close", side_effect=close):
+                with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE" if close_number == 1 else "PUBLICATION_CLEANUP_UNRESOLVED"):
+                    join.publish_joined_panel(out, b, p, root, "run")
+            self.assertEqual((root / "disqualified/run.json").stat().st_ino, foreign_inode[0])
+            self.assertEqual((root / "disqualified/run.json").read_bytes(), b"foreign staged/final failure")
+            self.assertEqual((root / "complete/run.json").exists(), close_number != 1)
+
+    def test_v1_replaced_disqualified_directory_never_written(self):
+        b, p, out = self.candidate()
+        root = self.root / "replaced-disqualified"
+        real_close, closes, inode = os.close, [], []
+        def close(fd):
+            target = root.exists() and os.fstat(fd).st_ino == root.stat().st_ino
+            real_close(fd)
+            if target:
+                closes.append(True)
+                if len(closes) == 3:
+                    (root / "disqualified").rename(root / "retained-disqualified")
+                    (root / "disqualified").mkdir(mode=0o700)
+                    inode.append((root / "disqualified").stat().st_ino)
+                    private_file(root / "disqualified/foreign.txt", b"foreign directory")
+        with patch.object(join.os, "close", side_effect=close):
+            with self.assertRaisesRegex(join.JoinError, "PUBLICATION_CLEANUP_UNRESOLVED"):
+                join.publish_joined_panel(out, b, p, root, "run")
+        self.assertEqual((root / "disqualified").stat().st_ino, inode[0])
+        self.assertFalse((root / "disqualified/run.json").exists())
+        self.assertFalse((root / "retained-disqualified/run.json").exists())
+        self.assertEqual((root / "disqualified/foreign.txt").read_bytes(), b"foreign directory")
+
+    def test_v1_recovery_refuses_replaced_ancestor_before_traversal(self):
+        b, p, out = self.candidate()
+        parent = self.root / "owned-parent"
+        parent.mkdir(mode=0o700)
+        root = parent / "joined"
+        real_close, real_open = os.close, os.open
+        closes, replaced, traversed = [], [], []
+        def close(fd):
+            target = root.exists() and os.fstat(fd).st_ino == root.stat().st_ino
+            real_close(fd)
+            if target:
+                closes.append(True)
+                if len(closes) == 3:
+                    retained = parent.with_name("retained-parent")
+                    parent.rename(retained); parent.mkdir(mode=0o700)
+                    (retained / "joined").rename(root)  # Original root inode under a foreign ancestor.
+                    replaced.append(True)
+        def open_file(name, flags, *args, **kwargs):
+            if replaced and name == "owned-parent":traversed.append(True)
+            return real_open(name, flags, *args, **kwargs)
+        with patch.object(join.os, "close", side_effect=close), patch.object(join.os, "open", side_effect=open_file):
+            with self.assertRaisesRegex(join.JoinError, "PUBLICATION_CLEANUP_UNRESOLVED"):
+                join.publish_joined_panel(out, b, p, root, "run")
+        self.assertTrue(replaced)
+        self.assertEqual(traversed, [], "recovery traversed a replacement ancestor")
+        self.assertFalse((root / "disqualified/run.json").exists())
+        self.assertTrue((root / "complete/run.json").exists())
+
+    def test_v1_disqualification_final_close_and_identity_faults_unresolved(self):
+        for fault in ("close", "same_byte_replacement"):
+            with self.subTest(fault=fault):
+                b, p, out = self.candidate()
+                root = self.root / ("failure-record-final-" + fault)
+                real_sync, real_close = os.fsync, os.close
+                failed, closes, fired = [], [], []
+                foreign_inode = []
+                def sync(fd):
+                    positive = root / "complete"
+                    if positive.exists() and os.fstat(fd).st_ino == positive.stat().st_ino and not failed:
+                        failed.append(True); raise OSError("synthetic postlink fsync")
+                    real_sync(fd)
+                def close(fd):
+                    target = root.exists() and os.fstat(fd).st_ino == root.stat().st_ino
+                    real_close(fd)
+                    if target:
+                        closes.append(True)
+                        # No final verifier opens the root after the fsync fault:
+                        # staged, publisher, then independent disqualification close.
+                        if len(closes) == 3:
+                            fired.append(True)
+                            if fault == "close":raise OSError("synthetic recovery root close")
+                            record = root / "disqualified/run.json"
+                            body = record.read_bytes(); record.rename(record.with_name("retained-created.json"))
+                            private_file(record, body); foreign_inode.append(record.stat().st_ino)
+                with patch.object(join.os, "fsync", side_effect=sync), patch.object(join.os, "close", side_effect=close):
+                    with self.assertRaisesRegex(join.JoinError, "PUBLICATION_CLEANUP_UNRESOLVED"):
+                        join.publish_joined_panel(out, b, p, root, "run")
+                self.assertTrue(fired)
+                self.assertTrue((root / "complete/run.json").exists())
+                if fault == "same_byte_replacement":
+                    self.assertEqual((root / "disqualified/run.json").stat().st_ino, foreign_inode[0])
+                    self.assertEqual((root / "disqualified/run.json").read_bytes(),
+                                     (root / "disqualified/retained-created.json").read_bytes())
+                for reader in (join.verify_joined_panel, join.inspect_joined_panel):
+                    with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                        reader(root, "run", b, p)
+
+    def test_v1_foreign_incomplete_link_preserved_and_disqualified(self):
+        b, p, out = self.candidate(missing=True)
+        root = self.root / "foreign-incomplete"
+        real_link, foreign = os.link, []
+        def link(*args, **kwargs):
+            real_link(*args, **kwargs)
+            marker = root / "incomplete/run.json"
+            body = marker.read_bytes(); marker.rename(marker.with_name("retained-created.json"))
+            private_file(marker, body); foreign.append(marker.stat().st_ino)
+        with patch.object(join.os, "link", side_effect=link):
+            with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
+                join.publish_joined_panel(out, b, p, root, "run")
+        self.assertEqual((root / "incomplete/run.json").stat().st_ino, foreign[0])
+        self.assertEqual((root / "incomplete/run.json").read_bytes(), (root / "incomplete/retained-created.json").read_bytes())
+        self.assertTrue((root / "disqualified/run.json").exists())
+        with self.assertRaises(join.JoinError):join.inspect_joined_panel(root, "run", b, p)
+
     def test_postlink_fsync_failure_retains_complete_without_any_marker_delete(self):
         b, p, out = self.candidate()
         root = self.root / "sync-failure"
@@ -425,8 +676,8 @@ class JoinTests(unittest.TestCase):
             with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
                 join.publish_joined_panel(out, b, p, root, "run")
         self.assertTrue((root / "complete/run.json").exists())
-        negative = json.loads((root / "incomplete/run.json").read_bytes())
-        self.assertEqual(negative["reason"], "POSTLINK_FINALIZATION_FAILED")
+        negative = json.loads((root / "disqualified/run.json").read_bytes())
+        self.assertEqual(negative["reason"], "PUBLICATION_LINK_OR_FINALIZATION_FAILED")
         with self.assertRaises(join.JoinError):join.verify_joined_panel(root, "run", b, p)
         with self.assertRaises(join.JoinError):join.inspect_joined_panel(root, "run", b, p)
 
@@ -538,13 +789,13 @@ class JoinTests(unittest.TestCase):
                 triggered = []
                 marker_failed = []
                 def negative_file(fd):
-                    path = root / "incomplete/run.json"
+                    path = root / "disqualified/run.json"
                     return path.exists() and os.fstat(fd).st_ino == path.stat().st_ino
                 def sync(fd):
                     positive = root / "complete"
                     if positive.exists() and os.fstat(fd).st_ino == positive.stat().st_ino and not marker_failed:
                         marker_failed.append(True); raise OSError("postlink fault")
-                    negative = root / "incomplete"
+                    negative = root / "disqualified"
                     if ((fault == "file_sync" and negative_file(fd)) or
                             (fault == "dir_sync" and negative.exists() and os.fstat(fd).st_ino == negative.stat().st_ino)):
                         triggered.append(True); raise OSError("disqualifier fsync fault")
@@ -609,7 +860,7 @@ class JoinTests(unittest.TestCase):
             with self.assertRaisesRegex(join.JoinError, "PUBLICATION_INCOMPLETE"):
                 join.publish_joined_panel(out, b, p, root, "run")
         self.assertTrue((root / "complete/run.json").exists())
-        self.assertEqual(json.loads((root / "incomplete/run.json").read_bytes())["reason"], "POSTLINK_FINALIZATION_FAILED")
+        self.assertEqual(json.loads((root / "disqualified/run.json").read_bytes())["reason"], "PUBLICATION_LINK_OR_FINALIZATION_FAILED")
 
     def test_whole_manifest_matches_independent_contract_projection(self):
         b, p, out = self.candidate()
@@ -723,7 +974,7 @@ class JoinTests(unittest.TestCase):
                     join.publish_joined_panel(out, b, p, root, "run")
             self.assertTrue(triggered)
             self.assertTrue((root / "complete/run.json").exists())
-            self.assertEqual(json.loads((root / "incomplete/run.json").read_bytes())["reason"], "POSTLINK_FINALIZATION_FAILED")
+            self.assertEqual(json.loads((root / "disqualified/run.json").read_bytes())["reason"], "PUBLICATION_LINK_OR_FINALIZATION_FAILED")
 
 
 if __name__ == "__main__":unittest.main()

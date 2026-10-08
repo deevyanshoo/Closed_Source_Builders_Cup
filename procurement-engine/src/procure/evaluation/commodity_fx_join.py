@@ -686,6 +686,8 @@ def _verify(output_root, run, bindings, policy, *, diagnostic=False, staged=Fals
         root = guard.root(output_root)
         positive = guard.directory(root, "complete")
         negative = guard.directory(root, "incomplete")
+        disqualified = guard.directory(root, "disqualified")
+        guard.absent(disqualified, run + ".json", "PUBLICATION_INCOMPLETE")
         if staged:
             guard.absent(positive, run + ".json", "PUBLICATION_EXISTS")
             guard.absent(negative, run + ".json", "PUBLICATION_EXISTS")
@@ -714,6 +716,7 @@ def _verify(output_root, run, bindings, policy, *, diagnostic=False, staged=Fals
     except (OSError, ValueError, TypeError, KeyError):_fail("PUBLICATION_INVALID")
     finally:
         try:guard.close()
+        except JoinError:raise
         except (OSError, ValueError):_fail("PUBLICATION_INVALID")
     return actual
 
@@ -726,15 +729,37 @@ def inspect_joined_panel(output_root, run_id: str, component_bindings: dict, joi
     return _verify(output_root, run_id, component_bindings, join_policy, diagnostic=True)
 
 
-def _disqualify(output_root, root_identity, run):
+def _recovery_root(guard, ancestors):
+    """Reopen only the original ancestor chain, checking each before traversal."""
+    parent = None
+    for path, identity in ancestors:
+        name = path.rsplit("/", 1)[-1] if parent is not None else None
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False) if parent is not None else os.stat(path, follow_symlinks=False)
+        if _directory_identity(current) != identity:_fail("PUBLICATION_CLEANUP_UNRESOLVED")
+        fd = os.open(name if parent is not None else path,
+                     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        guard.records.append((parent, name, fd, path, identity, True))
+        if _directory_identity(os.fstat(fd)) != identity:_fail("PUBLICATION_CLEANUP_UNRESOLVED")
+        parent = fd
+    _private(os.fstat(parent))
+    guard.check()
+    return parent
+
+
+def _disqualify(output_root, root_identity, directory_identity, ancestors, run):
     """Independent creation-bound evidence; never delete any marker pathname."""
     guard = _Guard()
     try:
-        root = guard.root(output_root)
+        root = _recovery_root(guard, ancestors)
         if (os.fstat(root).st_dev, os.fstat(root).st_ino) != root_identity:_fail("PUBLICATION_CLEANUP_UNRESOLVED")
-        directory = guard.directory(root, "incomplete")
+        original = os.stat("disqualified", dir_fd=root, follow_symlinks=False)
+        if (original.st_dev, original.st_ino) != directory_identity:_fail("PUBLICATION_CLEANUP_UNRESOLVED")
+        directory = guard.directory(root, "disqualified")
+        if (os.fstat(directory).st_dev, os.fstat(directory).st_ino) != directory_identity:_fail("PUBLICATION_CLEANUP_UNRESOLVED")
+        # Verify all captured ancestors before writing through the pinned directory.
+        guard.check()
         body = _json({"schema_version": "synthetic-commodity-fx-join-failure.v1", **FLAGS,
-                      "run_id": run, "status": INCOMPLETE, "reason": "POSTLINK_FINALIZATION_FAILED"})
+                      "run_id": run, "status": INCOMPLETE, "reason": "PUBLICATION_LINK_OR_FINALIZATION_FAILED"})
         _write_new(guard, directory, run + ".json", body)
         os.fsync(directory)
         guard.check()
@@ -753,15 +778,21 @@ def publish_joined_panel(candidate: dict, component_bindings: dict, join_policy:
     panel = _json(fresh)
     manifest = _manifest(fresh, run_id, panel)
     guard = _Guard()
-    linked_complete = False
+    link_attempted = False
     root_identity = None
+    directory_identity = None
+    ancestors = ()
     error = None
     try:
         root = guard.root(output_root, create=True)
         root_identity = (os.fstat(root).st_dev, os.fstat(root).st_ino)
+        ancestors = tuple((record[3], record[4]) for record in guard.records)
         objects = guard.directory(root, "objects", create=True)
         positive = guard.directory(root, "complete", create=True)
         negative = guard.directory(root, "incomplete", create=True)
+        disqualified = guard.directory(root, "disqualified", create=True)
+        directory_identity = (os.fstat(disqualified).st_dev, os.fstat(disqualified).st_ino)
+        guard.absent(disqualified, run_id + ".json", "PUBLICATION_INCOMPLETE")
         # Preflight only; these absences change intentionally at our own link.
         for fd in (positive, negative):
             try:os.stat(run_id + ".json", dir_fd=fd, follow_symlinks=False)
@@ -774,8 +805,10 @@ def publish_joined_panel(candidate: dict, component_bindings: dict, join_policy:
         if _verify(output_root, run_id, component_bindings, join_policy, staged=True) != manifest:_fail("PUBLICATION_INVALID")
         complete = manifest["status"] == COMPLETE
         marker_dir = positive if complete else negative
+        guard.check()
+        # A raised call can have an ambiguous side effect; intent covers both statuses.
+        link_attempted = True
         os.link("manifest.json", run_id + ".json", src_dir_fd=obj, dst_dir_fd=marker_dir, follow_symlinks=False)
-        linked_complete = complete
         # Linking changes manifest ctime; refresh only our creation-bound inode.
         for i, row in enumerate(guard.records):
             parent, name, fd, path, ident, directory = row
@@ -795,8 +828,8 @@ def publish_joined_panel(candidate: dict, component_bindings: dict, join_policy:
     except BaseException as exc:
         if error is None:error = exc
     if error is not None:
-        if linked_complete:
-            _disqualify(output_root, root_identity, run_id)
+        if link_attempted:
+            _disqualify(output_root, root_identity, directory_identity, ancestors, run_id)
             _fail("PUBLICATION_INCOMPLETE")
         if isinstance(error, JoinError):raise error
         if isinstance(error, FileExistsError):_fail("PUBLICATION_EXISTS")

@@ -101,3 +101,35 @@ produce audio, activate SQL or deploy. The global 40-call model pilot remains ex
 SQL activation stays HOLD and the INR 10000 existing-credit allowance is owned by
 root. Future real orchestration and its account/region/latency proof require root
 approval and a separate package.
+
+
+## Private local proposal transport
+
+`procure.agents.voice_proposal_adapter` accepts a bounded private envelope
+`{proposal_version:"1",sdk_response:...}` on stdin and returns canonical tool-call
+bytes. It reconstructs exact installed SDK nodes only after checking the
+supported completion projection, then uses `proposal_call_bytes`. It does not
+execute a proposal or receive host identity/context. Input is at most 256 KiB;
+output at most 128 KiB. Invalid input exits with a fixed `invalid_proposal`
+message, without source values or exception text.
+
+This is a local host-to-mapper protocol. It is not added to any public request
+or claimed to be a complete provider wire format. Only the documented
+completion fields are supported. Opaque binary signatures and continuation
+encodings are unsupported here; a real adapter must establish their meaning
+in a separate package. Numbers are never coerced into valid tool strings.
+Unknown fields, blocked/partial/multiple/mixed proposals, duplicates, malformed
+Unicode, excessive depth/entries/bytes and model-supplied authority fail closed.
+The CLI installs offline network/Client/ADC/dotenv/credential-read guards.
+
+The gateway can inject a server-owned `ProposalSource` and fixed local Python
+mapper into an internal adapter constructor. The existing required typed call
+supplies bounded semantic arguments to that source; it supplies no SDK response.
+The proposal-mode Runner receives only mapped server-source bytes. No missing
+or failed source falls back to executing the typed call. Default host
+construction keeps the existing typed path. No CLI/environment/provider
+configuration enables a synthetic source in ordinary runtime.
+
+Connected tests use server-injected synthetic proposals and the actual fixed
+Python numerical tool. They do not observe a Gemini response or prove model
+intent, provider schema acceptance, speech or real provider orchestration.

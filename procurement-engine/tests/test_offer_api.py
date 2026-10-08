@@ -53,10 +53,18 @@ def test_full_review_flow_over_http(client):
     oid = offer["offer_id"]
     blocked = client.post(f"/offers/{oid}/save", json={"expected_version": 1, "actor": "r", "idempotency_key": key()})
     assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "save_blocked"
-    corrected = client.post(f"/offers/{oid}/corrections", json={
+    # Since #33 a price-line currency is not settlement evidence, so citing it is refused...
+    refused = client.post(f"/offers/{oid}/corrections", json={
         "field": "settlement_currency", "value": "USD", "evidence": [{"locator": "p1:l10", "quote": "USD"}],
         "expected_version": 1, "actor": "r", "idempotency_key": key()})
+    assert refused.status_code == 422 and refused.json()["error"]["code"] == "evidence_not_verified"
+    # ...and the reviewer records USD as their own assertion, labelled as having no document evidence.
+    corrected = client.post(f"/offers/{oid}/corrections", json={
+        "field": "settlement_currency", "value": "USD", "expected_version": 1, "actor": "r",
+        "idempotency_key": key()})
     assert corrected.status_code == 200 and corrected.json()["status"] == "corrected"
+    settlement = corrected.json()["fields"]["settlement_currency"]
+    assert (settlement["evidence"], settlement["evidence_status"]) == ([], "user_entered_without_document_evidence")
     saved = client.post(f"/offers/{oid}/save", json={"expected_version": 2, "actor": "r", "idempotency_key": key()})
     assert saved.json()["status"] == "saved"
     detail = client.get(f"/offers/{oid}?include_events=true").json()

@@ -239,3 +239,45 @@ def test_future_hazard_is_dated_exposure_not_confirmation():
     assert found["confirmed"] == found["exposure"] == []
     assert found["outside_period"][0]["status"] == "exposure"
     assert found["outside_period"][0]["period_state"] == "future"
+
+
+@pytest.mark.parametrize("path,reason", [
+    (("facility", "code"), "invalid_location"),
+    (("facility", "kind"), "invalid_location"),
+    (("lane", "origin"), "invalid_location"),
+    (("lane", "destination"), "invalid_location"),
+    (("lane", "mode"), "invalid_location"),
+    (("source", "provider_id"), "missing_source"),
+    (("evidence_id",), "missing_identifier"),
+])
+def test_padded_required_identifiers_reject_only_their_row(path, reason):
+    source = RECORDS[6] if path[0] == "lane" else RECORDS[1]
+    bad = copy.deepcopy(source)
+    target = bad
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = " " + target[path[-1]] + " "
+    before = copy.deepcopy(bad)
+    out = normalize_route_evidence([bad, RECORDS[0]], as_of=FIXTURE["as_of"])
+    assert bad == before
+    assert [e["evidence_id"] for e in out["evidence"]] == ["rev-haz-001"]
+    assert [r["reason"] for r in out["rejected"]] == [reason]
+    assert evidence_for_locations(out, ["INMAA"])["exposure"][0]["evidence_id"] == "rev-haz-001"
+
+
+def test_canonical_facility_and_lane_keys_remain_queryable():
+    result = normalize_route_evidence([RECORDS[1], RECORDS[6]], as_of=FIXTURE["as_of"])
+    assert evidence_for_locations(result, ["INNSA"])["confirmed"][0]["evidence_id"] == "rev-port-002"
+    assert evidence_for_locations(result, ["INMUN"])["exposure"][0]["evidence_id"] == "rev-lane-007"
+
+
+def test_optional_prose_keeps_intentional_surrounding_spaces():
+    record = copy.deepcopy(RECORDS[1])
+    record["summary"] = "  display summary  "
+    record["source"]["reference"] = "  cited reference  "
+    record["facility"]["name"] = "  displayed facility  "
+    out = normalize_route_evidence([record], as_of=FIXTURE["as_of"])
+    found = evidence_for_locations(out, ["INNSA"])["confirmed"][0]
+    assert found["summary"] == "  display summary  "
+    assert found["source"]["reference"] == "  cited reference  "
+    assert found["facility"]["name"] == "  displayed facility  "

@@ -48,6 +48,10 @@ def _text(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value) <= _MAX_TEXT and bool(value.strip())
 
 
+def _required_text(value: object) -> bool:
+    return _text(value) and value == value.strip()
+
+
 def _optional_text(value: object) -> bool:
     return value is None or (isinstance(value, str) and len(value) <= _MAX_TEXT)
 
@@ -67,13 +71,13 @@ def _location(record: Mapping) -> tuple[dict | None, dict | None, list[str]]:
         raise _Reject("missing_location")
     keys = []
     if facility is not None:
-        if type(facility) is not dict or not _text(facility.get("kind")) or not _text(facility.get("code")) \
+        if type(facility) is not dict or not _required_text(facility.get("kind")) or not _required_text(facility.get("code")) \
                 or not _optional_text(facility.get("name")):
             raise _Reject("invalid_location", "facility")
         facility = {k: facility[k] for k in ("kind", "code", "name") if k in facility}
         keys.append(facility["code"])
     if lane is not None:
-        if type(lane) is not dict or not all(_text(lane.get(k)) for k in ("origin", "destination", "mode")):
+        if type(lane) is not dict or not all(_required_text(lane.get(k)) for k in ("origin", "destination", "mode")):
             raise _Reject("invalid_location", "lane")
         lane = {k: lane[k] for k in ("origin", "destination", "mode")}
         keys.extend((lane["origin"], lane["destination"]))
@@ -84,7 +88,7 @@ def _record(record: object, as_of: datetime) -> dict:
     if type(record) is not dict or type(record.get("synthetic")) is not bool:
         raise _Reject("invalid_record", "synthetic")
     evidence_id = record.get("evidence_id")
-    if not _text(evidence_id) or evidence_id != evidence_id.strip():
+    if not _required_text(evidence_id):
         raise _Reject("missing_identifier", "evidence_id")
     kind = record.get("kind")
     if not _text(kind) or kind not in KINDS:
@@ -97,7 +101,7 @@ def _record(record: object, as_of: datetime) -> dict:
     end = None if period.get("end") is None else _instant(period.get("end"), "observed_period.end")
     valid_until = None if record.get("valid_until") is None else _instant(record.get("valid_until"), "valid_until")
     source = record.get("source")
-    if type(source) is not dict or not _text(source.get("provider_id")) or \
+    if type(source) is not dict or not _required_text(source.get("provider_id")) or \
             not _text(source.get("kind")) or source["kind"] not in HAZARD_SOURCES | OPERATING_SOURCES \
             or not _optional_text(source.get("reference")):
         raise _Reject("missing_source")
@@ -189,7 +193,7 @@ def _valid_result(result: object) -> bool:
         if type(item) is not dict or set(item) != _ITEM_KEYS:
             return False
         if (type(item["location_keys"]) is not list or len(item["location_keys"]) > 3
-                or not all(_text(key) for key in item["location_keys"])):
+                or not all(_required_text(key) for key in item["location_keys"])):
             return False
         if item["expiry"] not in ("current", "expired", "no_stated_expiry") or item["period_state"] not in ("past", "current", "future"):
             return False
@@ -230,7 +234,7 @@ def evidence_for_locations(result: Mapping, location_keys: list[str]) -> dict:
     found = {"confirmed": [], "exposure": [], "expired": [], "outside_period": []}
     base = {"status": "error", "reasons": [], "as_of": None, "location_keys": [], **found}
     if (type(location_keys) is not list or len(location_keys) > _MAX_QUERY_KEYS
-            or not all(_text(key) and key == key.strip() for key in location_keys)):
+            or not all(_required_text(key) for key in location_keys)):
         return {**base, "reasons": ["invalid_location_keys"]}
     wanted = set(location_keys)
     if not _valid_result(result):

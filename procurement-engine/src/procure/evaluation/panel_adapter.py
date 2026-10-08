@@ -321,12 +321,47 @@ def _pin_code(guard):
     return identities
 
 
+def _admit_source_receipt(raw,kind,b,run):
+    """Admission only: anchored metadata must pass before any body-reading API.
+
+    Caller-bound digests are identity checks, never substitute permission gates.
+    Public loaders/verifiers still establish full source/artifact closure later.
+    """
+    receipt=_decode(raw,MAX_META)
+    if kind=='commodity':
+        _keys(receipt,{'schema_version',*FLAGS,'run_id','first_month','last_month',
+                       'month_count','original_bytes','original_sha256'})
+        _flags(receipt)
+        if receipt['schema_version']!='synthetic-commodity-fixture-receipt.v1' or receipt['run_id']!=run: _fail()
+        count=receipt['month_count']
+        if type(count) is not int or not 1<=count<=240: _fail()
+        if _month(receipt['last_month'])-_month(receipt['first_month'])+1!=count: _fail()
+        _size(receipt['original_bytes']); _hash(receipt['original_sha256'])
+        if receipt['original_bytes']!=b['original_bytes'] or receipt['original_sha256']!=b['original_sha256']: _fail()
+    else:
+        _keys(receipt,{'schema_version','run_id','status','offline_only','execution_authorized',
+                       'originals','settled','capture_verified'})
+        if (receipt['schema_version']!='offline-source-publication.v1' or receipt['run_id']!=run or
+            receipt['status']!='OFFLINE_COMPLETE' or receipt['offline_only'] is not True or
+            receipt['execution_authorized'] is not False or receipt['settled'] is not True or
+            receipt['capture_verified'] is not True): _fail('ADAPTER_OBSERVED_HOLD')
+        rows=receipt['originals']
+        if type(rows) is not list or len(rows)!=2: _fail()
+        for row,sid in zip(rows,sorted(b['source_originals'])):
+            _keys(row,{'source_id','path','bytes','sha256'})
+            _size(row['bytes']); _hash(row['sha256'])
+            if (row['source_id']!=sid or row['path']!=f'objects/{run}/{sid}.raw' or
+                row['bytes']!=b['source_originals'][sid]['bytes'] or row['sha256']!=b['source_originals'][sid]['sha256']): _fail()
+
+
 def _pin_sources(guard,kind,b):
     root=guard.root(b['original_root']); objects=guard.directory(root,'objects')
     run=b['fixture_run_id'] if kind=='commodity' else b['source_run_id']
     obj=guard.directory(objects,run); committed=guard.directory(root,'committed')
     receipt,s=guard.read(committed,run+'.json',MAX_META)
     if _sha(receipt)!=b['fixture_receipt_sha256' if kind=='commodity' else 'source_receipt_sha256']: _fail()
+    _admit_source_receipt(receipt,kind,b,run)
+    guard.check()
     if kind=='commodity':
         raw,_=guard.read(obj,'original.csv')
         if len(raw)!=b['original_bytes'] or _sha(raw)!=b['original_sha256']: _fail()
@@ -335,6 +370,7 @@ def _pin_sources(guard,kind,b):
         manifest,ms=guard.read(obj,'manifest.json',MAX_META)
         if manifest!=receipt or (ms.st_dev,ms.st_ino)!=(s.st_dev,s.st_ino): _fail()
         for sid,expected in b['source_originals'].items():
+            guard.check()
             raw,_=guard.read(obj,sid+'.raw')
             if len(raw)!=expected['bytes'] or _sha(raw)!=expected['sha256']: _fail()
 
@@ -376,22 +412,28 @@ def _component(guard,kind,b,p):
     _pin_sources(guard,kind,b)
     raw,_,manifest=_pin_panel(guard,b)
     if manifest['code_sha256']!=b['code_sha256'] or manifest['schema_sha256']!=b['schema_sha256']: _fail()
+    guard.check()  # Admitted receipt identity must still hold before public body reads.
     if kind=='commodity':
         verified=commodity.load_synthetic_component(b['original_root'],b['fixture_run_id'],FLAGS)
         if (verified['receipt_sha256']!=b['fixture_receipt_sha256'] or verified['original_sha256']!=b['original_sha256'] or
                 verified['original_bytes']!=b['original_bytes']): _fail()
+        guard.check()
         candidate=commodity.normalize_commodity_component(verified,commodity.SCHEMA,p['required_months'],p['as_of'])
         if manifest['as_of']!=p['as_of'] or manifest['mask_sha256']!=_sha(_canonical(p['required_months'])): _fail()
         if manifest['status']==COMPLETE:
+            guard.check()
             checked=commodity.verify_commodity_component(b['panel_root'],b['panel_run_id'],verified,commodity.SCHEMA,p['required_months'],p['as_of'])
         else: checked=None
     else:
         verified=fx.load_verified_originals(b['original_root'],b['source_run_id'],b['provenance'])
         source_identity={sid:{k:r[k] for k in ('sha256','bytes')} for sid,r in verified['originals'].items()}
         if verified['receipt_sha256']!=b['source_receipt_sha256'] or source_identity!=b['source_originals']: _fail()
+        guard.check()
         candidate=fx.normalize_ecb_pair(verified,fx.SCHEMA,b['coverage'])
         if manifest['coverage_sha256']!=b['coverage_sha256']: _fail()
-        if manifest['status']==COMPLETE: checked=fx.verify_fx_panel(b['panel_root'],b['panel_run_id'],verified,fx.SCHEMA,b['coverage'])
+        if manifest['status']==COMPLETE:
+            guard.check()
+            checked=fx.verify_fx_panel(b['panel_root'],b['panel_run_id'],verified,fx.SCHEMA,b['coverage'])
         else: checked=None
     complete=all(r['status']=='complete' for r in candidate['months'])
     if complete!=(manifest['status']==COMPLETE): _fail()
@@ -416,9 +458,10 @@ def _evaluate(request,guard):
         except (PanelAdapterError,OSError,ValueError,TypeError,KeyError,OverflowError):
             channels[kind]='integrity_refused'; reasons=['COMPONENT_INTEGRITY_REFUSED']
         ledger.append({'channel':kind,'reasons':reasons})
-    composed=None; closure_refused=False
+    composed=None
     if len(components)==2:
         try:
+            guard.check()
             inputs=join.load_join_inputs(b,p); composed=join.compose_joined_panel(inputs,p)
             public=_decode(inputs.payload)
             for kind,key in [('commodity','commodity_USD'),('fx','FX_INR_USD')]:
@@ -436,7 +479,7 @@ def _evaluate(request,guard):
         except (PanelAdapterError,OSError,ValueError,TypeError,KeyError,OverflowError):
             # A reproduced public integrity refusal is not an inspector gap.
             # Independently complete lanes retain their separate certification.
-            composed=None; closure_refused=True
+            composed=None
             for kind,part in components.items():
                 if part['status']!='complete_synthetic':
                     channels[kind]='integrity_refused'; identities[kind]=None
@@ -447,15 +490,18 @@ def _evaluate(request,guard):
         except (PanelAdapterError,OSError,ValueError,TypeError,KeyError,OverflowError): joined_refused=True
     if j is None:
         channels['joined']='not_supplied'; ledger.append({'channel':'joined','reasons':['JOIN_PANEL_NOT_SUPPLIED']})
-    elif joined_refused or closure_refused:
+    elif joined_refused:
         channels['joined']='integrity_refused'; ledger.append({'channel':'joined','reasons':['JOIN_PUBLICATION_INTEGRITY_REFUSED']})
     elif composed is None:
-        channels['joined']='dependency_unavailable'; ledger.append({'channel':'joined','reasons':['JOIN_DEPENDENCY_UNAVAILABLE']})
+        # Supplied bytes/markers do not prove a publication without PUBLIC closure.
+        channels['joined']='integrity_refused'; ledger.append({'channel':'joined','reasons':['JOIN_PUBLIC_CLOSURE_UNVERIFIED']})
     else:
         try:
             raw,panel,manifest=pinned_join
+            guard.check()
             checked=join.inspect_joined_panel(j['output_root'],j['run_id'],b,p)
             if manifest['status']==COMPLETE:
+                guard.check()
                 if join.verify_joined_panel(j['output_root'],j['run_id'],b,p)!=checked: _fail()
             if _canonical(checked,MAX_META)!=raw or panel!=_canonical(composed): _fail()
             channels['joined']='complete_synthetic' if manifest['status']==COMPLETE else 'natural_incomplete_diagnostic'

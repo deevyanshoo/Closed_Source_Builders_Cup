@@ -493,3 +493,185 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(snapshot.request,old)
         self.assertEqual(json.loads(snapshot.request)['join_policy']['required_months'],['2026-07','2026-08'])
         with self.assertRaises(AttributeError): snapshot.payload=b'caller upgrade'
+
+    def rewrite_component_receipt(self,bindings,kind,mutate):
+        binding=bindings[kind]
+        run=binding['fixture_run_id' if kind=='commodity' else 'source_run_id']
+        receipt=Path(binding['original_root'])/'committed'/(run+'.json')
+        value=json.loads(receipt.read_bytes());mutate(value);raw=canon(value)
+        receipt.chmod(0o600);receipt.write_bytes(raw)
+        if kind=='fx':receipt.chmod(0o400)
+        binding['fixture_receipt_sha256' if kind=='commodity' else 'source_receipt_sha256']=sha(raw)
+        return receipt
+
+    def load_with_body_open_trace(self,b,p,j,kind):
+        opened=[];real_open=os.open
+        names={'original.csv'} if kind=='commodity' else {'ecb_usd_eur.raw','ecb_inr_eur.raw'}
+        def traced(path,*args,**kwargs):
+            name=Path(os.fsdecode(path)).name
+            if name in names:opened.append(name)
+            return real_open(path,*args,**kwargs)
+        with patch.object(os,'open',side_effect=traced):
+            snapshot=adapter.load_verified_panel_series(b,p,j)
+        return json.loads(snapshot.payload),opened
+
+    def test_repair_R1_commodity_receipt_gate_precedes_original_open(self):
+        b,p,j=self.fixture()
+        self.rewrite_component_receipt(b,'commodity',lambda r:r.update(synthetic=False))
+        out,opened=self.load_with_body_open_trace(b,p,j,'commodity')
+        self.assertEqual(out['channel_statuses']['commodity'],'integrity_refused')
+        self.assertEqual(out['channel_statuses']['fx'],'complete_synthetic')
+        self.assertEqual(out['series'][2]['rows'][0]['basis'],{'numerator':'40','denominator':'1'})
+        self.assertEqual(opened,[], 'Invalid receipt must refuse BEFORE any original body open')
+
+    def test_repair_R1_fx_receipt_gate_precedes_original_open(self):
+        b,p,j=self.fixture()
+        self.rewrite_component_receipt(b,'fx',lambda r:r.update(execution_authorized=True))
+        out,opened=self.load_with_body_open_trace(b,p,j,'fx')
+        self.assertEqual(out['channel_statuses']['fx'],'integrity_refused')
+        self.assertEqual(out['channel_statuses']['commodity'],'complete_synthetic')
+        self.assertEqual(out['series'][0]['rows'][0]['basis'],{'numerator':'2000','denominator':'1'})
+        self.assertEqual(opened,[], 'Invalid receipt must refuse BEFORE any original body open')
+
+    def test_repair_R2_unsupported_join_with_either_companion_missing_is_refused(self):
+        for missing in ('commodity','fx'):
+            with self.subTest(missing=missing):
+                b,p,j=self.fixture();manifest=Path(j['output_root'])/'objects/joined/manifest.json'
+                value=json.loads(manifest.read_bytes());value['schema_version']='unsupported-joined-receipt.v99'
+                raw=canon(value);write(manifest,raw)
+                j.update(manifest_sha256=sha(raw),manifest_bytes=len(raw))
+                # Confirm the artifact itself is invalid with complete public closure.
+                with self.assertRaisesRegex(join.JoinError,'PUBLICATION_INVALID'):
+                    join.inspect_joined_panel(j['output_root'],j['run_id'],b,p)
+                companion='fx' if missing=='commodity' else 'commodity';b[missing]=None
+                out=json.loads(adapter.load_verified_panel_series(b,p,j).payload)
+                self.assertEqual(out['channel_statuses'][companion],'complete_synthetic')
+                self.assertEqual(out['channel_statuses']['joined'],'integrity_refused')
+                self.assertEqual(out['load_ledger'][2]['reasons'],['JOIN_PUBLIC_CLOSURE_UNVERIFIED'])
+                self.assertIsNone(out['joined_identity'])
+                self.assertTrue(all(r['basis'] is None for s in out['series'][3:] for r in s['rows']))
+
+    def test_repair_R1_metadata_admission_matrix_never_opens_invalid_bodies(self):
+        common=[('missing',lambda r:r.pop('schema_version')),('extra',lambda r:r.update(extra='caller')),
+                ('schema',lambda r:r.update(schema_version='unsupported.v99')),
+                ('run',lambda r:r.update(run_id='other'))]
+        commodity_cases=common+[
+            ('synthetic',lambda r:r.update(synthetic=False)),('synthetic_type',lambda r:r.update(synthetic=1)),
+            ('authenticity',lambda r:r.update(source_authenticity=True)),('observed',lambda r:r.update(observed_eligible=True)),
+            ('execution',lambda r:r.update(execution_authorized=True)),('rights',lambda r:r.update(rights='approved')),
+            ('first_month',lambda r:r.update(first_month='2026-13')),('last_month',lambda r:r.update(last_month=None)),
+            ('reverse_window',lambda r:r.update(first_month='2026-09')),
+            ('count_type',lambda r:r.update(month_count=True)),('count_range',lambda r:r.update(month_count=241)),
+            ('count_decl',lambda r:r.update(month_count=1)),('bytes_type',lambda r:r.update(original_bytes=True)),
+            ('bytes_range',lambda r:r.update(original_bytes=0)),('bytes_decl',lambda r:r.update(original_bytes=1)),
+            ('hash_syntax',lambda r:r.update(original_sha256='BAD')),('hash_decl',lambda r:r.update(original_sha256='0'*64))]
+        fx_cases=common+[
+            ('status',lambda r:r.update(status='OFFLINE_INCOMPLETE')),
+            ('offline',lambda r:r.update(offline_only=False)),('offline_type',lambda r:r.update(offline_only=1)),
+            ('settled',lambda r:r.update(settled=False)),('settled_type',lambda r:r.update(settled=1)),
+            ('capture',lambda r:r.update(capture_verified=False)),('capture_type',lambda r:r.update(capture_verified=1)),
+            ('execution',lambda r:r.update(execution_authorized=True)),('execution_type',lambda r:r.update(execution_authorized=0)),
+            ('originals_type',lambda r:r.update(originals={})),('missing_original',lambda r:r['originals'].pop()),
+            ('duplicate_original',lambda r:r['originals'].__setitem__(1,copy.deepcopy(r['originals'][0]))),
+            ('row_extra',lambda r:r['originals'][0].update(extra='caller')),
+            ('row_missing',lambda r:r['originals'][0].pop('bytes')),
+            ('row_source',lambda r:r['originals'][0].update(source_id='unknown')),
+            ('row_path',lambda r:r['originals'][0].update(path='../outside.raw')),
+            ('row_bytes_type',lambda r:r['originals'][0].update(bytes=True)),
+            ('row_bytes_range',lambda r:r['originals'][0].update(bytes=0)),
+            ('row_bytes_decl',lambda r:r['originals'][0].update(bytes=1)),
+            ('row_hash_syntax',lambda r:r['originals'][0].update(sha256='BAD')),
+            ('row_hash_decl',lambda r:r['originals'][0].update(sha256='0'*64))]
+        for kind,cases in [('commodity',commodity_cases),('fx',fx_cases)]:
+            for label,mutate in cases:
+                with self.subTest(kind=kind,case=label):
+                    b,p,j=self.fixture();self.rewrite_component_receipt(b,kind,mutate)
+                    out,opened=self.load_with_body_open_trace(b,p,j,kind)
+                    self.assertEqual(opened,[])
+                    self.assertEqual(out['channel_statuses'][kind],'integrity_refused')
+                    companion='fx' if kind=='commodity' else 'commodity'
+                    self.assertEqual(out['channel_statuses'][companion],'complete_synthetic')
+
+    def test_repair_R2_valid_supplied_join_without_public_closure_is_explicitly_unverified(self):
+        for missing in ('commodity','fx'):
+            with self.subTest(missing=missing):
+                b,p,j=self.fixture();b[missing]=None
+                out=json.loads(adapter.load_verified_panel_series(b,p,j).payload)
+                self.assertEqual(out['channel_statuses']['joined'],'integrity_refused')
+                self.assertEqual(out['load_ledger'][2]['reasons'],['JOIN_PUBLIC_CLOSURE_UNVERIFIED'])
+                self.assertTrue(all(r['basis'] is None for s in out['series'][3:] for r in s['rows']))
+
+    def test_repair_R1_noncanonical_or_nonregular_receipts_refuse_before_bodies(self):
+        for kind in ('commodity','fx'):
+            for form in ('duplicate','decimal','noncanonical','oversize','fifo','symlink','fx_unlinked_receipt'):
+                if form=='fx_unlinked_receipt' and kind!='fx':continue
+                with self.subTest(kind=kind,form=form):
+                    b,p,j=self.fixture();binding=b[kind]
+                    run=binding['fixture_run_id' if kind=='commodity' else 'source_run_id']
+                    path=Path(binding['original_root'])/'committed'/(run+'.json');raw=path.read_bytes()
+                    if form in ('fifo','symlink','fx_unlinked_receipt'):
+                        path.unlink()
+                        if form=='fifo':os.mkfifo(path,0o600)
+                        elif form=='symlink':path.symlink_to('absent-receipt')
+                        else:write(path,raw);path.chmod(0o400)
+                    else:
+                        if form=='duplicate':raw=raw[:-1]+b',"schema_version":"unsupported"}'
+                        elif form=='decimal':raw=raw.replace(b'"execution_authorized":false',b'"execution_authorized":0.0')
+                        elif form=='noncanonical':raw+=b'\n'
+                        else:raw+=b' '*(65537-len(raw))
+                        path.chmod(0o600);path.write_bytes(raw)
+                        if kind=='fx':path.chmod(0o400)
+                        binding['fixture_receipt_sha256' if kind=='commodity' else 'source_receipt_sha256']=sha(raw)
+                    out,opened=self.load_with_body_open_trace(b,p,j,kind)
+                    self.assertEqual(opened,[])
+                    self.assertEqual(out['channel_statuses'][kind],'integrity_refused')
+                    self.assertEqual(out['channel_statuses']['commodity' if kind=='fx' else 'fx'],'complete_synthetic')
+
+    def test_repair_R1_receipt_mutation_after_anchor_aborts_before_body_open(self):
+        for kind in ('commodity','fx'):
+            with self.subTest(kind=kind):
+                b,p,j=self.fixture();binding=b[kind]
+                run=binding['fixture_run_id' if kind=='commodity' else 'source_run_id']
+                receipt=Path(binding['original_root'])/'committed'/(run+'.json')
+                real_read=adapter._ReadLifetime.read;real_open=os.open;fired=False;opened=[]
+                names={'original.csv'} if kind=='commodity' else {'ecb_usd_eur.raw','ecb_inr_eur.raw'}
+                def traced_open(path,*args,**kwargs):
+                    if Path(os.fsdecode(path)).name in names:opened.append(os.fsdecode(path))
+                    return real_open(path,*args,**kwargs)
+                def mutate_after_read(guard,parent,name,*args,**kwargs):
+                    nonlocal fired
+                    result=real_read(guard,parent,name,*args,**kwargs)
+                    if not fired and guard.path(parent)+'/'+name==str(receipt):
+                        fired=True;value=json.loads(result[0]);value['execution_authorized']=True
+                        receipt.chmod(0o600);receipt.write_bytes(canon(value))
+                        if kind=='fx':receipt.chmod(0o400)
+                    return result
+                with patch.object(adapter._ReadLifetime,'read',new=mutate_after_read),patch.object(os,'open',side_effect=traced_open):
+                    with self.assertRaisesRegex(adapter.PanelAdapterError,'ADAPTER_SOURCE_CHANGED'):
+                        adapter.load_verified_panel_series(b,p,j)
+                self.assertTrue(fired);self.assertEqual(opened,[])
+
+    def test_repair_R1_rechecks_admitted_receipt_before_public_body_loader(self):
+        for kind in ('commodity','fx'):
+            with self.subTest(kind=kind):
+                b,p,j=self.fixture();binding=b[kind]
+                run=binding['fixture_run_id' if kind=='commodity' else 'source_run_id']
+                receipt=Path(binding['original_root'])/'committed'/(run+'.json')
+                panel=Path(binding['panel_root'])/'objects/panel/panel.csv'
+                real_read=adapter._ReadLifetime.read;real_open=os.open;fired=False;late_opens=[]
+                names={'original.csv'} if kind=='commodity' else {'ecb_usd_eur.raw','ecb_inr_eur.raw'}
+                def traced_open(path,*args,**kwargs):
+                    if fired and Path(os.fsdecode(path)).name in names:late_opens.append(os.fsdecode(path))
+                    return real_open(path,*args,**kwargs)
+                def mutate_after_panel(guard,parent,name,*args,**kwargs):
+                    nonlocal fired
+                    result=real_read(guard,parent,name,*args,**kwargs)
+                    if not fired and guard.path(parent)+'/'+name==str(panel):
+                        fired=True;value=json.loads(receipt.read_bytes());value['execution_authorized']=True
+                        receipt.chmod(0o600);receipt.write_bytes(canon(value))
+                        if kind=='fx':receipt.chmod(0o400)
+                    return result
+                with patch.object(adapter._ReadLifetime,'read',new=mutate_after_panel),patch.object(os,'open',side_effect=traced_open):
+                    with self.assertRaisesRegex(adapter.PanelAdapterError,'ADAPTER_SOURCE_CHANGED'):
+                        adapter.load_verified_panel_series(b,p,j)
+                self.assertTrue(fired);self.assertEqual(late_opens,[])

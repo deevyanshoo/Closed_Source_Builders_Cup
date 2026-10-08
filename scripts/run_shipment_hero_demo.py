@@ -13,10 +13,13 @@ import json
 import os
 from pathlib import Path
 import re
+import resource
+import selectors
 import signal
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -28,6 +31,126 @@ LABELS = ('precision_delayed', 'numerical_unsupported', 'no_eligible_empty', 'so
 
 class DemoError(RuntimeError):
     """Fixed, nonsecret diagnostic; never include child output or environment."""
+
+
+CAPTURE_LIMIT = 2 << 20
+DEMO_ACK = b'local-demo-listener-v1 127.0.0.1:8844\n'
+GIT_PREFIX = ('-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '--no-optional-locks')
+GIT_READS = {('rev-parse', 'HEAD'), ('rev-parse', 'HEAD^{tree}'),
+             ('status', '--porcelain', '--untracked-files=all'), ('ls-tree', '-rz', 'HEAD')}
+NODE_BOOTSTRAP = """const fs=require('node:fs');
+const {pathToFileURL}=require('node:url');
+const [raw,entry,...args]=process.argv.slice(1);
+if(!/^[0-9]+$/.test(raw)||Number(raw)<3||!fs.fstatSync(Number(raw)).isSocket())process.exit(2);
+// Keep this inherited descriptor open for the entire proxy lifetime; never accept.
+// No stream/FileHandle wrapper owns it and no code closes it before process exit.
+process.argv=[process.execPath,entry,...args];
+import(pathToFileURL(entry).href).catch(()=>process.exit(2));
+"""
+
+
+def validate_darwin_listener_info(info):
+    # ROOT-approved Mac ABI: tcpi_state is the first uint8, LISTEN is 1.
+    # Reject future/unknown layouts instead of reading a truncated state byte.
+    if len(info) != 112 or info[0] != 1:
+        raise DemoError('native listening state invalid')
+
+
+def verify_native_listening(listener):
+    try:
+        if listener.family != socket.AF_INET or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM:
+            raise DemoError('native listener role invalid')
+        if sys.platform == 'darwin':
+            validate_darwin_listener_info(listener.getsockopt(socket.IPPROTO_TCP, 0x106, 256))
+        elif sys.platform == 'linux':
+            if listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1:
+                raise DemoError('native listening state invalid')
+        else:
+            raise DemoError('native listening platform unsupported')
+    except OSError:
+        raise DemoError('native listening state unavailable') from None
+
+
+@contextmanager
+def reserve_listener(port=8844):
+    if sys.platform not in ('darwin', 'linux') or not hasattr(socket, 'SO_REUSEPORT'):
+        raise DemoError('exclusive native listener unsupported')
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 0)
+        listener.bind(('127.0.0.1', port))
+        listener.listen(128)
+        verify_native_listening(listener)
+        if (listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0 or
+                listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT) != 0):
+            raise DemoError('exclusive listener validation failed')
+        yield listener
+    except OSError:
+        raise DemoError('exclusive loopback listener unavailable') from None
+    finally:
+        listener.close()
+
+
+def node_command(node, entry, listener_fd):
+    return [str(node), '-e', NODE_BOOTSTRAP, '--', str(listener_fd), str(entry),
+            '--host', '127.0.0.1', '--port', '5344', '--strictPort']
+
+
+def wait_gateway_ack(owner, child, ready_fd, timeout):
+    if not 0 < timeout <= 60:
+        raise DemoError('invalid acknowledgement timeout')
+    os.set_blocking(ready_fd, False)
+    deadline = time.monotonic() + timeout
+    body = bytearray()
+    with selectors.DefaultSelector() as selector:
+        selector.register(ready_fd, selectors.EVENT_READ)
+        while time.monotonic() < deadline:
+            owner._check_stop()
+            if child.poll() is not None:
+                raise DemoError('owned gateway exited before adoption')
+            if not selector.select(min(.02, max(0, deadline-time.monotonic()))):
+                continue
+            try:
+                part = os.read(ready_fd, 129-len(body))
+            except BlockingIOError:
+                continue
+            if not part:
+                raise DemoError('incomplete listener adoption acknowledgement')
+            body.extend(part)
+            if len(body) > 128 or not DEMO_ACK.startswith(body):
+                raise DemoError('invalid listener adoption acknowledgement')
+            if bytes(body) == DEMO_ACK:
+                # Do not block for EOF. The child writes exactly one frame and
+                # closes its sole write end; ownership comes from retained FD.
+                if child.poll() is not None:
+                    raise DemoError('owned gateway exited during adoption')
+                return
+    raise DemoError('listener adoption acknowledgement timeout')
+
+
+def capture_argv_valid(argv):
+    if (len(argv) < len(GIT_PREFIX)+2 or tuple(argv[1:1+len(GIT_PREFIX)]) != GIT_PREFIX or
+            tuple(argv[1+len(GIT_PREFIX):]) not in GIT_READS):
+        return False
+    try:
+        path = tool_path(Path(argv[0]))
+        return not (path.stat().st_mode & (stat.S_ISUID | stat.S_ISGID))
+    except (DemoError, OSError):
+        return False
+
+
+def capture_exec(argv):
+    # Internal exec mode only. No normal launcher/auth/config logic is entered.
+    if (not capture_argv_valid(argv) or os.geteuid() == 0 or os.getuid() != os.geteuid() or
+            not stat.S_ISREG(os.fstat(1).st_mode)):
+        return 70
+    try:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (CAPTURE_LIMIT, CAPTURE_LIMIT))
+        signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+        os.execve(argv[0], argv, dict(os.environ))
+    except (OSError, ValueError):
+        return 70
 
 
 def canonical(value):
@@ -130,13 +253,13 @@ class OwnedProcesses:
     def __exit__(self, *_):
         self.close()
 
-    def spawn(self, argv, cwd, env, *, stdout=subprocess.DEVNULL):
+    def spawn(self, argv, cwd, env, *, stdout=subprocess.DEVNULL, pass_fds=()):
         if self.closed:
             raise DemoError('owned process supervisor closed')
         self._check_stop()
         try:
             child = subprocess.Popen(argv, cwd=cwd, env=env, start_new_session=True,
-                                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.DEVNULL)
+                                     stdin=subprocess.DEVNULL, stdout=stdout, stderr=subprocess.DEVNULL, pass_fds=pass_fds, close_fds=True)
         except OSError:
             raise DemoError('owned executable failed to start') from None
         self.children.append(child)
@@ -154,6 +277,9 @@ class OwnedProcesses:
         if not children:
             return
         for child in children:
+            # Darwin can deny signalling a zombie-only group. Reap our own
+            # exited leader first; still signal its group for live descendants.
+            child.poll()
             self._signal(child, signal.SIGTERM)
         # Allow the whole group, including grandchildren, a fixed grace. Do not
         # shortcut just because its leader exited and inherited pipes remain.
@@ -177,9 +303,18 @@ class OwnedProcesses:
             return
         self.closed = True
         children, self.children = self.children, []
-        self._stop(children)
+        failure = None
+        for child in reversed(children):  # proxy registered after Go: stop/reap it first
+            try:
+                self._stop([child])
+            except OSError:
+                failure = DemoError('owned child signalling failed')
+            except DemoError as error:
+                failure = error
+        if failure is not None:
+            raise failure
 
-    def run(self, argv, cwd, env, timeout, *, stdout=subprocess.DEVNULL):
+    def run(self, argv, cwd, env, timeout, *, stdout=subprocess.DEVNULL, output_guard=None):
         if not 0 < timeout <= 60:
             raise DemoError('invalid command timeout')
         child = self.spawn(argv, cwd, env, stdout=stdout)
@@ -187,10 +322,14 @@ class OwnedProcesses:
             deadline = time.monotonic() + timeout
             while child.poll() is None:
                 self._check_stop()
+                if output_guard is not None:
+                    output_guard()
                 if time.monotonic() >= deadline:
                     raise DemoError('owned command timeout')
                 time.sleep(min(.02, max(0, deadline - time.monotonic())))
             self._check_stop()
+            if output_guard is not None:
+                output_guard()
             if child.returncode:
                 raise DemoError('owned command failed')
         finally:
@@ -219,15 +358,20 @@ class OwnedProcesses:
 
 
 def capture_command(argv, repo, runtime, tools, stop_event=None):
+    if not capture_argv_valid(argv):
+        raise DemoError('capture command outside fixed source allowlist')
     env = base_environment(runtime, tools)
     env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_OPTIONAL_LOCKS='0')
-    # File-backed bounded result: descendants cannot keep a pipe reader hanging.
+    helper = tool_path(Path(sys.executable))
     with tempfile.TemporaryFile(dir=runtime) as output, OwnedProcesses(grace=.05, stop_event=stop_event) as owner:
-        owner.run(argv, repo, env, timeout=10, stdout=output)
-        if output.tell() > 2 << 20:
-            raise DemoError('source inventory too large')
+        def guard():
+            if os.fstat(output.fileno()).st_size >= CAPTURE_LIMIT:
+                raise DemoError('source inventory too large')
+        owner.run([str(helper), '-I', '-S', str(Path(__file__).resolve()), '--_capture-exec', *argv],
+                  repo, env, timeout=10, stdout=output, output_guard=guard)
+        guard()
         output.seek(0)
-        return output.read()
+        return output.read(CAPTURE_LIMIT)
 
 
 def verify_source_files(repo, entries):
@@ -317,8 +461,12 @@ def runtime_files(path, profile, source):
         yield run, catalog, manifest
 
 
-def gateway_command(binary, python, repo, catalog):
+def gateway_command(binary, python, repo, catalog, listener_fd=None, ready_fd=None):
     command = [str(binary)]
+    if (listener_fd is None) != (ready_fd is None):
+        raise DemoError('both listener descriptors required')
+    if listener_fd is not None:
+        command += ['-local-demo-listener-fd', str(listener_fd), '-local-demo-ready-fd', str(ready_fd)]
     if catalog is not None:
         command += ['-shipment-local-contexts', str(catalog), '-shipment-local-python', str(python),
                     '-shipment-local-source', str(repo / 'procurement-engine/src')]
@@ -354,7 +502,7 @@ def launch(args, stop_event=None):
         raise DemoError('existing Vite dependency unavailable')
     catalog_path = repo / 'scripts/demo/shipment_recovery_catalog.json'
     load_catalog(catalog_path, args.profile)
-    ensure_ports_free(PORTS)
+    ensure_ports_free(PORTS[1:])
     with tempfile.TemporaryDirectory(prefix='shipment-demo-preflight-') as directory:
         source = verify_source(repo, args.git, args.reviewed_head, Path(directory).resolve(), stop_event)
     # These are source-bound files, not an arbitrary external script/binary.
@@ -364,30 +512,44 @@ def launch(args, stop_event=None):
     if Path(__file__).resolve() != repo / 'scripts/run_shipment_hero_demo.py':
         raise DemoError('launcher must come from reviewed repository')
     directories = [p.parent for p in tools]
-    with runtime_files(catalog_path, args.profile, source) as (run, catalog, manifest), OwnedProcesses(stop_event=stop_event) as owner:
-        binary = run / 'gateway'
-        owner.run([str(args.go), 'build', '-o', str(binary), '.'], repo / 'services/gateway',
-                  build_environment(run, directories, args.go_cache, args.go_mod_cache), args.build_timeout)
+    with runtime_files(catalog_path, args.profile, source) as (run, catalog, manifest):
+        with OwnedProcesses(stop_event=stop_event) as build_owner:
+            binary = run / 'gateway'
+            build_owner.run([str(args.go), 'build', '-o', str(binary), '.'], repo / 'services/gateway',
+                            build_environment(run, directories, args.go_cache, args.go_mod_cache), args.build_timeout)
         if verify_source(repo, args.git, args.reviewed_head, run, stop_event) != source:
             raise DemoError('reviewed source changed during build')
         check_dotenv(repo)
-        # Metadata only; reject changed permissions/symlink replacement before children.
         private_file(identities)
         private_file(proxy)
-        ensure_ports_free(PORTS)
-        owner.spawn(gateway_command(binary, args.python, repo, catalog), repo,
-                    gateway_environment(run, directories, repo, identities))
-        owner.spawn([str(args.node), str(vite), '--host', '127.0.0.1', '--port', '5344', '--strictPort'],
-                    repo / 'apps/web', web_environment(run, directories, proxy))
-        owner.wait_started(PORTS[:2], args.startup_timeout)
-        print('Loopback transport started; session, route and browser verification remain required.', flush=True)
-        print('http://127.0.0.1:5344/shipment-recovery', flush=True)
-        print('Nonsecret runtime manifest: ' + str(manifest), flush=True)
-        while True:
-            owner._check_stop()
-            if any(child.poll() is not None for child in owner.children):
-                raise DemoError('owned service exited')
-            time.sleep(.2)
+        ensure_ports_free(PORTS[1:])
+        # Reservation context outlives supervisor cleanup; Node keeps its own
+        # inherited copy if the launcher is abruptly killed.
+        with reserve_listener() as listener, OwnedProcesses(stop_event=stop_event) as owner:
+            read_fd, write_fd = os.pipe()
+            try:
+                try:
+                    gateway = owner.spawn(gateway_command(binary, args.python, repo, catalog, listener.fileno(), write_fd), repo,
+                            gateway_environment(run, directories, repo, identities), pass_fds=(listener.fileno(), write_fd))
+                finally:
+                    os.close(write_fd)
+                wait_gateway_ack(owner, gateway, read_fd, args.startup_timeout)
+            finally:
+                os.close(read_fd)
+            if gateway.poll() is not None:
+                raise DemoError('owned gateway exited before proxy start')
+            owner.spawn(node_command(args.node, vite, listener.fileno()), repo / 'apps/web',
+                        web_environment(run, directories, proxy), pass_fds=(listener.fileno(),))
+            # Connectivity is UI transport only, never gateway ownership proof.
+            owner.wait_started([5344], args.startup_timeout)
+            print('Owned loopback transport started; session, route and browser verification remain required.', flush=True)
+            print('http://127.0.0.1:5344/shipment-recovery', flush=True)
+            print('Nonsecret runtime manifest: ' + str(manifest), flush=True)
+            while True:
+                owner._check_stop()
+                if any(child.poll() is not None for child in owner.children):
+                    raise DemoError('owned service exited')
+                time.sleep(.2)
 
 
 def main(argv=None):
@@ -412,4 +574,6 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['--_capture-exec']:
+        raise SystemExit(capture_exec(sys.argv[2:]))
     raise SystemExit(main())

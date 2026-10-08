@@ -117,7 +117,7 @@ export function ShipmentRecoveryPage() {
   }
   function cancel() { invalidate(); setView({ kind: selectedRef.current ? 'ready' : 'empty' }); }
   return <div className="shell shipment-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SHIPMENT RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/recovery">Receipt comparison</Link></header>
+    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SHIPMENT RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/recovery">Receipt comparison</Link><Link className="recovery-back" to="/dispatch">Synthetic dispatch workspace</Link></header>
     <main>
       <div className="shipment-intro"><p className="eyebrow">LOCAL · SYNTHETIC · HOST CONFIGURED · EPHEMERAL</p><h1>Shipment recovery evidence.</h1><p>Compare complete host-configured shipment contexts through the local read-only gateway. Source authenticity not verified. No plan is applied or saved.</p></div>
       <section className="shipment-session" aria-label="Current local session">

@@ -40,6 +40,10 @@ describe('local dispatch fixture adapter', () => {
     await expect(adapter.affected('evt-nope')).rejects.toBeInstanceOf(DispatchError);
   });
 
+  it('does not return an expired trigger as a successful affected-shipment result', async () => {
+    await expect(adapter.affected('evt-008-eta')).rejects.toMatchObject({ kind: 'unavailable' });
+  });
+
   it('separates confirmed and exposure route evidence', async () => {
     const port = await adapter.routeEvidence('SHP-SYN-002');
     expect(port.confirmed.map(e => [e.evidence_id, e.operating_status])).toEqual([['rev-port-002', 'restricted']]);

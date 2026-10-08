@@ -4,10 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from procure.api import app
 from procure.dispatch import samples
+from procure.dispatch.http import router
 
 AS_OF = "2026-10-08T12:00:00Z"
 NOW = "2026-10-08T13:00:00Z"
@@ -16,7 +17,9 @@ Q = f"as_of={AS_OF}&now={NOW}"
 
 @pytest.fixture(scope="module")
 def client():
-    return TestClient(app)  # no lifespan: these routes need no market data
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)  # isolated read-only router; shared mount is root integration scope
 
 
 def test_shipment_list_is_synthetic_and_evidence_based(client):
@@ -113,3 +116,25 @@ def test_missing_or_non_synthetic_sample_data_is_503(client, monkeypatch, tmp_pa
     monkeypatch.setitem(samples.SAMPLE_FILES, "snapshot", labelled_real)
     r = client.get(f"/dispatch/shipments?{Q}")
     assert r.status_code == 503 and r.json()["reasons"] == ["sample_data_unavailable"]
+
+
+@pytest.mark.parametrize("stamp", ["2026-99-99T99:99:99Z", "2026-02-30T12:00:00Z", "2026-10-08T12:00:00+25:00"])
+def test_impossible_as_of_is_400_before_sample_loading(client, monkeypatch, stamp):
+    def forbidden_load():
+        raise AssertionError("sample opened before calendar validation")
+    monkeypatch.setattr(samples, "load_samples", forbidden_load)
+    for path in ("/dispatch/shipments", "/dispatch/shipments/SHP-SYN-002", "/dispatch/events/evt-002-hold/affected", "/dispatch/route-evidence?location=INNSA"):
+        sep = "&" if "?" in path else "?"
+        response = client.get(f"{path}{sep}as_of={stamp}")
+        assert response.status_code == 400
+        assert response.json()["reasons"] == ["invalid_as_of"]
+
+
+@pytest.mark.parametrize("stamp", ["2026-02-30T12:00:00Z", "2026-10-08T12:00:00+25:00"])
+def test_impossible_now_is_400_before_sample_loading(client, monkeypatch, stamp):
+    def forbidden_load():
+        raise AssertionError("sample opened before calendar validation")
+    monkeypatch.setattr(samples, "load_samples", forbidden_load)
+    response = client.get(f"/dispatch/shipments?as_of={AS_OF}&now={stamp}")
+    assert response.status_code == 400
+    assert response.json()["reasons"] == ["invalid_now"]

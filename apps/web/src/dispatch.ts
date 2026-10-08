@@ -49,6 +49,7 @@ export type EvidenceResponse = {
 };
 type FixtureData = {
   synthetic: true; source: string; generated_from_revision: string; as_of: string; notice: string; files: string[];
+  source_sha256?: Record<string, string>; unavailable_affected_event_ids?: string[];
   shipments: ListResponse; timelines: Record<string, TimelineResponse>; affected: Record<string, AffectedResponse>;
   route_evidence: Record<string, EvidenceResponse>;
 };
@@ -60,28 +61,37 @@ export class DispatchError extends Error {
 const data = JSON.parse(raw) as FixtureData;
 export const dispatchFixtureInfo = { asOf: data.as_of, revision: data.generated_from_revision, notice: data.notice, files: data.files };
 
+function readable<T extends { status: ReadStatus; reasons: string[] }>(value: T): T {
+  if (!value || !['ok', 'empty', 'stale'].includes(value.status) || !Array.isArray(value.reasons)
+      || !value.reasons.every(reason => typeof reason === 'string')) {
+    throw new DispatchError('Dispatch data is unavailable at this cutoff.', 'unavailable');
+  }
+  return structuredClone(value);
+}
+
 export type DispatchAdapter = ReturnType<typeof createDispatchFixtureAdapter>;
 
 export function createDispatchFixtureAdapter() {
-  const copy = <T,>(value: T): T => structuredClone(value);
   return {
     source: 'local_fixture_adapter' as const,
     synthetic: true as const,
-    async listShipments(): Promise<ListResponse> { return copy(data.shipments); },
+    async listShipments(): Promise<ListResponse> { return readable(data.shipments); },
     async timeline(shipmentId: string): Promise<TimelineResponse> {
       const found = data.timelines[shipmentId];
-      if (found) return copy(found);
+      if (found) return readable(found);
       return { status: 'empty', reasons: ['no_accepted_events'], as_of: data.as_of, shipment_id: shipmentId,
         events: [], current: null, flags: [], rejected_records: [] };
     },
     async affected(eventId: string): Promise<AffectedResponse> {
+      if (data.unavailable_affected_event_ids?.includes(eventId))
+        throw new DispatchError('Affected shipments unavailable because this event’s evidence expired.', 'unavailable');
       const found = data.affected[eventId];
       if (!found) throw new DispatchError(`No accepted event ${eventId} in the synthetic data.`, 'not_found');
-      return copy(found);
+      return readable(found);
     },
     async routeEvidence(shipmentId: string): Promise<EvidenceResponse> {
       const found = data.route_evidence[shipmentId];
-      if (found) return copy(found);
+      if (found) return readable(found);
       return { status: 'empty', reasons: [], as_of: data.as_of, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] };
     },
   };

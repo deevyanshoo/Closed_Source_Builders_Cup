@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from ..events.ingest import normalize_milestones
 from ..route_evidence import evidence_for_locations, normalize_route_evidence
 from . import samples
-from .read_models import affected_shipments, shipment_timeline
+from .read_models import _instant, affected_shipments, shipment_timeline
 from .summary import shipment_list
 
 router = APIRouter(prefix="/dispatch", tags=["dispatch"])
@@ -35,9 +35,9 @@ def _error(status_code: int, reason: str) -> JSONResponse:
 
 def _context(as_of: str | None, now: str | None):
     """(samples, normalized milestones, now, now_source) or an error response."""
-    if not isinstance(as_of, str) or not _TIMESTAMP.fullmatch(as_of):
+    if not isinstance(as_of, str) or not _TIMESTAMP.fullmatch(as_of) or _instant(as_of) is None:
         return _error(400, "invalid_as_of")
-    if now is not None and not _TIMESTAMP.fullmatch(now):
+    if now is not None and (not _TIMESTAMP.fullmatch(now) or _instant(now) is None):
         return _error(400, "invalid_now")
     try:
         data = samples.load_samples()

@@ -15,9 +15,18 @@ export function StateNotice({ kind, message }: { kind: 'loading' | 'empty' | 'er
   return <p className="dispatch-state dispatch-empty">{message ?? 'Nothing to show.'}</p>;
 }
 
-export function ShipmentList({ rows, selected, onSelect }: { rows: ShipmentRow[]; selected: string | null; onSelect: (id: string) => void }) {
-  if (!rows.length) return <StateNotice kind="empty" message="No shipments with accepted milestones at this cutoff." />;
-  return <ul className="dispatch-list" aria-label="Shipments">
+function readError(reasons: string[]): string {
+  return reasons.length ? `Dispatch data unavailable: ${reasons.map(humanize).join(', ')}.` : 'Dispatch data unavailable.';
+}
+
+export function ShipmentList({ response, selected, onSelect }: { response: ListResponse; selected: string | null; onSelect: (id: string) => void }) {
+  if (response.status === 'error' || !['ok', 'empty', 'stale'].includes(response.status))
+    return <StateNotice kind="error" message={readError(response.reasons)} />;
+  if (response.status === 'empty') return <StateNotice kind="empty" message="No shipments with accepted milestones at this cutoff." />;
+  if (!response.shipments.length) return <StateNotice kind="error" message="Shipment rows unavailable." />;
+  const rows = response.shipments;
+  return <>{response.status === 'stale' && <StateNotice kind="stale" message={`Shipment data is dated ${formatInstant(response.as_of)}.`} />}
+    <ul className="dispatch-list" aria-label="Shipments">
     {rows.map(row => <li key={row.shipment_id}>
       <button type="button" aria-pressed={selected === row.shipment_id} onClick={() => onSelect(row.shipment_id)}>
         <span className="dispatch-id">{row.shipment_id}</span>
@@ -25,7 +34,7 @@ export function ShipmentList({ rows, selected, onSelect }: { rows: ShipmentRow[]
         {row.signals.length > 0 && <small>{row.signals.map(humanize).join(' · ')}</small>}
       </button>
     </li>)}
-  </ul>;
+  </ul></>;
 }
 
 function location(event: TimelineEvent): string {
@@ -36,8 +45,12 @@ function location(event: TimelineEvent): string {
 }
 
 export function ShipmentDetail({ row, timeline, onShowAffected }: { row: ShipmentRow; timeline: TimelineResponse; onShowAffected: (eventId: string) => void }) {
+  if (timeline.status === 'error' || !['ok', 'empty', 'stale'].includes(timeline.status))
+    return <StateNotice kind="error" message={readError(timeline.reasons)} />;
+  if (timeline.status === 'empty') return <StateNotice kind="empty" message="No accepted milestones at this cutoff." />;
   const current = timeline.current;
   return <section className="dispatch-detail" aria-label={`Shipment ${row.shipment_id}`}>
+    {timeline.status === 'stale' && <StateNotice kind="stale" message={`Milestone data is dated ${formatInstant(timeline.as_of)}.`} />}
     <div className="dispatch-detail-head">
       <h2>{row.shipment_id}</h2>
       <span className="dispatch-status" data-status={row.status}>{statusLabel(row.status)}</span>
@@ -92,15 +105,20 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
 }
 
 export function RouteEvidencePanel({ evidence }: { evidence: EvidenceResponse }) {
+  if (evidence.status === 'error' || !['ok', 'empty', 'stale'].includes(evidence.status))
+    return <StateNotice kind="error" message={readError(evidence.reasons)} />;
   const sections: [keyof Pick<EvidenceResponse, 'confirmed' | 'exposure' | 'expired' | 'outside_period'>, string, string][] = [
     ['confirmed', 'Confirmed operating status', 'Asserted by a port authority, carrier or facility operator.'],
     ['exposure', 'Exposure only', 'A hazard or condition nearby. It does not prove a closure or delay.'],
     ['expired', 'Expired evidence', 'Past its validity; shown for history only.'],
     ['outside_period', 'Outside observed period', 'Not describing the current period.'],
   ];
-  if (evidence.status === 'empty' || sections.every(([key]) => evidence[key].length === 0))
+  if (evidence.status === 'empty')
     return <StateNotice kind="empty" message="No route evidence for this shipment's facilities or lanes." />;
+  if (sections.every(([key]) => evidence[key].length === 0))
+    return <StateNotice kind="error" message="Route evidence entries unavailable." />;
   return <div className="dispatch-evidence-panel">
+    {evidence.status === 'stale' && <StateNotice kind="stale" message={`Route evidence is dated ${formatInstant(evidence.as_of)}.`} />}
     {sections.filter(([key]) => evidence[key].length).map(([key, title, help]) => <section key={key} aria-label={title}>
       <h4>{title}</h4><p className="field-hint">{help}</p>
       <ul>{evidence[key].map(item => <EvidenceCard key={item.evidence_id} item={item} />)}</ul>
@@ -109,11 +127,15 @@ export function RouteEvidencePanel({ evidence }: { evidence: EvidenceResponse })
 }
 
 export function AffectedPanel({ affected }: { affected: AffectedResponse }) {
+  if (affected.status === 'error' || !['ok', 'empty', 'stale'].includes(affected.status))
+    return <StateNotice kind="error" message={readError(affected.reasons)} />;
   return <section className="dispatch-affected" aria-label="Affected shipments">
+    {affected.status === 'stale' && <StateNotice kind="stale" message={`Affected-shipment data is dated ${formatInstant(dispatchFixtureInfo.asOf)}.`} />}
     <h3>Shipments sharing a location with {affected.event_id}</h3>
     <p className="dispatch-note">{affected.note}</p>
-    {affected.affected.length === 0
+    {affected.status === 'empty'
       ? <StateNotice kind="empty" message="No other shipments share this event's facility or lane." />
+      : affected.affected.length === 0 ? <StateNotice kind="error" message="Affected-shipment rows unavailable." />
       : <ul>{affected.affected.map(a => <li key={a.shipment_id}>
         <strong>{a.shipment_id}</strong> {a.relation === 'self' ? '(this shipment)' : ''}
         <span className="dispatch-chip" data-kind="exposure">exposure</span>
@@ -134,7 +156,7 @@ export function DispatchPage() {
 
   useEffect(() => {
     adapter.listShipments()
-      .then(value => { setList({ kind: 'ready', value }); if (value.shipments[0]) select(value.shipments[0].shipment_id); })
+      .then(value => { setList({ kind: 'ready', value }); if ((value.status === 'ok' || value.status === 'stale') && value.shipments[0]) select(value.shipments[0].shipment_id); })
       .catch(error => setList({ kind: 'error', message: error instanceof Error ? error.message : 'Shipments unavailable.' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adapter]);
@@ -184,10 +206,10 @@ export function DispatchPage() {
         <h2>Shipments</h2>
         {list.kind === 'loading' && <StateNotice kind="loading" />}
         {list.kind === 'error' && <StateNotice kind="error" message={list.message} />}
-        {list.kind === 'ready' && <ShipmentList rows={rows} selected={selected} onSelect={select} />}
+        {list.kind === 'ready' && <ShipmentList response={list.value} selected={selected} onSelect={select} />}
       </aside>
       <div className="dispatch-column dispatch-main">
-        {!selected && list.kind === 'ready' && <StateNotice kind="empty" message="Select a shipment." />}
+        {!selected && list.kind === 'ready' && list.value.status !== 'empty' && <StateNotice kind="empty" message="Select a shipment." />}
         {detail?.kind === 'loading' && <StateNotice kind="loading" />}
         {detail?.kind === 'error' && <StateNotice kind="error" message={detail.message} />}
         {detail?.kind === 'ready' && row && <>

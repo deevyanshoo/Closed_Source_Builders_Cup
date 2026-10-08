@@ -19,27 +19,36 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from ..route_evidence import evidence_for_locations
-from .read_models import DEFAULT_MAX_AGE_SECONDS, _frame, _instant, shipment_timeline
+from .read_models import DEFAULT_MAX_AGE_SECONDS, _MAX_ROWS, _frame, _identifier, _instant, shipment_timeline
 
 STATUS_NOTE = ("Status needs evidence: delayed and on time compare with the plan baseline, at risk needs current "
                "route evidence, and unknown means neither is available.")
 
 
-def _baselines(snapshot: object) -> dict[str, set[str]] | None:
+def _baselines(snapshot: object, cutoff: str) -> tuple[dict[str, set[str]] | None, bool]:
     if snapshot is None:
-        return {}
-    lines = snapshot.get("arrival_lines") if isinstance(snapshot, Mapping) else None
-    if not isinstance(lines, list):
-        return None
+        return {}, False
+    if not isinstance(snapshot, Mapping) or not all(
+        _identifier(snapshot.get(key)) for key in ("workspace_id", "plan_version", "snapshot_id")
+    ):
+        return None, False
+    snapshot_time = _instant(snapshot.get("as_of"))
+    lines = snapshot.get("arrival_lines")
+    if snapshot_time is None or type(lines) is not list or len(lines) > _MAX_ROWS:
+        return None, False
+    if snapshot_time > _instant(cutoff):
+        return {}, True
     out: dict[str, set[str]] = {}
     for line in lines:
-        if not isinstance(line, Mapping) or not isinstance(line.get("shipment_id"), str):
-            return None
+        if not isinstance(line, Mapping) or not _identifier(line.get("shipment_id")) or (
+            "line_id" in line and not _identifier(line["line_id"])
+        ):
+            return None, False
         instant = _instant(line.get("arrival_at"))
         if instant is None:
-            return None
+            return None, False
         out.setdefault(line["shipment_id"], set()).add(instant.isoformat())
-    return out
+    return out, False
 
 
 def _location_keys(events: list[dict]) -> list[str]:
@@ -52,10 +61,12 @@ def _location_keys(events: list[dict]) -> list[str]:
     return sorted(keys)
 
 
-def _row(timeline: dict, baselines: set[str] | None, route_evidence: Mapping | None) -> dict:
+def _row(timeline: dict, baselines: set[str] | None, route_evidence: Mapping | None,
+         future_baseline: bool = False) -> dict:
     events, current = timeline["events"], timeline["current"]
-    types = {e["event_type"] for e in events}
-    arrivals = sorted((e for e in events if e["event_type"] in ("arrived", "delivered")),
+    usable = [e for e in events if e["operating_evidence"]]
+    types = {e["event_type"] for e in usable}
+    arrivals = sorted((e for e in usable if e["event_type"] in ("arrived", "delivered")),
                       key=lambda e: (e["occurred_at"], e["event_id"]))
     if arrivals:
         expected = {"at": arrivals[-1]["occurred_at"], "basis": "actual_arrival", "event_id": arrivals[-1]["event_id"]}
@@ -73,7 +84,9 @@ def _row(timeline: dict, baselines: set[str] | None, route_evidence: Mapping | N
     if current["unusable_event_ids"]:
         signals.add("evidence_expired")
     baseline = None
-    if not baselines:
+    if future_baseline:
+        signals.add("baseline_unavailable_at_cutoff")
+    elif not baselines:
         signals.add("no_baseline")
     elif len(baselines) > 1:
         signals.add("baseline_ambiguous")
@@ -83,8 +96,9 @@ def _row(timeline: dict, baselines: set[str] | None, route_evidence: Mapping | N
     if late:
         signals.add("arrived_after_baseline" if expected["basis"] == "actual_arrival" else "eta_after_baseline")
     keys = _location_keys(events)
-    if route_evidence is not None and not arrivals and keys:
-        found = evidence_for_locations(route_evidence, keys)
+    active_keys = _location_keys(usable)
+    if route_evidence is not None and not arrivals and active_keys:
+        found = evidence_for_locations(route_evidence, active_keys)
         signals.update(f"route_confirmed:{e['operating_status']}" for e in found["confirmed"]
                        if e["operating_status"] != "normal")
         if found["exposure"]:
@@ -113,7 +127,7 @@ def shipment_list(normalized: Mapping, *, now: str, snapshot: Mapping | None = N
     result.update(shipments=[], note=STATUS_NOTE)
     if data is None:
         return result
-    baselines = _baselines(snapshot)
+    baselines, future_baseline = _baselines(snapshot, result["as_of"])
     if baselines is None:
         return {**result, "status": "error", "reasons": ["invalid_snapshot"]}
     if route_evidence is not None and evidence_for_locations(route_evidence, [])["status"] == "error":
@@ -125,5 +139,5 @@ def shipment_list(normalized: Mapping, *, now: str, snapshot: Mapping | None = N
         timeline = shipment_timeline(normalized, shipment_id, now=now, max_age_seconds=max_age_seconds)
         if timeline["status"] == "error":
             return {**result, "status": "error", "reasons": timeline["reasons"], "shipments": []}
-        result["shipments"].append(_row(timeline, baselines.get(shipment_id), route_evidence))
+        result["shipments"].append(_row(timeline, baselines.get(shipment_id), route_evidence, future_baseline))
     return result

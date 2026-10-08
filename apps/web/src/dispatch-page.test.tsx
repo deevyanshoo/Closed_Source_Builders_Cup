@@ -9,7 +9,7 @@ const adapter = createDispatchFixtureAdapter();
 describe('dispatch workspace components', () => {
   it('shows each shipment with a status label and its signals', async () => {
     const list = await adapter.listShipments();
-    const html = renderToStaticMarkup(<ShipmentList rows={list.shipments} selected="SHP-SYN-004" onSelect={() => {}} />);
+    const html = renderToStaticMarkup(<ShipmentList response={list} selected="SHP-SYN-004" onSelect={() => {}} />);
     for (const label of ['On hold', 'Delayed', 'On time', 'Unknown']) expect(html).toContain(label);
     expect(html).toContain('eta after baseline');
     expect(html).toContain('aria-pressed="true"');
@@ -50,5 +50,39 @@ describe('dispatch workspace components', () => {
     expect(renderToStaticMarkup(<StateNotice kind="empty" message="No accepted milestones" />)).toContain('No accepted milestones');
     expect(renderToStaticMarkup(<StateNotice kind="error" message="Not found" />)).toContain('role="alert"');
     expect(renderToStaticMarkup(<StateNotice kind="stale" message="Data cutoff is 50 hours old" />)).toContain('Data cutoff is 50 hours old');
+  });
+
+  it('shows read-model errors as errors rather than empty evidence or actions', async () => {
+    const route = await adapter.routeEvidence('SHP-SYN-002');
+    const routeHtml = renderToStaticMarkup(<RouteEvidencePanel evidence={{ ...route, status: 'error', reasons: ['invalid_route_evidence'], confirmed: [], exposure: [] }} />);
+    expect(routeHtml).toContain('role="alert"');
+    expect(routeHtml).not.toContain('No route evidence');
+
+    const affected = await adapter.affected('evt-002-hold');
+    const affectedHtml = renderToStaticMarkup(<AffectedPanel affected={{ ...affected, status: 'error', reasons: ['invalid_event'], affected: [] }} />);
+    expect(affectedHtml).toContain('role="alert"');
+    expect(affectedHtml).not.toContain('No other shipments');
+
+    const list = await adapter.listShipments();
+    const timeline = await adapter.timeline('SHP-SYN-003');
+    const row = list.shipments.find(s => s.shipment_id === 'SHP-SYN-003')!;
+    const detailHtml = renderToStaticMarkup(<MemoryRouter><ShipmentDetail row={row} timeline={{ ...timeline, status: 'error', reasons: ['invalid_timeline'], events: [] }} onShowAffected={() => {}} /></MemoryRouter>);
+    expect(detailHtml).toContain('role="alert"');
+    expect(detailHtml).not.toContain('No accepted milestones');
+  });
+
+  it('distinguishes error, genuine empty, and stale shipment lists', async () => {
+    const list = await adapter.listShipments();
+    const render = (response: typeof list) => renderToStaticMarkup(<ShipmentList response={response} selected={null} onSelect={() => {}} />);
+    const error = render({ ...list, status: 'error', reasons: ['invalid_snapshot'], shipments: [] });
+    expect(error).toContain('role="alert"');
+    expect(error).not.toContain('No shipments');
+    const empty = render({ ...list, status: 'empty', reasons: ['no_accepted_events'], shipments: [] });
+    expect(empty).toContain('No shipments');
+    expect(empty).not.toContain('role="alert"');
+    const stale = render({ ...list, status: 'stale', reasons: ['data_older_than_max_age'] });
+    expect(stale).toContain('Old data');
+    expect(stale).toContain('2026-10-08');
+    expect(stale).toContain('SHP-SYN-004');
   });
 });

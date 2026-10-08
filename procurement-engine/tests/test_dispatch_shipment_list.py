@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from procure.dispatch import shipment_list
+from procure.dispatch import shipment_list, shipment_timeline
 from procure.events.ingest import normalize_milestones
 from procure.route_evidence import normalize_route_evidence
 
@@ -147,3 +147,48 @@ def test_inputs_are_not_modified():
     before = copy.deepcopy((norm, snap, ev))
     shipment_list(norm, now=NOW, snapshot=snap, route_evidence=ev)
     assert (norm, snap, ev) == before
+
+
+def test_future_snapshot_cannot_make_historical_eta_delayed():
+    cutoff = "2026-10-05T12:00:00Z"
+    past = normalize_milestones([eta_record("2026-10-15T06:00:00Z")], as_of=cutoff)
+    listing = shipment_list(past, now="2026-10-05T12:01:00Z", snapshot=SNAPSHOT)
+    current = listing["shipments"][0]
+    assert listing["status"] == "ok"
+    assert current["baseline_arrival_at"] is None
+    assert current["status"] == "unknown"
+    assert current["signals"] == ["baseline_unavailable_at_cutoff"]
+    assert current["expected_arrival"]["basis"] == "eta"
+
+
+def test_snapshot_at_cutoff_retains_baseline_and_late_signal():
+    listing = shipment_list(normalized([eta_record("2026-10-15T06:00:00Z")]), now=NOW, snapshot=SNAPSHOT)
+    current = listing["shipments"][0]
+    assert current["baseline_arrival_at"] == "2026-10-13T00:00:00+00:00"
+    assert current["status"] == "delayed"
+    assert current["signals"] == ["eta_after_baseline"]
+
+
+def test_expired_location_event_cannot_create_current_route_risk():
+    record = eta_record("2026-10-15T06:00:00Z")
+    record["evidence"][0]["valid_until"] = "2026-10-07T00:00:00Z"
+    listing = shipment_list(normalized([record]), now=NOW, route_evidence=evidence())
+    current = listing["shipments"][0]
+    assert current["location_keys"] == ["AEJEA", "INMAA"]
+    assert current["status"] == "unknown"
+    assert current["signals"] == ["evidence_expired", "no_baseline"]
+
+
+@pytest.mark.parametrize("kind,index", [("arrived", 1), ("delivered", 1), ("partially_delivered", 3)])
+def test_expired_operating_event_stays_history_without_arrival_or_delivery(kind, index):
+    record = copy.deepcopy(MILESTONES["records"][index])
+    record["type"] = kind
+    record["evidence"][0]["valid_until"] = "2026-10-07T00:00:00Z"
+    listing = shipment_list(normalized([record]), now=NOW)
+    current = listing["shipments"][0]
+    assert current["status"] == "unknown"
+    assert current["expected_arrival"] is None
+    assert current["signals"] == ["evidence_expired", "no_baseline"]
+    assert current["delivered_quantity"] == {}
+    timeline = shipment_timeline(normalized([record]), current["shipment_id"], now=NOW)
+    assert len(timeline["events"]) == 1 and timeline["events"][0]["operating_evidence"] is False

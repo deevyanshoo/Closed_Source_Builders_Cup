@@ -161,7 +161,7 @@ def _instant(value: object) -> datetime | None:
         return None
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
 
 

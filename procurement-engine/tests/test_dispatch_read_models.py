@@ -214,6 +214,34 @@ def test_age_limit_uses_full_precision(normalized):
     assert shipment_timeline(normalized, "SHP-SYN-002", now="2026-10-09T12:00:00.000001Z")["status"] == "stale"
 
 
+@pytest.mark.parametrize("extreme", ["9999-12-31T23:59:59-01:00", "0001-01-01T00:00:00+01:00"])
+@pytest.mark.parametrize("field", ["as_of", "now", "occurred_at", "observed_at", "eta",
+                                   "retrieved_at", "valid_until"])
+def test_utc_conversion_overflow_is_controlled_in_both_views(normalized, extreme, field):
+    data = copy.deepcopy(normalized)
+    now = NOW
+    if field == "as_of":
+        data["as_of"] = extreme
+    elif field == "now":
+        now = extreme
+    elif field in {"retrieved_at", "valid_until"}:
+        data["events"][0]["evidence"][0][field] = extreme
+    else:
+        data["events"][0][field] = extreme
+    reason = "invalid_now" if field == "now" else "invalid_normalized_input"
+    for got in (shipment_timeline(data, "SHP-SYN-002", now=now),
+                affected_shipments(data, "evt-002-hold", now=now)):
+        assert got["status"] == "error" and got["reasons"] == [reason]
+        assert got.get("events", got.get("affected")) == []
+
+
+def test_valid_utc_boundary_and_equivalent_offsets_remain_accepted(normalized):
+    data = copy.deepcopy(normalized)
+    data["as_of"] = "2026-10-08T17:30:00+05:30"
+    assert shipment_timeline(data, "SHP-SYN-002", now="2026-10-08T13:00:00Z")["status"] == "ok"
+    assert affected_shipments(data, "evt-002-hold", now="2026-10-08T18:30:00+05:30")["status"] == "ok"
+
+
 def test_records_shape_is_controlled(normalized):
     got = shipment_timeline(normalized, "SHP-SYN-002", now=NOW, records="not-a-list")
     assert got["status"] == "error" and got["reasons"] == ["invalid_records"] and got["events"] == []

@@ -27,7 +27,7 @@ produces them; I'm proposing them for the shared contract:
 
 ## Proposed `ShipmentMilestoneEvent`
 
-The normaliser's real output for the synthetic port hold, as produced by `normalize_milestones`:
+Selected fields from the synthetic port-hold output of `normalize_milestones` (digest abbreviated for display):
 
 ```json
 {"event_id": "evt-002-hold", "shipment_id": "SHP-SYN-002", "event_type": "port_hold", "raw_type": "port_hold",
@@ -49,7 +49,7 @@ Conventions match `projection.py`:
 **Rejections** carry a record index and reason:
 `missing_identifier`, `invalid_timestamp`, `observed_before_occurred`, `observed_after_as_of`, `unsupported_event_type`,
 `missing_location`, `invalid_location`, `missing_source`, `missing_evidence`, `invalid_evidence`, `missing_eta`,
-`invalid_quantity`, `conflicting_duplicate`, `invalid_record`.
+`invalid_quantity`, `conflicting_duplicate`, `invalid_record`, `evidence_after_as_of`.
 
 ```json
 {"record_index": 12, "event_id": "evt-007-dep", "reason": "conflicting_duplicate", "details": ["evt-007-dep"]}
@@ -61,12 +61,19 @@ Conventions match `projection.py`:
 - Copies that differ in anything else are all rejected; which one is right is not guessed.
 - Provider corrections therefore need a new `event_id` or an explicit revision field (see question 3).
 
-**Point in time:** a record observed after `as_of` is rejected, because it was not available then.
+**Point in time:** a record observed after `as_of`, or with any evidence retrieved after it, is rejected because it was not available then.
 
 ## Mapping to the existing projection (implemented, not a contract change)
 
-`build_arrival_scenarios(normalized, snapshot)` emits at most one scenario per shipment, in exactly the existing
-scenario mapping. A test runs the unmodified `project_arrival_change` on it and gets `screened`.
+The local synthetic handoff calls `bind_synthetic_milestones(raw_records, snapshot,
+expected_workspace_id=..., expected_plan_version=..., expected_snapshot_id=...)` before
+`build_arrival_scenarios(binding, snapshot)`. The factory re-normalizes at the snapshot cutoff;
+the builder rejects a loose normalized mapping or a different snapshot. Its outer candidate
+keeps a bounded source/evidence receipt and a snapshot-bound digest. The inner scenario emits
+at most one candidate per shipment in exactly the existing projection mapping. A test runs
+the unmodified `project_arrival_change` on it and gets `screened`. Expected scope is a local
+caller assertion, not event ownership, provider authentication, source rights or tenant proof.
+This proposal is still unapproved for any connected/public event route or plan application.
 
 ```json
 {"workspace_id": "synthetic-workspace", "expected_plan_version": "synthetic-plan-v1",

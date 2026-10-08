@@ -155,3 +155,85 @@ def test_arrival_before_departure_is_a_sequence_conflict():
                observed_at="2026-09-19T01:00:00Z")
     out = normalize_milestones([dep, arr], as_of=AS_OF)
     assert "sequence_conflict" in out["shipments"]["SHP-SYN-001"]["flags"]
+
+
+@pytest.mark.parametrize("retrieved_at,accepted", [
+    ("2026-10-08T11:59:59Z", True),
+    ("2026-10-08T12:00:00Z", True),
+    ("2026-10-08T12:00:01Z", False),
+])
+def test_evidence_retrieval_respects_as_of_inclusively(retrieved_at, accepted):
+    row = base()
+    row["evidence"][0]["retrieved_at"] = retrieved_at
+    out = normalize_milestones([row], as_of=AS_OF)
+    assert len(out["events"]) == int(accepted)
+    if accepted:
+        assert out["events"][0]["operating_evidence"] is True
+        assert out["rejected"] == []
+    else:
+        assert out["rejected"] == [{"record_index": 0, "event_id": row["event_id"],
+                                    "reason": "evidence_after_as_of", "details": ["ev:ev-001-bl"]}]
+
+
+def test_one_future_evidence_reference_rejects_entire_record():
+    row = base()
+    future = copy.deepcopy(row["evidence"][0])
+    future["evidence_id"] = "future-reference"
+    future["retrieved_at"] = "2026-10-09T00:00:00Z"
+    row["evidence"].append(future)
+    out = normalize_milestones([row], as_of=AS_OF)
+    assert out["events"] == []
+    assert out["rejected"][0]["reason"] == "evidence_after_as_of"
+    assert out["rejected"][0]["details"] == ["ev:future-reference"]
+
+
+@pytest.mark.parametrize("reobserved", [False, True])
+def test_future_evidence_copy_is_rejected_before_duplicate_grouping(reobserved):
+    valid = base()
+    future = copy.deepcopy(valid)
+    if reobserved:
+        future["observed_at"] = "2026-10-07T00:00:00Z"
+    future["evidence"][0]["retrieved_at"] = "2026-10-09T00:00:00Z"
+    out = normalize_milestones([valid, future], as_of=AS_OF)
+    assert [e["record_index"] for e in out["events"]] == [0]
+    assert out["events"][0]["operating_evidence"] is True
+    assert out["duplicates"] == []
+    assert [(r["record_index"], r["reason"]) for r in out["rejected"]] == [(1, "evidence_after_as_of")]
+
+
+def test_evidence_retrieved_after_observation_but_before_cutoff_is_allowed():
+    row = base()
+    row["evidence"][0]["retrieved_at"] = "2026-10-07T00:00:00Z"
+    out = normalize_milestones([row], as_of=AS_OF)
+    assert out["rejected"] == []
+    assert out["events"][0]["evidence"][0]["retrieved_at"] == "2026-10-07T00:00:00+00:00"
+
+
+def test_evidence_expiry_equal_to_cutoff_remains_current():
+    row = base()
+    row["evidence"][0]["retrieved_at"] = AS_OF
+    row["evidence"][0]["valid_until"] = AS_OF
+    out = normalize_milestones([row], as_of=AS_OF)
+    assert out["rejected"] == []
+    assert out["events"][0]["evidence"][0]["status"] == "current"
+    assert out["events"][0]["operating_evidence"] is True
+
+
+@pytest.mark.parametrize("actual_type,actual_time,actual_shipment,superseded", [
+    ("arrived", "2026-09-21T00:00:00Z", "SHP-SYN-001", True),
+    ("delivered", "2026-09-21T00:00:00Z", "SHP-SYN-001", True),
+    ("partial_delivery", "2026-09-21T00:00:00Z", "SHP-SYN-001", False),
+    ("delivered", "2026-09-19T00:00:00Z", "SHP-SYN-001", False),
+    ("delivered", "2026-09-20T17:00:00Z", "SHP-SYN-001", False),
+    ("delivered", "2026-09-21T00:00:00Z", "OTHER-SHIPMENT", False),
+])
+def test_only_later_whole_shipment_arrival_or_delivery_supersedes_eta(
+        actual_type, actual_time, actual_shipment, superseded):
+    eta = base(event_id="eta", type="eta_changed", eta="2026-09-23T00:00:00Z")
+    actual = base(event_id="actual", shipment_id=actual_shipment, type=actual_type,
+                  occurred_at=actual_time, observed_at="2026-09-21T01:00:00Z")
+    if actual_type == "partial_delivery":
+        actual["quantity"] = {"amount": "20.000", "unit": "tonne"}
+    out = normalize_milestones([eta, actual], as_of=AS_OF)
+    assert out["rejected"] == []
+    assert ("superseded_by_arrival" in event(out, "eta")["flags"]) is superseded

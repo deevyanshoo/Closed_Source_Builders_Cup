@@ -1,0 +1,201 @@
+{
+  "components": {
+    "schemas": {
+      "ShipmentRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "minLength": 32,
+            "maxLength": 32
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_id",
+          "expected_revision"
+        ]
+      },
+      "ShipmentRecoveryContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "minLength": 32,
+            "maxLength": 32
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "propagation_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "production_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "source": {
+            "type": "string",
+            "const": "host_configured_synthetic"
+          },
+          "persistence": {
+            "type": "string",
+            "const": "ephemeral"
+          },
+          "source_authenticity": {
+            "type": "string",
+            "const": "not_verified"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "context_id",
+          "revision",
+          "workspace_id",
+          "plan_version",
+          "propagation_snapshot_id",
+          "production_snapshot_id",
+          "as_of",
+          "synthetic",
+          "source",
+          "persistence",
+          "source_authenticity",
+          "request_sha256"
+        ]
+      },
+      "ShipmentRecoveryContextsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShipmentRecoveryContext"
+            },
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "contract_version",
+          "contexts"
+        ]
+      },
+      "ShipmentRecoveryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/ShipmentRecoveryContext"
+          },
+          "outcome_json": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 4194304,
+            "x-max-utf8-bytes": 4194304,
+            "description": "Strict JSON text containing the complete unchanged private synthetic shipment adapter outcome, including all public numerical results and source/projection evidence. Validate before use; never float-coerce decimal strings. May contain evaluated, no_eligible_scenario or rejected."
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "outcome_json"
+        ]
+      },
+      "StateErrorResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "error": {
+            "$ref": "#/components/schemas/SemanticError"
+          }
+        },
+        "required": [
+          "contract_version",
+          "error"
+        ]
+      },
+      "SemanticError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      }
+    }
+  },
+  "limits": {
+    "request_bytes": 4096,
+    "response_bytes": 8421376,
+    "max_depth": 2,
+    "outcome_bytes": 4194304
+  }
+}

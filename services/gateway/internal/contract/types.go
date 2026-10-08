@@ -753,3 +753,35 @@ type VoiceHTTPSavedSessionRequest struct {
   ContextId string `json:"context_id"`
   ExpectedRevision int `json:"expected_revision"`
 }
+
+type ShipmentRecoveryRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ContextId string `json:"context_id"`
+  ExpectedRevision int `json:"expected_revision"`
+}
+
+type ShipmentRecoveryContext struct {
+  ContextId string `json:"context_id"`
+  Revision int `json:"revision"`
+  WorkspaceId string `json:"workspace_id"`
+  PlanVersion string `json:"plan_version"`
+  PropagationSnapshotId string `json:"propagation_snapshot_id"`
+  ProductionSnapshotId string `json:"production_snapshot_id"`
+  AsOf string `json:"as_of"`
+  Synthetic bool `json:"synthetic"`
+  Source string `json:"source"`
+  Persistence string `json:"persistence"`
+  SourceAuthenticity string `json:"source_authenticity"`
+  RequestSha256 string `json:"request_sha256"`
+}
+
+type ShipmentRecoveryContextsResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Contexts []ShipmentRecoveryContext `json:"contexts"`
+}
+
+type ShipmentRecoveryResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context ShipmentRecoveryContext `json:"context"`
+  OutcomeJson string `json:"outcome_json"`
+}

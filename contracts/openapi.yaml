@@ -2537,6 +2537,264 @@
           }
         }
       }
+    },
+    "/v2/workspaces/{workspace_id}/shipment-recovery/contexts": {
+      "get": {
+        "operationId": "shipmentRecoveryContexts",
+        "description": "LOCAL authenticated metadata-only host-configured synthetic ephemeral context list. Read-only, no database/source-authenticity/operational-state proof. Viewer/editor membership before availability.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "Must exactly match server-authenticated local workspace; never authorizes itself."
+          }
+        ],
+        "x-request-max-bytes": 0,
+        "x-response-max-bytes": 65536,
+        "responses": {
+          "200": {
+            "description": "Workspace-filtered context metadata or empty enabled list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentRecoveryContextsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing local development identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Foreign workspace or unsupported role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed path/query/header/body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled local feature or invalid host catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/workspaces/{workspace_id}/shipment-recovery/comparisons": {
+      "post": {
+        "operationId": "shipmentRecoveryComparison",
+        "description": "LOCAL authenticated read-only comparison of complete host-owned synthetic context. Body is reference-only. Current ephemeral revision and final publication guards; no application/idempotent effect, persistence, provider or source-authenticity claim. Each source scenario is independent. Numerical unsupported and no-eligible evidence remain explicit.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "Must exactly match server-authenticated local workspace; never authorizes itself."
+          }
+        ],
+        "x-request-max-bytes": 4096,
+        "x-response-max-bytes": 8421376,
+        "x-max-depth": 2,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShipmentRecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete evaluated or no-eligible outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShipmentRecoveryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing local identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace/role denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or foreign context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Wrong method",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale/replaced ephemeral context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "HTTP request exceeds4096bytes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed transport or complete adapter input/join/projection rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ShipmentRecoveryResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StateErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded global/principal execution admission full",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Complete adapter output rejection or invalid/tampered child response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ShipmentRecoveryResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StateErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled/unavailable feature or complete adapter binding/source/runtime rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ShipmentRecoveryResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StateErrorResponse"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Deadline exceeded after bounded child reaping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6086,6 +6344,156 @@
           "expected_revision"
         ],
         "description": "Authenticated host reads current complete stored context; no caller snapshot override. Local synthetic read-only comparison only."
+      },
+      "ShipmentRecoveryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "minLength": 32,
+            "maxLength": 32
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_id",
+          "expected_revision"
+        ]
+      },
+      "ShipmentRecoveryContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$",
+            "minLength": 32,
+            "maxLength": 32
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "workspace_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "plan_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "propagation_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "production_snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "as_of": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "source": {
+            "type": "string",
+            "const": "host_configured_synthetic"
+          },
+          "persistence": {
+            "type": "string",
+            "const": "ephemeral"
+          },
+          "source_authenticity": {
+            "type": "string",
+            "const": "not_verified"
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "minLength": 64,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "context_id",
+          "revision",
+          "workspace_id",
+          "plan_version",
+          "propagation_snapshot_id",
+          "production_snapshot_id",
+          "as_of",
+          "synthetic",
+          "source",
+          "persistence",
+          "source_authenticity",
+          "request_sha256"
+        ]
+      },
+      "ShipmentRecoveryContextsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShipmentRecoveryContext"
+            },
+            "maxItems": 4
+          }
+        },
+        "required": [
+          "contract_version",
+          "contexts"
+        ]
+      },
+      "ShipmentRecoveryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/ShipmentRecoveryContext"
+          },
+          "outcome_json": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 4194304,
+            "x-max-utf8-bytes": 4194304,
+            "description": "Strict JSON text containing the complete unchanged private synthetic shipment adapter outcome, including all public numerical results and source/projection evidence. Validate before use; never float-coerce decimal strings. May contain evaluated, no_eligible_scenario or rejected."
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "outcome_json"
+        ]
       }
     },
     "securitySchemes": {

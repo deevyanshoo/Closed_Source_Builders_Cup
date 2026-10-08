@@ -1,0 +1,22 @@
+{
+  "schema_version": "observed-source-manifest.v1",
+  "eligibility_status": "HOLD",
+  "is_synthetic": false,
+  "source_id": "worldbank_pinksheet_monthly_oct2026",
+  "source_url": "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/related/CMO-Historical-Data-Monthly.xlsx",
+  "retrieved_utc": "2026-10-08T07:44:34Z",
+  "sha256": "ea1c350827878ea3bbe30e3cda16a13fd3bd5b409b8458940dc94a36b5a33154",
+  "bytes": 586099,
+  "sheet": "Monthly Prices",
+  "month_range": "1960M01-2026M09",
+  "vintage_status": "latest_vintage_only_historical_publication_unknown",
+  "rights_status": "HOLD_file_specific_exception_not_cleared",
+  "series": {
+    "copper": {"label": "Copper", "column": "BM", "unit": "($/mt)", "normalized_unit": "USD/metric tonne", "eligibility_status": "HOLD"},
+    "aluminum": {"label": "Aluminum", "column": "BK", "unit": "($/mt)", "normalized_unit": "USD/metric tonne", "eligibility_status": "HOLD"},
+    "iron_ore": {"label": "Iron ore, cfr spot", "column": "BL", "unit": "($/dmtu)", "eligibility_status": "root_unit_review"}
+  },
+  "ecb_usd_eur": "not_evaluated_unavailable_timeout_no_bytes",
+  "ecb_inr_eur": "not_evaluated_unavailable_timeout_no_bytes",
+  "joined": "not_evaluated_fx_unavailable_and_iron_unit_hold"
+}

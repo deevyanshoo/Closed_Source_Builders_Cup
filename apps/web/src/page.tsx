@@ -261,6 +261,7 @@ export function PlanningPage() {
     <header className="masthead">
       <div className="brand">CLOSED <span>SOURCE</span><sup> / PLANNING</sup></div>
       <a className="recovery-back" href="/recovery">Synthetic recovery comparison</a>
+      <a className="recovery-back" href="/shipment-recovery">Shipment recovery evidence</a>
       <a className="recovery-back" href="/scenarios">Typed scenarios</a>
       <div className="masthead-meta"><span className="red-dot" aria-hidden="true">●</span> {identityCopy.masthead}</div>
     </header>

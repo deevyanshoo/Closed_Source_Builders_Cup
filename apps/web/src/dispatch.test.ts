@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, statusLabel } from './dispatch';
+import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, hazardStateLabel, formatQuantities, freshness, statusLabel } from './dispatch';
 import type { ShipmentStatus } from './dispatch';
 
 describe('local dispatch fixture adapter', () => {
@@ -73,5 +73,37 @@ describe('display helpers', () => {
   it('marks data older than a day as stale', () => {
     expect(freshness('2026-10-08T12:00:00+00:00', new Date('2026-10-08T13:00:00Z'))).toEqual({ ageSeconds: 3600, stale: false });
     expect(freshness('2026-10-08T12:00:00+00:00', new Date('2026-10-10T12:00:01Z')).stale).toBe(true);
+  });
+});
+
+describe('hazard and weather exposure (local adapter)', () => {
+  const adapter = createDispatchFixtureAdapter();
+
+  it('lists one assessment per provider and location, exposure only', async () => {
+    const h = await adapter.hazards('SHP-SYN-008');
+    expect(h.status).toBe('ok');
+    expect(h.note).toMatch(/^Exposure only, not confirmed/);
+    expect(h.assessments.map(a => [a.provider_id, a.location.code, a.state, a.usable])).toEqual([
+      ['gdacs', 'BRTUB', 'no_exposure_found', true], ['gdacs', 'INPRT', 'exposure_found', true],
+      ['open-meteo', 'BRTUB', 'provider_failure', false], ['open-meteo', 'INPRT', 'exposure_found', false]]);
+    expect(h.evidence.confirmed).toEqual([]);
+    expect(h.evidence.exposure.map(e => e.source.provider_id)).toEqual(['gdacs']);
+    expect(h.evidence.expired.map(e => e.source.provider_id)).toEqual(['open-meteo']);
+  });
+
+  it('keeps unknown locations unsupported and unknown shipments empty', async () => {
+    expect((await adapter.hazards('SHP-SYN-003')).assessments.map(a => a.state)).toEqual(['unsupported_location', 'unsupported_location']);
+    const none = await adapter.hazards('SHP-NOPE');
+    expect([none.status, none.assessments]).toEqual(['empty', []]);
+  });
+
+  it('labels every state without calling anything safe', () => {
+    const states = ['exposure_found', 'no_exposure_found', 'insufficient_data', 'unsupported_location', 'offline',
+      'provider_failure', 'rate_limited', 'malformed_payload', 'not_fetched'] as const;
+    const labels = states.map(s => hazardStateLabel(s));
+    expect(labels[0]).toBe('Exposure found, not confirmed');
+    expect(labels[1]).toBe('No exposure found (not a safety check)');
+    expect(labels.join(' ').toLowerCase()).not.toMatch(/\bsafe\b/);
+    expect(new Set(labels).size).toBe(states.length);
   });
 });

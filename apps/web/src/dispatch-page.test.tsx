@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import { AffectedPanel, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
+import { AffectedPanel, HazardPanel, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
 import { createDispatchFixtureAdapter } from './dispatch';
 
 const adapter = createDispatchFixtureAdapter();
@@ -84,5 +84,34 @@ describe('dispatch workspace components', () => {
     expect(stale).toContain('Old data');
     expect(stale).toContain('2026-10-08');
     expect(stale).toContain('SHP-SYN-004');
+  });
+});
+
+describe('hazard and weather exposure panel', () => {
+  const render = async (id: string) => renderToStaticMarkup(<HazardPanel hazards={await adapter.hazards(id)} />);
+
+  it('labels exposure as not confirmed with provider, retrieval, period, threshold and expiry', async () => {
+    const html = await render('SHP-SYN-008');
+    expect(html).toContain('Exposure, not confirmed');
+    expect(html).toContain('gdacs');
+    expect(html).toContain('121 km');
+    expect(html).toContain('Orange or Red within 300 km');
+    for (const label of ['Retrieved', 'Period', 'Threshold', 'Valid until']) expect(html).toContain(label);
+    expect(html).toContain('Stale: retrieved too long before the cutoff. Not usable for planning.');
+    expect(html).toContain('Provider failure');
+    const failure = html.slice(html.indexOf('data-state="provider_failure"'));
+    expect(failure.slice(0, failure.indexOf('</li>'))).toContain('Not available');
+  });
+
+  it('shows measured values with units against the rule', async () => {
+    const html = await render('SHP-SYN-002');
+    expect(html).toContain('76.8 mm');
+    expect(html).toContain('64.5 mm');
+    expect(html).toContain('No exposure found (not a safety check)');
+  });
+
+  it('shows unsupported locations and the empty state', async () => {
+    expect(await render('SHP-SYN-003')).toContain('Location not in registry');
+    expect(await render('SHP-NOPE')).toContain('No hazard or weather assessments for this shipment.');
   });
 });

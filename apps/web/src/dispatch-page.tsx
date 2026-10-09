@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, humanize, statusLabel,
+  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, hazardStateLabel, humanize,
+  statusLabel,
 } from './dispatch';
-import type { AffectedResponse, EvidenceItem, EvidenceResponse, ListResponse, ShipmentRow, TimelineEvent, TimelineResponse } from './dispatch';
+import type {
+  AffectedResponse, EvidenceItem, EvidenceResponse, HazardAssessment, HazardResponse, HazardValue, ListResponse, ShipmentRow, TimelineEvent,
+  TimelineResponse,
+} from './dispatch';
 import './dispatch.css';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
@@ -145,12 +149,64 @@ export function AffectedPanel({ affected }: { affected: AffectedResponse }) {
   </section>;
 }
 
+function hazardValue(v: HazardValue): string {
+  if (v.rule_id === 'gdacs_alert_within_radius')
+    return `${v.alert_level} ${v.event_type} alert ${v.event_id}, ${v.distance_km} km away${v.period ? ` (${formatInstant(v.period.start)} to ${formatInstant(v.period.end)})` : ''}`;
+  const value = v.value == null ? 'not available' : `${v.value} ${v.unit}`;
+  return `${humanize(v.rule_id)}: ${value}${v.at ? ` at ${formatInstant(v.at)}` : ''}`;
+}
+
+function ruleOutcome(v: HazardValue): string {
+  if (v.met) return 'threshold met';
+  if (v.met === false) return v.reason ? humanize(v.reason) : 'below threshold';
+  return v.reason ? `undecided: ${humanize(v.reason)}` : 'undecided';
+}
+
+function HazardCard({ item }: { item: HazardAssessment }) {
+  const stale = item.freshness === 'stale';
+  return <li className="dispatch-hazard-card" data-state={item.state} data-usable={item.usable}>
+    <div className="dispatch-event-head">
+      <strong>{item.provider_id} · {item.location.name ?? item.location.code} ({item.location.code})</strong>
+      <span className="dispatch-chip" data-kind={item.state === 'exposure_found' ? 'exposure' : 'neutral'}>{hazardStateLabel(item.state)}</span>
+    </div>
+    {item.reason && item.state !== 'exposure_found' && <p className="field-hint">Reason: {humanize(item.reason)}</p>}
+    {stale && <p className="dispatch-note">Stale: retrieved too long before the cutoff. Not usable for planning.</p>}
+    {!item.usable && !stale && item.state !== 'unsupported_location' && <p className="field-hint">Not usable for planning.</p>}
+    <dl>
+      <div><dt>Retrieved</dt><dd>{formatInstant(item.retrieved_at)}</dd></div>
+      <div><dt>Period</dt><dd>{item.period ? `${formatInstant(item.period.start)} to ${formatInstant(item.period.end)}` : item.values.some(v => v.period) ? 'Per event below' : 'Not available'}</dd></div>
+      <div><dt>Valid until</dt><dd>{formatInstant(item.valid_until)}</dd></div>
+      <div><dt>Thresholds</dt><dd>{item.thresholds_version}</dd></div>
+    </dl>
+    {item.values.length > 0 && <table className="dispatch-hazard-values">
+      <caption className="field-hint">Measured or reported values against the stated rule</caption>
+      <thead><tr><th scope="col">Value</th><th scope="col">Threshold</th><th scope="col">Outcome</th></tr></thead>
+      <tbody>{item.values.map((v, i) => <tr key={`${v.rule_id}:${v.event_id ?? i}`}>
+        <td>{hazardValue(v)}</td><td>{v.rule_id === 'gdacs_alert_within_radius' ? v.threshold : `${v.threshold} ${v.unit}`}</td><td>{ruleOutcome(v)}</td>
+      </tr>)}</tbody>
+    </table>}
+  </li>;
+}
+
+export function HazardPanel({ hazards }: { hazards: HazardResponse }) {
+  return <section className="dispatch-hazards" aria-label="Hazard and weather exposure">
+    <h4>Hazard and weather exposure <span className="dispatch-chip" data-kind="exposure">Exposure, not confirmed</span></h4>
+    <p className="field-hint">{hazards.note}</p>
+    {hazards.status === 'stale' && <StateNotice kind="stale" message="These provider answers describe an old cutoff." />}
+    {hazards.assessments.length === 0
+      ? <StateNotice kind="empty" message="No hazard or weather assessments for this shipment." />
+      : <ul>{hazards.assessments.map(a => <HazardCard key={`${a.provider_id}:${a.location.code}:${a.retrieved_at}`} item={a} />)}</ul>}
+    {dispatchFixtureInfo.hazardNotice && <p className="field-hint">{dispatchFixtureInfo.hazardNotice}</p>}
+  </section>;
+}
+
 export function DispatchPage() {
   const adapter = useMemo(() => createDispatchFixtureAdapter(), []);
   const [list, setList] = useState<Load<ListResponse>>({ kind: 'loading' });
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Load<{ timeline: TimelineResponse; evidence: EvidenceResponse }> | null>(null);
   const [affected, setAffected] = useState<Load<AffectedResponse> | null>(null);
+  const [hazards, setHazards] = useState<Load<HazardResponse> | null>(null);
   const serial = useRef(0);
   const age = freshness(dispatchFixtureInfo.asOf, new Date());
 
@@ -166,6 +222,10 @@ export function DispatchPage() {
     setSelected(id);
     setAffected(null);
     setDetail({ kind: 'loading' });
+    setHazards({ kind: 'loading' });
+    adapter.hazards(id)
+      .then(value => { if (mine === serial.current) setHazards({ kind: 'ready', value }); })
+      .catch(error => { if (mine === serial.current) setHazards({ kind: 'error', message: error instanceof Error ? error.message : 'Hazard exposure unavailable.' }); });
     Promise.all([adapter.timeline(id), adapter.routeEvidence(id)])
       .then(([timeline, evidence]) => { if (mine === serial.current) setDetail({ kind: 'ready', value: { timeline, evidence } }); })
       .catch(error => { if (mine === serial.current) setDetail({ kind: 'error', message: error instanceof Error ? error.message : 'Shipment unavailable.' }); });
@@ -220,6 +280,9 @@ export function DispatchPage() {
           <section className="dispatch-route" aria-label="Route evidence">
             <h3>Route evidence</h3>
             <RouteEvidencePanel evidence={detail.value.evidence} />
+            {hazards?.kind === 'loading' && <StateNotice kind="loading" />}
+            {hazards?.kind === 'error' && <StateNotice kind="error" message={hazards.message} />}
+            {hazards?.kind === 'ready' && <HazardPanel hazards={hazards.value} />}
           </section>
         </>}
       </div>

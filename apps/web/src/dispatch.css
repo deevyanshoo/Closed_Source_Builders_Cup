@@ -48,3 +48,15 @@
 .dispatch-adapter{display:flex;flex-direction:column;gap:6px;padding:14px 30px;border-bottom:1px solid #111;background:#f0e9e6;border-left:6px solid #e61919;font-size:12px;line-height:1.5}
 .dispatch-adapter strong{font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.07em}
 @media(max-width:800px){.dispatch-adapter{padding:12px 16px}}
+.dispatch-hazards{margin-top:18px;border-top:1px solid #bbb;padding-top:4px}
+.dispatch-hazards h4{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.dispatch-hazards ul{list-style:none;padding:0;margin:0}
+.dispatch-hazard-card{border:1px solid #bbb;background:#fff;padding:10px 12px;margin:8px 0;font-size:12px}
+.dispatch-hazard-card[data-usable=false]{background:#f7f7f3;border-style:dashed}
+.dispatch-hazard-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin:8px 0}
+.dispatch-hazard-card dt{font:700 10px ui-monospace,SFMono-Regular,Consolas,monospace;text-transform:uppercase;color:#555}
+.dispatch-hazard-card dd{margin:3px 0 0;overflow-wrap:anywhere}
+.dispatch-hazard-values{min-width:0;font-size:11px;margin-top:6px}
+.dispatch-hazard-values caption{text-align:left;padding:4px 0}
+.dispatch-chip[data-kind=neutral]{border-color:#555;color:#333}
+@media(max-width:800px){.dispatch-hazard-card dl{grid-template-columns:1fr}.dispatch-hazard-values th,.dispatch-hazard-values td{padding:6px 4px}}

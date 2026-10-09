@@ -1,0 +1,25 @@
+{
+  "version": "hazard-thresholds-v1",
+  "notice": "Explicit thresholds that turn provider values into EXPOSURE. Meeting a threshold never confirms a closure, damage or delay, and never changes an arrival date. Below a threshold the result is 'no exposure found', not 'safe'.",
+  "open_meteo": {
+    "provider_id": "open-meteo",
+    "endpoint": "https://api.open-meteo.com/v1/forecast",
+    "query": {"hourly": "wind_speed_10m,wind_gusts_10m,precipitation", "wind_speed_unit": "kmh", "precipitation_unit": "mm", "timezone": "GMT", "forecast_days": "4"},
+    "window_hours": 72,
+    "valid_hours": 6,
+    "max_grid_offset_degrees": "0.5",
+    "rules": [
+      {"rule_id": "wind_gale", "variable": "wind_speed_10m", "unit": "km/h", "aggregate": "max_hourly", "threshold": "62", "basis": "Beaufort force 8 (gale) lower bound, 62 km/h"},
+      {"rule_id": "gust_storm", "variable": "wind_gusts_10m", "unit": "km/h", "aggregate": "max_hourly", "threshold": "89", "basis": "Beaufort force 10 (storm) lower bound, 89 km/h, applied to gusts"},
+      {"rule_id": "rain_heavy_24h", "variable": "precipitation", "unit": "mm", "aggregate": "max_rolling_sum_24h", "threshold": "64.5", "basis": "IMD 'heavy rainfall' lower bound, 64.5 mm in 24 hours"}
+    ]
+  },
+  "gdacs": {
+    "provider_id": "gdacs",
+    "endpoint": "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH",
+    "radius_km": "300",
+    "alert_levels": ["Orange", "Red"],
+    "valid_hours": 24,
+    "time_zone_assumption": "GDACS event dates carry no offset; they are read as UTC, as GDACS publishes them."
+  }
+}

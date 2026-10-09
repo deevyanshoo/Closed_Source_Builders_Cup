@@ -1527,3 +1527,236 @@ def test_native_host_fresh_verifier_rechecks_live_seal_after_closes(tmp_path,mon
         a._fail_native_run(fixture[3],a._native_state(fixture[3])['token'])
     monkeypatch.setattr(a._NativeLifetime,'close',close)
     with pytest.raises(ValueError,match='failed'):observed_runner.verify_runner_run(fixture[-1],expected_run=fixture[3])
+
+
+def test_agnostic_oct9_protocol_preserves_origins_and_validation_only_choice():
+    p={**observed_runner.PROTOCOL_FIELDS,'as_of':'2026-10-09','profile':'generated-fixture-test-v1',
+       'status':'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD','observed_execution_authorized':False,
+       'protocol_sha256':'a'*64,'source_sha256':'b'*64,'snapshot_sha256':'c'*64}
+    observed_runner._check_protocol(p,'2026-10-09')
+    values={m:100.+i for i,m in enumerate(observed_runner._range('2016-09','2026-08'))}
+    windows=observed_runner.plan_common_origins({'arbitrary:grain':values},'2026-10-09',p)
+    assert windows['validation'][0]=='2021-09' and windows['validation'][-1]=='2023-08'
+    assert windows['test'][0]=='2024-03' and windows['test'][-1]=='2026-02'
+    assert len(windows['purged'])==6 and windows['latest_actual']=='2026-08'
+
+
+def _agnostic_call(fixture):
+    sources,_,_,binding,pp,mp,out=fixture
+    return observed_runner.run_offline_evaluation(pp,mp,{k:v['file']['path']for k,v in sources.items()},out,
+                                                  '2026-10-09',accepted_run=binding)
+
+
+@pytest.mark.parametrize('batch_index',[0,1,2,3])
+def test_agnostic_complete_matched_dynamic_batch_phase_seal_and_fresh_metadata_verifier(tmp_path,monkeypatch,batch_index):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,batch_index=batch_index)
+    requests=_native_wire_fit(monkeypatch)
+    events=[];attach=observed_runner._GenericPhases.attach
+    def attaching(self,split):
+        events.append((split,len(requests)))
+        return attach(self,split)
+    monkeypatch.setattr(observed_runner._GenericPhases,'attach',attaching)
+    closure=_agnostic_call(fixture);out=fixture[-1];n=len(json.loads(fixture[1])['selected_ids'])
+    assert closure['status']=='generic_fixture_complete' and len(requests)==144*n
+    assert events==[('validation',72*n),('test',144*n)]
+    ledger=json.loads((out/'candidate_ledger.json').read_bytes())['entries']
+    assert len(ledger)==18*n and all(r['status']=='scored' for r in ledger)
+    rows=json.loads((out/'scored_rows.json').read_bytes())['predictions']
+    for sid in {r['series_id']for r in rows}:
+        for split in ('validation','test'):
+            for h in (1,3,6):
+                cohorts=[{(r['origin'],r['target'],r['training_cutoff']) for r in rows if
+                    (r['series_id'],r['split'],r['model'],r['horizon'])==(sid,split,m,h)}for m in ('naive','ets','gbm')]
+                assert len(cohorts[0])==24 and cohorts[0]==cohorts[1]==cohorts[2]
+    assert all('actual' not in r for r in json.loads((out/'test_prediction_freeze.json').read_bytes())['predictions'])
+    assert len(json.loads((out/'source_receipt.json').read_bytes())['catalog'])==12
+    body=a._NativeLifetime.read;original_ids={ (os.lstat(s['file']['path']).st_dev,os.lstat(s['file']['path']).st_ino)for s in fixture[0].values()}
+    def metadata_only(self,fd,limit):
+        stat=os.fstat(fd)
+        if (stat.st_dev,stat.st_ino) in original_ids:raise AssertionError('fresh verifier read original body')
+        return body(self,fd,limit)
+    monkeypatch.setattr(a._NativeLifetime,'read',metadata_only)
+    assert observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    with pytest.raises(ValueError,match='attempted'):_agnostic_call(fixture)
+
+
+@pytest.mark.parametrize('mode',['typed_gbm','budget_test','naive_one_series'])
+def test_agnostic_unavailable_is_whole_candidate_and_independent_naive_series_advances(tmp_path,monkeypatch,mode):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    selected=json.loads(fixture[1])['selected_ids'];first=selected[0];wire=observed_runner.run_bounded_child
+    if mode=='typed_gbm':
+        def transport(command,payload,*,timeout):
+            req=json.loads(payload)
+            if req['model']=='gbm':
+                requests.append(req)
+                return json.dumps({'schema_version':'observed-native-fit-result.v1','status':'unavailable',
+                  'request_sha256':hashlib.sha256(payload).hexdigest(),'model':'gbm','reason':'unsupported_unpinned_backend',
+                  'stage':'backend_precheck','backend':'lightgbm','expected_backend':'sklearn',
+                  'versions':_NATIVE_TEST_VERSIONS,'model_fit_attempted':False}).encode()
+            return wire(command,payload,timeout=timeout)
+        monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    else:
+        remaining=observed_runner._GenericBudget.remaining
+        def budget(self,sid,model,split):
+            if sid==first and ((mode=='budget_test' and model=='ets' and split=='test') or (mode=='naive_one_series' and model=='naive')):
+                raise observed_runner._NativeBudgetUnavailable('model_phase_budget_unavailable')
+            return remaining(self,sid,model,split)
+        monkeypatch.setattr(observed_runner._GenericBudget,'remaining',budget)
+    closure=_agnostic_call(fixture);out=fixture[-1]
+    assert closure['status']=='generic_fixture_complete_with_unavailable'
+    rows=json.loads((out/'scored_rows.json').read_bytes())['predictions'];ledger=json.loads((out/'candidate_ledger.json').read_bytes())['entries']
+    if mode=='typed_gbm':
+        assert not any(r['model']=='gbm' for r in rows)
+        assert len([r for r in requests if r['model']=='gbm'])==2
+        unavailable=[r for r in ledger if r['model']=='gbm']
+        assert len(unavailable)==12
+    elif mode=='budget_test':
+        assert not any(r['series_id']==first and r['model']=='ets' for r in rows)  # validation cohort removed too
+        assert len([r for r in requests if r['name'].endswith(':'+first) and r['model']=='ets'])==24
+        unavailable=[r for r in ledger if r['series_id']==first and r['model']=='ets']
+        assert len(unavailable)==6
+    else:
+        assert not any(r['series_id']==first for r in rows) and {r['series_id']for r in rows}=={selected[1]}
+        assert not any(r['name'].endswith(':'+first) for r in requests)
+        unavailable=[r for r in ledger if r['series_id']==first];assert len(unavailable)==18
+    assert all(r['backend'] is None and r['metrics'] is None and r['status']=='not_evaluated' for r in unavailable)
+    history=json.loads((out/'attempts.json').read_bytes());assert len(history['attempts'])+len(history['skipped'])==288
+    assert all(r['status']=='skipped' and r['elapsed_seconds'] is None for r in history['skipped'])
+
+
+@pytest.mark.parametrize('fault',['malformed','generic_error','timeout','late','cleanup','backend_change','source','foreign_output','failure_marker','phase','close','finalizer'])
+def test_agnostic_hard_fault_fails_entire_batch_without_retry_or_marker_deletion(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    out=fixture[-1];wire=observed_runner.run_bounded_child;clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    if fault=='phase':
+        freeze=observed_runner._GenericPhases.freeze
+        def changed(self,split,rows):
+            rows[0]['training_cutoff']=rows[0]['origin'];return freeze(self,split,rows)
+        monkeypatch.setattr(observed_runner._GenericPhases,'freeze',changed)
+    elif fault in ('close','finalizer'):
+        seal=a._seal_native_run
+        def sealing(binding,token,raw):
+            if fault=='finalizer':clock[0]=1800.
+            else:
+                close=a._RunDirectoryAnchor.close
+                def ambiguous(self):close(self);raise ValueError('owned ambiguous seal close')
+                monkeypatch.setattr(a._RunDirectoryAnchor,'close',ambiguous)
+            return seal(binding,token,raw)
+        monkeypatch.setattr(a,'_seal_native_run',sealing)
+    else:
+        def transport(command,payload,*,timeout):
+            if fault=='generic_error':raise RuntimeError('fit_unavailable')
+            if fault=='timeout':raise TimeoutError('owned timeout')
+            if fault=='cleanup':raise observed_runner.OwnedChildCleanupError('owned cleanup unverified')
+            response=wire(command,payload,timeout=timeout)
+            if fault=='late':clock[0]+=timeout+1
+            elif fault=='source':Path(fixture[0]['bis']['file']['path']).write_bytes(b'owned source drift')
+            elif fault=='foreign_output':out.rename(out.with_name('preserved'));out.mkdir(mode=0o700)
+            elif fault=='failure_marker':(out/'FAILURE.json').symlink_to('absent')
+            elif fault=='malformed':response=b'{"status":"unavailable","reason":"fit_unavailable"}'
+            elif fault=='backend_change':
+                doc=json.loads(response);doc['backend']='lightgbm';response=json.dumps(doc).encode()
+            return response
+        monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    with pytest.raises((ValueError,RuntimeError,TimeoutError,OSError)):_agnostic_call(fixture)
+    assert a._native_state(fixture[3])['state']=='FAILED'
+    if fault=='foreign_output':assert list(out.iterdir())==[]
+    elif fault=='failure_marker':assert (out/'FAILURE.json').is_symlink()
+    else:assert (out/'FAILURE.json').exists()
+    if fault not in ('close','finalizer'):assert not (out/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError):_agnostic_call(fixture)
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    if fault not in ('phase','close','finalizer'):assert len(requests)<=1
+
+
+@pytest.mark.parametrize('fault',['source','catalog','extra','failure','close','seal_after_close'])
+def test_agnostic_fresh_verifier_fault_irreversibly_revokes_live_seal(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch);_agnostic_call(fixture);out=fixture[-1]
+    if fault in ('source','catalog'):
+        c=json.loads(fixture[1]);p=Path(c['sources']['bis']['file']['path'] if fault=='source' else c['catalog']['path'])
+        p.write_bytes(p.read_bytes()+b' ')
+    elif fault=='extra':(out/'unexpected').write_bytes(b'owned extra')
+    elif fault=='failure':(out/'FAILURE.json').mkdir()
+    else:
+        close=a._NativeLifetime.close
+        def changed(self):
+            close(self)
+            if fault=='close':raise ValueError('owned fresh close uncertainty')
+            a._fail_native_run(fixture[3],a._native_state(fixture[3])['token'])
+        monkeypatch.setattr(a._NativeLifetime,'close',changed)
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    assert a._native_state(fixture[3])['state']=='FAILED' and (out/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+
+
+def test_agnostic_budget_enforces_selected_scope_unique144_cells_and_reserves(monkeypatch):
+    clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    b=observed_runner._GenericBudget(['WB:arbitrary'])
+    assert b.remaining('WB:arbitrary','naive','validation')==45
+    assert b.remaining('WB:arbitrary','ets','validation')==60
+    for m in ('naive','ets','gbm'):
+        for split in ('validation','test'):
+            for o in observed_runner._range(observed_runner.MONTHS[split+'_start'],observed_runner.MONTHS[split+'_end']):
+                b.begin_attempt('WB:arbitrary',m,split,o,1.)
+    assert len(b.attempts)==144
+    with pytest.raises(RuntimeError):b.begin_attempt('WB:arbitrary','naive','validation','2021-09',1.)
+    with pytest.raises(RuntimeError):b.begin_attempt('foreign','naive','validation','2021-09',1.)
+    clock[0]=1767.
+    with pytest.raises(observed_runner._NativeBudgetUnavailable):b.remaining('WB:arbitrary','ets','validation')
+    clock[0]=1800.
+    with pytest.raises(TimeoutError):b.check()
+
+
+@pytest.mark.parametrize('mode',['weak_test','selected_unavailable'])
+def test_agnostic_validation_winner_is_frozen_even_when_test_is_weak_or_unavailable(tmp_path,monkeypatch,mode):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    wire=observed_runner.run_bounded_child;selected=json.loads(fixture[1])['selected_ids'];first=selected[0]
+    def transport(command,payload,*,timeout):
+        response=json.loads(wire(command,payload,timeout=timeout));req=json.loads(payload)
+        if req['model']=='ets':
+            is_test=len(req['months'])>=90
+            last=math.exp(req['values'][-1])
+            response['drift']=[-.02 if is_test and mode=='weak_test' else math.log((last+.01)/last)]*7
+        return json.dumps(response).encode()
+    monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    if mode=='selected_unavailable':
+        remaining=observed_runner._GenericBudget.remaining
+        def budget(self,sid,model,split):
+            if sid==first and model=='ets' and split=='test':raise observed_runner._NativeBudgetUnavailable('model_phase_budget_unavailable')
+            return remaining(self,sid,model,split)
+        monkeypatch.setattr(observed_runner._GenericBudget,'remaining',budget)
+    closure=_agnostic_call(fixture);out=fixture[-1]
+    frozen=json.loads((out/'selection_freeze.json').read_bytes())
+    assert all(frozen['selection'][f'{sid}:{h}']=='ets' for sid in selected for h in (1,3,6))
+    assert json.loads((out/'legacy/selection.json').read_bytes())==frozen['selection']
+    if mode=='selected_unavailable':
+        assert closure['selected_unavailable']==[{'series_id':first,'horizon':h,'model':'ets','reason':'model_phase_budget_unavailable'}for h in (1,3,6)]
+    else:
+        rows=json.loads((out/'scored_rows.json').read_bytes())['predictions']
+        naive=next(r for r in rows if r['series_id']==first and r['split']=='test' and r['model']=='naive' and r['horizon']==1)
+        ets=next(r for r in rows if r['series_id']==first and r['split']=='test' and r['model']=='ets' and r['horizon']==1)
+        assert abs(ets['actual']-ets['p50'])>abs(naive['actual']-naive['p50'])
+
+
+def test_agnostic_constant_currency_zero_baseline_is_undefined_not_positive_skill(tmp_path,monkeypatch):
+    import csv,io
+    from test_forecast_series_catalog import generated_bis
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    rows=list(csv.reader(io.StringIO(generated_bis().decode())))
+    for r in rows[1:]:r[5]='1' if r[2]=='USD' else '2'
+    out=io.StringIO();csv.writer(out).writerows(rows)
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,bis_raw=out.getvalue().encode());_native_wire_fit(monkeypatch)
+    _agnostic_call(fixture)
+    metrics=list(csv.DictReader((fixture[-1]/'legacy/scorecard/metrics.csv').open()))
+    test=[r for r in metrics if r['split']=='test']
+    assert test and all(float(r['mae'])==0 for r in test)
+    challengers=[r for r in test if r['model']!='naive']
+    assert challengers and all(r['skill'] in ('','None') and r['skill_reason']=='zero_naive_error' for r in challengers)

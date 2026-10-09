@@ -510,3 +510,127 @@ def test_native_host_expiry_after_registration_refuses_before_body(tmp_path,monk
     source,raw,authority,binding,pp,mp,output=fixture
     with pytest.raises(ValueError,match='expired'):runner.run_offline_evaluation(pp,mp,source,output,'2026-10-08',accepted_run=binding)
     assert not output.exists()
+
+
+def agnostic_owned_fixture(tmp_path,monkeypatch,*,mutate=None,register=True,batch_index=0,wb_raw=None,bis_raw=None):
+    """Owning synthetic host only. No production registry reset API is added."""
+    from test_forecast_series_catalog import generated_wb,generated_bis
+    from procure.evaluation.series_catalog import build_catalog,finite_batches
+    authority,old,_,source,pp,mp,output=native_owned_fixture(tmp_path,monkeypatch,register=False)
+    source.write_bytes(generated_wb() if wb_raw is None else wb_raw);bis=source.with_name('generated-bis.csv');bis.write_bytes(generated_bis() if bis_raw is None else bis_raw)
+    sources={key:{'file':_native_pin(path),'provider':'World Bank' if key=='wb' else 'BIS',
+                  'source_id':'generated-'+key,'source_url':'synthetic:owned-'+key,
+                  'retrieved_utc':'2026-10-09T00:00:00.000000Z',
+                  'rights_disposition_sha256':'7'*64,'source_disposition_sha256':'8'*64}
+             for key,path in [('wb',source),('bis',bis)]}
+    profile='generated-fixture-test-v1'
+    snapshot=build_catalog(source.read_bytes(),bis.read_bytes(),sources=sources,profile=profile)
+    catalog=source.with_name('generated-catalog.json');catalog.write_bytes(snapshot.canonical_bytes)
+    pp.write_bytes(admission.canonical({**runner.PROTOCOL_FIELDS,'as_of':'2026-10-09','profile':profile,
+       'status':'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD','observed_execution_authorized':False}))
+    mp.write_bytes(admission.canonical({'schema_version':'generic-source-manifest.v1','profile':profile,
+       'sources':{k:{'sha256':s['file']['sha256'],'bytes':s['file']['bytes'],'source_id':s['source_id']}for k,s in sources.items()}}))
+    c={k:v for k,v in old.items() if k!='source'}
+    c.update(schema_version='root-generic-run-control.v1',status='ROOT_ACCEPTED_GENERIC_FIXTURE_TEST',profile=profile,
+       sources=sources,catalog=_native_pin(catalog),selected_ids=list(finite_batches(snapshot.records)[batch_index]),
+       batch_index=batch_index,regime_dispositions={},analysis_as_of_utc='2026-10-09T12:00:00.000000Z')
+    c['calendar']={k:v for k,v in old['calendar'].items() if k!='source_months'};c['calendar']['as_of']='2026-10-09'
+    c['controls']['protocol']=_native_pin(pp);c['controls']['manifest']=_native_pin(mp)
+    rel='procurement-engine/src/procure/evaluation/series_catalog.py';project=Path(__file__).parents[2]
+    data=(project/rel).read_bytes();c['code'].append({'repository_path':rel,'file':_native_pin(project/rel),
+       'git_blob':__import__('hashlib').sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()})
+    c['test_artifact_blobs']['procurement-engine/tests/test_forecast_series_catalog.py']='8'*40
+    if mutate:mutate(c)
+    root_control=Path(c['controls']['root_acceptance_path']);raw=admission.canonical(c);root_control.write_bytes(raw)
+    monkeypatch.setattr(admission,'_NATIVE_ACTIVE',None) # test isolation; old test lifetime is finished
+    issuer=getattr(admission,'_issue_root_generic_host_authority',admission._issue_root_native_host_authority)
+    authority=issuer(acceptance_id=c['acceptance_id'],accepted_control=_native_pin(root_control),
+       integrated_head='1'*40,integrated_tree='2'*40,profile=profile)
+    if not register:return authority,c,raw,source,bis,pp,mp,output
+    binding=admission.register_root_accepted_generic_run(authority,raw)
+    return sources,raw,authority,binding,pp,mp,output
+
+
+@pytest.mark.parametrize('change',['calendar','budget','permissions','code','metadata','origin','alias','selection','source_size','head','schema'])
+def test_agnostic_bad_control_refuses_before_any_original_body(tmp_path,monkeypatch,change):
+    def mutate(c):
+        if change=='calendar':c['calendar']['as_of']='2026-10-08'
+        elif change=='budget':c['budgets']['max_attempts']=289
+        elif change=='permissions':c['permissions']['observed_execution']=True
+        elif change=='code':c['code'][-1]['file']['sha256']='0'*64
+        elif change=='metadata':c['runtime']['packages'][0]['metadata']['sha256']='0'*64
+        elif change=='origin':c['runtime']['packages'][0]['module_origin']='/absent/generated.py'
+        elif change=='alias':c['runtime']['alias_chain'][0]['target']='wrong'
+        elif change=='selection':c['selected_ids'].append('WB:foreign')
+        elif change=='source_size':c['sources']['bis']['file']['bytes']=32*1024*1024+1
+        elif change=='head':c['integrated_head']='0'*40
+        else:c['new_permission']=True
+    authority,c,raw,wb,bis,pp,mp,out=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,mutate=mutate,register=False)
+    identities={(os.lstat(p).st_dev,os.lstat(p).st_ino)for p in (wb,bis)};reader=admission._NativeLifetime.read;seen=[]
+    def read(self,fd,limit):
+        st=os.fstat(fd)
+        if (st.st_dev,st.st_ino) in identities:seen.append(fd)
+        return reader(self,fd,limit)
+    monkeypatch.setattr(admission._NativeLifetime,'read',read)
+    with pytest.raises(ValueError):admission.register_root_accepted_generic_run(authority,raw)
+    assert seen==[] and not out.exists()
+
+
+def test_agnostic_copied_unissued_authority_and_snapshot_refuse_before_access(tmp_path,monkeypatch):
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);binding=fixture[3]
+    for bad in (copy.copy(binding),admission.RootGenericRunBinding(binding.run_id),object()):
+        with monkeypatch.context() as patch:
+            patch.setattr(os,'open',lambda *a,**k:(_ for _ in ()).throw(AssertionError('unissued source access')))
+            with pytest.raises(ValueError):admission.open_root_generic_snapshot(bad)
+    with pytest.raises(ValueError,match='running'):admission.open_root_generic_snapshot(binding)
+    with pytest.raises(ValueError):admission.register_root_accepted_generic_run(copy.copy(fixture[2]),fixture[1])
+    with pytest.raises(ValueError,match='consumed'):admission.register_root_accepted_generic_run(fixture[2],fixture[1])
+    with pytest.raises(ValueError,match='configured'):
+        admission._issue_root_generic_host_authority(acceptance_id='next',accepted_control=_native_pin(fixture[4]),
+            integrated_head='1'*40,integrated_tree='2'*40,profile='generated-fixture-test-v1')
+
+
+@pytest.mark.parametrize('fault',['catalog_claim','queue','replacement','symlink','during_parse'])
+def test_agnostic_body_derivation_fd_and_ordered_queue_fail_without_fit(tmp_path,monkeypatch,fault):
+    from procure.evaluation import series_catalog as catalog
+    def mutate(c):
+        if fault=='catalog_claim':
+            path=Path(c['catalog']['path']);doc=json.loads(path.read_bytes());doc['series'][0]['quoted_unit']='FAKE/kg'
+            path.write_bytes(admission.canonical(doc));c['catalog']=_native_pin(path)
+        elif fault=='queue':c['batch_index']=1
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,mutate=mutate);source=Path(fixture[0]['bis']['file']['path'])
+    if fault=='replacement':
+        other=source.with_name('same_bytes');other.write_bytes(source.read_bytes());os.replace(other,source)
+    elif fault=='symlink':
+        source.rename(source.with_name('preserved'));source.symlink_to('preserved')
+    elif fault=='during_parse':
+        original=catalog.build_catalog
+        def changed(*args,**kwargs):
+            result=original(*args,**kwargs);source.write_bytes(b'changed owned source');return result
+        monkeypatch.setattr(catalog,'build_catalog',changed)
+    monkeypatch.setattr(runner,'fit_in_owned_child',lambda *a,**k:(_ for _ in ()).throw(AssertionError('fit before catalog verification')))
+    paths={k:v['file']['path']for k,v in fixture[0].items()}
+    with pytest.raises((ValueError,OSError)):
+        runner.run_offline_evaluation(fixture[4],fixture[5],paths,fixture[-1],'2026-10-09',accepted_run=fixture[3])
+    assert admission._native_state(fixture[3])['state']=='FAILED' and not fixture[-1].exists()
+
+
+def test_agnostic_large_bis_same_owned_fd_hash_parse_and_close(tmp_path,monkeypatch):
+    import csv
+    from test_forecast_series_catalog import BIS_HEADER
+    out=io.StringIO();w=csv.writer(out);w.writerow(BIS_HEADER+['TITLE'])
+    for i in range(90000):w.writerow(['M','PP','PAD','A',f'{i//12+1:04d}-{i%12+1:02d}','2','A','0','x'*128])
+    raw=out.getvalue().encode();assert 12*1024*1024<len(raw)<32*1024*1024
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,bis_raw=raw)
+    pin=json.loads(fixture[1])['sources']['bis']['file'];parsed=[]
+    from procure.evaluation import series_catalog as catalog
+    original=catalog.build_catalog
+    def parse(wb,bis,**kwargs):
+        parsed.append((len(bis),admission.digest(bis)));return original(wb,bis,**kwargs)
+    monkeypatch.setattr(catalog,'build_catalog',parse)
+    token=admission._begin_native_run(fixture[3])
+    with admission.open_root_generic_snapshot(fixture[3]) as read:
+        assert len(read.series)==2 and all(len(s)==120 for s in read.series.values())
+        assert read.receipt['catalog_status']
+    assert parsed==[(pin['bytes'],pin['sha256'])] and read.lifetime.closed
+    admission._fail_native_run(fixture[3],token) # test-owned terminal cleanup, no completion minted

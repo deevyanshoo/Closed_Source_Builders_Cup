@@ -876,6 +876,8 @@ def _native_alias_guard(runtime):
 
 
 def _native_pins_lifetime(run):
+    if run['control']['profile'] in ('generic-observed-v1','generated-fixture-test-v1'):
+        return _generic_pins_lifetime(run)
     c = run['control']; life = _NativeLifetime()
     try:
         _native_alias_guard(c['runtime'])
@@ -1033,3 +1035,220 @@ def open_root_native_snapshot(binding):
     except BaseException:
         life.close()
         raise
+
+# Generic profiles are explicit host identities, separate from legacy/narrow runs.
+GENERIC_CALENDAR = {k:v for k,v in NATIVE_CALENDAR.items() if k != 'source_months'}
+GENERIC_CALENDAR = {**GENERIC_CALENDAR, 'as_of':'2026-10-09'}
+_GENERIC_CODE = _NATIVE_CODE | {'procurement-engine/src/procure/evaluation/series_catalog.py'}
+_GENERIC_TESTS = _NATIVE_TESTS | {'procurement-engine/tests/test_forecast_series_catalog.py'}
+_GENERIC_ORIGINALS = {'wb':('ea1c350827878ea3bbe30e3cda16a13fd3bd5b409b8458940dc94a36b5a33154',586099),
+                      'bis':('c3abed13e05392664999b363703ef40e6ac6f2851b2c3e5a0deabdd70f462989',22714802)}
+
+
+@dataclass(frozen=True, eq=False)
+class RootGenericRunBinding(RootNativeRunBinding):
+    """Constructing/copying this object never registers authority."""
+
+
+def _issue_root_generic_host_authority(*, acceptance_id, accepted_control, integrated_head, integrated_tree, profile):
+    """Private ROOT bootstrap, one shared active host epoch per process."""
+    global _NATIVE_ACTIVE
+    from .series_catalog import PROFILES
+    _native_id(acceptance_id);_native_pin_schema(accepted_control)
+    _native_sha(integrated_head,40);_native_sha(integrated_tree,40)
+    if profile not in PROFILES:raise ValueError('generic issued profile required')
+    with _NATIVE_LOCK:
+        if _NATIVE_ACTIVE is not None:raise ValueError('native issuer already configured; no reset/rotation')
+        life=_NativeLifetime()
+        try:_native_pin_open(life,accepted_control,private=True)
+        finally:life.close()
+        authority=RootNativeHostAuthority(acceptance_id)
+        _NATIVE_HOSTS[authority]={'pin':_native_freeze(accepted_control),'head':integrated_head,'tree':integrated_tree,
+                                'profile':profile,'epoch':object(),'used_controls':set(),'used_ids':set(),'used_outputs':set()}
+        _NATIVE_ACTIVE=authority
+        return authority
+
+
+def _generic_source_pin(pin,limit):
+    # New source-specific limit; the legacy 12MiB/16MiB pin rules are untouched.
+    _native_keys(pin,('path','bytes','sha256','identity','ancestors'))
+    path=_native_path(pin['path']);_native_sha(pin['sha256'])
+    if type(pin['bytes']) is not int or not 0<pin['bytes']<=limit:raise ValueError('generic source size bound')
+    if _native_identity_doc(pin['identity'])[5]!=pin['bytes']:raise ValueError('generic size identity mismatch')
+    _native_ancestors(path,pin['ancestors'])
+
+
+def _generic_runtime_schema(runtime):
+    _native_keys(runtime,('executable_alias','resolved_executable','alias_chain','python_version','packages','model_backends'))
+    _native_path(runtime['executable_alias']);_native_pin_schema(runtime['resolved_executable'])
+    if (runtime['executable_alias']!=sys.executable or runtime['resolved_executable']['path']!=str(Path(sys.executable).resolve())
+            or runtime['python_version']!=sys.version.split()[0]):raise ValueError('generic interpreter pin mismatch')
+    _native_equal(runtime['model_backends'],{'naive':'naive','ets':'ets','gbm':'sklearn'})
+    if not isinstance(runtime['alias_chain'],list) or len(runtime['alias_chain'])>8:raise ValueError('generic alias bound')
+    for item in runtime['alias_chain']:
+        _native_keys(item,('path','target','identity','ancestors'))
+        path=_native_path(item['path']);_native_identity_doc(item['identity'],link=True);_native_ancestors(path,item['ancestors'])
+        if not isinstance(item['target'],str) or not item['target']:raise ValueError('generic alias target invalid')
+    if not isinstance(runtime['packages'],list) or len(runtime['packages'])!=6 or {p.get('distribution') for p in runtime['packages']}!=_NATIVE_PACKAGES:
+        raise ValueError('generic six package pins required')
+    for item in runtime['packages']:
+        _native_keys(item,('distribution','version','metadata','module_origin'))
+        if not isinstance(item['version'],str) or not 0<len(item['version'])<=128 or any(ord(c)<32 for c in item['version']):
+            raise ValueError('generic version invalid')
+        _native_pin_schema(item['metadata']);_native_path(item['module_origin'])
+
+
+def _generic_control_schema(c,host,authority):
+    from .series_catalog import MAX_BIS_BYTES,MAX_WB_BYTES
+    required=('schema_version','status','profile','acceptance_id','run_id','integrated_head','integrated_tree',
+              'integration_receipt_sha256','design_acceptance_sha256','numerical_review_sha256','runtime_review_sha256',
+              'issued_at_utc','expires_at_utc','analysis_as_of_utc','sources','catalog','selected_ids','batch_index',
+              'regime_dispositions','controls','code','test_artifact_blobs','runtime','calendar','outputs','budgets','permissions')
+    _native_keys(c,required);observed=host['profile']=='generic-observed-v1'
+    if (c['schema_version'],c['status'],c['profile'],c['acceptance_id'],c['integrated_head'],c['integrated_tree'])!=(
+        'root-generic-run-control.v1','ROOT_ACCEPTED_GENERIC_OBSERVED_RUN' if observed else 'ROOT_ACCEPTED_GENERIC_FIXTURE_TEST',
+        host['profile'],authority.acceptance_id,host['head'],host['tree']):raise ValueError('generic authority/control mismatch')
+    _native_id(c['run_id'])
+    for k in ('integration_receipt_sha256','design_acceptance_sha256','numerical_review_sha256','runtime_review_sha256'):_native_sha(c[k])
+    issued,expiry,asof=map(_native_utc,(c['issued_at_utc'],c['expires_at_utc'],c['analysis_as_of_utc']))
+    if not issued<=datetime.now(timezone.utc)<expiry or issued>=expiry or asof.date().isoformat()!='2026-10-09':
+        raise ValueError('generic expiry/as-of refused')
+    _native_equal(c['calendar'],GENERIC_CALENDAR);_native_equal(c['budgets'],NATIVE_BUDGETS)
+    _native_equal(c['permissions'],{'local_source_body_read':True,'local_statistical_execution':observed,
+                  'observed_execution':observed,'synthetic_test_execution':not observed,'network':False,'provider':False,
+                  'source_download':False,'sql':False})
+    _native_keys(c['sources'],('wb','bis'))
+    for key,limit in [('wb',MAX_WB_BYTES),('bis',MAX_BIS_BYTES)]:
+        source=c['sources'][key]
+        _native_keys(source,('file','provider','source_id','source_url','retrieved_utc','rights_disposition_sha256','source_disposition_sha256'))
+        _generic_source_pin(source['file'],limit)
+        for k in ('rights_disposition_sha256','source_disposition_sha256'):_native_sha(source[k])
+        if _native_utc(source['retrieved_utc'])>asof:raise ValueError('generic source retrieval after as-of')
+        for k in ('provider','source_id','source_url'):
+            if not isinstance(source[k],str) or not 0<len(source[k])<=512:raise ValueError('generic source field bound')
+        if source['provider']!=('World Bank' if key=='wb' else 'BIS'):raise ValueError('generic provider mismatch')
+        original=_GENERIC_ORIGINALS[key]
+        if observed:
+            if (source['file']['sha256'],source['file']['bytes'])!=original:raise ValueError('generic observed original pin mismatch')
+            if source['rights_disposition_sha256']!='f34d8348dc638969f61b629c77e20a277b108a169848844cc2b944ee7a37c1ee':
+                raise ValueError('generic published rights disposition mismatch')
+        elif source['file']['sha256'] in {v[0] for v in _GENERIC_ORIGINALS.values()} or Path(source['file']['path']).name in {
+                'worldbank_pinksheet_monthly.xlsx','bis-xru-monthly-averages.csv'}:
+            raise ValueError('observed original cannot become generic fixture')
+    _native_pin_schema(c['catalog'])
+    if c['catalog']['bytes']>8*1024*1024:raise ValueError('generic catalog byte bound')
+    ids=c['selected_ids']
+    if not isinstance(ids,list) or not 1<=len(ids)<=2 or any(not isinstance(s,str) or not 0<len(s)<=512 for s in ids) or ids!=sorted(set(ids)):
+        raise ValueError('generic selected ordered initial batch bound')
+    if type(c['batch_index']) is not int or c['batch_index']<0 or not isinstance(c['regime_dispositions'],dict):
+        raise ValueError('generic finite batch/regime shape invalid')
+    controls=c['controls'];_native_keys(controls,('protocol','manifest','root_acceptance_path'))
+    for k in ('protocol','manifest'):_native_pin_schema(controls[k])
+    if controls['root_acceptance_path']!=host['pin']['path']:raise ValueError('generic root control path mismatch')
+    if not isinstance(c['code'],list) or len(c['code'])!=5 or {p.get('repository_path') for p in c['code']}!=_GENERIC_CODE:
+        raise ValueError('generic exact five code pins required')
+    repo=Path(__file__).resolve().parents[4]
+    for item in c['code']:
+        _native_keys(item,('repository_path','file','git_blob'));_native_sha(item['git_blob'],40);_native_pin_schema(item['file'])
+        if item['file']['path']!=str(repo/item['repository_path']):raise ValueError('generic foreign code path')
+    _native_keys(c['test_artifact_blobs'],_GENERIC_TESTS)
+    for b in c['test_artifact_blobs'].values():_native_sha(b,40)
+    _generic_runtime_schema(c['runtime'])
+    out=c['outputs'];_native_keys(out,('path','parent','parent_identity','owner_uid','create_mode','absent_required','overwrite'))
+    path=_native_path(out['path']);parent=_native_identity_doc(out['parent_identity'],True)
+    if str(path.parent)!=out['parent'] or type(out['owner_uid']) is not int or out['owner_uid']!=os.getuid() or parent[3]!=os.getuid() or parent[2]&0o077:
+        raise ValueError('generic private output parent/owner mismatch')
+    _native_equal({k:out[k] for k in ('create_mode','absent_required','overwrite')},{'create_mode':448,'absent_required':True,'overwrite':False})
+    inputs=[Path(s['file']['path'])for s in c['sources'].values()]+[Path(c['catalog']['path']),Path(host['pin']['path'])]+[
+        Path(controls[k]['path'])for k in ('protocol','manifest')]
+    if len(set(inputs))!=len(inputs) or any(path==p or path in p.parents or path.parent==p.parent for p in inputs):
+        raise ValueError('generic distinct inputs/output required')
+
+
+def _generic_pins_lifetime(run):
+    c=run['control'];life=_NativeLifetime()
+    try:
+        _native_alias_guard(c['runtime']);_native_pin_open(life,run['root_pin'],private=True)
+        pr=_native_pin_open(life,c['controls']['protocol'],private=True)
+        mr=_native_pin_open(life,c['controls']['manifest'],private=True)
+        catalog=_native_pin_open(life,c['catalog'],private=True)
+        decoded=decode(catalog)
+        from .series_catalog import canonical_catalog
+        if set(decoded)!= {'schema_version','series'} or decoded['schema_version']!='forecast-series-catalog.v1' or canonical_catalog(decoded['series'])!=catalog:
+            raise ValueError('generic canonical sorted catalog required')
+        for item in c['code']:
+            raw=_native_pin_open(life,item['file'])
+            if hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()!=item['git_blob']:
+                raise ValueError('generic code Git blob drift')
+        _native_pin_open(life,c['runtime']['resolved_executable'])
+        from importlib.machinery import PathFinder
+        from email.parser import BytesParser
+        for item in c['runtime']['packages']:
+            raw=_native_pin_open(life,item['metadata']);module={'scikit-learn':'sklearn'}.get(item['distribution'],item['distribution'])
+            spec=PathFinder.find_spec(module)
+            if BytesParser().parsebytes(raw).get('Version')!=item['version'] or spec is None or spec.origin!=item['module_origin']:
+                raise ValueError('generic package metadata/origin drift')
+        for source in c['sources'].values():_native_pin_open(life,source['file'],private=True,body=False)
+        from .observed_runner import PROTOCOL_FIELDS
+        observed=c['profile']=='generic-observed-v1'
+        p=decode(pr);_native_equal(p,{**PROTOCOL_FIELDS,'as_of':'2026-10-09','profile':c['profile'],
+                        'status':'APPROVED_OBSERVED_EXECUTION' if observed else 'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD',
+                        'observed_execution_authorized':observed})
+        _native_equal(decode(mr),{'schema_version':'generic-source-manifest.v1','profile':c['profile'],
+              'sources':{k:{'sha256':s['file']['sha256'],'bytes':s['file']['bytes'],'source_id':s['source_id']}for k,s in c['sources'].items()}})
+        life.check();return life
+    except BaseException:
+        life.close();raise
+
+
+def register_root_accepted_generic_run(authority,root_acceptance_raw):
+    host=_native_host(authority) # issued identity before metadata/body
+    if host['profile'] not in ('generic-observed-v1','generated-fixture-test-v1'):raise ValueError('generic issued host required')
+    if not isinstance(root_acceptance_raw,bytes) or len(root_acceptance_raw)>128*1024 or digest(root_acceptance_raw)!=host['pin']['sha256']:
+        raise ValueError('generic external control SHA mismatch')
+    c=decode(root_acceptance_raw);_generic_control_schema(c,host,authority)
+    with _NATIVE_LOCK:
+        if host['used_controls'] or host['used_ids'] or host['used_outputs']:raise ValueError('generic reservation consumed; fresh host required')
+        host['used_controls'].add(host['pin']['sha256']);host['used_ids'].add(c['run_id']);host['used_outputs'].add(c['outputs']['path'])
+    run=_native_freeze({'authority':authority,'epoch':host['epoch'],'control':c,'root_pin':host['pin'],'output':c['outputs']['path'],
+                       'parent_identity':_native_identity_doc(c['outputs']['parent_identity'],True),'raw':root_acceptance_raw})
+    life=_generic_pins_lifetime(run)
+    try:
+        if os.path.lexists(run['output']) or _identity(os.lstat(Path(run['output']).parent),True)!=run['parent_identity']:
+            raise ValueError('generic output absence/parent drift')
+    finally:life.close()
+    binding=RootGenericRunBinding(c['run_id']);_NATIVE_RUNS[binding]=run
+    _NATIVE_LIVES[binding]={'state':'READY','token':None,'created':None,'sealed':None,'closure_sha':None}
+    return binding
+
+
+def open_root_generic_snapshot(binding):
+    if not isinstance(binding,RootGenericRunBinding):raise ValueError('generic issued run identity required')
+    run=native_run_record(binding)
+    if _native_state(binding)['state']!='RUNNING':raise ValueError('generic running host required before body')
+    life=_generic_pins_lifetime(run)
+    try:
+        c=run['control'];sources=_native_plain(c['sources'])
+        # No reopen: hash and parse exactly the bytes returned by owned no-follow FDs.
+        raw={k:_native_pin_open(life,s['file'],private=True)for k,s in c['sources'].items()}
+        from .series_catalog import build_catalog,finite_batches
+        snap=build_catalog(raw['wb'],raw['bis'],sources=sources,profile=c['profile'],regime_dispositions=_native_plain(c['regime_dispositions']))
+        if digest(snap.canonical_bytes)!=c['catalog']['sha256'] or len(snap.canonical_bytes)!=c['catalog']['bytes']:
+            raise ValueError('generic reconstructed catalog drift')
+        queue=finite_batches(snap.records)
+        if c['batch_index']>=len(queue) or tuple(c['selected_ids'])!=queue[c['batch_index']]:raise ValueError('generic finite queue batch mismatch')
+        selected={sid:dict(snap.values[sid]) for sid in c['selected_ids']}
+        basis={sid:{m:{'hex':v.hex(),'numerator':str(Fraction.from_float(v).numerator),
+                      'denominator':str(Fraction.from_float(v).denominator)}for m,v in series.items()}for sid,series in selected.items()}
+        receipt={'catalog':list(snap.records),'catalog_sha256':c['catalog']['sha256'],'batch_queue':[list(b)for b in queue],
+                 'selected_ids':list(c['selected_ids']),'batch_index':c['batch_index'],'required_months':120,
+                 'catalog_status':{r['series_id']:('selected_current_batch' if r['series_id'] in c['selected_ids'] else
+                     'queued_separate_root_control_required' if r['forecast_eligible'] else 'unavailable')for r in snap.records},
+                 'stored_value_basis':basis,'stored_value_basis_sha256':digest(canonical(basis)),
+                 'root_control_sha256':run['root_pin']['sha256'],'full_parent_snapshot_exposed':True,
+                 'physical_test_actuals_untouched':False,'is_synthetic':c['profile']=='generated-fixture-test-v1',
+                 'observed_authenticity':c['profile']=='generic-observed-v1','observed_execution_authorized':c['profile']=='generic-observed-v1',
+                 'availability_proxy':'retrospective latest-vintage m+1; not PIT'}
+        life.check();return _NativeRead(life,selected,receipt)
+    except BaseException:
+        life.close();raise

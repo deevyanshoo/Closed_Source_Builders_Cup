@@ -131,7 +131,7 @@ def _wb_unit(unit):
 
 
 def _wb(raw, source, profile):
-    from .observed_admission import _zip_guard, _native
+    from .observed_admission import _zip_guard, _native, GENERIC_RECTANGLE_LIMIT
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
     if len(raw)>MAX_WB_BYTES:raise ValueError('WB source byte bound')
@@ -142,7 +142,7 @@ def _wb(raw, source, profile):
         for sheet_name,headers,start in [('Monthly Prices',(5,),7),('Monthly Indices',(6,7,8),9)]:
             if sheet_name not in book.sheetnames:raise ValueError('WB required sheet absent')
             sheet=book[sheet_name]
-            if not sheet.max_row or not sheet.max_column or sheet.max_row*sheet.max_column>100000 or sheet.max_row>2048:
+            if not sheet.max_row or not sheet.max_column or sheet.max_row*sheet.max_column>GENERIC_RECTANGLE_LIMIT or sheet.max_row>2048:
                 raise ValueError('WB sheet expansion bound')
             # Iterate once; native same-byte book, bounded by ZIP and sheet limits.
             rows=list(sheet.iter_rows())

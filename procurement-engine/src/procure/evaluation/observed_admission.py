@@ -26,6 +26,9 @@ from xml.etree import ElementTree
 MAX_SOURCE = 12 * 1024 * 1024
 MAX_MEMBER = 16 * 1024 * 1024
 MAX_EXPANSION = 64 * 1024 * 1024
+# Formatting and reader iteration may exceed the retained meaningful-data bound.
+# Shared with the generic catalog reader; the legacy rectangle stays100000.
+GENERIC_RECTANGLE_LIMIT = 200000
 SCHEMA = "observed-admission-fixture.v1"
 SERIES = {"copper": (65, "Copper", "($/mt)"), "aluminum": (63, "Aluminum", "($/mt)")}
 OFFLINE_ACCEPTANCE_SHA256 = "ea92d939b06e9c48a25bd03becc0039135e98af90efe380aff6adf41bdee4983"
@@ -461,6 +464,7 @@ def _zip_guard(raw, *, worksheet_policy="legacy"):
         raise ValueError("worksheet policy invalid")
     generic = worksheet_policy == "generic_style_tail_v1"
     physical_rows = 2048 if generic else 1006
+    rectangle_limit = GENERIC_RECTANGLE_LIMIT if generic else 100000
     control_roots, admitted = {}, set()
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         members = archive.infolist()
@@ -509,6 +513,7 @@ def _zip_guard(raw, *, worksheet_policy="legacy"):
                     if generic and any(re.fullmatch(r"[1-9][0-9]*", node.attrib.get("r", "")) is None for node in xml_rows):
                         raise ValueError("actual XML invalid row coordinate")
                     seen, max_row, max_col = set(), 0, 0
+                    meaningful_row, meaningful_col = 0, 0
                     min_row, min_col = physical_rows + 1, 100001
                     for cell in cells:
                         ref = cell.attrib.get("r", "")
@@ -520,12 +525,13 @@ def _zip_guard(raw, *, worksheet_policy="legacy"):
                             parent = parents.get(cell)
                             if parent not in row_nodes or parent.attrib.get("r") != matched[2]:
                                 raise ValueError("actual XML cell/row coordinate mismatch")
-                            if int(matched[2]) > 1006 and (
+                            meaningful = (
                                     cell.attrib.get("t") == "e" or any(
                                         node.tag.rsplit("}", 1)[-1] == "f" or (
                                             bool(node.text) and (node.tag.rsplit("}", 1)[-1] in {"v", "t"}
                                                                  or bool(node.text.strip())))
-                                        for node in cell.iter())):
+                                        for node in cell.iter()))
+                            if int(matched[2]) > 1006 and meaningful:
                                 raise ValueError("actual XML meaningful tail cell beyond1006")
                         col = 0
                         for letter in matched[1]:
@@ -534,7 +540,12 @@ def _zip_guard(raw, *, worksheet_policy="legacy"):
                                 raise ValueError("actual XML cell expansion bound")
                         min_col, min_row = min(min_col, col), min(min_row, int(matched[2]))
                         max_col, max_row = max(max_col, col), max(max_row, int(matched[2]))
-                    if max_row > physical_rows or max_row * max_col > 100000:
+                        if generic and meaningful:
+                            meaningful_row = max(meaningful_row, int(matched[2]))
+                            meaningful_col = max(meaningful_col, col)
+                    if generic and meaningful_row * meaningful_col > 100000:
+                        raise ValueError("actual XML meaningful extent expansion bound")
+                    if max_row > physical_rows or max_row * max_col > rectangle_limit:
                         raise ValueError("actual XML cell expansion bound")
                     if generic:
                         dimensions = [n for n in root if n.tag.rsplit("}", 1)[-1] == "dimension"]
@@ -550,7 +561,7 @@ def _zip_guard(raw, *, worksheet_policy="legacy"):
                             return result
                         first_col, first_row = column(extent[1]), int(extent[2])
                         last_col, last_row = column(extent[3] or extent[1]), int(extent[4] or extent[2])
-                        if (last_row > physical_rows or last_row * last_col > 100000
+                        if (last_row > physical_rows or last_row * last_col > rectangle_limit
                                 or first_row > last_row or first_col > last_col
                                 or max_row > last_row or max_col > last_col
                                 or (row_ids and (min(row_ids) < first_row or max(row_ids) > last_row))

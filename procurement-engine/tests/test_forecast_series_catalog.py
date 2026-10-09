@@ -640,3 +640,125 @@ def test_source_shape_v3_nonxml_workbook_part_cannot_select_unchecked_links(monk
     import openpyxl
     monkeypatch.setattr(openpyxl,'load_workbook',lambda *a,**k:(_ for _ in ()).throw(AssertionError('nonXML workbook reached reader')))
     with pytest.raises(ValueError,match='generic workbook'):build(out.getvalue(),generated_bis())
+
+
+# Generic rectangle regressions: only generated source bytes.
+def generic_rectangle_wb(*, style_row=1362, style_col=81):
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font
+    book=load_workbook(io.BytesIO(shape_wb(full_catalog=True)))
+    sheet=book['Monthly Indices']
+    #802 synthetic months, meaningful extent810*17; no original observations.
+    for i,n in enumerate(range(1959*12+10,2026*12+8)):
+        sheet.cell(i+9,1,f'{n//12:04d}M{n%12+1:02d}')
+        for col in range(2,18):sheet.cell(i+9,col,500.+i+col-2)
+    sheet.cell(1,1).font=Font(bold=True)
+    sheet.cell(style_row,style_col).font=Font(bold=True)
+    out=io.BytesIO();book.save(out);book.close();return out.getvalue()
+
+
+@pytest.mark.parametrize('style_row,style_col',[(1362,81),(2000,100)])
+def test_generic_rectangle_bounded_style_extent_preserves_full_public_catalog(style_row,style_col):
+    import zipfile
+    from xml.etree import ElementTree as ET
+    raw=generic_rectangle_wb(style_row=style_row,style_col=style_col)
+    with zipfile.ZipFile(io.BytesIO(raw))as archive:
+        root=ET.fromstring(archive.read('xl/worksheets/sheet2.xml'))
+        cells=[n for n in root.iter()if n.tag.rsplit('}',1)[-1]=='c']
+        assert len(cells)<100000
+        assert root.find('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}dimension').get('ref')==('A1:CC1362'if style_row==1362 else'A1:CV2000')
+    snap=build(raw,shape_bis())
+    wb=[r for r in snap.records if r['series_kind']=='commodity']
+    assert len(wb)==82
+    indices=[r for r in wb if r['locator']['sheet']=='Monthly Indices']
+    assert len(indices)==11 and all(r['forecast_eligible']for r in indices)
+    first=next(r for r in indices if r['locator']['column']=='B')
+    assert first['source_first_period']=='1959-11'and first['source_last_period']=='2026-08'
+    assert first['required_window_mask']==['valid']*120
+    assert snap.values[first['series_id']]['2016-09']==1182.
+    assert snap.values[first['series_id']]['2026-08']==1301.
+    assert all(r['quoted_unit']=='2010=100'for r in indices)
+
+
+@pytest.mark.parametrize('fault,reason',[
+    ('actual_rectangle','cell expansion'),('declared_rectangle','dimension/expansion'),
+    ('actual_cells','row/cell expansion'),('meaningful_extent','meaningful.*expansion'),
+    ('physical_rows','row/cell expansion'),('meaningful_row','meaningful tail'),
+    ('formula_extent','meaningful.*expansion'),('error_extent','meaningful.*expansion'),
+    ('whitespace_extent','meaningful.*expansion'),
+])
+def test_generic_rectangle_independent_limits_refused_before_reader(fault,reason,monkeypatch):
+    from xml.etree import ElementTree as ET
+    ns='{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+    def edit(name,raw):
+        if name!='xl/worksheets/sheet2.xml':return raw
+        root=ET.fromstring(raw);data=root.find(ns+'sheetData');dim=root.find(ns+'dimension')
+        rows={int(r.get('r')):r for r in data}
+        def cell(row,col):
+            node=rows.get(row)
+            if node is None:
+                node=ET.SubElement(data,ns+'row',r=str(row));rows[row]=node
+            ref=f'{col}{row}'
+            found=next((c for c in node if c.get('r')==ref),None)
+            return found if found is not None else ET.SubElement(node,ns+'c',r=ref,s='1')
+        if fault=='actual_rectangle':cell(2000,'CW');dim.set('ref','A1:CW2000') #202000
+        elif fault=='declared_rectangle':dim.set('ref','A1:CW2000')
+        elif fault=='actual_cells':
+            from openpyxl.utils import get_column_letter
+            #101000 style/data cells within137562 rectangle; actual count is
+            #independently bounded even though physical/style extent is safe.
+            for row in range(1,1001):
+                node=rows.get(row)
+                if node is None:node=ET.SubElement(data,ns+'row',r=str(row));rows[row]=node
+                present={c.get('r')for c in node}
+                for col in range(1,102):
+                    ref=f'{get_column_letter(col)}{row}'
+                    if ref not in present:ET.SubElement(node,ns+'c',r=ref,s='1')
+            dim.set('ref','A1:CW1362')
+        elif fault=='physical_rows':cell(2049,'B');dim.set('ref','A1:CC2049')
+        elif fault=='meaningful_row':ET.SubElement(cell(1007,'Q'),ns+'v').text='9'
+        else:
+            #Sparse meaningful point:1000*101=101000, actual style rectangle
+            #1362*101=137562. Formula/error/whitespace are not style-only.
+            c=cell(1000,'CW');dim.set('ref','A1:CW1362')
+            if fault=='formula_extent':ET.SubElement(c,ns+'f')
+            elif fault=='error_extent':c.set('t','e')
+            elif fault=='whitespace_extent':
+                c.set('t','inlineStr');ET.SubElement(ET.SubElement(c,ns+'is'),ns+'t').text=' '
+            else:ET.SubElement(c,ns+'v').text='9'
+        #Keep canonical row order; the rejection must be the intended bound.
+        data[:]=sorted(data,key=lambda n:int(n.get('r')))
+        return ET.tostring(root)
+    raw=shape_xml(generic_rectangle_wb(),edit)
+    import openpyxl
+    monkeypatch.setattr(openpyxl,'load_workbook',lambda *a,**k:(_ for _ in ()).throw(AssertionError('unadmitted extent reached reader')))
+    with pytest.raises(ValueError,match=reason):build(raw,generated_bis())
+
+
+def test_generic_rectangle_meaningful1006_and_physical2048_preserve_complete_window():
+    from openpyxl import load_workbook
+    book=load_workbook(io.BytesIO(generic_rectangle_wb(style_row=2048,style_col=81)))
+    sheet=book['Monthly Indices']
+    for i,n in enumerate(range(1943*12+6,2026*12+8)):
+        sheet.cell(i+9,1,f'{n//12:04d}M{n%12+1:02d}')
+        for col in range(2,18):sheet.cell(i+9,col,500.+i+col-2)
+    assert sheet.max_row==2048
+    out=io.BytesIO();book.save(out);book.close()
+    snap=build(out.getvalue(),shape_bis())
+    index=next(r for r in snap.records if r['locator'].get('sheet')=='Monthly Indices'and r['locator']['column']=='B')
+    assert index['forecast_eligible']and index['required_window_mask']==['valid']*120
+    assert snap.values[index['series_id']]['2016-09']==1378.
+    assert snap.values[index['series_id']]['2026-08']==1497.
+
+
+def test_generic_rectangle_legacy_default_retains100000_rectangle():
+    #Physical rows below legacy1006 so refusal specifically exercises rectangle.
+    from openpyxl import load_workbook
+    from openpyxl.styles import Font
+    book=load_workbook(io.BytesIO(generated_wb()))
+    book['Monthly Indices'].cell(1000,101).font=Font(bold=True)
+    out=io.BytesIO();book.save(out);book.close();raw=out.getvalue()
+    with pytest.raises(ValueError,match='cell expansion'):a._zip_guard(raw)
+    snap=build(raw,generated_bis())
+    assert len(snap.records)==12
+    assert any(r['label']=='Cotton A Index'and r['forecast_eligible']for r in snap.records)

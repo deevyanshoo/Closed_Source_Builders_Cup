@@ -6,6 +6,8 @@
 // saves happen in this browser tab only and are not persisted or evidence-checked here; the Python service does
 // that through its /offers routes. Amounts stay decimal strings throughout.
 import raw from './offers-fixtures.json?raw';
+import { REPORT_NOTICE, toCsv } from './report';
+import type { Report } from './report';
 
 export type FieldStatus = 'extracted' | 'missing' | 'conflict' | 'unverified' | 'corrected';
 export type OfferStatus = 'extracted' | 'needs_review' | 'corrected' | 'saved' | 'used_in_plan' | 'rfq_drafted' | 'rejected' | 'expired';
@@ -215,4 +217,36 @@ export function formatValue(kind: string, value: unknown): string {
 export function dataAge(asOf: string, now: Date): { days: number; old: boolean } {
   const days = Math.max(0, Math.floor((now.getTime() - Date.parse(`${asOf}T00:00:00Z`)) / 86_400_000));
   return { days, old: days > 7 };
+}
+
+/** A reviewed offer with its evidence as downloadable JSON and CSV. Values keep their exact decimal strings. */
+export function offerReport(offer: Offer, generatedAt: Date): Report {
+  const fields = fieldEntries(offer).map(([name, field]) => ({
+    name, kind: field.kind, status: field.status, critical: field.critical, source: field.source, value: field.value,
+    display: formatValue(field.kind, field.value), reasons: field.reasons,
+    evidence: field.evidence.map(e => ({ locator: e.locator, quote: e.quote, text_sha256: e.text_sha256 })),
+  }));
+  const json = {
+    report: 'offer_review', synthetic: true, notice: REPORT_NOTICE, source: 'local_fixture_adapter',
+    generated_at: generatedAt.toISOString(), fixture_revision: fixtureInfo.revision, data_as_of: fixtureInfo.asOf,
+    offer: { offer_id: offer.offer_id, version: offer.version, status: offer.status, extractor: offer.extractor, as_of: offer.as_of,
+      document: offer.document },
+    fields, blocking_reasons: offer.blocking_reasons, review_flags: offer.review_flags,
+    revalidation_required: offer.revalidation_required ?? [],
+  };
+  const rows: (string | null)[][] = [
+    ['notice', null, null, null, null, null, REPORT_NOTICE],
+    ['offer', offer.offer_id, offer.status, `version ${offer.version}`, offer.extractor, null, offer.document.filename],
+  ];
+  for (const f of fields) {
+    rows.push(['field', f.name, f.status, f.display, f.source, null, f.reasons.join('; ') || null]);
+    for (const e of f.evidence) rows.push(['evidence', f.name, null, null, 'document', e.locator, e.quote]);
+  }
+  for (const r of offer.blocking_reasons) rows.push(['blocking_reason', r.field, r.code, null, null, null, r.message]);
+  for (const r of offer.review_flags) rows.push(['review_flag', null, r.flag, null, null, r.locator, r.text]);
+  return {
+    basename: `synthetic-offer-${offer.offer_id}-v${offer.version}`,
+    json: JSON.stringify(json, null, 2),
+    csv: toCsv(['record_type', 'name', 'status', 'value', 'source', 'locator', 'detail', 'synthetic'], rows.map(r => [...r, 'true'])),
+  };
 }

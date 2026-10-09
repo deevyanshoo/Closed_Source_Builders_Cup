@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { NavLink } from 'react-router-dom';
-import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, OffersError } from './offers';
+import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
+import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
 import './offers.css';
 
@@ -255,6 +256,7 @@ export function OffersPage() {
         <button className="primary-button" type="button" disabled={busy || !['extracted', 'needs_review', 'corrected'].includes(offer.status)}
           onClick={() => run(() => adapter.save(offer.offer_id, offer.version), 'Offer saved in this browser tab.')}>
           Save offer <span>→</span></button>
+        <ReportDownloads label={`offer ${offer.offer_id} version ${offer.version}`} build={() => offerReport(offer, new Date())} />
         <p className="limit-note">Saving here is local to the fixture adapter. This preview checks the current UTC date, but cannot replace service normalization, source checks, or audit. Corrected economic values cannot be saved here until authoritative revalidation. Nothing is sent to a supplier.</p>
       </div>
     </section>}

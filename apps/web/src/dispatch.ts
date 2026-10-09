@@ -5,6 +5,8 @@
 // (procurement-engine/scripts/export_dispatch_fixtures_for_web.py), at a fixed cutoff. Responses have the same
 // shape as the read-only Python /dispatch routes. Quantities stay decimal strings; nothing here is live data.
 import raw from './dispatch-fixtures.json?raw';
+import { REPORT_NOTICE, toCsv } from './report';
+import type { Report } from './report';
 
 export type ReadStatus = 'ok' | 'empty' | 'stale' | 'error';
 export type ShipmentStatus = 'delivered' | 'on_hold' | 'delayed' | 'at_risk' | 'on_time' | 'unknown';
@@ -285,3 +287,40 @@ const HAZARD_STATES: Record<HazardState, string> = {
   retrieved_after_as_of: 'Retrieved after the cutoff: rejected',
 };
 export const hazardStateLabel = (state: HazardState) => HAZARD_STATES[state] ?? humanize(state);
+
+export type DispatchView = { row: ShipmentRow; timeline: TimelineResponse; evidence: EvidenceResponse; hazards: HazardResponse | null };
+
+/** The selected shipment's dispatch view (status, timeline, evidence, hazards) as downloadable JSON and CSV. */
+export function dispatchReport(view: DispatchView, generatedAt: Date): Report {
+  const { row, timeline, evidence, hazards } = view;
+  const buckets = ['confirmed', 'exposure', 'expired', 'outside_period'] as const;
+  const json = {
+    report: 'dispatch_shipment', synthetic: true, notice: REPORT_NOTICE, source: 'local_fixture_adapter',
+    generated_at: generatedAt.toISOString(), cutoff: timeline.as_of ?? dispatchFixtureInfo.asOf, fixture_revision: dispatchFixtureInfo.revision,
+    shipment: row, current: timeline.current, lead_time: timeline.lead_time ?? null,
+    timeline: timeline.events.map(e => ({ event_id: e.event_id, event_type: e.event_type, occurred_at: e.occurred_at, observed_at: e.observed_at,
+      eta: e.eta, quantity: e.quantity, operating_evidence: e.operating_evidence, flags: e.flags,
+      evidence: e.evidence.map(x => ({ evidence_id: x.evidence_id, status: x.status })) })),
+    route_evidence: Object.fromEntries(buckets.map(b => [b, evidence[b].map(e => ({ evidence_id: e.evidence_id, kind: e.kind, status: e.status,
+      operating_status: e.operating_status, source: e.source, retrieved_at: e.retrieved_at, valid_until: e.valid_until, summary: e.summary }))])),
+    hazards: hazards ? hazards.assessments.map(a => ({ provider_id: a.provider_id, location: a.location.code, state: a.state, reason: a.reason,
+      usable: a.usable, freshness: a.freshness, retrieved_at: a.retrieved_at, valid_until: a.valid_until, thresholds_version: a.thresholds_version,
+      values: a.values })) : null,
+    note: 'Exposure is not a confirmed delay. Recovery options are on the shipment recovery page.',
+  };
+  const rows: (string | null)[][] = [
+    ['notice', null, null, null, REPORT_NOTICE],
+    ['shipment', row.shipment_id, row.status, row.expected_arrival?.at ?? null, row.signals.join('; ') || null],
+  ];
+  for (const e of timeline.events)
+    rows.push(['event', e.event_id, e.operating_evidence ? 'operating_evidence' : 'evidence_expired', e.occurred_at,
+      [e.event_type, e.eta ? `eta ${e.eta}` : null, e.quantity ? `${e.quantity.amount} ${e.quantity.unit}` : null].filter(Boolean).join('; ')]);
+  for (const b of buckets) for (const e of evidence[b]) rows.push(['route_evidence', e.evidence_id, b, e.retrieved_at, e.summary]);
+  for (const a of hazards?.assessments ?? [])
+    rows.push(['hazard', `${a.provider_id}:${a.location.code}`, a.state, a.retrieved_at, `${a.usable ? 'usable' : 'not usable'}; ${a.thresholds_version}`]);
+  return {
+    basename: `synthetic-dispatch-${row.shipment_id}`,
+    json: JSON.stringify(json, null, 2),
+    csv: toCsv(['record_type', 'id', 'status', 'at', 'detail', 'synthetic'], rows.map(r => [...r, 'true'])),
+  };
+}

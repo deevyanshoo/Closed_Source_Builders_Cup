@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import {
-  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness,
+  createDispatchFixtureAdapter, dispatchReport, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness,
   hazardStateLabel, humanize, replayReason, statusLabel,
 } from './dispatch';
 import type {
   AffectedResponse, DispatchAdapter, EvidenceItem, EvidenceResponse, HazardAssessment, HazardResponse, HazardValue, LeadTime, ListResponse,
   MaterialScreen, ReplayResponse, ReplaySample, ReplaySamplesResponse, ShipmentRow, TimelineEvent, TimelineResponse,
 } from './dispatch';
+import { ReportDownloads } from './report-downloads';
 import './dispatch.css';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
@@ -418,6 +419,11 @@ export function DispatchPage() {
             {hazards?.kind === 'loading' && <StateNotice kind="loading" />}
             {hazards?.kind === 'error' && <StateNotice kind="error" message={hazards.message} />}
             {hazards?.kind === 'ready' && <HazardPanel hazards={hazards.value} />}
+          </section>
+          <section className="dispatch-export" aria-label="Export this shipment">
+            <h3>Export</h3>
+            <ReportDownloads label={`shipment ${row.shipment_id}`} build={() => dispatchReport({ row, timeline: detail.value.timeline,
+              evidence: detail.value.evidence, hazards: hazards?.kind === 'ready' ? hazards.value : null }, new Date())} />
           </section>
         </>}
       </div>

@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "notice": "SYNTHETIC saved listing pages for offline policy-notice parsing. Pages are hand-written in the general style of each site, not copies; every notice is invented. Nothing was fetched.",
+  "as_of": "2026-10-08T12:00:00Z",
+  "pages": [
+    {"provider": "dgft", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "dgft.html", "case": "four notices: restriction, unresolved, instruction-like, invalid date"},
+    {"provider": "dgft", "http_status": 200, "retrieved_at": "2026-10-08T10:00:00Z", "file": "dgft.html", "case": "repeated fetch"},
+    {"provider": "cbic", "http_status": 200, "retrieved_at": "2026-10-08T09:05:00Z", "file": "cbic.html", "case": "two notifications"},
+    {"provider": "pib", "http_status": 200, "retrieved_at": "2026-10-08T09:10:00Z", "file": "pib.html", "case": "press releases, one also indexed by GDELT"},
+    {"provider": "jnpa", "http_status": 200, "retrieved_at": "2026-10-08T09:15:00Z", "file": "jnpa.html", "case": "port circular"},
+    {"provider": "jnpa", "http_status": 503, "retrieved_at": "2026-10-08T09:20:00Z", "file": null, "case": "provider failure"},
+    {"provider": "pib", "http_status": 200, "retrieved_at": "2026-10-08T13:00:00Z", "file": "pib.html", "case": "retrieved after as_of"}
+  ]
+}

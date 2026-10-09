@@ -91,7 +91,7 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
     sources = sources or load_sources()
     cutoff = utc(as_of)
     rules = sources["entities"]
-    ordered = sorted(fetches, key=lambda f: (f["retrieved_at"], f["provider"], f["material"],
+    ordered = sorted(fetches, key=lambda f: (f["retrieved_at"], f["provider"], str(f["material"]),
                                              json.dumps(f["items"], sort_keys=True)))
     rejected, states, items = [], [], []
     for f in ordered:
@@ -132,6 +132,9 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
                 duplicates.append({"snapshot_id": snapshot_id, "provider": provider, "kept_retrieved_at": times[0],
                                    "dropped_retrieved_at": times[1:]})
         published = sorted(m["published_at"] for m in members if m["published_at"])
+        dates = sorted(m["published_date"] for m in members if m.get("published_date"))
+        kind = "official" if any(sources["providers"][m["provider"]].get("source_kind") == "official"
+                                 for m in members) else "news"
         provider_seen = sorted(m["provider_first_seen_at"] for m in members if m["provider_first_seen_at"])
         providers = sorted(seen_per_provider)
         entities = {**tag_entities(first["title"], rules), "rules_version": sources["version"]}
@@ -141,21 +144,22 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
             "snapshot_id": snapshot_id, "providers": providers,
             "source": {"source_id": first["source_id"], "publisher": next((m["publisher"] for m in members
                                                                             if m["publisher"]), None),
-                       "kind": "news"},
+                       "kind": kind},
             "story_id": first["story_id"], "revision_id": first["revision_id"],
             "url": next((m["url"] for m in members if m["url"]), None), "title": first["title"],
             "language": first["language"], "first_seen_at": first["retrieved_at"],
             "retrieved_at": sorted({m["retrieved_at"] for m in members}),
             "provider_first_seen_at": provider_seen[0] if provider_seen else None,
             "published_at": published[0] if published else None,
-            "published_at_status": "stated" if published else "not_stated",
+            "published_date": dates[0] if dates else None,
+            "published_at_status": "stated" if published else ("date_only" if dates else "not_stated"),
             "content_sha256": first["content_sha256"],
             "rights": [{"provider": p, "rights_status": sources["providers"][p]["rights_status"],
                         "permitted_uses": list(sources["providers"][p]["permitted_uses"]),
                         "attribution": sources["providers"][p]["attribution"],
                         "terms_note": sources["providers"][p]["terms_note"]} for p in providers],
             "synthetic": any(m["synthetic"] for m in members), "sample": False,
-            "query_materials": sorted({m["query_material"] for m in members}),
+            "query_materials": sorted({m["query_material"] for m in members if m["query_material"]}),
             "entities": entities, "review_flags": flags, "evidence_status": "candidate", "note": CANDIDATE_NOTE,
         })
 
@@ -188,7 +192,7 @@ def _gate_row(s: dict, rules: dict) -> tuple[dict | None, str | None]:
     seen = s["first_seen_at"]
     return {
         "source_id": s["source"]["source_id"], "source_url": s["url"], "story_id": s["story_id"],
-        "revision_id": s["revision_id"], "content_hash": s["content_sha256"], "source_kind": "news",
+        "revision_id": s["revision_id"], "content_hash": s["content_sha256"], "source_kind": s["source"]["kind"],
         "event_type": s["entities"]["event_type"],
         "effect_class": rules["effect_class_for_event_type"][s["entities"]["event_type"]],
         "confidence": 0, "synthetic": s["synthetic"], "sample": s["sample"],

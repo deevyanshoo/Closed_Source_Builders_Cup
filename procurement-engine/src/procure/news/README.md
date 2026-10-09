@@ -76,3 +76,24 @@ with `.test` domains. It covers:
 - `OFFLINE=1`
 - an instruction-like headline
 - acceptance by the real gate
+
+## Official policy notices (issue #12, saved HTML only)
+
+`policy.py` parses saved listing pages from four sources: DGFT trade notices, CBIC customs notifications, PIB press
+releases and JNPA port circulars. It produces the same item shape, so `build_snapshots` makes the same snapshots.
+
+- **Snapshot fields:**
+  - `source.kind` is `official`.
+  - The stated listing date is kept as `published_date`, with `published_at_status` set to `date_only`. No time of day is invented.
+- **No fetching.**
+  - There is no fetch function, and `fetch_allowed` is false for every source in `config/policy_sources_v1.json`.
+  - robots.txt and terms are recorded as **not checked**, each with the exact thing to read before any fetch.
+- **Parser:**
+  - Uses the standard library `html.parser`, so it adds no dependency.
+  - [Scrapling](https://github.com/D4Vinci/Scrapling) is a proposed swap that needs approval as a new dependency.
+- **Layouts:** each source has a versioned layout (container, header labels, row shape).
+  - A page without them is `layout_changed`, never an empty listing.
+  - Rows with an invalid date or shape are rejected individually.
+- **Page states:** `ok`, `empty`, `layout_changed`, `malformed_payload`, `provider_failure`, `rate_limited`.
+- **Deduplication against news:** a notice and a news item with the same canonical URL, publisher and headline are one snapshot. One publisher seen twice is not corroboration.
+- **Fixtures:** the saved pages in `tests/fixtures/policy` are hand-written in the general style of each site, not copies of real pages, and are labelled synthetic.

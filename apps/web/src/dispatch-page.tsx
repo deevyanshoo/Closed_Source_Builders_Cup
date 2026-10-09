@@ -47,8 +47,8 @@ export function ShipmentList({ response, selected, onSelect }: { response: ListR
     {rows.map(row => <li key={row.shipment_id}>
       <button type="button" aria-pressed={selected === row.shipment_id} onClick={() => onSelect(row.shipment_id)}>
         <span className="dispatch-id">{row.shipment_id}</span>
-        <span className="dispatch-status" data-status={row.status}>{statusLabel(row.status)}</span>
-        {row.signals.length > 0 && <small>{row.signals.map(humanize).join(' · ')}</small>}
+        <span className="dispatch-status" data-status={row.status}><span className="sr-only">Status: </span>{statusLabel(row.status)}</span>
+        {row.signals.length > 0 && <small><span className="sr-only">Signals: </span>{row.signals.map(humanize).join(' · ')}</small>}
       </button>
     </li>)}
   </ul></>;
@@ -78,7 +78,7 @@ export function ShipmentDetail({ row, timeline, onShowAffected }: { row: Shipmen
     {timeline.status === 'stale' && <StateNotice kind="stale" message={`Milestone data is dated ${formatInstant(timeline.as_of)}.`} />}
     <div className="dispatch-detail-head">
       <h2>{row.shipment_id}</h2>
-      <span className="dispatch-status" data-status={row.status}>{statusLabel(row.status)}</span>
+      <span className="dispatch-status" data-status={row.status}><span className="sr-only">Status: </span>{statusLabel(row.status)}</span>
     </div>
     <dl className="dispatch-facts">
       <div><dt>Expected arrival</dt><dd>{row.expected_arrival ? `${formatInstant(row.expected_arrival.at)} (${row.expected_arrival.basis === 'eta' ? 'stated ETA' : 'actual arrival'})` : 'No usable ETA'}</dd></div>
@@ -119,7 +119,7 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
   return <li className="dispatch-evidence-card">
     <div className="dispatch-event-head">
       <strong>{item.summary ?? humanize(item.kind)}</strong>
-      <span className="dispatch-chip" data-kind={item.status}>{item.status === 'confirmed' ? `confirmed: ${item.operating_status}` : 'exposure'}</span>
+      <span className="dispatch-chip" data-kind={item.status}><span className="sr-only">Evidence status: </span>{item.status === 'confirmed' ? `confirmed: ${item.operating_status}` : 'exposure'}</span>
     </div>
     <dl>
       <div><dt>Source</dt><dd>{item.source.provider_id} ({humanize(item.source.kind)}){item.source.reference ? `, ${item.source.reference}` : ''}</dd></div>
@@ -216,9 +216,9 @@ export function ReplayResult({ result }: { result: ReplayResponse }) {
         <div className="dispatch-event-head">
           <strong>{change.shipment_id}</strong>
           <span>
-            {change.before && <span className="dispatch-status" data-status={change.before.status}>{statusLabel(change.before.status)}</span>}
+            <span className="sr-only">Status before: </span>{change.before && <span className="dispatch-status" data-status={change.before.status}>{statusLabel(change.before.status)}</span>}
             {' → '}
-            {change.after && <span className="dispatch-status" data-status={change.after.status}>{statusLabel(change.after.status)}</span>}
+            <span className="sr-only"> after: </span>{change.after && <span className="dispatch-status" data-status={change.after.status}>{statusLabel(change.after.status)}</span>}
           </span>
         </div>
         <ul>{explainChange(change).map(line => <li key={line}>{line}</li>)}</ul>
@@ -302,7 +302,7 @@ function HazardCard({ item }: { item: HazardAssessment }) {
   return <li className="dispatch-hazard-card" data-state={item.state} data-usable={item.usable}>
     <div className="dispatch-event-head">
       <strong>{item.provider_id} · {item.location.name ?? item.location.code} ({item.location.code})</strong>
-      <span className="dispatch-chip" data-kind={item.state === 'exposure_found' ? 'exposure' : 'neutral'}>{hazardStateLabel(item.state)}</span>
+      <span className="dispatch-chip" data-kind={item.state === 'exposure_found' ? 'exposure' : 'neutral'}><span className="sr-only">Assessment: </span>{hazardStateLabel(item.state)}</span>
     </div>
     {item.reason && item.state !== 'exposure_found' && <p className="field-hint">Reason: {humanize(item.reason)}</p>}
     {stale && <p className="dispatch-note">Stale: retrieved too long before the cutoff. Not usable for planning.</p>}
@@ -378,10 +378,10 @@ export function DispatchPage() {
   const row = rows.find(r => r.shipment_id === selected) ?? null;
   const hours = Math.floor(age.ageSeconds / 3600);
 
-  return <main className="shell">
+  return <main className="shell dispatch-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot">●</span></div>
+      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
       <WorkspaceNav />
     </header>
     <section className="recovery-intro">

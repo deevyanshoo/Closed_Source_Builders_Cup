@@ -84,3 +84,6 @@
 .dispatch-hazard-values caption{text-align:left;padding:4px 0}
 .dispatch-chip[data-kind=neutral]{border-color:#555;color:#333}
 @media(max-width:800px){.dispatch-hazard-card dl{grid-template-columns:1fr}.dispatch-hazard-values th,.dispatch-hazard-values td{padding:6px 4px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.workspace-nav a[aria-current=page]{color:#a30f0f}
+.dispatch-shell :is(a,button):focus-visible{outline:3px solid #a30f0f;outline-offset:2px}

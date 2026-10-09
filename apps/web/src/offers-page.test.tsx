@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { Editor, OffersPage } from './offers-page';
+import { EditButton, Editor, FieldName, FieldStatus, OffersPage } from './offers-page';
 import { createFixtureAdapter } from './offers';
 
 describe('offer review editor', () => {
@@ -31,5 +31,28 @@ describe('top navigation', () => {
     expect(nav.match(/aria-current="page"/g)?.length).toBe(1);
     expect(html).toContain('Synthetic · local adapter');
     expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
+  });
+});
+
+describe('accessibility', () => {
+  const offer = createFixtureAdapter().list()[0];
+  const field = offer.fields.supplier_name;
+
+  it('lets keyboard users select a field to highlight its source', () => {
+    const html = renderToStaticMarkup(<FieldName name="supplier_name" field={field} selected onSelect={() => {}} />);
+    expect(html).toMatch(/<button type="button" class="offers-field-button" aria-pressed="true"/);
+    expect(html).toContain('supplier name');
+    expect(html).toContain('<span class="sr-only">Show source for </span>');
+  });
+
+  it('names each edit button after its field and gives status chips context', () => {
+    expect(renderToStaticMarkup(<EditButton name="supplier_name" onEdit={() => {}} />)).toContain('aria-label="Edit supplier name"');
+    const chip = renderToStaticMarkup(<FieldStatus field={field} />);
+    expect(chip).toContain('<span class="sr-only">Field status: </span>');
+  });
+
+  it('hides the decorative dot from screen readers', () => {
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/offers']}><OffersPage /></MemoryRouter>);
+    expect(html).toContain('<span class="red-dot" aria-hidden="true">');
   });
 });

@@ -183,3 +183,20 @@ describe('hazard and weather exposure panel', () => {
     expect(await render('SHP-NOPE')).toContain('No hazard or weather assessments for this shipment.');
   });
 });
+
+describe('accessibility', () => {
+  it('gives status chips and signals screen-reader context', async () => {
+    const html = renderToStaticMarkup(<ShipmentList response={await adapter.listShipments()} selected={null} onSelect={() => {}} />);
+    expect(html.match(/<span class="sr-only">Status: <\/span>/g)?.length).toBe(6);
+    expect(html).toContain('<span class="sr-only">Signals: </span>');
+  });
+
+  it('labels evidence chips and hides the decorative dot', async () => {
+    expect(renderToStaticMarkup(<RouteEvidencePanel evidence={await adapter.routeEvidence('SHP-SYN-002')} />))
+      .toContain('<span class="sr-only">Evidence status: </span>');
+    expect(renderToStaticMarkup(<HazardPanel hazards={await adapter.hazards('SHP-SYN-008')} />))
+      .toContain('<span class="sr-only">Assessment: </span>');
+    const page = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage /></MemoryRouter>);
+    expect(page).toContain('<span class="red-dot" aria-hidden="true">');
+  });
+});

@@ -92,6 +92,21 @@ function Reasons({ reasons, title }: { reasons: BlockingReason[]; title: string 
   return <div className="notice notice-error offers-reasons" role="alert"><strong>{title}</strong><ul>{reasons.map(r => <li key={`${r.code}:${r.field}`}>{fieldLabel(r.field)}: {statusLabel(r.code.replace('field_', ''))}</li>)}</ul></div>;
 }
 
+export function FieldName({ name, field, selected, onSelect }: { name: string; field: Field; selected: boolean; onSelect: (name: string) => void }) {
+  return <button type="button" className="offers-field-button" aria-pressed={selected} onClick={event => { event.stopPropagation(); onSelect(name); }}>
+    <span className="sr-only">Show source for </span>{fieldLabel(name)}{field.critical && <small>critical</small>}
+  </button>;
+}
+
+export function EditButton({ name, onEdit }: { name: string; onEdit: (name: string) => void }) {
+  return <button className="text-button" type="button" aria-label={`Edit ${fieldLabel(name)}`} onClick={event => { event.stopPropagation(); onEdit(name); }}>Edit</button>;
+}
+
+export function FieldStatus({ field }: { field: Field }) {
+  return <><span className="offers-chip" data-status={field.status}><span className="sr-only">Field status: </span>{field.status}</span>
+    {field.source === 'user' && <small>reviewer entry</small>}</>;
+}
+
 export function OffersPage() {
   const adapter = useMemo(() => createFixtureAdapter(), []);
   const [view, setView] = useState<View>({ kind: 'empty' });
@@ -151,10 +166,10 @@ export function OffersPage() {
 
   const evidenceLocators = new Set(selected && offer ? fieldEntries(offer).find(([n]) => n === selected)?.[1].evidence.map(e => e.locator) : []);
 
-  return <main className="shell">
+  return <main className="shell offers-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot">●</span></div>
+      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
       <WorkspaceNav />
     </header>
 
@@ -210,20 +225,20 @@ export function OffersPage() {
           <caption>Extracted fields and their source</caption>
           <thead><tr><th>Field</th><th>Value</th><th>Status</th><th>Source text</th><th></th></tr></thead>
           <tbody>{fieldEntries(offer).map(([name, field]) => <tr key={name} className={selected === name ? 'offers-selected' : ''} onClick={() => setSelected(name)}>
-            <th scope="row">{fieldLabel(name)}{field.critical && <small>critical</small>}</th>
+            <th scope="row"><FieldName name={name} field={field} selected={selected === name} onSelect={setSelected} /></th>
             <td>{editing === name
               ? <Editor field={field} busy={busy} onCancel={() => setEditing(null)} onSubmit={value => run(() => adapter.correct(offer.offer_id, name, value, offer.version), `Corrected ${fieldLabel(name)}.`)} />
               : formatValue(field.kind, field.value)}
               {field.status === 'conflict' && <ul className="offers-candidates">{field.candidates.filter(c => c.verified).map((c, i) => <li key={i}>{formatValue(field.kind, c.value)} <code>{c.locators.join(', ')}</code></li>)}</ul>}
               {field.status === 'unverified' && field.reasons.length > 0 && <small className="offers-reason">{field.reasons.slice(0, 3).join(', ').replaceAll('_', ' ')}</small>}
             </td>
-            <td><span className="offers-chip" data-status={field.status}>{field.status}</span>{field.source === 'user' && <small>reviewer entry</small>}</td>
+            <td><FieldStatus field={field} /></td>
             <td>{field.evidence.length ? field.evidence.map((e, i) => {
               const seg = offer.segments.find(s => s.locator === e.locator);
               return <div className="offers-evidence" key={`${e.locator}:${i}`}><code>{e.locator}</code> {seg ? <Quote text={seg.text} quote={e.quote} /> : e.quote}</div>;
             }) : <span className="inline-empty">{field.status === 'missing' ? 'Not stated in the document' : field.source === 'user' ? 'Entered by reviewer' : 'No verified source'}</span>}</td>
             <td>{field.kind !== 'shipments' && editing !== name && ['extracted', 'needs_review', 'corrected'].includes(offer.status) &&
-              <button className="text-button" type="button" onClick={e => { e.stopPropagation(); setEditing(name); }}>Edit</button>}</td>
+              <EditButton name={name} onEdit={setEditing} />}</td>
           </tr>)}</tbody>
         </table></div>
 

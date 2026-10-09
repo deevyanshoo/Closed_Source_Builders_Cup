@@ -169,6 +169,27 @@ def forecast_at_origin(series: dict, origin: str, model: str, protocol: dict, se
     _check_series(training, MONTHS["training_start"], cutoff)
     if any(not isinstance(series[t], (int, float)) or isinstance(series[t], bool) or not math.isfinite(series[t]) or series[t] <= 0 for t in targets):
         raise ValueError("invalid actual target")
+    from .observed_admission import canonical
+    frozen = canonical(forecast_from_training(training, origin, model, protocol, series_spec, split, fitter))
+    return attach_frozen_actuals(frozen, {target: series[target] for target in targets},
+                                expected_prediction_sha256=_sha(frozen))
+
+
+def forecast_from_training(training: dict[str, float], origin: str, model: str, protocol: dict,
+                           series_spec: dict, split: str, fitter=None) -> list[dict]:
+    """Numerical seam only, no execution authority and no target actuals accepted."""
+    _check_protocol(protocol, protocol.get("as_of"))
+    if model not in {"naive", "ets", "gbm"} or split not in {"validation", "test"}:
+        raise ValueError("unsupported model or split")
+    allowed = _range(MONTHS[split + "_start"], MONTHS[split + "_end"])
+    if origin not in allowed:
+        raise ValueError("origin outside frozen split")
+    cutoff = _name(_month(origin) - 1)
+    targets = [_name(_month(origin) + h) for h in (1, 3, 6)]
+    _check_series(training, MONTHS["training_start"], cutoff)
+    training = {month: training[month] for month in _range(MONTHS["training_start"], cutoff)}
+    if len(training) < 60:
+        raise ValueError("insufficient_history")
     p0 = float(training[cutoff])
     prices = list(training.values())
     scale = float(np.mean(np.abs(np.diff(prices))))
@@ -203,8 +224,29 @@ def forecast_at_origin(series: dict, origin: str, model: str, protocol: dict, se
         rows.append({**common, "split": split, "origin": origin, "target": target, "horizon": horizon,
                      "model": model, "backend": backend, "training_cutoff": cutoff, "p0": p0,
                      "p10": float(quantiles[0, lead - 1]), "p50": float(quantiles[1, lead - 1]),
-                     "p90": float(quantiles[2, lead - 1]), "actual": float(series[target]), "mase_scale": scale})
+                     "p90": float(quantiles[2, lead - 1]), "mase_scale": scale})
     return rows
+
+
+def attach_frozen_actuals(frozen_predictions: bytes, actuals: dict[str, float], *,
+                          expected_prediction_sha256: str) -> list[dict]:
+    """Pure attachment; the admitted host separately owns causal release authority."""
+    from .observed_admission import decode
+    if _sha(frozen_predictions) != expected_prediction_sha256:
+        raise ValueError("foreign/stale prediction freeze")
+    rows = decode(frozen_predictions)
+    if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) or "actual" in row for row in rows):
+        raise ValueError("prediction freeze must be actual-free")
+    identities = {(row.get("series_id"), row.get("model"), row.get("origin"), row.get("split")) for row in rows}
+    if len(rows) != 3 or len(identities) != 1 or {row.get("horizon") for row in rows} != {1, 3, 6}:
+        raise ValueError("duplicate or foreign prediction identity")
+    targets = {row["target"] for row in rows}
+    if len(targets) != 3 or any(row["target"] != _name(_month(row["origin"]) + row["horizon"]) for row in rows):
+        raise ValueError("duplicate or foreign target identity")
+    if not isinstance(actuals, dict) or set(actuals) != targets or any(
+            type(value) not in {int, float} or not math.isfinite(value) or value <= 0 for value in actuals.values()):
+        raise ValueError("invalid actual target")
+    return [{**row, "actual": float(actuals[row["target"]])} for row in rows]
 
 
 def _scaled_interval(row: dict, multiplier: float) -> dict:
@@ -592,7 +634,9 @@ def publish_runner(output_dir: str | Path, stage1_input: dict, ledger: list, sel
     return {"artifact_sha256": hashes, "stage1_input_sha256": input_sha}
 
 
-def verify_runner_run(output_dir: str | Path) -> bool:
+def verify_runner_run(output_dir: str | Path, *, expected_run=None) -> bool:
+    if expected_run is not None:
+        return _verify_admitted_fixture(output_dir, expected_run)
     output = Path(output_dir)
     state, _ = strict_json(output / "RUN_STATE.json")
     hashes = state.get("artifact_sha256")
@@ -630,7 +674,462 @@ def _publish_incomplete_run(output_dir: str | Path, ledger: list[dict], reason: 
 
 
 def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str | Path,
-                           source_file: str | Path, output_dir: str | Path, as_of: str) -> dict:
+                           source_file: str | Path, output_dir: str | Path, as_of: str,
+                           *, accepted_run=None) -> dict:
+    if accepted_run is None:
+        raise ValueError("registered execution binding required; observed execution HOLD")
+    return _run_admitted_fixture(protocol_path, source_manifest_path, source_file, output_dir, as_of, accepted_run)
+
+
+# A fixture run must intercept this PUBLIC boundary in its owning test. No
+# product-supplied callback, child command, or real statistical fitting is enabled.
+_REAL_FIT_BOUNDARY = fit_in_owned_child
+_ADMITTED_SCHEMA = "observed-run-fixture-closure.v1"
+
+
+def _owned_json(path, max_bytes=8 * 1024 * 1024):
+    from .observed_admission import Lifetime, decode
+    life = Lifetime()
+    try:
+        fd = life.open(path, limit=max_bytes)
+        raw = life.read(fd, max_bytes)
+        value = decode(raw)
+        if not isinstance(value, dict):
+            raise ValueError("artifact must be object")
+        return value, raw
+    finally:
+        life.close()
+
+
+def _exclusive_json(path, value):
+    from .observed_admission import canonical, _identity
+    raw = canonical(value)
+    parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        parent_identity = _identity(os.fstat(parent_fd), True)
+        fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent_fd)
+        try:
+            offset = 0
+            while offset < len(raw):
+                written = os.write(fd, raw[offset:])
+                if written <= 0:
+                    raise OSError("short artifact write")
+                offset += written
+            os.fsync(fd)
+            file_identity = _identity(os.fstat(fd))
+            if os.fstat(fd).st_nlink != 1:
+                raise ValueError("artifact hardlink")
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
+    if _identity(os.lstat(path.parent), True) != parent_identity or _identity(os.lstat(path)) != file_identity:
+        raise ValueError("artifact postclose identity changed")
+    return _sha(raw)
+
+
+def _fixture_ledger():
+    rows = []
+    for kind, series_id, unit, reason in (
+            ("commodity", "copper", "USD/metric tonne", None),
+            ("commodity", "aluminum", "USD/metric tonne", None),
+            ("fx", "USDINR", "INR/USD", "ecb_originals_absent"),
+            ("joined", "CopperINRkg", "INR/kg", "fx_unavailable"),
+            ("joined", "AluminiumINRkg", "INR/kg", "fx_unavailable"),
+            ("commodity", "iron_ore", "USD/dmtu", "root_unit_review")):
+        for model in (("all",) if series_id == "iron_ore" else ("naive", "ets", "gbm")):
+            for split in ("validation", "test"):
+                for horizon in (1, 3, 6):
+                    rows.append({"series_kind": kind, "series_id": series_id, "unit": unit,
+                                 "model": model, "split": split, "horizon": horizon,
+                                 "status": "pending" if reason is None else "not_evaluated",
+                                 "reason": reason, "backend": None, "metrics": None})
+    assert len(rows) == 96
+    return rows
+
+
+class _FixturePhases:
+    """Host-owned state, never a phase grant decoded from a product request."""
+
+    def __init__(self, output, read, context):
+        self.output, self.read, self.context = output, read, context
+        self._step = 0
+        self._freezes = {}
+        self._file_ids = {}
+        self.identity = (output.stat().st_dev, output.stat().st_ino, output.stat().st_mode, output.stat().st_uid)
+
+    def check(self):
+        self.read.check()
+        info = os.lstat(self.output)
+        if (info.st_dev, info.st_ino, info.st_mode, info.st_uid) != self.identity:
+            raise ValueError("output identity changed")
+        if os.path.lexists(self.output / "FAILURE.json"):
+            raise ValueError("failure entry dominates")
+        for name, (sha, _) in self._freezes.items():
+            from .observed_admission import _identity
+            if _identity(os.lstat(self.output / name)) != self._file_ids[name]:
+                raise ValueError("freeze identity changed")
+            doc, raw = _owned_json(self.output / name)
+            if _sha(raw) != sha or doc.get("context") != self.context:
+                raise ValueError("foreign/stale freeze")
+
+    def freeze(self, split, rows):
+        from .observed_admission import canonical
+        self.check()
+        if (split, self._step) not in {("validation", 0), ("test", 2)}:
+            raise ValueError("prediction freeze wrong phase")
+        if not rows or any("actual" in row or row["split"] != split for row in rows):
+            raise ValueError("freeze must be actual-free")
+        counts = defaultdict(set)
+        identities = set()
+        for row in rows:
+            identity = (row["series_id"], row["model"], row["horizon"], row["origin"])
+            if identity in identities or row["target"] != _name(_month(row["origin"]) + row["horizon"]):
+                raise ValueError("duplicate/foreign prediction identity")
+            identities.add(identity)
+            counts[(row["series_id"], row["model"], row["horizon"])].add(row["origin"])
+        origins = set(_range(MONTHS[split + "_start"], MONTHS[split + "_end"]))
+        if any(cells != origins for cells in counts.values()):
+            raise ValueError("incomplete prediction cohort")
+        name = split + "_prediction_freeze.json"
+        raw = canonical(rows)
+        doc = {"schema_version": "actual-free-prediction-freeze.v1", "context": self.context,
+               "split": split, "prediction_sha256": _sha(raw), "predictions": rows}
+        sha = _exclusive_json(self.output / name, doc)
+        self._freezes[name] = (sha, raw)
+        from .observed_admission import _identity
+        self._file_ids[name] = _identity(os.lstat(self.output / name))
+        self._step += 1
+        self.check()
+
+    def attach(self, split):
+        self.check()
+        if (split, self._step) not in {("validation", 1), ("test", 3)}:
+            raise ValueError("actual attachment wrong phase")
+        name = split + "_prediction_freeze.json"
+        _, raw = self._freezes[name]
+        from .observed_admission import canonical, decode
+        grouped = defaultdict(list)
+        for row in decode(raw):
+            grouped[(row["series_id"], row["model"], row["origin"])].append(row)
+        scored = []
+        for (sid, _, _), rows in grouped.items():
+            frozen = canonical(rows)
+            actuals = {row["target"]: self.read.series[sid][row["target"]] for row in rows}
+            scored.extend(attach_frozen_actuals(frozen, actuals, expected_prediction_sha256=_sha(frozen)))
+        self.check()
+        return scored
+
+    def freeze_selection(self, selections, calibration, failed):
+        self.check()
+        if self._step != 1:
+            raise ValueError("selection freeze wrong phase")
+        doc = {"schema_version": "validation-selection-freeze.v1", "context": self.context,
+               "validation_prediction_sha256": self._freezes["validation_prediction_freeze.json"][0],
+               "selection": selections, "calibration": calibration, "failed_cohorts": failed}
+        sha = _exclusive_json(self.output / "selection_freeze.json", doc)
+        self._freezes["selection_freeze.json"] = (sha, None)
+        from .observed_admission import _identity
+        self._file_ids["selection_freeze.json"] = _identity(os.lstat(self.output / "selection_freeze.json"))
+        self._step = 2
+        self.check()
+
+
+def _run_admitted_fixture(protocol_path, manifest_path, source_file, output_dir, as_of, binding):
+    from .observed_admission import (canonical, decode, fixture_run_record, fixture_admission_record,
+                                     open_observed_native_snapshot, Lifetime, _identity,
+                                     _begin_fixture_run, _capture_fixture_output, _seal_fixture_run, _fail_fixture_run)
+    run = fixture_run_record(binding)  # permission before even source stat
+    admission = fixture_admission_record(run["admission"])
+    if tuple(map(str, (protocol_path, manifest_path, source_file, output_dir))) != (
+            run["protocol"], run["manifest"], admission["source"], run["output"]):
+        raise ValueError("foreign run/source/control/output binding")
+    output = Path(output_dir)
+    if os.path.lexists(output) or _identity(os.lstat(output.parent), True) != run["parent_identity"]:
+        raise ValueError("output entry or parent identity changed")
+    if fit_in_owned_child is _REAL_FIT_BOUNDARY:
+        raise ValueError("fixture requires owning test interception; real fitting HOLD")
+    controls = Lifetime()
+    try:
+        values = []
+        for path, sha in admission["controls"]:
+            fd = controls.open(path, private=True, limit=1024 * 1024)
+            raw = controls.read(fd, 1024 * 1024)
+            if _sha(raw) != sha:
+                raise ValueError("foreign control hash")
+            values.append((decode(raw), raw))
+    finally:
+        controls.close()
+    (protocol, protocol_raw), (manifest, manifest_raw) = values
+    if (protocol.get("status") != "INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD"
+            or protocol.get("observed_execution_authorized") is not False
+            or manifest.get("is_synthetic") is not True
+            or manifest.get("observed_authenticity") is not False
+            or manifest.get("observed_execution_authorized") is not False
+            or manifest.get("sha256") != admission["grant"]["source_sha256"]
+            or manifest.get("bytes") != admission["grant"]["source_bytes"]
+            or manifest.get("source_id") != "owned_fixture"):
+        raise ValueError("fixture controls required; observed execution HOLD")
+    protocol = {**protocol, "protocol_sha256": _sha(protocol_raw),
+                "source_sha256": manifest["sha256"], "snapshot_sha256": manifest["sha256"]}
+    _check_protocol(protocol, as_of)
+    context = {"fixture_id": binding.fixture_id, "source_sha256": manifest["sha256"],
+               "protocol_sha256": _sha(protocol_raw), "manifest_sha256": _sha(manifest_raw),
+               "code_sha256": dict(admission["code"]), "output": str(output), "as_of": as_of}
+    ledger, failed = _fixture_ledger(), {}
+    started, elapsed, backends = time.monotonic(), defaultdict(float), {}
+    provenance = {"source_manifest_sha256": _sha(manifest_raw), "protocol_sha256": _sha(protocol_raw),
+                  "seeds": {}, "backends": {}, "versions": {}, "training_cutoffs": {},
+                  "source_slice_sha256": {}, "model_fit_seeds": {}, "source_snapshot_sha256": manifest["sha256"],
+                  "source_eligibility_status": "OWNED_SYNTHETIC_FIXTURE", "latest_vintage_proxy": True,
+                  "full_parent_snapshot_exposed": True, "physical_test_actuals_untouched": False,
+                  "observed_authenticity": False, "observed_execution_authorized": False}
+    token = _begin_fixture_run(binding)
+    owned_output_identity = None
+    try:
+        with open_observed_native_snapshot(Path(source_file), admission["raw"], expected_admission=run["admission"]) as read:
+            windows = plan_common_origins({sid: dict(s) for sid, s in read.series.items()}, as_of, protocol)
+            read.check()
+            output.mkdir(mode=0o700, exist_ok=False)
+            owned_output_identity = _identity(os.lstat(output), True)
+            read.check()
+            _capture_fixture_output(binding, token, owned_output_identity)
+            _exclusive_json(output / "HOST_PENDING.json", {"schema_version": _ADMITTED_SCHEMA, "context": context,
+                                                           "status": "incomplete", "is_synthetic": True})
+            host = _FixturePhases(output, read, context)
+            _exclusive_json(output / "source_receipt.json", dict(read.receipt))
+
+            def predict(split):
+                predictions = []
+                for sid in ("copper", "aluminum"):
+                    for model in ("naive", "ets", "gbm"):
+                        key = (sid, model)
+                        if key in failed:
+                            continue
+                        if (sid, "naive") in failed:
+                            failed[key] = "naive_baseline_unavailable"
+                            continue
+                        rows = []
+                        before = time.monotonic()
+                        try:
+                            for origin in windows[split]:
+                                host.check()
+                                remaining = min(60.0, 1800 - (time.monotonic() - started),
+                                                900 - elapsed[sid] - (time.monotonic() - before))
+                                if remaining <= 0:
+                                    raise TimeoutError("fit_deadline")
+                                cutoff = _name(_month(origin) - 1)
+                                training = {m: read.series[sid][m] for m in _range("2016-09", cutoff)}
+                                spec = {"series_kind": "commodity", "series_id": sid, "unit": "USD/metric tonne",
+                                        "source_id": "owned_fixture", "is_synthetic": True}
+                                def bounded(model_name, logs, lead, name, refit):
+                                    fit_started = time.monotonic()
+                                    fit = fit_in_owned_child(model_name, logs, lead, name, refit,
+                                                             remaining_seconds=remaining)
+                                    if time.monotonic() - fit_started > remaining:
+                                        raise TimeoutError("fit_deadline")
+                                    if fit.backend != "fixture":
+                                        raise ValueError("unsupported_unpinned_backend")
+                                    if key in backends and fit.backend != backends[key]:
+                                        raise ValueError("backend_changed")
+                                    backends[key] = fit.backend
+                                    provenance["backends"][f"{sid}:{model}:{origin}"] = fit.backend
+                                    provenance["versions"].update(getattr(fit, "versions", {}))
+                                    host.check()
+                                    return fit
+                                rows.extend(forecast_from_training(training, origin, model, protocol, spec, split, bounded))
+                                provenance["seeds"][f"{sid}:{origin}"] = canonical_seed(protocol, sid, origin)
+                                provenance["training_cutoffs"][f"{sid}:{origin}"] = cutoff
+                                provenance["source_slice_sha256"][f"{sid}:{origin}"] = _sha(canonical(training))
+                                provenance["model_fit_seeds"][f"{sid}:{model}"] = 0 if model == "gbm" else None
+                        except (ValueError, RuntimeError, TimeoutError) as exc:
+                            reason = str(exc) if str(exc) in {"backend_changed", "unsupported_unpinned_backend", "fit_deadline"} else "fit_unavailable"
+                            failed[key] = reason
+                            if reason == "fit_deadline" or isinstance(exc, OwnedChildCleanupError):
+                                raise
+                        else:
+                            predictions.extend(rows)
+                        finally:
+                            elapsed[sid] += time.monotonic() - before
+                if not predictions:
+                    raise ValueError("all native cohorts unavailable")
+                return predictions
+
+            host.freeze("validation", predict("validation"))
+            validation = host.attach("validation")
+            calibration, calibrated = {}, []
+            for sid in ("copper", "aluminum"):
+                for model in ("naive", "ets", "gbm"):
+                    if (sid, model) in failed:
+                        continue
+                    cohort = []
+                    try:
+                        for horizon in (1, 3, 6):
+                            factor, adjusted = calibrate_intervals([r for r in validation if
+                                (r["series_id"], r["model"], r["horizon"]) == (sid, model, horizon)])
+                            calibration[f"{sid}:{model}:{horizon}"] = factor
+                            cohort.extend(adjusted)
+                    except ValueError:
+                        failed[(sid, model)] = "calibration_unavailable"
+                        calibration = {key: value for key, value in calibration.items()
+                                       if not key.startswith(f"{sid}:{model}:")}
+                    else:
+                        calibrated.extend(cohort)
+            calibrated = [r for r in calibrated if (r["series_id"], r["model"]) not in failed
+                          and (r["series_id"], "naive") not in failed]
+            selection = {f"{sid}:{h}": value for (sid, h), value in select_models(calibrated).items()}
+            host.freeze_selection(selection, calibration, {f"{sid}:{m}": reason for (sid, m), reason in failed.items()})
+            host.freeze("test", predict("test"))
+            test = host.attach("test")
+            scored = calibrated + [_scaled_interval(r, calibration[f"{r['series_id']}:{r['model']}:{r['horizon']}"])
+                                    for r in test]
+            available = {(r["series_id"], r["model"]) for r in test}
+            scored = [r for r in scored if (r["series_id"], r["model"]) in available
+                      and (r["series_id"], "naive") not in failed]
+            for entry in ledger:
+                if entry["status"] == "pending":
+                    key = (entry["series_id"], entry["model"])
+                    if key in failed or (key[0], "naive") in failed:
+                        entry.update(status="not_evaluated", reason=failed.get(key, "naive_baseline_unavailable"))
+                    elif key in available:
+                        entry.update(status="scored", backend=backends[key], reason=None)
+                    else:
+                        entry.update(status="not_evaluated", reason="missing_cohort")
+            if not scored:
+                raise ValueError("all scored cohorts unavailable")
+            _exclusive_json(output / "candidate_ledger.json", {"entries": ledger, "provider_dl": "out_of_scope"})
+            _exclusive_json(output / "scored_rows.json", {"context": context, "predictions": scored})
+            # Existing schema is unchanged, explicitly nested and fixture marked.
+            doc = {"schema_version": "forecast-scorecard.v1", "metadata": {"synthetic": True,
+                    "latest_vintage_proxy": True, "observed_execution_authorized": False}, "predictions": scored}
+            publish_runner(output / "legacy", doc, ledger, selection, calibration, provenance)
+            verify_runner_run(output / "legacy")
+            host.check()
+        # Source/control/code close and postclose checks succeeded before closure.
+        artifacts = _admitted_artifacts(output)
+        read.lifetime.check(postclose=True)
+        info = os.lstat(output)
+        if (info.st_dev, info.st_ino, info.st_mode, info.st_uid) != host.identity or os.path.lexists(output / "FAILURE.json"):
+            raise ValueError("late output/failure identity changed")
+        closure = {"schema_version": _ADMITTED_SCHEMA, "status": "fixture_complete", "context": context,
+                   "is_synthetic": True, "observed_authenticity": False, "observed_execution_authorized": False,
+                   "full_parent_snapshot_exposed": True, "physical_test_actuals_untouched": False,
+                   "close_postclose_verified": True, "artifact_sha256": artifacts}
+        _exclusive_json(output / "ADMITTED_COMPLETE.json", closure)
+        _seal_fixture_run(binding, token, canonical(closure))
+        _verify_admitted_fixture(output, binding)
+        return closure
+    except BaseException as exc:
+        _fail_fixture_run(binding, token)
+        try:
+            still_owned = (owned_output_identity is not None
+                           and _identity(os.lstat(output), True) == owned_output_identity
+                           and _identity(os.lstat(output.parent), True) == run["parent_identity"])
+        except OSError:
+            still_owned = False
+        if still_owned and not os.path.lexists(output / "FAILURE.json"):
+            reason = ("fit_interrupted" if isinstance(exc, (InterruptedError, KeyboardInterrupt))
+                      else "owned_child_cleanup_unverified" if isinstance(exc, OwnedChildCleanupError)
+                      else "fit_deadline" if isinstance(exc, TimeoutError)
+                      else "admitted_execution_unverified")
+            _exclusive_json(output / "FAILURE.json", {"schema_version": _ADMITTED_SCHEMA, "status": "incomplete",
+                                                      "reason": reason})
+            if not os.path.lexists(output / "candidate_ledger.json"):
+                interrupted_ledger = [{**item, "status": "not_evaluated", "reason": item["reason"] or reason}
+                                      for item in ledger]
+                _exclusive_json(output / "candidate_ledger.json", {"entries": interrupted_ledger,
+                                                                   "provider_dl": "out_of_scope"})
+        if isinstance(exc, (InterruptedError, KeyboardInterrupt)):
+            raise RuntimeError("runner incomplete: fit_interrupted") from None
+        if isinstance(exc, OwnedChildCleanupError):
+            raise RuntimeError("runner incomplete: owned_child_cleanup_unverified") from None
+        raise
+
+
+def _admitted_artifacts(output):
+    from .observed_admission import Lifetime
+    hashes = {}
+    life = Lifetime()
+    try:
+        for path in sorted(output.rglob("*")):
+            if path.is_symlink():
+                raise ValueError("artifact symlink")
+            if path.is_dir():
+                continue
+            if path.name == "ADMITTED_COMPLETE.json" and path.parent == output:
+                continue
+            fd = life.open(path, limit=16 * 1024 * 1024)
+            hashes[str(path.relative_to(output))] = _sha(life.read(fd, 16 * 1024 * 1024))
+    finally:
+        life.close()
+    return hashes
+
+
+def _verify_admitted_fixture(output_dir, binding):
+    from .observed_admission import fixture_run_record, _fixture_completion_identity, _RunDirectoryAnchor
+    run = fixture_run_record(binding)
+    output = Path(output_dir)
+    if str(output) != run["output"]:
+        raise ValueError("foreign output binding")
+    if os.path.lexists(output / "FAILURE.json"):
+        raise ValueError("failure entry dominates complete")
+    identities = _fixture_completion_identity(binding)
+    with _RunDirectoryAnchor(output, identities) as anchor:
+        result = _verify_admitted_fixture_artifacts(output, binding)
+        anchor.check()  # after final artifact/closure checks, while still open
+    return result  # close/postclose uncertainty cannot return success
+
+
+def _verify_admitted_fixture_artifacts(output_dir, binding):
+    from .observed_admission import fixture_run_record, fixture_admission_record, _identity, _fixture_completion_sha
+    run = fixture_run_record(binding)
+    admission = fixture_admission_record(run["admission"])
+    output = Path(output_dir)
+    if str(output) != run["output"] or output.is_symlink():
+        raise ValueError("foreign output binding")
+    if os.path.lexists(output / "FAILURE.json"):
+        raise ValueError("failure entry dominates complete")
+    for path, identity, directory in admission["identities"]:
+        if _identity(os.lstat(path), directory) != identity:
+            raise ValueError("source/control/code identity changed")
+    closure, closure_raw = _owned_json(output / "ADMITTED_COMPLETE.json")
+    if _sha(closure_raw) != _fixture_completion_sha(binding):
+        raise ValueError("host-issued closure bytes mismatch")
+    if (closure.get("schema_version") != _ADMITTED_SCHEMA or closure.get("status") != "fixture_complete"
+            or closure.get("is_synthetic") is not True or closure.get("observed_authenticity") is not False
+            or closure.get("observed_execution_authorized") is not False
+            or closure.get("close_postclose_verified") is not True
+            or closure.get("full_parent_snapshot_exposed") is not True
+            or closure.get("physical_test_actuals_untouched") is not False):
+        raise ValueError("admitted outer closure incomplete")
+    context = closure.get("context", {})
+    if (context.get("fixture_id") != binding.fixture_id or context.get("source_sha256") != admission["grant"]["source_sha256"]
+            or context.get("code_sha256") != dict(admission["code"])
+            or context.get("protocol_sha256") != dict(admission["controls"])[run["protocol"]]
+            or context.get("manifest_sha256") != dict(admission["controls"])[run["manifest"]]
+            or context.get("output") != str(output) or context.get("as_of") != "2026-10-08"):
+        raise ValueError("foreign closure context")
+    hashes = _admitted_artifacts(output)
+    required = {"HOST_PENDING.json", "validation_prediction_freeze.json", "selection_freeze.json",
+                "test_prediction_freeze.json", "candidate_ledger.json", "scored_rows.json", "source_receipt.json"}
+    if not required.issubset(hashes) or hashes != closure.get("artifact_sha256"):
+        raise ValueError("admitted closure artifact mismatch")
+    for name in ("HOST_PENDING.json", "validation_prediction_freeze.json", "selection_freeze.json",
+                 "test_prediction_freeze.json", "scored_rows.json"):
+        doc, _ = _owned_json(output / name)
+        if doc.get("context") != context:
+            raise ValueError("foreign causal artifact")
+    selection, _ = _owned_json(output / "selection_freeze.json")
+    if selection.get("validation_prediction_sha256") != hashes["validation_prediction_freeze.json"]:
+        raise ValueError("selection does not bind validation freeze")
+    verify_runner_run(output / "legacy")
+    if _admitted_artifacts(output) != hashes or os.path.lexists(output / "FAILURE.json"):
+        raise ValueError("late closure artifact/failure change")
+    return True
+
+
+def _legacy_run_offline_evaluation(protocol_path, source_manifest_path, source_file, output_dir, as_of):
+    """Historical implementation retained for source comparison, not execution authority."""
     try:
         return _run_offline_evaluation_inner(protocol_path, source_manifest_path, source_file, output_dir, as_of)
     except OwnedChildCleanupError:

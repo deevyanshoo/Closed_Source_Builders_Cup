@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import {
   createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, humanize, statusLabel,
 } from './dispatch';
@@ -7,6 +7,19 @@ import type { AffectedResponse, EvidenceItem, EvidenceResponse, ListResponse, Sh
 import './dispatch.css';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
+
+
+// Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
+const WORKSPACE_PAGES: [string, string][] = [
+  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
+  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
+];
+
+function WorkspaceNav() {
+  return <nav className="workspace-nav" aria-label="Workspace pages">
+    {WORKSPACE_PAGES.map(([to, label]) => <NavLink key={to} className="recovery-back" to={to} end>{label}</NavLink>)}
+  </nav>;
+}
 
 export function StateNotice({ kind, message }: { kind: 'loading' | 'empty' | 'error' | 'stale'; message?: string }) {
   if (kind === 'loading') return <p className="dispatch-state" aria-busy="true">Loading dispatch data…</p>;
@@ -184,10 +197,10 @@ export function DispatchPage() {
   const hours = Math.floor(age.ageSeconds / 3600);
 
   return <main className="shell">
-    <header className="masthead">
+    <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
       <div className="masthead-meta">Synthetic · local adapter<span className="red-dot">●</span></div>
-      <nav className="dispatch-nav"><Link className="recovery-back" to="/planning">Planning</Link><Link className="recovery-back" to="/shipment-recovery">Shipment recovery</Link></nav>
+      <WorkspaceNav />
     </header>
     <section className="recovery-intro">
       <p className="eyebrow">Dispatch workspace · issue 5</p>

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import { AffectedPanel, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
+import { AffectedPanel, DispatchPage, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
 import { createDispatchFixtureAdapter } from './dispatch';
 
 const adapter = createDispatchFixtureAdapter();
@@ -84,5 +84,23 @@ describe('dispatch workspace components', () => {
     expect(stale).toContain('Old data');
     expect(stale).toContain('2026-10-08');
     expect(stale).toContain('SHP-SYN-004');
+  });
+});
+
+describe('top navigation', () => {
+  const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage /></MemoryRouter>);
+  const nav = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
+
+  it('links to every workspace page like the planning header', () => {
+    for (const path of ['/planning', '/offers', '/dispatch', '/shipment-recovery', '/recovery', '/scenarios'])
+      expect(nav).toContain(`href="${path}"`);
+    expect(nav).toContain('aria-label="Workspace pages"');
+  });
+
+  it('marks this page as current and keeps the synthetic local-adapter labels', () => {
+    expect(nav).toMatch(/aria-current="page"[^>]*href="\/dispatch"|href="\/dispatch"[^>]*aria-current="page"/);
+    expect(nav.match(/aria-current="page"/g)?.length).toBe(1);
+    expect(html).toContain('Synthetic · local adapter');
+    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
   });
 });

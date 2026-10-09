@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, OffersError } from './offers';
 import type { BlockingReason, Field, Offer } from './offers';
 import './offers.css';
@@ -19,6 +19,19 @@ function Quote({ text, quote }: { text: string; quote: string }) {
   const at = quote ? text.toLowerCase().indexOf(quote.toLowerCase()) : -1;
   if (at < 0) return <>{text}</>;
   return <>{text.slice(0, at)}<mark>{text.slice(at, at + quote.length)}</mark>{text.slice(at + quote.length)}</>;
+}
+
+
+// Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
+const WORKSPACE_PAGES: [string, string][] = [
+  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
+  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
+];
+
+function WorkspaceNav() {
+  return <nav className="workspace-nav" aria-label="Workspace pages">
+    {WORKSPACE_PAGES.map(([to, label]) => <NavLink key={to} className="recovery-back" to={to} end>{label}</NavLink>)}
+  </nav>;
 }
 
 export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean }) {
@@ -139,10 +152,10 @@ export function OffersPage() {
   const evidenceLocators = new Set(selected && offer ? fieldEntries(offer).find(([n]) => n === selected)?.[1].evidence.map(e => e.locator) : []);
 
   return <main className="shell">
-    <header className="masthead">
+    <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
       <div className="masthead-meta">Synthetic · local adapter<span className="red-dot">●</span></div>
-      <Link className="recovery-back" to="/planning">Planning</Link>
+      <WorkspaceNav />
     </header>
 
     <section className="recovery-intro">

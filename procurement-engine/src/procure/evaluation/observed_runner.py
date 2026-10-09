@@ -838,7 +838,7 @@ class _FixturePhases:
 def _run_admitted_fixture(protocol_path, manifest_path, source_file, output_dir, as_of, binding):
     from .observed_admission import (canonical, decode, fixture_run_record, fixture_admission_record,
                                      open_observed_native_snapshot, Lifetime, _identity,
-                                     _begin_fixture_run, _seal_fixture_run, _fail_fixture_run)
+                                     _begin_fixture_run, _capture_fixture_output, _seal_fixture_run, _fail_fixture_run)
     run = fixture_run_record(binding)  # permission before even source stat
     admission = fixture_admission_record(run["admission"])
     if tuple(map(str, (protocol_path, manifest_path, source_file, output_dir))) != (
@@ -893,6 +893,7 @@ def _run_admitted_fixture(protocol_path, manifest_path, source_file, output_dir,
             output.mkdir(mode=0o700, exist_ok=False)
             owned_output_identity = _identity(os.lstat(output), True)
             read.check()
+            _capture_fixture_output(binding, token, owned_output_identity)
             _exclusive_json(output / "HOST_PENDING.json", {"schema_version": _ADMITTED_SCHEMA, "context": context,
                                                            "status": "incomplete", "is_synthetic": True})
             host = _FixturePhases(output, read, context)
@@ -1065,6 +1066,21 @@ def _admitted_artifacts(output):
 
 
 def _verify_admitted_fixture(output_dir, binding):
+    from .observed_admission import fixture_run_record, _fixture_completion_identity, _RunDirectoryAnchor
+    run = fixture_run_record(binding)
+    output = Path(output_dir)
+    if str(output) != run["output"]:
+        raise ValueError("foreign output binding")
+    if os.path.lexists(output / "FAILURE.json"):
+        raise ValueError("failure entry dominates complete")
+    identities = _fixture_completion_identity(binding)
+    with _RunDirectoryAnchor(output, identities) as anchor:
+        result = _verify_admitted_fixture_artifacts(output, binding)
+        anchor.check()  # after final artifact/closure checks, while still open
+    return result  # close/postclose uncertainty cannot return success
+
+
+def _verify_admitted_fixture_artifacts(output_dir, binding):
     from .observed_admission import fixture_run_record, fixture_admission_record, _identity, _fixture_completion_sha
     run = fixture_run_record(binding)
     admission = fixture_admission_record(run["admission"])

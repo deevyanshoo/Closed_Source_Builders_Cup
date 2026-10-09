@@ -255,15 +255,80 @@ def _begin_fixture_run(binding):
     if binding in _RUN_LIVES:
         raise ValueError("fixture run already attempted; no marker reset")
     token = object()
-    _RUN_LIVES[binding] = {"token": token, "completion_sha256": None, "failed": False}
+    _RUN_LIVES[binding] = {"token": token, "completion_sha256": None, "failed": False,
+                          "created_identity": None, "sealed_identity": None}
     return token
 
 
+class _RunDirectoryAnchor(Lifetime):
+    """Discrete run identity check; own directory FDs through verification/close.
+
+    The inherited file reader is unchanged. This anchor opens directories only,
+    without following any ancestor, and uses the same close-once/postclose guard.
+    """
+
+    def __init__(self, output, identities):
+        super().__init__()
+        output = _absolute(output)
+        parent = None
+        try:
+            for index, part in enumerate(output.parts):
+                at = Path("/") if index == 0 else at / part
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK
+                fd = os.open("/" if index == 0 else part, flags, dir_fd=parent)
+                self.fds.append(fd)  # ownership before even the first fstat
+                info = os.fstat(fd)
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ValueError("run directory identity/type changed")
+                identity = _identity(info, True)
+                self.records.append((at, fd, identity, True))
+                if at == output.parent and identity != identities[0]:
+                    raise ValueError("run parent identity changed")
+                if at == output and identity != identities[1]:
+                    raise ValueError("run output identity changed")
+                parent = fd
+            self.check()
+        except BaseException:
+            self.close()
+            raise
+
+    def __enter__(self):
+        try:
+            self.check()
+        except BaseException:
+            self.close()
+            raise
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def _capture_fixture_output(binding, token, created_identity):
+    """Owning host only: capture the mkdir identity with its issued run token."""
+    run = _registered(binding, _RUNS)
+    state = _registered(binding, _RUN_LIVES)
+    if (state["token"] is not token or state["failed"] or state["created_identity"] is not None
+            or state["completion_sha256"] is not None):
+        raise ValueError("foreign/stale host output token")
+    identities = (run["parent_identity"], tuple(created_identity))
+    with _RunDirectoryAnchor(run["output"], identities):
+        pass
+    state["created_identity"] = identities
+
+
 def _seal_fixture_run(binding, token, completion_raw):
+    run = _registered(binding, _RUNS)
     state = _registered(binding, _RUN_LIVES)
     if state["token"] is not token or state["failed"] or state["completion_sha256"] is not None:
         raise ValueError("foreign/stale host closure token")
-    state["completion_sha256"] = digest(completion_raw)
+    identities = state["created_identity"]
+    if identities is None or identities[0] != run["parent_identity"]:
+        raise ValueError("host-created output identity absent")
+    with _RunDirectoryAnchor(run["output"], identities):
+        pass
+    # Issue both commitments only after the anchor's close/postclose succeeds.
+    state.update(completion_sha256=digest(completion_raw), sealed_identity=identities)
 
 
 def _fail_fixture_run(binding, token):
@@ -278,6 +343,17 @@ def _fixture_completion_sha(binding):
     if state["failed"] or state["completion_sha256"] is None:
         raise ValueError("host-issued closure absent or failed")
     return state["completion_sha256"]
+
+
+def _fixture_completion_identity(binding):
+    run = _registered(binding, _RUNS)
+    _fixture_completion_sha(binding)
+    state = _registered(binding, _RUN_LIVES)
+    identities = state["sealed_identity"]
+    if (identities is None or identities != state["created_identity"]
+            or identities[0] != run["parent_identity"]):
+        raise ValueError("host-sealed output identity absent or stale")
+    return identities
 
 
 def _zip_guard(raw):

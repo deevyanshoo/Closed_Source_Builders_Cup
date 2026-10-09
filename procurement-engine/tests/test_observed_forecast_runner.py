@@ -82,6 +82,244 @@ def _admitted_call(fixture):
     return observed_runner.run_offline_evaluation(pp, mp, source, out, "2026-10-08", accepted_run=binding)
 
 
+@pytest.fixture
+def completed_identity_fixture(monkeypatch):
+    import tempfile
+    from test_forecast_observed_admission import owned_fixture
+    # Canonical owned root; keep fault evidence, including displaced outputs.
+    root = Path(tempfile.mkdtemp(prefix="oa-v1-r1-", dir="/private/tmp"))
+    fixture = owned_fixture(root)
+    monkeypatch.setattr(observed_runner, "fit_in_owned_child", _admitted_fake_fit)
+    _admitted_call(fixture)
+    assert verify_runner_run(fixture[-1], expected_run=fixture[3]) is True
+    return fixture
+
+
+def _preserve_and_copy_output(output):
+    import shutil
+    preserved = output.with_name("preserved_host_output")
+    original = os.lstat(output)
+    os.rename(output, preserved)
+    shutil.copytree(preserved, output)
+    assert (original.st_dev, original.st_ino) != (os.lstat(output).st_dev, os.lstat(output).st_ino)
+    before = {str(p.relative_to(preserved)): p.read_bytes() for p in preserved.rglob("*") if p.is_file()}
+    after = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    assert before == after
+    return preserved
+
+
+def test_admitted_identity_same_bytes_replacement_refuses(completed_identity_fixture):
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    preserved = _preserve_and_copy_output(output)
+    # Unbound legacy verification is intentionally only artifact verification.
+    assert verify_runner_run(output / "legacy") is True
+    with pytest.raises(ValueError, match="identity"):
+        verify_runner_run(output, expected_run=fixture[3])
+    assert preserved.is_dir() and output.is_dir()
+
+
+@pytest.mark.parametrize("kind", ["absent", "file", "symlink", "copied"])
+def test_admitted_identity_refuses_before_artifact_reads(completed_identity_fixture, monkeypatch, kind):
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    if kind == "copied":
+        preserved = _preserve_and_copy_output(output)
+    else:
+        preserved = output.with_name("preserved_host_output")
+        os.rename(output, preserved)
+        if kind == "file":
+            output.write_bytes(b"owned replacement")
+        elif kind == "symlink":
+            output.symlink_to(preserved, target_is_directory=True)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("replaced output reached artifact reads")
+    monkeypatch.setattr(observed_runner, "_owned_json", forbidden)
+    with pytest.raises((ValueError, OSError)):
+        verify_runner_run(output, expected_run=fixture[3])
+    assert preserved.is_dir()
+
+
+@pytest.mark.parametrize("where", ["parent", "output"])
+@pytest.mark.parametrize("field", ["st_dev", "st_ino", "st_mode", "st_uid"])
+def test_admitted_identity_each_directory_field_refuses(completed_identity_fixture, monkeypatch, where, field):
+    from procure.evaluation import observed_admission as a
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    wanted = os.lstat(output.parent if where == "parent" else output)
+    real_fstat = os.fstat
+    def fault(fd):
+        info = real_fstat(fd)
+        if (info.st_dev, info.st_ino) == (wanted.st_dev, wanted.st_ino):
+            values = {name: getattr(info, name) for name in ("st_dev", "st_ino", "st_mode", "st_uid")}
+            values[field] += 1
+            return SimpleNamespace(**values)
+        return info
+    def forbidden(*args, **kwargs):
+        raise AssertionError("directory identity fault reached artifact reads")
+    monkeypatch.setattr(a.os, "fstat", fault)
+    monkeypatch.setattr(observed_runner, "_owned_json", forbidden)
+    with pytest.raises(ValueError, match="identity"):
+        verify_runner_run(output, expected_run=fixture[3])
+
+
+@pytest.mark.parametrize("where", ["parent", "output"])
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_admitted_identity_mode_change_refuses(completed_identity_fixture, monkeypatch, where, when):
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    target = output.parent if where == "parent" else output
+    original = observed_runner._admitted_artifacts
+    calls = []
+    def changed(path):
+        result = original(path)
+        calls.append(path)
+        if len(calls) == 2:  # final successful artifact scan in fresh verifier
+            target.chmod(0o750)
+        return result
+    if when == "before":
+        target.chmod(0o750)
+    else:
+        monkeypatch.setattr(observed_runner, "_admitted_artifacts", changed)
+    with pytest.raises(ValueError, match="identity"):
+        verify_runner_run(output, expected_run=fixture[3])
+    assert target.stat().st_mode & 0o777 == 0o750
+    if when == "after":
+        assert len(calls) == 2
+
+
+def test_admitted_identity_final_scan_replacement_refuses(completed_identity_fixture, monkeypatch):
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    original = observed_runner._admitted_artifacts
+    calls = []
+    def replaced(path):
+        hashes = original(path)
+        calls.append(path)
+        if len(calls) == 2:
+            _preserve_and_copy_output(output)
+        return hashes
+    monkeypatch.setattr(observed_runner, "_admitted_artifacts", replaced)
+    with pytest.raises(ValueError, match="identity"):
+        verify_runner_run(output, expected_run=fixture[3])
+    assert len(calls) == 2 and output.with_name("preserved_host_output").is_dir()
+
+
+@pytest.mark.parametrize("fault", ["first_fstat", "last_lstat", "close", "entry_check"])
+def test_admitted_identity_stat_close_uncertainty_refuses(completed_identity_fixture, monkeypatch, fault):
+    from procure.evaluation import observed_admission as a
+    fixture = completed_identity_fixture
+    output = fixture[-1]
+    wanted = os.lstat(output)
+    opened, closed, hit, anchor_postclose = [], [], [], []
+    real_open, real_close, real_fstat, real_lstat = os.open, os.close, os.fstat, os.lstat
+    def traced_open(*args, **kwargs):
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+    def traced_close(fd):
+        is_output = real_fstat(fd).st_ino == wanted.st_ino
+        closed.append(fd)
+        real_close(fd)  # simulate uncertainty after the actual single close
+        if fault == "close" and is_output and not hit:
+            hit.append(True)
+            raise OSError("injected run directory close uncertainty")
+    def bad_fstat(fd):
+        info = real_fstat(fd)
+        if fault == "first_fstat" and info.st_ino == wanted.st_ino:
+            hit.append(True)
+            raise OSError("injected initial directory stat uncertainty")
+        return info
+    def bad_lstat(path, *args, **kwargs):
+        if fault == "last_lstat" and Path(path) == output and anchor_postclose:
+            hit.append(True)
+            raise OSError("injected postclose stat uncertainty")
+        return real_lstat(path, *args, **kwargs)
+    original_check = a._RunDirectoryAnchor.check
+    checks = []
+    def bad_entry(self, **kwargs):
+        checks.append(kwargs)
+        if kwargs.get("postclose"):
+            anchor_postclose.append(True)
+        if fault == "entry_check" and len(checks) == 2:
+            hit.append(True)
+            raise OSError("injected context entry identity uncertainty")
+        return original_check(self, **kwargs)
+    monkeypatch.setattr(a.os, "open", traced_open)
+    monkeypatch.setattr(a.os, "close", traced_close)
+    monkeypatch.setattr(a.os, "fstat", bad_fstat)
+    monkeypatch.setattr(a.os, "lstat", bad_lstat)
+    monkeypatch.setattr(a._RunDirectoryAnchor, "check", bad_entry)
+    with pytest.raises((ValueError, OSError)):
+        verify_runner_run(output, expected_run=fixture[3])
+    assert hit and sorted(opened) == sorted(closed)
+    # FD numbers may be reused by separate artifact lifetimes; each open is closed once.
+
+
+@pytest.mark.parametrize("stage", ["capture", "seal"])
+def test_admitted_identity_host_close_uncertainty_prevents_seal(monkeypatch, stage):
+    import tempfile
+    from test_forecast_observed_admission import owned_fixture
+    from procure.evaluation import observed_admission as a
+    root = Path(tempfile.mkdtemp(prefix="oa-v1-r1-", dir="/private/tmp"))
+    fixture = owned_fixture(root)
+    binding, output = fixture[3], fixture[-1]
+    original_close = a._RunDirectoryAnchor.close
+    hit = []
+    def uncertain(self):
+        original_close(self)
+        state = a._RUN_LIVES[binding]
+        captured = state["created_identity"] is not None
+        if not hit and captured == (stage == "seal") and state["completion_sha256"] is None:
+            hit.append(True)
+            raise ValueError("injected host directory close uncertainty")
+    monkeypatch.setattr(a._RunDirectoryAnchor, "close", uncertain)
+    monkeypatch.setattr(observed_runner, "fit_in_owned_child", _admitted_fake_fit)
+    with pytest.raises(ValueError, match="close uncertainty"):
+        _admitted_call(fixture)
+    assert hit and (output / "FAILURE.json").is_file()
+    assert (output / "ADMITTED_COMPLETE.json").exists() == (stage == "seal")
+    with pytest.raises(ValueError, match="absent or failed"):
+        a._fixture_completion_identity(binding)
+    with pytest.raises(ValueError, match="failure entry"):
+        verify_runner_run(output, expected_run=binding)
+    with pytest.raises(ValueError, match="output entry"):
+        _admitted_call(fixture)
+    assert (output / "FAILURE.json").is_file()
+
+
+def test_admitted_identity_host_token_capture_and_seal_are_single_use(monkeypatch):
+    import tempfile
+    from test_forecast_observed_admission import owned_fixture
+    from procure.evaluation import observed_admission as a
+    root = Path(tempfile.mkdtemp(prefix="oa-v1-r1-", dir="/private/tmp"))
+    fixture = owned_fixture(root)
+    run, output = fixture[3], fixture[-1]
+    token = a._begin_fixture_run(run)
+    with pytest.raises(ValueError, match="identity absent"):
+        a._seal_fixture_run(run, token, b"unissued")
+    output.mkdir(mode=0o700)
+    identity = a._identity(os.lstat(output), True)
+    with pytest.raises(ValueError, match="foreign/stale"):
+        a._capture_fixture_output(run, object(), identity)
+    a._capture_fixture_output(run, token, identity)
+    with pytest.raises(ValueError, match="foreign/stale"):
+        a._capture_fixture_output(run, token, identity)
+    with pytest.raises(ValueError, match="foreign/stale"):
+        a._seal_fixture_run(run, object(), b"unissued")
+    a._seal_fixture_run(run, token, b"host closure fixture")
+    assert a._fixture_completion_identity(run) == (a.fixture_run_record(run)["parent_identity"], identity)
+    with pytest.raises(ValueError, match="foreign/stale"):
+        a._seal_fixture_run(run, token, b"reissued")
+    a._fail_fixture_run(run, token)
+    with pytest.raises(ValueError, match="absent or failed"):
+        a._fixture_completion_identity(run)
+    with pytest.raises(ValueError, match="already attempted"):
+        a._begin_fixture_run(run)
+    with pytest.raises(ValueError, match="registered"):
+        a._fixture_completion_identity(a.RootObservedRunBinding(run.fixture_id))
+
+
 def test_admitted_public_host_freezes_then_scores_whole_cohorts(tmp_path, monkeypatch):
     from test_forecast_observed_admission import owned_fixture
     fixture = owned_fixture(tmp_path)

@@ -88,13 +88,15 @@ def _range(start: str, end: str) -> list[str]:
 
 
 def _check_protocol(protocol: dict, as_of: str) -> None:
-    if not isinstance(protocol, dict) or as_of != protocol.get("as_of") or as_of != "2026-10-08":
+    generic = isinstance(protocol, dict) and protocol.get("profile") in {"generic-observed-v1", "generated-fixture-test-v1"}
+    expected_asof = "2026-10-09" if generic else "2026-10-08"
+    if not isinstance(protocol, dict) or as_of != protocol.get("as_of") or as_of != expected_asof:
         raise ValueError("as_of/protocol mismatch")
     try:
         date.fromisoformat(as_of)
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid as_of") from exc
-    for field, expected in PROTOCOL_FIELDS.items():
+    for field, expected in {**PROTOCOL_FIELDS, "as_of": expected_asof}.items():
         actual = protocol.get(field)
         if type(actual) is not type(expected) or actual != expected or (
                 isinstance(expected, list) and any(type(a) is not type(e) for a, e in zip(actual, expected))):
@@ -523,7 +525,11 @@ def run_bounded_child(command: list[str], payload: bytes, *, timeout: float = 60
 
 
 def fit_in_owned_child(model: str, log_series: pd.Series, horizon: int, name: str, refit_every: int,
-                       *, remaining_seconds: float = 60.0):
+                       *, remaining_seconds: float = 60.0, result_contract: str = "legacy", expected_versions=None):
+    if result_contract == "native-v1":
+        return _fit_in_native_child(model, log_series, horizon, name, refit_every, remaining_seconds, expected_versions)
+    if result_contract != "legacy" or expected_versions is not None:
+        raise NativeChildProtocolError("unknown native contract selector")
     from types import SimpleNamespace
     if horizon != 7 or refit_every != 1 or model not in {"naive", "ets", "gbm"}:
         raise ValueError("fit protocol mismatch")
@@ -636,6 +642,11 @@ def publish_runner(output_dir: str | Path, stage1_input: dict, ledger: list, sel
 
 def verify_runner_run(output_dir: str | Path, *, expected_run=None) -> bool:
     if expected_run is not None:
+        from .observed_admission import RootNativeRunBinding, RootGenericRunBinding
+        if isinstance(expected_run, RootGenericRunBinding):
+            return _verify_root_generic(output_dir, expected_run)
+        if isinstance(expected_run, RootNativeRunBinding):
+            return _verify_root_native(output_dir, expected_run)
         return _verify_admitted_fixture(output_dir, expected_run)
     output = Path(output_dir)
     state, _ = strict_json(output / "RUN_STATE.json")
@@ -678,6 +689,11 @@ def run_offline_evaluation(protocol_path: str | Path, source_manifest_path: str 
                            *, accepted_run=None) -> dict:
     if accepted_run is None:
         raise ValueError("registered execution binding required; observed execution HOLD")
+    from .observed_admission import RootNativeRunBinding, RootGenericRunBinding
+    if isinstance(accepted_run, RootGenericRunBinding):
+        return _run_root_generic(protocol_path, source_manifest_path, source_file, output_dir, as_of, accepted_run)
+    if isinstance(accepted_run, RootNativeRunBinding):
+        return _run_root_native(protocol_path, source_manifest_path, source_file, output_dir, as_of, accepted_run)
     return _run_admitted_fixture(protocol_path, source_manifest_path, source_file, output_dir, as_of, accepted_run)
 
 
@@ -1342,5 +1358,946 @@ def _run_offline_evaluation_inner(protocol_path: str | Path, source_manifest_pat
     return publish_runner(output_dir, stage1_input, ledger, selection_json, calibration, provenance)
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--fit-child"]:
+
+
+# Explicit native transport. Legacy --fit-child payload/error behavior is retained.
+class NativeFitUnavailable(RuntimeError):
+    def __init__(self, reason, request_sha256, backend):
+        super().__init__(reason)
+        self._outcome = (reason, 'backend_precheck', request_sha256, backend)
+
+    reason = property(lambda self: self._outcome[0])
+    stage = property(lambda self: self._outcome[1])
+    request_sha256 = property(lambda self: self._outcome[2])
+    backend = property(lambda self: self._outcome[3])
+
+
+class NativeChildProtocolError(RuntimeError):
+    pass
+
+
+class NativeChildExecutionError(RuntimeError):
+    pass
+
+
+class NativeBackendIntegrityError(RuntimeError):
+    pass
+
+
+_NATIVE_VERSION_KEYS = frozenset(('numpy', 'pandas', 'openpyxl', 'scikit-learn', 'statsmodels', 'lightgbm'))
+
+
+def _native_versions(value):
+    from collections.abc import Mapping
+    if (not isinstance(value, Mapping) or set(value) != _NATIVE_VERSION_KEYS or
+            any(not isinstance(v, str) or not 0 < len(v) <= 128 or any(ord(c) < 32 for c in v) for v in value.values())):
+        raise NativeChildProtocolError('native exact six versions required')
+    return dict(value)
+
+
+def _native_finite(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def _native_request(raw):
+    if not isinstance(raw, bytes) or len(raw) > 1024 * 1024:
+        raise NativeChildProtocolError('native request bound')
+    try:
+        req = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_no_constant)
+        if not isinstance(req, dict) or set(req) != {'schema_version', 'model', 'name', 'months', 'values', 'expected_versions'}:
+            raise ValueError('request keys')
+        if req['schema_version'] != 'observed-native-fit-request.v1' or req['model'] not in ('naive', 'ets', 'gbm'):
+            raise ValueError('request version/model')
+        if not isinstance(req['name'], str) or not 0 < len(req['name']) <= 256 or any(ord(c) < 32 for c in req['name']):
+            raise ValueError('request name')
+        labels, values = req['months'], req['values']
+        if (not isinstance(labels, list) or not 60 <= len(labels) <= 113 or
+                labels != _range('2016-09', _name(_month('2016-09') + len(labels) - 1)) or
+                not isinstance(values, list) or len(values) != len(labels) or not all(_native_finite(v) for v in values)):
+            raise ValueError('past log-series shape')
+        _native_versions(req['expected_versions'])
+        return req
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise NativeChildProtocolError('native request invalid') from exc
+
+
+def _decode_native_fit_result(raw, *, request_raw, expected_model, expected_training_count, expected_versions):
+    from types import SimpleNamespace
+    expected_versions = _native_versions(expected_versions)
+    try:
+        if not isinstance(raw, bytes) or len(raw) > 1024 * 1024:
+            raise ValueError('result bound')
+        value = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_no_constant)
+        if not isinstance(value, dict):
+            raise ValueError('result object')
+        status = value.get('status')
+        common = {'schema_version', 'status', 'request_sha256', 'model'}
+        extras = {'ok': {'drift', 'residuals', 'noise_scale', 'backend', 'versions', 'model_fit_attempted'},
+                  'unavailable': {'reason', 'stage', 'backend', 'expected_backend', 'versions', 'model_fit_attempted'},
+                  'failed': {'reason', 'stage'}}
+        if not isinstance(status, str) or status not in extras or set(value) != common | extras[status]:
+            raise ValueError('result exact status/key set')
+        if (value['schema_version'] != 'observed-native-fit-result.v1' or value['request_sha256'] != _sha(request_raw)
+                or value['model'] != expected_model):
+            raise ValueError('result foreign job/version')
+        if status == 'failed':
+            if (value['reason'], value['stage']) not in {
+                    ('protocol_fault', 'request_validation'), ('runtime_binding_mismatch', 'runtime_validation'),
+                    ('invalid_fit_result', 'result_validation'), ('unexpected_child_exception', 'execution')}:
+                raise ValueError('failed reason/stage invalid')
+            raise NativeChildExecutionError(value['reason'])
+        versions = _native_versions(value['versions'])
+        if versions != expected_versions:
+            raise NativeBackendIntegrityError('native version mismatch')
+        if status == 'unavailable':
+            if (expected_model, value['reason'], value['stage'], value['backend'], value['expected_backend']) != (
+                    'gbm', 'unsupported_unpinned_backend', 'backend_precheck', 'lightgbm', 'sklearn') or value['model_fit_attempted'] is not False:
+                raise ValueError('unavailable causal tuple invalid')
+            raise NativeFitUnavailable(value['reason'], value['request_sha256'], value['backend'])
+        if value['backend'] != {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'}[expected_model]:
+            raise NativeBackendIntegrityError('native backend mismatch')
+        drift, residuals, noise = value['drift'], value['residuals'], value['noise_scale']
+        if (not isinstance(drift, list) or len(drift) != 7 or not all(_native_finite(v) for v in drift)
+                or not isinstance(residuals, list) or not 12 <= len(residuals) <= min(120, expected_training_count)
+                or not all(_native_finite(v) for v in residuals) or not _native_finite(noise) or noise <= 0
+                or value['model_fit_attempted'] is not True):
+            raise ValueError('result array/noise shape invalid')
+        return SimpleNamespace(drift=np.asarray(drift), residuals=np.asarray(residuals), noise_scale=noise,
+                               backend=value['backend'], versions=versions)
+    except (ValueError, TypeError, OverflowError, KeyError) as exc:
+        raise NativeChildProtocolError('native malformed result') from exc
+
+
+def _fit_in_native_child(model, logs, horizon, name, refit, remaining, versions):
+    if horizon != 7 or refit != 1 or model not in ('naive', 'ets', 'gbm'):
+        raise NativeChildProtocolError('native fit protocol mismatch')
+    payload = json.dumps({'schema_version': 'observed-native-fit-request.v1', 'model': model, 'name': name,
+                          'months': [v.strftime('%Y-%m') for v in logs.index],
+                          'values': [float(v) for v in logs.values], 'expected_versions': _native_versions(versions)}, allow_nan=False).encode()
+    request = _native_request(payload)  # validate before transport; no fallback
+    response = run_bounded_child([sys.executable, '-m', 'procure.evaluation.observed_runner', '--native-fit-child-v1'],
+                                 payload, timeout=min(60., remaining))
+    return _decode_native_fit_result(response, request_raw=payload, expected_model=model,
+                                     expected_training_count=len(request['months']), expected_versions=versions)
+
+
+def _native_fit_child_main():
+    # Entire native body, including import/serialization, has hard exception semantics.
+    raw = sys.stdin.buffer.read(1024 * 1024 + 1)
+    model = None
+    common = {'schema_version': 'observed-native-fit-result.v1', 'request_sha256': _sha(raw), 'model': None}
+    try:
+        req = _native_request(raw)
+        model = req['model']; common['model'] = model
+    except Exception:
+        response = {**common, 'status': 'failed', 'reason': 'protocol_fault', 'stage': 'request_validation'}
+    else:
+        try:
+            from importlib.metadata import version
+            versions = {k: version(k) for k in _NATIVE_VERSION_KEYS}
+            if versions != req['expected_versions']:
+                response = {**common, 'status': 'failed', 'reason': 'runtime_binding_mismatch', 'stage': 'runtime_validation'}
+            else:
+                from procure.forecast import models
+                if model == 'gbm' and models.GBM_BACKEND == 'lightgbm':
+                    response = {**common, 'status': 'unavailable', 'reason': 'unsupported_unpinned_backend',
+                                'stage': 'backend_precheck', 'backend': 'lightgbm', 'expected_backend': 'sklearn',
+                                'versions': versions, 'model_fit_attempted': False}
+                else:
+                    if model == 'gbm' and models.GBM_BACKEND != 'sklearn':
+                        raise NativeBackendIntegrityError('unknown native backend')
+                    series = pd.Series(req['values'], index=pd.to_datetime([m + '-01' for m in req['months']]))
+                    models.clear_cache()
+                    fit = models.fit_series(model, series, 7, name=req['name'], refit_every=1)
+                    if not _native_finite(fit.noise_scale) or fit.noise_scale <= 0:
+                        raise NativeChildProtocolError('native fitted noise invalid')
+                    response = {**common, 'status': 'ok', 'drift': fit.drift.tolist(),
+                                'residuals': np.asarray(fit.residuals).tolist(), 'noise_scale': float(fit.noise_scale),
+                                'backend': models.GBM_BACKEND if model == 'gbm' else model,
+                                'versions': {k: version(k) for k in _NATIVE_VERSION_KEYS}, 'model_fit_attempted': True}
+                    try:
+                        _decode_native_fit_result(json.dumps(response, allow_nan=False).encode(), request_raw=raw,
+                                                  expected_model=model, expected_training_count=len(req['months']), expected_versions=versions)
+                    except NativeChildProtocolError:
+                        response = {**common, 'status': 'failed', 'reason': 'invalid_fit_result', 'stage': 'result_validation'}
+        except Exception:
+            response = {**common, 'status': 'failed', 'reason': 'unexpected_child_exception', 'stage': 'execution'}
+    try:
+        sys.stdout.write(json.dumps(response, allow_nan=False))
+        return 0
+    except Exception:
+        return 1  # serialization/stdout uncertainty never unavailable
+
+class _NativeBudgetUnavailable(RuntimeError):
+    pass
+
+
+class _NativeBudget:
+    def __init__(self):
+        self.started = time.monotonic()
+        self.series = defaultdict(float)
+        self.models = defaultdict(float)
+        self.phases = defaultdict(float)
+        self.attempts = []
+        self.seen = set()
+
+    def check(self):
+        if time.monotonic() - self.started >= 1800 or any(v >= 900 for v in self.series.values()):
+            raise TimeoutError('native hard deadline')
+
+    def charge(self, sid, model, split, elapsed):
+        if elapsed < 0:
+            raise RuntimeError('native monotonic clock reversed')
+        self.series[sid] += elapsed
+        self.models[sid, model] += elapsed
+        self.phases[sid, model, split] += elapsed
+        self.check()
+        caps = {'naive': 120, 'ets': 360, 'gbm': 360}
+        phases = {'validation': {'naive': 48, 'ets': 144, 'gbm': 144}, 'test': {'naive': 72, 'ets': 216, 'gbm': 216}}
+        if self.models[sid, model] > caps[model] or self.phases[sid, model, split] > phases[split][model]:
+            raise TimeoutError('native actual model/phase overrun')
+
+    def remaining(self, sid, model, split):
+        self.check()
+        caps = {'naive': 120, 'ets': 360, 'gbm': 360}
+        phase = {'validation': {'naive': 48, 'ets': 144, 'gbm': 144}, 'test': {'naive': 72, 'ets': 216, 'gbm': 216}}
+        seconds = min(60., caps[model] - self.models[sid, model] - 3,
+                      phase[split][model] - self.phases[sid, model, split] - 3,
+                      900 - self.series[sid] - 3, 1800 - (time.monotonic() - self.started) - 33)
+        if seconds <= 0:
+            raise _NativeBudgetUnavailable('model_phase_budget_unavailable')
+        return seconds
+
+    def begin_attempt(self, sid, model, split, origin, timeout):
+        key = (sid, model, split, origin)
+        if key in self.seen or len(self.seen) >= 288:
+            raise RuntimeError('native attempt reuse/ceiling')
+        self.seen.add(key)
+        item = {'series_id': sid, 'model': model, 'split': split, 'origin': origin,
+                'planned_timeout': timeout, 'elapsed_seconds': None, 'status': 'running',
+                'reason': None, 'expected_backend': {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'}[model],
+                'backend': None, 'cleanup_verified': False}
+        self.attempts.append(item)
+        return item
+
+
+def _native_attempt_document(budget, context, failed, terminal=None):
+    skipped = []
+    for split in ('validation', 'test'):
+        for sid in ('copper', 'aluminum'):
+            for model in ('naive', 'ets', 'gbm'):
+                for origin in _range(MONTHS[split + '_start'], MONTHS[split + '_end']):
+                    if (sid, model, split, origin) not in budget.seen:
+                        skipped.append({'series_id': sid, 'model': model, 'split': split, 'origin': origin,
+                            'status': 'skipped', 'reason': terminal or failed.get((sid, model), 'naive_baseline_unavailable'),
+                            'expected_backend': {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'}[model],
+                            'backend': None, 'planned_timeout': None, 'elapsed_seconds': None, 'cleanup_verified': False})
+    return {'context': context, 'attempts': budget.attempts, 'skipped': skipped,
+            'series_seconds': dict(budget.series), 'elapsed_seconds': time.monotonic() - budget.started}
+
+
+class _NativePhases(_FixturePhases):
+    def __init__(self, output, read, context, run, budget, output_anchor):
+        super().__init__(output, read, context)
+        self.run, self.budget = run, budget
+        self.output_anchor = output_anchor
+        self.attached = set()
+
+    def check(self):
+        super().check()
+        self.output_anchor.check()
+        self.budget.check()
+        from .observed_admission import _native_alias_guard, _identity
+        _native_alias_guard(self.run['control']['runtime'])
+        if _identity(os.lstat(self.output.parent), True) != self.run['parent_identity']:
+            raise ValueError('native output parent identity changed')
+
+    def freeze(self, split, rows):
+        groups = defaultdict(set)
+        from .forecast_scorecard import FIELDS
+        for row in rows:
+            if (set(row) != FIELDS - {'actual'} or row['series_id'] not in ('copper', 'aluminum')
+                    or row['model'] not in ('naive', 'ets', 'gbm') or row['horizon'] not in (1, 3, 6)
+                    or type(row['horizon']) is not int or row['unit'] != 'USD/metric tonne'
+                    or row['training_cutoff'] != _name(_month(row['origin']) - 1)):
+                raise ValueError('native freeze row shape/calendar mismatch')
+            groups[row['series_id'], row['model']].add(row['horizon'])
+        if not groups or any(h != {1, 3, 6} for h in groups.values()):
+            raise ValueError('native complete three-horizon cohort required')
+        if split == 'test' and 'validation' not in self.attached:
+            raise ValueError('native validation attachment absent')
+        super().freeze(split, rows)
+
+    def attach(self, split):
+        if split in self.attached:
+            raise ValueError('native actual attachment already consumed')
+        rows = super().attach(split)
+        self.attached.add(split)
+        return rows
+
+    def freeze_selection(self, selections, calibration, failed):
+        if 'validation' not in self.attached:
+            raise ValueError('native selection before validation attachment')
+        super().freeze_selection(selections, calibration, failed)
+
+
+def _native_artifacts(output):
+    from .observed_admission import _NativeLifetime
+    life = _NativeLifetime(); hashes = {}; total = 0
+    try:
+        paths = sorted(output.rglob('*'))
+        if len(paths) > 132:
+            raise ValueError('native artifact count bound')
+        for path in paths:
+            info = os.lstat(path)
+            import stat
+            if stat.S_ISDIR(info.st_mode):
+                if str(path.relative_to(output)) not in {'legacy', 'legacy/charts', 'legacy/scorecard'}:
+                    raise ValueError('native unexpected artifact directory')
+                continue
+            if path.name == 'NATIVE_COMPLETE.json' and path.parent == output:
+                continue
+            fd = life.open(path, limit=16 * 1024 * 1024)
+            raw = life.read(fd, 16 * 1024 * 1024)
+            total += len(raw)
+            if total > 64 * 1024 * 1024 or len(hashes) >= 128:
+                raise ValueError('native artifact byte/file bound')
+            hashes[str(path.relative_to(output))] = _sha(raw)
+        life.check()
+    finally:
+        life.close()
+    return hashes
+
+
+def _native_expected_artifacts(rows):
+    names = {'HOST_PENDING.json', 'source_receipt.json', 'validation_prediction_freeze.json', 'selection_freeze.json',
+             'test_prediction_freeze.json', 'candidate_ledger.json', 'scored_rows.json', 'attempts.json',
+             'legacy/RUN_STATE.json', 'legacy/predictions_input.json', 'legacy/candidate_ledger.json',
+             'legacy/selection.json', 'legacy/calibration.json', 'legacy/provenance.json'}
+    names.update('legacy/scorecard/' + n for n in (*ARTIFACTS, 'RUN_STATE.json'))
+    for r in rows:
+        group = tuple(r[k] for k in ('series_kind', 'series_id', 'unit', 'source_id', 'model', 'backend', 'split', 'horizon'))
+        names.add('legacy/charts/' + _sha(json.dumps(group, ensure_ascii=True).encode())[:16] + '.svg')
+    return names
+
+
+def _verify_root_native(output_dir, binding):
+    from contextlib import closing
+    from .observed_admission import (native_run_record, _native_completion, _RunDirectoryAnchor,
+                                     _native_pins_lifetime, _fail_native_run, _native_state)
+    run = native_run_record(binding)  # original issued live identity before paths
+    ids, issued_sha = _native_completion(binding)
+    output = Path(output_dir)
+    if str(output) != run['output']:
+        raise ValueError('native foreign output')  # a foreign argument cannot invalidate the original
+    try:
+        if os.path.lexists(output / 'FAILURE.json'):
+            raise ValueError('native failure entry')
+        # Metadata-only source; never workbook body. Close uncertainty is terminal.
+        with closing(_native_pins_lifetime(run)) as pins, _RunDirectoryAnchor(output, ids) as anchor:
+            closure, raw = _owned_json(output / 'NATIVE_COMPLETE.json')
+            c = run['control']; observed = c['profile'] == 'native_observed'
+            statuses = ('native_complete', 'native_complete_with_unavailable') if observed else (
+                'native_fixture_complete', 'native_fixture_complete_with_unavailable')
+            if (_sha(raw) != issued_sha or closure.get('schema_version') != 'root-native-host-closure.v1'
+                    or closure.get('status') not in statuses or closure.get('context') != _native_context(run)
+                    or closure.get('is_synthetic') is not (not observed) or closure.get('observed_authenticity') is not observed
+                    or closure.get('observed_execution_authorized') is not observed
+                    or closure.get('full_parent_snapshot_exposed') is not True
+                    or closure.get('physical_test_actuals_untouched') is not False
+                    or closure.get('close_postclose_verified') is not True):
+                raise ValueError('native closure schema/issued context mismatch')
+            hashes = _native_artifacts(output)
+            scored, _ = _owned_json(output / 'scored_rows.json')
+            if set(hashes) != _native_expected_artifacts(scored['predictions']) or hashes != closure['artifact_sha256']:
+                raise ValueError('native exact artifact set/hash mismatch')
+            context = closure['context']
+            for name in ('HOST_PENDING.json', 'source_receipt.json', 'validation_prediction_freeze.json',
+                         'selection_freeze.json', 'test_prediction_freeze.json', 'scored_rows.json', 'attempts.json'):
+                doc, _ = _owned_json(output / name)
+                if doc.get('context') != context:
+                    raise ValueError('native foreign artifact context')
+            selection, _ = _owned_json(output / 'selection_freeze.json')
+            ledger, _ = _owned_json(output / 'candidate_ledger.json')
+            attempts, _ = _owned_json(output / 'attempts.json')
+            history = attempts['attempts'] + attempts['skipped']
+            planned = {(s, m, split, o) for s in ('copper', 'aluminum') for m in ('naive', 'ets', 'gbm')
+                       for split in ('validation', 'test') for o in _range(MONTHS[split + '_start'], MONTHS[split + '_end'])}
+            if (len(history) != 288 or {(r['series_id'],r['model'],r['split'],r['origin']) for r in history} != planned
+                    or any(r['status'] not in ('ok','unavailable') or r['cleanup_verified'] is not True for r in attempts['attempts'])
+                    or any(r['status'] != 'skipped' or r['elapsed_seconds'] is not None or r['cleanup_verified'] is not False
+                           for r in attempts['skipped'])):
+                raise ValueError('native exact attempt/skip agreement required')
+            if (selection['validation_prediction_sha256'] != hashes['validation_prediction_freeze.json']
+                    or len(ledger['entries']) != 96 or len(attempts['attempts']) > 288
+                    or closure['candidate_ledger_sha256'] != hashes['candidate_ledger.json']
+                    or closure['attempts_sha256'] != hashes['attempts.json']
+                    or closure['validation_prediction_sha256'] != hashes['validation_prediction_freeze.json']
+                    or closure['selection_sha256'] != hashes['selection_freeze.json']
+                    or closure['test_prediction_sha256'] != hashes['test_prediction_freeze.json']):
+                raise ValueError('native cohort/ledger/phase receipt mismatch')
+            # Fresh verifier consumes existing artifacts, never re-fits/re-scores.
+            verify_runner_run(output / 'legacy')
+            if _native_artifacts(output) != hashes or os.path.lexists(output / 'FAILURE.json'):
+                raise ValueError('native late artifact/failure drift')
+            pins.check(); anchor.check()
+        if _native_completion(binding) != (ids, issued_sha):
+            raise ValueError('native live issued seal changed after close')
+    except BaseException:
+        _fail_native_run(binding, _native_state(binding)['token'])
+        raise
+    return True
+
+
+def _native_context(run):
+    from .observed_admission import _native_plain, canonical
+    c = run['control']
+    return {'profile': c['profile'], 'acceptance_id': c['acceptance_id'], 'run_id': c['run_id'],
+            'root_control_sha256': run['root_pin']['sha256'], 'source_sha256': c['source']['file']['sha256'],
+            'protocol_sha256': c['controls']['protocol']['sha256'], 'manifest_sha256': c['controls']['manifest']['sha256'],
+            'code_sha256': {p['repository_path']: p['file']['sha256'] for p in c['code']},
+            'runtime_pin_sha256': _sha(canonical(_native_plain(c['runtime']))), 'output': run['output'],
+            'as_of': '2026-10-08', 'analysis_as_of_utc': c['analysis_as_of_utc'],
+            'budget_policy_sha256': _sha(canonical(_native_plain(c['budgets'])))}
+
+
+def _run_root_native(protocol_path, manifest_path, source_file, output_dir, as_of, binding):
+    from contextlib import ExitStack
+    from .observed_admission import (native_run_record, _native_plain, canonical, decode, _identity,
+                                     _begin_native_run, _capture_native_output, _seal_native_run, _fail_native_run,
+                                     open_root_native_snapshot, _RunDirectoryAnchor)
+    run = native_run_record(binding)
+    c = run['control']; observed = c['profile'] == 'native_observed'
+    if tuple(map(str, (protocol_path, manifest_path, source_file, output_dir, as_of))) != (
+            c['controls']['protocol']['path'], c['controls']['manifest']['path'], c['source']['file']['path'], run['output'], '2026-10-08'):
+        raise ValueError('native foreign run/source/control/output arguments')
+    if (observed and fit_in_owned_child is not _REAL_FIT_BOUNDARY) or (not observed and fit_in_owned_child is _REAL_FIT_BOUNDARY):
+        raise ValueError('native mode/fitter identity mismatch before source body')
+    token = _begin_native_run(binding)
+    output = Path(run['output']); budget = _NativeBudget(); made = None
+    ledger, failed, backends = _fixture_ledger(), {}, {}
+    context = _native_context(run)
+    versions = {p['distribution']: p['version'] for p in c['runtime']['packages']}
+    provenance = {'source_manifest_sha256': c['controls']['manifest']['sha256'], 'protocol_sha256': c['controls']['protocol']['sha256'],
+                  'seeds': {}, 'backends': {}, 'versions': versions, 'training_cutoffs': {}, 'source_slice_sha256': {},
+                  'source_snapshot_sha256': c['source']['file']['sha256'], 'model_fit_seeds': {},
+                  'source_eligibility_status': 'APPROVED_OBSERVED' if observed else 'OWNED_SYNTHETIC_FIXTURE',
+                  'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                  'observed_authenticity': observed, 'observed_execution_authorized': observed, 'latest_vintage_proxy': True}
+    try:
+        if os.path.lexists(output) or _identity(os.lstat(output.parent), True) != run['parent_identity']:
+            raise ValueError('native output absence/parent drift')
+        with open_root_native_snapshot(binding) as read, ExitStack() as output_lifetime:
+            p = {**PROTOCOL_FIELDS, 'status': 'APPROVED_OBSERVED_EXECUTION' if observed else 'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD',
+                 'observed_execution_authorized': observed, 'protocol_sha256': c['controls']['protocol']['sha256'],
+                 'source_sha256': c['source']['file']['sha256'], 'snapshot_sha256': c['source']['file']['sha256']}
+            windows = plan_common_origins({sid: dict(s) for sid, s in read.series.items()}, as_of, p)
+            budget.check(); read.check()
+            output.mkdir(mode=0o700, exist_ok=False); made = _identity(os.lstat(output), True)
+            _capture_native_output(binding, token, made)
+            output_anchor = output_lifetime.enter_context(_RunDirectoryAnchor(output, (run['parent_identity'], made)))
+            host = _NativePhases(output, read, context, run, budget, output_anchor)
+            _exclusive_json(output / 'HOST_PENDING.json', {'schema_version': 'root-native-host-closure.v1', 'context': context,
+                                                         'status': 'incomplete', 'is_synthetic': not observed})
+            _exclusive_json(output / 'source_receipt.json', {**dict(read.receipt), 'context': context})
+
+            def predict(split):
+                predictions = []
+                for sid in ('copper', 'aluminum'):
+                    for model in ('naive', 'ets', 'gbm'):
+                        key = (sid, model)
+                        if key in failed:
+                            continue
+                        if (sid, 'naive') in failed:
+                            failed[key] = 'naive_baseline_unavailable'; continue
+                        rows = []
+                        for origin in windows[split]:
+                            before = time.monotonic(); item = None; precharged = 0.
+                            try:
+                                host.check()
+                                budget.remaining(sid, model, split)
+                                cutoff = _name(_month(origin) - 1)
+                                training = {m: read.series[sid][m] for m in _range('2016-09', cutoff)}
+                                spec = {'series_kind': 'commodity', 'series_id': sid, 'unit': 'USD/metric tonne',
+                                        'source_id': c['source']['source_id'], 'is_synthetic': not observed}
+                                def bounded(m, logs, lead, name, refit):
+                                    nonlocal item, precharged
+                                    # Charge preparation before determining the launch timeout.
+                                    precharged = time.monotonic() - before
+                                    budget.charge(sid, model, split, precharged)
+                                    seconds = budget.remaining(sid, model, split)
+                                    item = budget.begin_attempt(sid, model, split, origin, seconds)
+                                    started = time.monotonic()
+                                    try:
+                                        fit = fit_in_owned_child(m, logs, lead, name, refit, remaining_seconds=seconds,
+                                                                 result_contract='native-v1', expected_versions=versions)
+                                    except NativeFitUnavailable as exc:
+                                        host.check()
+                                        if key in backends:
+                                            raise NativeBackendIntegrityError('native later backend precheck changed') from exc
+                                        item.update(status='unavailable', reason=exc.reason, backend=exc.backend, cleanup_verified=True)
+                                        raise
+                                    finally:
+                                        item['elapsed_seconds'] = time.monotonic() - started
+                                        if item['elapsed_seconds'] > seconds:
+                                            raise TimeoutError('native late fit beyond deadline')
+                                    host.check()
+                                    expected = {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'}[model] if observed else 'fixture'
+                                    if fit.backend != expected or fit.versions != versions or (key in backends and backends[key] != fit.backend):
+                                        raise NativeBackendIntegrityError('native returned backend/version drift')
+                                    backends[key] = fit.backend
+                                    item.update(status='ok', backend=fit.backend, cleanup_verified=True)
+                                    provenance['backends'][f'{sid}:{model}:{origin}'] = fit.backend
+                                    return fit
+                                rows.extend(forecast_from_training(training, origin, model, p, spec, split, bounded))
+                                provenance['seeds'][f'{sid}:{origin}'] = canonical_seed(p, sid, origin)
+                                provenance['training_cutoffs'][f'{sid}:{origin}'] = cutoff
+                                provenance['source_slice_sha256'][f'{sid}:{origin}'] = _sha(canonical(training))
+                                provenance['model_fit_seeds'][f'{sid}:{model}'] = 0 if model == 'gbm' else None
+                            except (NativeFitUnavailable, _NativeBudgetUnavailable) as exc:
+                                failed[key] = exc.reason if isinstance(exc, NativeFitUnavailable) else str(exc)
+                                break
+                            except BaseException:
+                                if item is not None:
+                                    item.update(status='failed', reason='native_integrity_unverified', cleanup_verified=False)
+                                raise
+                            finally:
+                                # Charge the remaining wall interval once, including post-fit checks/processing.
+                                budget.charge(sid, model, split, time.monotonic() - before - precharged)
+                        else:
+                            predictions.extend(rows)
+                if not predictions:
+                    raise RuntimeError('native all full cohorts unavailable; HOLD')
+                return predictions
+
+            host.freeze('validation', predict('validation'))
+            validation = host.attach('validation'); calibration, calibrated = {}, []
+            for sid in ('copper', 'aluminum'):
+                for model in ('naive', 'ets', 'gbm'):
+                    key = (sid, model)
+                    if key in failed or (sid, 'naive') in failed:
+                        continue
+                    start = time.monotonic(); cohort = []
+                    host.check()
+                    try:
+                        for horizon in (1, 3, 6):
+                            factor, adjusted = calibrate_intervals([r for r in validation if (r['series_id'], r['model'], r['horizon']) == (sid, model, horizon)])
+                            calibration[f'{sid}:{model}:{horizon}'] = factor; cohort.extend(adjusted)
+                    except ValueError:
+                        failed[key] = 'calibration_unavailable'
+                        calibration = {k: v for k, v in calibration.items() if not k.startswith(f'{sid}:{model}:')}
+                    else:
+                        calibrated.extend(cohort)
+                    finally:
+                        budget.series[sid] += time.monotonic() - start; budget.check()
+                    host.check()
+            calibrated = [r for r in calibrated if (r['series_id'], r['model']) not in failed and (r['series_id'], 'naive') not in failed]
+            selection = {f'{sid}:{h}': value for (sid, h), value in select_models(calibrated).items()}
+            host.freeze_selection(selection, calibration, {f'{sid}:{m}': reason for (sid, m), reason in failed.items()})
+            host.freeze('test', predict('test'))
+            test = host.attach('test')
+            available = {(r['series_id'], r['model']) for r in test}
+            scored = [r for r in calibrated if (r['series_id'], r['model']) in available and (r['series_id'], 'naive') in available]
+            scored.extend(_scaled_interval(r, calibration[f"{r['series_id']}:{r['model']}:{r['horizon']}"]) for r in test
+                          if (r['series_id'], 'naive') in available)
+            if not scored:
+                raise RuntimeError('native no complete naive baseline; HOLD')
+            for entry in ledger:
+                if entry['status'] == 'pending':
+                    key = (entry['series_id'], entry['model'])
+                    if key in available and (key[0], 'naive') in available:
+                        entry.update(status='scored', backend=backends[key], reason=None)
+                    else:
+                        entry.update(status='not_evaluated', backend=None, reason=failed.get(key, 'naive_baseline_unavailable'))
+            _exclusive_json(output / 'candidate_ledger.json', {'entries': ledger, 'provider_dl': 'out_of_scope'})
+            _exclusive_json(output / 'scored_rows.json', {'context': context, 'predictions': scored})
+            _exclusive_json(output / 'attempts.json', _native_attempt_document(budget, context, failed))
+            doc = {'schema_version': 'forecast-scorecard.v1', 'metadata': {'synthetic': not observed,
+                   'latest_vintage_proxy': True, 'observed_execution_authorized': observed}, 'predictions': scored}
+            publish_runner(output / 'legacy', doc, ledger, selection, calibration, provenance)
+            verify_runner_run(output / 'legacy'); host.check()
+        read.lifetime.check(postclose=True); budget.check()
+        artifacts = _native_artifacts(output)
+        if set(artifacts) != _native_expected_artifacts(scored):
+            raise ValueError('native publication artifact set mismatch')
+        unavailable = [{'series_id': sid, 'model': model, 'reason': reason} for (sid, model), reason in sorted(failed.items())]
+        selected_missing = [{'series_id': sid, 'horizon': int(h), 'model': model,
+                             'reason': failed.get((sid, model), 'naive_baseline_unavailable')}
+                            for k, model in selection.items() for sid, h in [k.split(':')] if (sid, model) not in available]
+        status = ('native_complete' if observed else 'native_fixture_complete') + ('_with_unavailable' if unavailable else '')
+        closure = {'schema_version': 'root-native-host-closure.v1', 'status': status, 'context': context,
+                   'is_synthetic': not observed, 'observed_authenticity': observed, 'observed_execution_authorized': observed,
+                   'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                   'close_postclose_verified': True, 'artifact_sha256': artifacts,
+                   'complete_cohorts': [{'series_id': sid, 'model': m} for sid, m in sorted(available) if (sid, 'naive') in available],
+                   'unavailable_cohorts': unavailable, 'selected_unavailable': selected_missing,
+                   'candidate_ledger_sha256': artifacts['candidate_ledger.json'], 'attempts_sha256': artifacts['attempts.json'],
+                   'validation_prediction_sha256': artifacts['validation_prediction_freeze.json'],
+                   'selection_sha256': artifacts['selection_freeze.json'], 'test_prediction_sha256': artifacts['test_prediction_freeze.json']}
+        budget.check()
+        _exclusive_json(output / 'NATIVE_COMPLETE.json', closure)
+        _seal_native_run(binding, token, canonical(closure)); budget.check()
+        _verify_root_native(output, binding); budget.check()
+        return closure
+    except BaseException as exc:
+        _fail_native_run(binding, token)
+        try:
+            owned = made is not None and _identity(os.lstat(output), True) == made and _identity(os.lstat(output.parent), True) == run['parent_identity']
+        except OSError:
+            owned = False
+        if owned and not os.path.lexists(output / 'FAILURE.json'):
+            reason = 'owned_child_cleanup_unverified' if isinstance(exc, OwnedChildCleanupError) else 'fit_deadline' if isinstance(exc, TimeoutError) else 'native_integrity_unverified'
+            _exclusive_json(output / 'FAILURE.json', {'schema_version': 'root-native-host-closure.v1', 'status': 'incomplete', 'reason': reason})
+            if not os.path.lexists(output / 'candidate_ledger.json'):
+                _exclusive_json(output / 'candidate_ledger.json', {'entries': [{**e, 'status': 'not_evaluated', 'backend': None,
+                                                      'reason': e['reason'] or reason} for e in ledger], 'provider_dl': 'out_of_scope'})
+            if not os.path.lexists(output / 'attempts.json'):
+                _exclusive_json(output / 'attempts.json', _native_attempt_document(budget, context, failed, reason))
+        raise
+
+
+def _run_root_generic(protocol_path, manifest_path, source_file, output_dir, as_of, binding):
+    from contextlib import ExitStack
+    from .observed_admission import (native_run_record, _native_plain, canonical, decode, _identity,
+                                     _begin_native_run, _capture_native_output, _seal_native_run, _fail_native_run,
+                                     open_root_generic_snapshot, _RunDirectoryAnchor)
+    run = native_run_record(binding)
+    c = run['control']; observed = c['profile'] == 'generic-observed-v1'
+    if (tuple(map(str, (protocol_path, manifest_path, output_dir, as_of))) != (
+            c['controls']['protocol']['path'], c['controls']['manifest']['path'], run['output'], '2026-10-09')
+            or not isinstance(source_file, dict) or source_file != {k:v['file']['path'] for k,v in c['sources'].items()}):
+        raise ValueError('native foreign run/source/control/output arguments')
+    if (observed and fit_in_owned_child is not _REAL_FIT_BOUNDARY) or (not observed and fit_in_owned_child is _REAL_FIT_BOUNDARY):
+        raise ValueError('native mode/fitter identity mismatch before source body')
+    token = _begin_native_run(binding)
+    output = Path(run['output']); budget = _GenericBudget(c['selected_ids']); made = None
+    ledger, failed, backends = [], {}, {}
+    context = _generic_context(run)
+    versions = {p['distribution']: p['version'] for p in c['runtime']['packages']}
+    provenance = {'source_manifest_sha256': c['controls']['manifest']['sha256'], 'protocol_sha256': c['controls']['protocol']['sha256'],
+                  'seeds': {}, 'backends': {}, 'versions': versions, 'training_cutoffs': {}, 'source_slice_sha256': {},
+                  'source_snapshot_sha256': c['catalog']['sha256'], 'model_fit_seeds': {},
+                  'source_eligibility_status': 'APPROVED_OBSERVED' if observed else 'OWNED_SYNTHETIC_FIXTURE',
+                  'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                  'observed_authenticity': observed, 'observed_execution_authorized': observed, 'latest_vintage_proxy': True}
+    try:
+        ledger = _generic_ledger(run)
+        if os.path.lexists(output) or _identity(os.lstat(output.parent), True) != run['parent_identity']:
+            raise ValueError('native output absence/parent drift')
+        with open_root_generic_snapshot(binding) as read, ExitStack() as output_lifetime:
+            p = {**PROTOCOL_FIELDS, 'as_of':'2026-10-09', 'profile':c['profile'], 'status': 'APPROVED_OBSERVED_EXECUTION' if observed else 'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD',
+                 'observed_execution_authorized': observed, 'protocol_sha256': c['controls']['protocol']['sha256'],
+                 'source_sha256': c['catalog']['sha256'], 'snapshot_sha256': c['catalog']['sha256']}
+            windows = plan_common_origins({sid: dict(s) for sid, s in read.series.items()}, as_of, p)
+            budget.check(); read.check()
+            output.mkdir(mode=0o700, exist_ok=False); made = _identity(os.lstat(output), True)
+            _capture_native_output(binding, token, made)
+            output_anchor = output_lifetime.enter_context(_RunDirectoryAnchor(output, (run['parent_identity'], made)))
+            host = _GenericPhases(output, read, context, run, budget, output_anchor)
+            host.binding = binding
+            _exclusive_json(output / 'HOST_PENDING.json', {'schema_version': 'root-generic-host-closure.v1', 'context': context,
+                                                         'status': 'incomplete', 'is_synthetic': not observed})
+            _exclusive_json(output / 'source_receipt.json', {**dict(read.receipt), 'context': context})
+
+            def predict(split):
+                predictions = []
+                for sid in c['selected_ids']:
+                    for model in ('naive', 'ets', 'gbm'):
+                        key = (sid, model)
+                        if key in failed:
+                            continue
+                        if (sid, 'naive') in failed:
+                            failed[key] = 'naive_baseline_unavailable'; continue
+                        rows = []
+                        for origin in windows[split]:
+                            before = time.monotonic(); item = None; precharged = 0.
+                            try:
+                                host.check()
+                                budget.remaining(sid, model, split)
+                                cutoff = _name(_month(origin) - 1)
+                                training = {m: read.series[sid][m] for m in _range('2016-09', cutoff)}
+                                record = next(r for r in read.receipt['catalog'] if r['series_id']==sid)
+                                spec = {'series_kind': record['series_kind'], 'series_id': sid, 'unit': record['quoted_unit'],
+                                        'source_id': record['source_id'], 'is_synthetic': not observed}
+                                def bounded(m, logs, lead, name, refit):
+                                    nonlocal item, precharged
+                                    # Charge preparation before determining the launch timeout.
+                                    precharged = time.monotonic() - before
+                                    budget.charge(sid, model, split, precharged)
+                                    seconds = budget.remaining(sid, model, split)
+                                    item = budget.begin_attempt(sid, model, split, origin, seconds)
+                                    started = time.monotonic()
+                                    try:
+                                        fit = fit_in_owned_child(m, logs, lead, name, refit, remaining_seconds=seconds,
+                                                                 result_contract='native-v1', expected_versions=versions)
+                                    except NativeFitUnavailable as exc:
+                                        host.check()
+                                        if key in backends:
+                                            raise NativeBackendIntegrityError('native later backend precheck changed') from exc
+                                        item.update(status='unavailable', reason=exc.reason, backend=exc.backend, cleanup_verified=True)
+                                        raise
+                                    finally:
+                                        item['elapsed_seconds'] = time.monotonic() - started
+                                        if item['elapsed_seconds'] > seconds:
+                                            raise TimeoutError('native late fit beyond deadline')
+                                    host.check()
+                                    expected = {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'}[model] if observed else 'fixture'
+                                    if fit.backend != expected or fit.versions != versions or (key in backends and backends[key] != fit.backend):
+                                        raise NativeBackendIntegrityError('native returned backend/version drift')
+                                    backends[key] = fit.backend
+                                    item.update(status='ok', backend=fit.backend, cleanup_verified=True)
+                                    provenance['backends'][f'{sid}:{model}:{origin}'] = fit.backend
+                                    return fit
+                                rows.extend(forecast_from_training(training, origin, model, p, spec, split, bounded))
+                                provenance['seeds'][f'{sid}:{origin}'] = canonical_seed(p, sid, origin)
+                                provenance['training_cutoffs'][f'{sid}:{origin}'] = cutoff
+                                provenance['source_slice_sha256'][f'{sid}:{origin}'] = _sha(canonical(training))
+                                provenance['model_fit_seeds'][f'{sid}:{model}'] = 0 if model == 'gbm' else None
+                            except (NativeFitUnavailable, _NativeBudgetUnavailable) as exc:
+                                failed[key] = exc.reason if isinstance(exc, NativeFitUnavailable) else str(exc)
+                                break
+                            except BaseException:
+                                if item is not None:
+                                    item.update(status='failed', reason='native_integrity_unverified', cleanup_verified=False)
+                                raise
+                            finally:
+                                # Charge the remaining wall interval once, including post-fit checks/processing.
+                                budget.charge(sid, model, split, time.monotonic() - before - precharged)
+                        else:
+                            predictions.extend(rows)
+                if not predictions:
+                    raise RuntimeError('native all full cohorts unavailable; HOLD')
+                return predictions
+
+            host.freeze('validation', predict('validation'))
+            validation = host.attach('validation'); calibration, calibrated = {}, []
+            for sid in c['selected_ids']:
+                for model in ('naive', 'ets', 'gbm'):
+                    key = (sid, model)
+                    if key in failed or (sid, 'naive') in failed:
+                        continue
+                    start = time.monotonic(); cohort = []
+                    host.check()
+                    try:
+                        for horizon in (1, 3, 6):
+                            factor, adjusted = calibrate_intervals([r for r in validation if (r['series_id'], r['model'], r['horizon']) == (sid, model, horizon)])
+                            calibration[f'{sid}:{model}:{horizon}'] = factor; cohort.extend(adjusted)
+                    except ValueError as exc:
+                        if str(exc) != 'calibration_unavailable':
+                            raise
+                        failed[key] = 'calibration_unavailable'
+                        calibration = {k: v for k, v in calibration.items() if not k.startswith(f'{sid}:{model}:')}
+                    else:
+                        calibrated.extend(cohort)
+                    finally:
+                        budget.series[sid] += time.monotonic() - start; budget.check()
+                    host.check()
+            calibrated = [r for r in calibrated if (r['series_id'], r['model']) not in failed and (r['series_id'], 'naive') not in failed]
+            selection = {f'{sid}:{h}': value for (sid, h), value in select_models(calibrated).items()}
+            host.freeze_selection(selection, calibration, {f'{sid}:{m}': reason for (sid, m), reason in failed.items()})
+            host.freeze('test', predict('test'))
+            test = host.attach('test')
+            available = {(r['series_id'], r['model']) for r in test}
+            scored = [r for r in calibrated if (r['series_id'], r['model']) in available and (r['series_id'], 'naive') in available]
+            scored.extend(_scaled_interval(r, calibration[f"{r['series_id']}:{r['model']}:{r['horizon']}"]) for r in test
+                          if (r['series_id'], 'naive') in available)
+            if not scored:
+                raise RuntimeError('native no complete naive baseline; HOLD')
+            for entry in ledger:
+                if entry['status'] == 'pending':
+                    key = (entry['series_id'], entry['model'])
+                    if key in available and (key[0], 'naive') in available:
+                        entry.update(status='scored', backend=backends[key], reason=None)
+                    else:
+                        entry.update(status='not_evaluated', backend=None, reason=failed.get(key, 'naive_baseline_unavailable'))
+            _exclusive_json(output / 'candidate_ledger.json', {'entries': ledger, 'provider_dl': 'out_of_scope'})
+            _exclusive_json(output / 'scored_rows.json', {'context': context, 'predictions': scored})
+            _exclusive_json(output / 'attempts.json', _generic_attempt_document(budget, context, failed))
+            doc = {'schema_version': 'forecast-scorecard.v1', 'metadata': {'synthetic': not observed,
+                   'latest_vintage_proxy': True, 'observed_execution_authorized': observed}, 'predictions': scored}
+            publish_runner(output / 'legacy', doc, ledger, selection, calibration, provenance)
+            verify_runner_run(output / 'legacy'); host.check()
+        read.lifetime.check(postclose=True); budget.check()
+        artifacts = _native_artifacts(output)
+        if set(artifacts) != _native_expected_artifacts(scored):
+            raise ValueError('native publication artifact set mismatch')
+        unavailable = [{'series_id': sid, 'model': model, 'reason': reason} for (sid, model), reason in sorted(failed.items())]
+        selected_missing = [{'series_id': sid, 'horizon': int(h), 'model': model,
+                             'reason': failed.get((sid, model), 'naive_baseline_unavailable')}
+                            for k, model in selection.items() for sid, h in [k.rsplit(':',1)] if (sid, model) not in available]
+        status = ('generic_complete' if observed else 'generic_fixture_complete') + ('_with_unavailable' if unavailable else '')
+        closure = {'schema_version': 'root-generic-host-closure.v1', 'status': status, 'context': context,
+                   'is_synthetic': not observed, 'observed_authenticity': observed, 'observed_execution_authorized': observed,
+                   'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                   'close_postclose_verified': True, 'artifact_sha256': artifacts,
+                   'complete_cohorts': [{'series_id': sid, 'model': m} for sid, m in sorted(available) if (sid, 'naive') in available],
+                   'unavailable_cohorts': unavailable, 'selected_unavailable': selected_missing,
+                   'candidate_ledger_sha256': artifacts['candidate_ledger.json'], 'attempts_sha256': artifacts['attempts.json'],
+                   'validation_prediction_sha256': artifacts['validation_prediction_freeze.json'],
+                   'selection_sha256': artifacts['selection_freeze.json'], 'test_prediction_sha256': artifacts['test_prediction_freeze.json']}
+        budget.check()
+        _exclusive_json(output / 'NATIVE_COMPLETE.json', closure)
+        _seal_native_run(binding, token, canonical(closure)); budget.check()
+        _verify_root_generic(output, binding); budget.check()
+        return closure
+    except BaseException as exc:
+        _fail_native_run(binding, token)
+        try:
+            owned = made is not None and _identity(os.lstat(output), True) == made and _identity(os.lstat(output.parent), True) == run['parent_identity']
+        except OSError:
+            owned = False
+        if owned and not os.path.lexists(output / 'FAILURE.json'):
+            reason = 'owned_child_cleanup_unverified' if isinstance(exc, OwnedChildCleanupError) else 'fit_deadline' if isinstance(exc, TimeoutError) else 'native_integrity_unverified'
+            _exclusive_json(output / 'FAILURE.json', {'schema_version': 'root-generic-host-closure.v1', 'status': 'incomplete', 'reason': reason})
+            if not os.path.lexists(output / 'candidate_ledger.json'):
+                _exclusive_json(output / 'candidate_ledger.json', {'entries': [{**e, 'status': 'not_evaluated', 'backend': None,
+                                                      'reason': e['reason'] or reason} for e in ledger], 'provider_dl': 'out_of_scope'})
+            if not os.path.lexists(output / 'attempts.json'):
+                _exclusive_json(output / 'attempts.json', _generic_attempt_document(budget, context, failed, reason))
+        raise
+
+
+
+
+
+def _generic_context(run):
+    from .observed_admission import canonical,_native_plain
+    c=run['control']
+    return {'profile':c['profile'],'acceptance_id':c['acceptance_id'],'run_id':c['run_id'],
+            'root_control_sha256':run['root_pin']['sha256'],
+            'source_sha256':{k:s['file']['sha256'] for k,s in c['sources'].items()},
+            'catalog_sha256':c['catalog']['sha256'],'selected_ids':list(c['selected_ids']),'batch_index':c['batch_index'],
+            'protocol_sha256':c['controls']['protocol']['sha256'],'manifest_sha256':c['controls']['manifest']['sha256'],
+            'code_sha256':{p['repository_path']:p['file']['sha256'] for p in c['code']},
+            'runtime_pin_sha256':_sha(canonical(_native_plain(c['runtime']))),'output':run['output'],
+            'as_of':'2026-10-09','analysis_as_of_utc':c['analysis_as_of_utc'],
+            'budget_policy_sha256':_sha(canonical(_native_plain(c['budgets'])))}
+
+
+def _generic_ledger(run):
+    # Derived from bound catalog; body eligibility is independently reconstructed
+    # before any fit. A ledger cell is model x split x horizon, not an origin.
+    from .observed_admission import decode
+    life=__import__('contextlib').closing
+    from .observed_admission import _generic_pins_lifetime,_native_pin_open
+    with life(_generic_pins_lifetime(run)) as pins:
+        records=decode(_native_pin_open(pins,run['control']['catalog'],private=True))['series']
+    selected=set(run['control']['selected_ids']);specs={r['series_id']:r for r in records}
+    if not selected.issubset(specs):raise ValueError('generic selected catalog ID absent')
+    return [{'series_kind':specs[sid]['series_kind'],'series_id':sid,'unit':specs[sid]['quoted_unit'],
+             'model':model,'split':split,'horizon':h,'status':'pending','reason':None,'backend':None,'metrics':None}
+            for sid in run['control']['selected_ids'] for model in ('naive','ets','gbm')
+            for split in ('validation','test') for h in (1,3,6)]
+
+
+class _GenericBudget(_NativeBudget):
+    def __init__(self,selected):
+        super().__init__();self.selected=tuple(selected)
+        if not 1<=len(self.selected)<=2 or len(set(self.selected))!=len(self.selected):raise ValueError('generic initial processing batch bound')
+
+    def begin_attempt(self,sid,model,split,origin,timeout):
+        if (sid not in self.selected or model not in ('naive','ets','gbm') or split not in ('validation','test')
+                or origin not in _range(MONTHS[split+'_start'],MONTHS[split+'_end'])
+                or type(timeout) not in (int,float) or not math.isfinite(timeout) or not 0<timeout<=60
+                or sum(k[0]==sid for k in self.seen)>=144
+                or len(self.seen)>=144*len(self.selected)):
+            raise RuntimeError('generic invalid/repeated/over-budget attempt')
+        return super().begin_attempt(sid,model,split,origin,timeout)
+
+
+def _generic_attempt_document(budget,context,failed,terminal=None):
+    skipped=[]
+    for sid in budget.selected:
+        for model in ('naive','ets','gbm'):
+            for split in ('validation','test'):
+                for origin in _range(MONTHS[split+'_start'],MONTHS[split+'_end']):
+                    if (sid,model,split,origin) not in budget.seen:
+                        skipped.append({'series_id':sid,'model':model,'split':split,'origin':origin,'status':'skipped',
+                            'reason':terminal or failed.get((sid,model),'naive_baseline_unavailable'),
+                            'expected_backend':{'naive':'naive','ets':'ets','gbm':'sklearn'}[model],
+                            'backend':None,'planned_timeout':None,'elapsed_seconds':None,'cleanup_verified':False})
+    return {'context':context,'attempts':budget.attempts,'skipped':skipped,'series_seconds':dict(budget.series),
+            'elapsed_seconds':time.monotonic()-budget.started}
+
+
+class _GenericPhases(_NativePhases):
+    def check(self):
+        super().check()
+        from .observed_admission import _native_utc,datetime,timezone,native_run_record,_native_state
+        c=self.run['control']
+        if datetime.now(timezone.utc)>=_native_utc(c['expires_at_utc']):raise ValueError('generic host expired during phase')
+        # Recheck active host, not merely copied immutable fields.
+        native_run_record(self.binding)
+        if _native_state(self.binding)['state']!='RUNNING':raise ValueError('generic live host phase failed')
+
+    def freeze(self,split,rows):
+        from .forecast_scorecard import FIELDS
+        specs={r['series_id']:r for r in self.read.receipt['catalog'] if r['series_id'] in self.run['control']['selected_ids']}
+        groups=defaultdict(set)
+        for row in rows:
+            sid=row.get('series_id');rec=specs.get(sid)
+            if (rec is None or set(row)!=FIELDS-{'actual'} or row['model'] not in ('naive','ets','gbm')
+                    or type(row['horizon']) is not int or row['horizon'] not in (1,3,6)
+                    or row['unit']!=rec['quoted_unit'] or row['series_kind']!=rec['series_kind']
+                    or row['source_id']!=rec['source_id'] or row['is_synthetic'] is not (self.run['control']['profile']=='generated-fixture-test-v1')
+                    or row['training_cutoff']!=_name(_month(row['origin'])-1)):
+                raise ValueError('generic exact row/native metadata mismatch')
+            groups[sid,row['model']].add(row['horizon'])
+        if not groups or any(h!={1,3,6} for h in groups.values()):raise ValueError('generic full horizon cohort required')
+        if split=='test' and 'validation' not in self.attached:raise ValueError('generic validation attachment absent')
+        _FixturePhases.freeze(self,split,rows)
+
+
+def _verify_root_generic(output_dir,binding):
+    """Consume sealed artifacts and metadata only; never source bodies or refits."""
+    from contextlib import closing
+    from .observed_admission import (native_run_record,_native_completion,_native_state,_fail_native_run,
+                                     _generic_pins_lifetime,_RunDirectoryAnchor)
+    run=native_run_record(binding);ids,issued_sha=_native_completion(binding);output=Path(output_dir)
+    if str(output)!=run['output']:raise ValueError('generic foreign output')
+    try:
+        if os.path.lexists(output/'FAILURE.json'):raise ValueError('generic failure dominates')
+        with closing(_generic_pins_lifetime(run)) as pins,_RunDirectoryAnchor(output,ids) as anchor:
+            closure,raw=_owned_json(output/'NATIVE_COMPLETE.json');c=run['control'];observed=c['profile']=='generic-observed-v1'
+            statuses=('generic_complete','generic_complete_with_unavailable') if observed else ('generic_fixture_complete','generic_fixture_complete_with_unavailable')
+            if (_sha(raw)!=issued_sha or closure.get('schema_version')!='root-generic-host-closure.v1'
+                    or closure.get('status') not in statuses or closure.get('context')!=_generic_context(run)
+                    or closure.get('is_synthetic') is not (not observed) or closure.get('observed_authenticity') is not observed
+                    or closure.get('observed_execution_authorized') is not observed or closure.get('close_postclose_verified') is not True
+                    or closure.get('full_parent_snapshot_exposed') is not True or closure.get('physical_test_actuals_untouched') is not False):
+                raise ValueError('generic closure/context mismatch')
+            hashes=_native_artifacts(output);scored,_=_owned_json(output/'scored_rows.json')
+            if set(hashes)!=_native_expected_artifacts(scored['predictions']) or hashes!=closure['artifact_sha256']:
+                raise ValueError('generic exact artifact set/hash mismatch')
+            for name in ('HOST_PENDING.json','source_receipt.json','validation_prediction_freeze.json','selection_freeze.json',
+                         'test_prediction_freeze.json','scored_rows.json','attempts.json'):
+                doc,_=_owned_json(output/name)
+                if doc.get('context')!=closure['context']:raise ValueError('generic foreign artifact context')
+            ledger,_=_owned_json(output/'candidate_ledger.json');selection,_=_owned_json(output/'selection_freeze.json')
+            attempts,_=_owned_json(output/'attempts.json');history=attempts['attempts']+attempts['skipped']
+            planned={(s,m,split,o) for s in c['selected_ids'] for m in ('naive','ets','gbm') for split in ('validation','test')
+                      for o in _range(MONTHS[split+'_start'],MONTHS[split+'_end'])}
+            cells={(s,m,split,h) for s in c['selected_ids'] for m in ('naive','ets','gbm') for split in ('validation','test')for h in (1,3,6)}
+            if (len(history)!=len(planned) or {(r['series_id'],r['model'],r['split'],r['origin'])for r in history}!=planned
+                    or any(r['status'] not in ('ok','unavailable') or r['cleanup_verified'] is not True for r in attempts['attempts'])
+                    or any(r['status']!='skipped' or r['elapsed_seconds'] is not None or r['cleanup_verified'] is not False for r in attempts['skipped'])
+                    or len(ledger['entries'])!=len(cells) or {(r['series_id'],r['model'],r['split'],r['horizon'])for r in ledger['entries']}!=cells):
+                raise ValueError('generic dynamic complete ledger/attempt mismatch')
+            for key,name in [('candidate_ledger_sha256','candidate_ledger.json'),('attempts_sha256','attempts.json'),
+                             ('validation_prediction_sha256','validation_prediction_freeze.json'),('selection_sha256','selection_freeze.json'),
+                             ('test_prediction_sha256','test_prediction_freeze.json')]:
+                if closure[key]!=hashes[name]:raise ValueError('generic phase/ledger hash mismatch')
+            if selection['validation_prediction_sha256']!=hashes['validation_prediction_freeze.json']:
+                raise ValueError('generic selection must bind validation')
+            verify_runner_run(output/'legacy')
+            if _native_artifacts(output)!=hashes or os.path.lexists(output/'FAILURE.json'):raise ValueError('generic late output drift')
+            pins.check();anchor.check()
+        if _native_completion(binding)!=(ids,issued_sha):raise ValueError('generic live seal changed after close')
+    except BaseException:
+        _fail_native_run(binding,_native_state(binding)['token']);raise
+    return True
+
+if __name__ == '__main__' and sys.argv[1:] == ['--fit-child']:
     raise SystemExit(_fit_child_main())
+if __name__ == '__main__' and sys.argv[1:] == ['--native-fit-child-v1']:
+    raise SystemExit(_native_fit_child_main())

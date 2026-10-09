@@ -1028,3 +1028,735 @@ def test_global_interruption_leaves_incomplete_receipt(monkeypatch, tmp_path):
         _admitted_call(fixture)
     assert json.loads((out / "FAILURE.json").read_text())["reason"] == "fit_interrupted"
     assert not (out / "ADMITTED_COMPLETE.json").exists()
+
+# Native-host tests own only generated XLSX, fake transport and fitted values.
+_NATIVE_TEST_VERSIONS = {"numpy": "2.5.3", "pandas": "3.0.6", "openpyxl": "3.1.5",
+                         "scikit-learn": "1.9.1", "statsmodels": "0.15.0", "lightgbm": "4.7.0"}
+
+
+def _native_wire_fit(monkeypatch, *, corrupt=None):
+    original = observed_runner._REAL_FIT_BOUNDARY
+    attempts = []
+    def transport(command, payload, *, timeout):
+        request = json.loads(payload)
+        attempts.append(request)
+        if corrupt and request["model"] == "gbm" and request["name"].endswith(":copper") and len(request["months"]) >= 90:
+            return json.dumps(corrupt).encode()
+        result = {"status": "ok", "drift": [0.] * 7, "residuals": [0.] * 12,
+                  "noise_scale": 1., "backend": "fixture", "versions": _NATIVE_TEST_VERSIONS}
+        if request.get("schema_version") == "observed-native-fit-request.v1":
+            assert command[-1] == "--native-fit-child-v1"
+            result.update(schema_version="observed-native-fit-result.v1", request_sha256=hashlib.sha256(payload).hexdigest(),
+                          model=request["model"], model_fit_attempted=True,
+                          backend={"naive": "naive", "ets": "ets", "gbm": "sklearn"}[request["model"]])
+        return json.dumps(result).encode()
+    monkeypatch.setattr(observed_runner, "run_bounded_child", transport)
+    def fit(model, logs, horizon, name, refit, *, remaining_seconds=60., **kwargs):
+        result = original(model, logs, horizon, name, refit, remaining_seconds=remaining_seconds, **kwargs)
+        result.backend = "fixture"  # owning synthetic test adapter, never observed mode
+        return result
+    monkeypatch.setattr(observed_runner, "fit_in_owned_child", fit)
+    return attempts
+
+
+@pytest.mark.parametrize("bad", [
+    {"status": "unavailable", "reason": "fit_failed"},
+    {"status": "weird"},
+    {"status": "unavailable"},
+    {"status": "unavailable", "reason": "fit_unavailable"},
+])
+def test_native_host_wire_fault_after_complete_baseline_is_fatal(tmp_path, monkeypatch, bad):
+    # RED first exercised the existing public fixture host. Once implemented,
+    # the same assertion uses issued native test authority and real native decoder.
+    from test_forecast_observed_admission import owned_fixture
+    if hasattr(observed_runner, "_run_root_native"):
+        from test_forecast_observed_admission import native_owned_fixture
+        fixture = native_owned_fixture(tmp_path.resolve(), monkeypatch)
+    else:
+        fixture = owned_fixture(tmp_path.resolve())
+    attempts = _native_wire_fit(monkeypatch, corrupt=bad)
+    with pytest.raises(RuntimeError):
+        _admitted_call(fixture)
+    output = fixture[-1]
+    assert not (output / "NATIVE_COMPLETE.json").exists()
+    assert not (output / "ADMITTED_COMPLETE.json").exists()
+    assert (output / "FAILURE.json").exists()
+    copper_naive = [r for r in attempts if r["model"] == "naive" and r["name"].endswith(":copper")]
+    assert len(copper_naive) == 48  # full validation + test predictions precede fault
+    faults = [r for r in attempts if r["model"] == "gbm" and r["name"].endswith(":copper") and len(r["months"]) >= 90]
+    assert len(faults) == 1
+
+
+def test_native_host_full_cohorts_phase_order_and_fresh_verifier(tmp_path, monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture = native_owned_fixture(tmp_path.resolve(), monkeypatch)
+    source_stat=os.lstat(fixture[0]);body_reads=[];reading=a._NativeLifetime.read
+    def read(self,fd,limit):
+        info=os.fstat(fd)
+        if (info.st_dev,info.st_ino)==(source_stat.st_dev,source_stat.st_ino):body_reads.append(fd)
+        return reading(self,fd,limit)
+    monkeypatch.setattr(a._NativeLifetime,'read',read)
+    attempts = _native_wire_fit(monkeypatch)
+    events = []
+    original_attach = observed_runner._NativePhases.attach
+    def attach(self, split):
+        events.append((split, len(attempts)))
+        if split == 'test':
+            assert (self.output / 'selection_freeze.json').exists()
+        return original_attach(self, split)
+    monkeypatch.setattr(observed_runner._NativePhases, 'attach', attach)
+    closure = _admitted_call(fixture)
+    output = fixture[-1]
+    assert events == [('validation', 144), ('test', 288)]
+    assert closure['status'] == 'native_fixture_complete'
+    assert closure['is_synthetic'] is True and closure['observed_authenticity'] is False
+    assert closure['observed_execution_authorized'] is False
+    assert closure['full_parent_snapshot_exposed'] is True and closure['physical_test_actuals_untouched'] is False
+    for split in ('validation', 'test'):
+        doc = json.loads((output / (split + '_prediction_freeze.json')).read_bytes())
+        assert len(doc['predictions']) == 432
+        assert all('actual' not in row for row in doc['predictions'])
+    selection = json.loads((output / 'selection_freeze.json').read_bytes())
+    assert len(selection['calibration']) == 18 and len(selection['selection']) == 6
+    scored = json.loads((output / 'scored_rows.json').read_bytes())['predictions']
+    assert len(scored) == 864
+    assert len(json.loads((output / 'candidate_ledger.json').read_bytes())['entries']) == 96
+    assert observed_runner.verify_runner_run(output, expected_run=fixture[3]) is True
+    assert len(attempts) == 288  # read-only fresh verifier does not refit
+    assert len(body_reads)==1  # run reads once; registration and both fresh verifications read metadata only
+    with pytest.raises(ValueError, match='attempted'):
+        _admitted_call(fixture)
+    with pytest.raises(ValueError, match='consumed'):
+        # One-use attachment stays one-use even with valid unchanged files.
+        host = observed_runner._NativePhases.__new__(observed_runner._NativePhases)
+        host.attached = {'validation'}
+        host.attach('validation')
+
+
+@pytest.mark.parametrize('mutation', ['shape','schema','reason','extra','versions','backend','job',
+                                        'bool','nan','residual_scalar','too_few','too_many','unknown_status','duplicate','trailing'])
+def test_native_host_strict_parent_rejects_malformed_wire(tmp_path, monkeypatch, mutation):
+    logs = pd.Series([1.] * 60, index=pd.date_range('2016-09-01', periods=60, freq='MS'))
+    def wire(command, payload, *, timeout):
+        req = json.loads(payload)
+        result = {'schema_version': 'observed-native-fit-result.v1', 'status': 'ok',
+                  'request_sha256': hashlib.sha256(payload).hexdigest(), 'model': 'naive',
+                  'drift': [0.] * 7, 'residuals': [0.] * 12, 'noise_scale': 1., 'backend': 'naive',
+                  'versions': dict(_NATIVE_TEST_VERSIONS), 'model_fit_attempted': True}
+        if mutation == 'shape': result['drift'] = [[0.]] * 7
+        if mutation == 'schema': result['schema_version'] = 'unknown'
+        if mutation == 'reason': result = {k:v for k,v in result.items() if k in {'schema_version','status','request_sha256','model'}}; result['status']='unavailable'
+        if mutation == 'extra': result['other'] = True
+        if mutation == 'versions': result['versions']['numpy'] = 'unknown'
+        if mutation == 'backend': result['backend'] = 'lightgbm'
+        if mutation == 'job': result['request_sha256'] = '0' * 64
+        if mutation == 'bool': result['noise_scale'] = True
+        if mutation == 'nan': result['drift'][0] = float('nan')
+        if mutation == 'residual_scalar': result['residuals'] = 0.
+        if mutation == 'too_few': result['residuals'] = [0.] * 11
+        if mutation == 'too_many': result['residuals'] = [0.] * 61
+        if mutation == 'unknown_status': result['status'] = 'weird'
+        if mutation == 'duplicate': return (json.dumps(result)[:-1]+',"status":"ok"}').encode()
+        if mutation == 'trailing': return json.dumps(result).encode()+b'{}'
+        return json.dumps(result).encode()
+    monkeypatch.setattr(observed_runner, 'run_bounded_child', wire)
+    with pytest.raises((observed_runner.NativeChildProtocolError, observed_runner.NativeBackendIntegrityError)):
+        observed_runner.fit_in_owned_child('naive', logs, 7, 'fake', 1, result_contract='native-v1', expected_versions=_NATIVE_TEST_VERSIONS)
+
+
+def test_native_host_legacy_transport_default_is_preserved(monkeypatch):
+    seen = []
+    def wire(command, payload, *, timeout):
+        seen.append((command,payload,timeout))
+        return b'{"status":"unavailable","reason":"fit_failed"}'
+    monkeypatch.setattr(observed_runner, 'run_bounded_child', wire)
+    logs = pd.Series([1.] * 60, index=pd.date_range('2016-09-01', periods=60, freq='MS'))
+    with pytest.raises(RuntimeError, match='fit_failed') as error:
+        observed_runner.fit_in_owned_child('naive', logs, 7, 'fake', 1)
+    assert type(error.value) is RuntimeError
+    assert seen[0][0] == [sys.executable, '-m', 'procure.evaluation.observed_runner', '--fit-child']
+    assert set(json.loads(seen[0][1])) == {'model','name','months','values'}
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize('backend,throw,status', [('lightgbm',False,'unavailable'),('sklearn',True,'failed'),('sklearn',False,'ok')])
+def test_native_host_fake_child_emits_causal_status(monkeypatch, backend, throw, status):
+    import io, types, importlib.metadata
+    calls = []
+    fake = types.ModuleType('procure.forecast.models')
+    fake.GBM_BACKEND = backend
+    fake.clear_cache = lambda: None
+    def fit(*args, **kwargs):
+        calls.append((args,kwargs))
+        if throw: raise ValueError('unexpected synthetic child defect')
+        return SimpleNamespace(drift=np.zeros(7), residuals=np.zeros(12), noise_scale=1.)
+    fake.fit_series = fit
+    monkeypatch.setitem(sys.modules, 'procure.forecast.models', fake)
+    import procure.forecast
+    monkeypatch.setattr(procure.forecast, 'models', fake, raising=False)
+    monkeypatch.setattr(importlib.metadata, 'version', lambda key: _NATIVE_TEST_VERSIONS[key])
+    req = {'schema_version':'observed-native-fit-request.v1','model':'gbm','name':'synthetic',
+           'months':list(months())[:60],'values':[1.] * 60,'expected_versions':_NATIVE_TEST_VERSIONS}
+    raw = json.dumps(req).encode(); target = io.StringIO()
+    monkeypatch.setattr(sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(raw)))
+    monkeypatch.setattr(sys, 'stdout', target)
+    assert observed_runner._native_fit_child_main() == 0
+    result = json.loads(target.getvalue())
+    assert result['status'] == status and result['request_sha256'] == hashlib.sha256(raw).hexdigest()
+    assert len(calls) == (0 if backend == 'lightgbm' else 1)
+    if throw: assert result['reason'] == 'unexpected_child_exception'
+    if backend == 'lightgbm':
+        assert result['model_fit_attempted'] is False and result['reason'] == 'unsupported_unpinned_backend'
+
+
+def test_native_host_typed_precheck_soft_and_no_backend_substitution(tmp_path, monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    fixture = native_owned_fixture(tmp_path.resolve(), monkeypatch)
+    attempts = _native_wire_fit(monkeypatch)
+    default = observed_runner.run_bounded_child
+    def wire(command, payload, *, timeout):
+        req = json.loads(payload)
+        if req['model'] == 'gbm':
+            attempts.append(req)
+            return json.dumps({'schema_version':'observed-native-fit-result.v1','status':'unavailable',
+               'request_sha256':hashlib.sha256(payload).hexdigest(),'model':'gbm','reason':'unsupported_unpinned_backend',
+               'stage':'backend_precheck','backend':'lightgbm','expected_backend':'sklearn',
+               'versions':_NATIVE_TEST_VERSIONS,'model_fit_attempted':False}).encode()
+        return default(command,payload,timeout=timeout)
+    monkeypatch.setattr(observed_runner,'run_bounded_child',wire)
+    closure = _admitted_call(fixture)
+    assert closure['status'] == 'native_fixture_complete_with_unavailable'
+    assert len(closure['unavailable_cohorts']) == 2
+    ledger = json.loads((fixture[-1]/'candidate_ledger.json').read_bytes())['entries']
+    gbm = [r for r in ledger if r['series_id'] in ('copper','aluminum') and r['model']=='gbm']
+    assert len(gbm)==12 and all(r['status']=='not_evaluated' and r['backend'] is None for r in gbm)
+    assert len([r for r in attempts if r['model']=='gbm'])==2  # one precheck per series, never retry or test-fit
+    receipt = json.loads((fixture[-1]/'attempts.json').read_bytes())
+    history = receipt['attempts'] + receipt.get('skipped', [])
+    assert len(history) == 288
+    assert len({(r['series_id'],r['model'],r['split'],r['origin']) for r in history}) == 288
+    assert all(r['status']=='skipped' and r['elapsed_seconds'] is None and r['cleanup_verified'] is False
+               and r['reason']=='unsupported_unpinned_backend' for r in receipt['skipped'])
+
+
+@pytest.mark.parametrize('kind',['copy','same_name','failure_dir','parent_mode','extra'])
+def test_native_host_fresh_verifier_refuses_copies_and_identity_changes(tmp_path,monkeypatch,kind):
+    import shutil
+    from test_forecast_observed_admission import native_owned_fixture
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch);_admitted_call(fixture)
+    output=fixture[-1]; check=output
+    if kind=='copy':
+        check=output.with_name('copy');shutil.copytree(output,check)
+    elif kind=='same_name':
+        old=output.with_name('preserved');output.rename(old);shutil.copytree(old,output)
+    elif kind=='failure_dir':(output/'FAILURE.json').mkdir()
+    elif kind=='parent_mode':output.parent.chmod(0o750)
+    else:(output/'unexpected.json').write_text('{}')
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(check,expected_run=fixture[3])
+
+
+def test_native_host_fresh_close_uncertainty_is_irreversible(tmp_path,monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch);_admitted_call(fixture)
+    original=a._NativeLifetime.close
+    def close(self):
+        original(self)
+        raise ValueError('synthetic fresh close uncertainty')
+    monkeypatch.setattr(a._NativeLifetime,'close',close)
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(fixture[-1],expected_run=fixture[3])
+    monkeypatch.setattr(a._NativeLifetime,'close',original)
+    # Restoring a local fault cannot restore a failed live run identity.
+    with pytest.raises(ValueError,match='failed'):observed_runner.verify_runner_run(fixture[-1],expected_run=fixture[3])
+    assert (fixture[-1]/'NATIVE_COMPLETE.json').exists()  # immutable earlier text is not deleted
+
+
+@pytest.mark.parametrize('fault',['timeout','late','cancel','cleanup','unexpected','backend_changed'])
+def test_native_host_terminal_child_faults_never_retry_or_seal(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch)
+    requests=_native_wire_fit(monkeypatch);original=observed_runner.run_bounded_child
+    clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    faults=[]
+    def wire(command,payload,*,timeout):
+        req=json.loads(payload)
+        if req['model']=='gbm' and req['name'].endswith(':copper') and len(req['months'])>=91:
+            faults.append(req)
+            if fault=='timeout':raise TimeoutError('synthetic timeout')
+            if fault=='cancel':raise InterruptedError('synthetic cancel')
+            if fault=='cleanup':raise observed_runner.OwnedChildCleanupError('synthetic cleanup')
+            if fault=='unexpected':raise RuntimeError('fit_unavailable')
+            if fault=='late':clock[0]+=timeout+0.1;return original(command,payload,timeout=timeout)
+            return json.dumps({'schema_version':'observed-native-fit-result.v1','status':'unavailable',
+                'request_sha256':hashlib.sha256(payload).hexdigest(),'model':'gbm','reason':'unsupported_unpinned_backend',
+                'stage':'backend_precheck','backend':'lightgbm','expected_backend':'sklearn',
+                'versions':_NATIVE_TEST_VERSIONS,'model_fit_attempted':False}).encode()
+        return original(command,payload,timeout=timeout)
+    monkeypatch.setattr(observed_runner,'run_bounded_child',wire)
+    with pytest.raises((RuntimeError,TimeoutError,InterruptedError,observed_runner.OwnedChildCleanupError)):_admitted_call(fixture)
+    assert len(faults)==1
+    assert len([r for r in requests if r['model']=='naive' and r['name'].endswith(':copper')])==48
+    assert a._native_state(fixture[3])['state']=='FAILED'
+    assert (fixture[-1]/'FAILURE.json').exists() and not (fixture[-1]/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError,match='attempted'):_admitted_call(fixture)
+    history=json.loads((fixture[-1]/'attempts.json').read_bytes())['attempts']
+    assert history[-1]['status']=='failed' and history[-1]['reason'] is not None
+    assert history[-1]['cleanup_verified'] is False  # no invented proof on exceptional return
+
+
+@pytest.mark.parametrize('stage',['zero','series','global','phase_overrun'])
+def test_native_host_budget_exact_caps_and_prelaunch_reserves(monkeypatch,stage):
+    clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0]);b=observed_runner._NativeBudget()
+    assert b.remaining('copper','naive','validation')==45
+    assert b.remaining('copper','ets','validation')==60
+    if stage=='zero':
+        b.phases['copper','naive','validation']=45
+        with pytest.raises(observed_runner._NativeBudgetUnavailable):b.remaining('copper','naive','validation')
+        assert b.attempts==[]
+    elif stage=='series':
+        b.series['copper']=900
+        with pytest.raises(TimeoutError):b.check()
+    elif stage=='global':
+        clock[0]=1766
+        assert b.remaining('copper','ets','validation')==1
+        clock[0]=1767
+        with pytest.raises(observed_runner._NativeBudgetUnavailable):b.remaining('copper','ets','validation')
+        b.begin_attempt('copper','ets','validation','2021-10',1)
+        with pytest.raises(RuntimeError):b.begin_attempt('copper','ets','validation','2021-10',1)
+        clock[0]=1800
+        with pytest.raises(TimeoutError):b.check()
+    else:
+        with pytest.raises(TimeoutError):b.charge('copper','naive','validation',48.01)
+
+
+def test_native_host_selected_soft_budget_loss_preserves_frozen_choice(tmp_path,monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    original=observed_runner._NativeBudget.remaining
+    def remaining(self,sid,model,split):
+        if split=='test' and sid=='copper' and model=='ets':raise observed_runner._NativeBudgetUnavailable('model_phase_budget_unavailable')
+        return original(self,sid,model,split)
+    monkeypatch.setattr(observed_runner._NativeBudget,'remaining',remaining)
+    # Frozen validation selector is deterministic; this witness targets its loss semantics, not math.
+    monkeypatch.setattr(observed_runner,'select_models',lambda rows:{(s,h):'ets' for s in ('copper','aluminum') for h in (1,3,6)})
+    closure=_admitted_call(fixture)
+    assert closure['status']=='native_fixture_complete_with_unavailable'
+    selection=json.loads((fixture[-1]/'selection_freeze.json').read_bytes())['selection']
+    assert selection['copper:1']=='ets'
+    assert len(closure['selected_unavailable'])==3 and all(r['model']=='ets' for r in closure['selected_unavailable'])
+    rows=json.loads((fixture[-1]/'scored_rows.json').read_bytes())['predictions']
+    assert not any(r['series_id']=='copper' and r['model']=='ets' for r in rows)
+    assert len([r for r in requests if r['name'].endswith(':copper') and r['model']=='ets'])==24
+
+
+@pytest.mark.parametrize('fault',['source','control','output','failure','finalizer','seal_close','input_close'])
+def test_native_host_phase_integrity_and_finalization_faults_are_hard(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    output=fixture[-1];original=observed_runner.run_bounded_child;clock=[0.]
+    monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    if fault=='input_close':
+        close=a._NativeLifetime.close
+        def closing(self):
+            close(self)
+            if (output/'legacy').exists():raise ValueError('synthetic input close uncertainty')
+        monkeypatch.setattr(a._NativeLifetime,'close',closing)
+    elif fault in ('finalizer','seal_close'):
+        seal=a._seal_native_run
+        def sealing(binding,token,raw):
+            if fault=='finalizer':clock[0]=1800
+            else:
+                close=a._RunDirectoryAnchor.close
+                def ambiguous(self):close(self);raise ValueError('synthetic seal close uncertainty')
+                monkeypatch.setattr(a._RunDirectoryAnchor,'close',ambiguous)
+            return seal(binding,token,raw)
+        monkeypatch.setattr(a,'_seal_native_run',sealing)
+    else:
+        def wire(command,payload,*,timeout):
+            result=original(command,payload,timeout=timeout)
+            if len(requests)==1:
+                if fault=='source':fixture[0].write_bytes(b'owned source replacement')
+                elif fault=='control':fixture[4].write_text('{}')
+                elif fault=='output':output.rename(output.with_name('preserved'));output.mkdir(mode=0o700)
+                else:(output/'FAILURE.json').symlink_to('missing')
+            return result
+        monkeypatch.setattr(observed_runner,'run_bounded_child',wire)
+    with pytest.raises((ValueError,RuntimeError,TimeoutError)):_admitted_call(fixture)
+    assert a._native_state(fixture[3])['state']=='FAILED'
+    if fault=='output':assert list(output.iterdir())==[]  # no writes to foreign replacement
+    elif fault=='failure':assert (output/'FAILURE.json').is_symlink()
+    elif fault not in ('finalizer','seal_close'):assert not (output/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(output,expected_run=fixture[3])
+
+
+@pytest.mark.parametrize('kind',['missing_h6','duplicate','cutoff','actual','foreign_context'])
+def test_native_host_prediction_freeze_requires_exact_complete_actual_free_cohort(tmp_path,monkeypatch,kind):
+    from test_forecast_observed_admission import native_owned_fixture
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    original=observed_runner._NativePhases.freeze
+    def freeze(self,split,rows):
+        if kind=='missing_h6':rows=[r for r in rows if r['horizon']!=6]
+        elif kind=='duplicate':rows.append(dict(rows[0]))
+        elif kind=='cutoff':rows[0]['training_cutoff']=rows[0]['origin']
+        elif kind=='actual':rows[0]['actual']=999.
+        else:self.context={**self.context,'run_id':'foreign'}
+        result=original(self,split,rows)
+        if kind=='foreign_context':
+            self.context={**self.context,'run_id':'owning-test-run'}
+            self.check()
+        return result
+    monkeypatch.setattr(observed_runner._NativePhases,'freeze',freeze)
+    with pytest.raises(ValueError):_admitted_call(fixture)
+    assert len(requests)==144 and not (fixture[-1]/'selection_freeze.json').exists()
+    assert not (fixture[-1]/'NATIVE_COMPLETE.json').exists()
+
+
+def test_native_host_wire_soft_outcome_fields_are_immutable():
+    raw=b'synthetic-request'
+    result={'schema_version':'observed-native-fit-result.v1','status':'unavailable',
+        'request_sha256':hashlib.sha256(raw).hexdigest(),'model':'gbm','reason':'unsupported_unpinned_backend',
+        'stage':'backend_precheck','backend':'lightgbm','expected_backend':'sklearn',
+        'versions':_NATIVE_TEST_VERSIONS,'model_fit_attempted':False}
+    with pytest.raises(observed_runner.NativeFitUnavailable) as caught:
+        observed_runner._decode_native_fit_result(json.dumps(result).encode(),request_raw=raw,
+            expected_model='gbm',expected_training_count=60,expected_versions=_NATIVE_TEST_VERSIONS)
+    error=caught.value
+    for field in ('reason','stage','backend','request_sha256'):
+        assert getattr(error,field)==result[field]
+        with pytest.raises(AttributeError):setattr(error,field,'changed')
+
+
+def test_native_host_holds_output_directory_anchor_across_child_callback(tmp_path,monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch)
+    active=set();enter=a._RunDirectoryAnchor.__enter__;leave=a._RunDirectoryAnchor.__exit__
+    def entering(self):
+        result=enter(self);active.add(self);return result
+    def leaving(self,*args):
+        try:return leave(self,*args)
+        finally:active.discard(self)
+    monkeypatch.setattr(a._RunDirectoryAnchor,'__enter__',entering)
+    monkeypatch.setattr(a._RunDirectoryAnchor,'__exit__',leaving)
+    original=observed_runner.run_bounded_child
+    def wire(command,payload,*,timeout):
+        assert active, 'native output directory anchor absent across child callback'
+        for anchor in active:anchor.check()
+        raise InterruptedError('stop after verified owned anchor')
+    monkeypatch.setattr(observed_runner,'run_bounded_child',wire)
+    with pytest.raises(InterruptedError):_admitted_call(fixture)
+    assert active==set()
+    assert not (fixture[-1]/'NATIVE_COMPLETE.json').exists()
+
+
+@pytest.mark.parametrize('fault',['shape','schema','child_exception'])
+def test_native_host_complete_baseline_does_not_mask_native_wire_fault(tmp_path,monkeypatch,fault):
+    import io,types,importlib.metadata
+    from test_forecast_observed_admission import native_owned_fixture
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    monkeypatch.setattr(observed_runner,'select_models',lambda rows:{(s,h):'gbm' for s in ('copper','aluminum') for h in (1,3,6)})
+    original=observed_runner.run_bounded_child;faults=[];child_calls=[]
+    def wire(command,payload,*,timeout):
+        req=json.loads(payload)
+        if req['model']!='gbm' or not req['name'].endswith(':copper') or len(req['months'])<90:
+            return original(command,payload,timeout=timeout)
+        faults.append(req)
+        if fault=='child_exception':
+            fake=types.ModuleType('procure.forecast.models');fake.GBM_BACKEND='sklearn';fake.clear_cache=lambda:None
+            def broken(*a,**k):child_calls.append(1);raise RuntimeError('unexpected synthetic model exception')
+            fake.fit_series=broken
+            import procure.forecast
+            with monkeypatch.context() as patch:
+                patch.setitem(sys.modules,'procure.forecast.models',fake);patch.setattr(procure.forecast,'models',fake,raising=False)
+                patch.setattr(importlib.metadata,'version',lambda k:_NATIVE_TEST_VERSIONS[k])
+                target=io.StringIO();patch.setattr(sys,'stdin',SimpleNamespace(buffer=io.BytesIO(payload)));patch.setattr(sys,'stdout',target)
+                assert observed_runner._native_fit_child_main()==0
+                response=target.getvalue().encode()
+            assert json.loads(response)['reason']=='unexpected_child_exception'
+            return response
+        response=json.loads(original(command,payload,timeout=timeout))
+        if fault=='shape':response['drift']=[[0.]]*7
+        else:response['schema_version']='unknown-native-v2'
+        return json.dumps(response).encode()
+    monkeypatch.setattr(observed_runner,'run_bounded_child',wire)
+    with pytest.raises((observed_runner.NativeChildProtocolError,observed_runner.NativeChildExecutionError)):_admitted_call(fixture)
+    assert len(faults)==1 and len([r for r in requests if r['model']=='naive' and r['name'].endswith(':copper')])==48
+    assert len(child_calls)==(1 if fault=='child_exception' else 0)
+    assert json.loads((fixture[-1]/'selection_freeze.json').read_bytes())['selection']['copper:1']=='gbm'
+    assert (fixture[-1]/'FAILURE.json').exists() and not (fixture[-1]/'NATIVE_COMPLETE.json').exists()
+
+
+def test_native_host_attempt_ceiling_and_no_repeated_key(monkeypatch):
+    monkeypatch.setattr(observed_runner.time,'monotonic',lambda:0.)
+    budget=observed_runner._NativeBudget()
+    for i in range(288):budget.begin_attempt('copper','naive','validation',str(i),1.)
+    with pytest.raises(RuntimeError):budget.begin_attempt('aluminum','gbm','test','additional',1.)
+    with pytest.raises(RuntimeError):budget.begin_attempt('copper','naive','validation','0',1.)
+    assert len(budget.attempts)==288
+
+
+def test_native_host_snapshot_entry_uncertainty_closes_owned_lifetime(tmp_path,monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch)
+    opening=a.open_root_native_snapshot;reads=[]
+    def snapshot(binding):
+        read=opening(binding);reads.append(read)
+        monkeypatch.setattr(read,'check',lambda:(_ for _ in ()).throw(ValueError('synthetic reader entry fault')))
+        return read
+    monkeypatch.setattr(a,'open_root_native_snapshot',snapshot)
+    try:
+        with pytest.raises(ValueError):_admitted_call(fixture)
+        assert len(reads)==1 and reads[0].lifetime.closed
+        assert not fixture[-1].exists()
+    finally:
+        # Owning-test cleanup only if the broken implementation leaked its FD lifetime.
+        if reads and not reads[0].lifetime.closed:reads[0].lifetime.close()
+
+
+def test_native_host_fresh_verifier_rechecks_live_seal_after_closes(tmp_path,monkeypatch):
+    from test_forecast_observed_admission import native_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=native_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch);_admitted_call(fixture)
+    closing=a._NativeLifetime.close
+    def close(self):
+        closing(self)
+        a._fail_native_run(fixture[3],a._native_state(fixture[3])['token'])
+    monkeypatch.setattr(a._NativeLifetime,'close',close)
+    with pytest.raises(ValueError,match='failed'):observed_runner.verify_runner_run(fixture[-1],expected_run=fixture[3])
+
+
+def test_agnostic_oct9_protocol_preserves_origins_and_validation_only_choice():
+    p={**observed_runner.PROTOCOL_FIELDS,'as_of':'2026-10-09','profile':'generated-fixture-test-v1',
+       'status':'INFRASTRUCTURE_ONLY_OBSERVED_EXECUTION_HOLD','observed_execution_authorized':False,
+       'protocol_sha256':'a'*64,'source_sha256':'b'*64,'snapshot_sha256':'c'*64}
+    observed_runner._check_protocol(p,'2026-10-09')
+    values={m:100.+i for i,m in enumerate(observed_runner._range('2016-09','2026-08'))}
+    windows=observed_runner.plan_common_origins({'arbitrary:grain':values},'2026-10-09',p)
+    assert windows['validation'][0]=='2021-09' and windows['validation'][-1]=='2023-08'
+    assert windows['test'][0]=='2024-03' and windows['test'][-1]=='2026-02'
+    assert len(windows['purged'])==6 and windows['latest_actual']=='2026-08'
+
+
+def _agnostic_call(fixture):
+    sources,_,_,binding,pp,mp,out=fixture
+    return observed_runner.run_offline_evaluation(pp,mp,{k:v['file']['path']for k,v in sources.items()},out,
+                                                  '2026-10-09',accepted_run=binding)
+
+
+@pytest.mark.parametrize('batch_index',[0,1,2,3])
+def test_agnostic_complete_matched_dynamic_batch_phase_seal_and_fresh_metadata_verifier(tmp_path,monkeypatch,batch_index):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,batch_index=batch_index)
+    requests=_native_wire_fit(monkeypatch)
+    events=[];attach=observed_runner._GenericPhases.attach
+    def attaching(self,split):
+        events.append((split,len(requests)))
+        return attach(self,split)
+    monkeypatch.setattr(observed_runner._GenericPhases,'attach',attaching)
+    closure=_agnostic_call(fixture);out=fixture[-1];n=len(json.loads(fixture[1])['selected_ids'])
+    assert closure['status']=='generic_fixture_complete' and len(requests)==144*n
+    assert events==[('validation',72*n),('test',144*n)]
+    ledger=json.loads((out/'candidate_ledger.json').read_bytes())['entries']
+    assert len(ledger)==18*n and all(r['status']=='scored' for r in ledger)
+    rows=json.loads((out/'scored_rows.json').read_bytes())['predictions']
+    for sid in {r['series_id']for r in rows}:
+        for split in ('validation','test'):
+            for h in (1,3,6):
+                cohorts=[{(r['origin'],r['target'],r['training_cutoff']) for r in rows if
+                    (r['series_id'],r['split'],r['model'],r['horizon'])==(sid,split,m,h)}for m in ('naive','ets','gbm')]
+                assert len(cohorts[0])==24 and cohorts[0]==cohorts[1]==cohorts[2]
+    assert all('actual' not in r for r in json.loads((out/'test_prediction_freeze.json').read_bytes())['predictions'])
+    assert len(json.loads((out/'source_receipt.json').read_bytes())['catalog'])==12
+    body=a._NativeLifetime.read;original_ids={ (os.lstat(s['file']['path']).st_dev,os.lstat(s['file']['path']).st_ino)for s in fixture[0].values()}
+    def metadata_only(self,fd,limit):
+        stat=os.fstat(fd)
+        if (stat.st_dev,stat.st_ino) in original_ids:raise AssertionError('fresh verifier read original body')
+        return body(self,fd,limit)
+    monkeypatch.setattr(a._NativeLifetime,'read',metadata_only)
+    assert observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    with pytest.raises(ValueError,match='attempted'):_agnostic_call(fixture)
+
+
+@pytest.mark.parametrize('mode',['typed_gbm','budget_test','naive_one_series'])
+def test_agnostic_unavailable_is_whole_candidate_and_independent_naive_series_advances(tmp_path,monkeypatch,mode):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    selected=json.loads(fixture[1])['selected_ids'];first=selected[0];wire=observed_runner.run_bounded_child
+    if mode=='typed_gbm':
+        def transport(command,payload,*,timeout):
+            req=json.loads(payload)
+            if req['model']=='gbm':
+                requests.append(req)
+                return json.dumps({'schema_version':'observed-native-fit-result.v1','status':'unavailable',
+                  'request_sha256':hashlib.sha256(payload).hexdigest(),'model':'gbm','reason':'unsupported_unpinned_backend',
+                  'stage':'backend_precheck','backend':'lightgbm','expected_backend':'sklearn',
+                  'versions':_NATIVE_TEST_VERSIONS,'model_fit_attempted':False}).encode()
+            return wire(command,payload,timeout=timeout)
+        monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    else:
+        remaining=observed_runner._GenericBudget.remaining
+        def budget(self,sid,model,split):
+            if sid==first and ((mode=='budget_test' and model=='ets' and split=='test') or (mode=='naive_one_series' and model=='naive')):
+                raise observed_runner._NativeBudgetUnavailable('model_phase_budget_unavailable')
+            return remaining(self,sid,model,split)
+        monkeypatch.setattr(observed_runner._GenericBudget,'remaining',budget)
+    closure=_agnostic_call(fixture);out=fixture[-1]
+    assert closure['status']=='generic_fixture_complete_with_unavailable'
+    rows=json.loads((out/'scored_rows.json').read_bytes())['predictions'];ledger=json.loads((out/'candidate_ledger.json').read_bytes())['entries']
+    if mode=='typed_gbm':
+        assert not any(r['model']=='gbm' for r in rows)
+        assert len([r for r in requests if r['model']=='gbm'])==2
+        unavailable=[r for r in ledger if r['model']=='gbm']
+        assert len(unavailable)==12
+    elif mode=='budget_test':
+        assert not any(r['series_id']==first and r['model']=='ets' for r in rows)  # validation cohort removed too
+        assert len([r for r in requests if r['name'].endswith(':'+first) and r['model']=='ets'])==24
+        unavailable=[r for r in ledger if r['series_id']==first and r['model']=='ets']
+        assert len(unavailable)==6
+    else:
+        assert not any(r['series_id']==first for r in rows) and {r['series_id']for r in rows}=={selected[1]}
+        assert not any(r['name'].endswith(':'+first) for r in requests)
+        unavailable=[r for r in ledger if r['series_id']==first];assert len(unavailable)==18
+    assert all(r['backend'] is None and r['metrics'] is None and r['status']=='not_evaluated' for r in unavailable)
+    history=json.loads((out/'attempts.json').read_bytes());assert len(history['attempts'])+len(history['skipped'])==288
+    assert all(r['status']=='skipped' and r['elapsed_seconds'] is None for r in history['skipped'])
+
+
+@pytest.mark.parametrize('fault',['malformed','generic_error','timeout','late','cleanup','backend_change','source','foreign_output','failure_marker','phase','close','finalizer'])
+def test_agnostic_hard_fault_fails_entire_batch_without_retry_or_marker_deletion(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    out=fixture[-1];wire=observed_runner.run_bounded_child;clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    if fault=='phase':
+        freeze=observed_runner._GenericPhases.freeze
+        def changed(self,split,rows):
+            rows[0]['training_cutoff']=rows[0]['origin'];return freeze(self,split,rows)
+        monkeypatch.setattr(observed_runner._GenericPhases,'freeze',changed)
+    elif fault in ('close','finalizer'):
+        seal=a._seal_native_run
+        def sealing(binding,token,raw):
+            if fault=='finalizer':clock[0]=1800.
+            else:
+                close=a._RunDirectoryAnchor.close
+                def ambiguous(self):close(self);raise ValueError('owned ambiguous seal close')
+                monkeypatch.setattr(a._RunDirectoryAnchor,'close',ambiguous)
+            return seal(binding,token,raw)
+        monkeypatch.setattr(a,'_seal_native_run',sealing)
+    else:
+        def transport(command,payload,*,timeout):
+            if fault=='generic_error':raise RuntimeError('fit_unavailable')
+            if fault=='timeout':raise TimeoutError('owned timeout')
+            if fault=='cleanup':raise observed_runner.OwnedChildCleanupError('owned cleanup unverified')
+            response=wire(command,payload,timeout=timeout)
+            if fault=='late':clock[0]+=timeout+1
+            elif fault=='source':Path(fixture[0]['bis']['file']['path']).write_bytes(b'owned source drift')
+            elif fault=='foreign_output':out.rename(out.with_name('preserved'));out.mkdir(mode=0o700)
+            elif fault=='failure_marker':(out/'FAILURE.json').symlink_to('absent')
+            elif fault=='malformed':response=b'{"status":"unavailable","reason":"fit_unavailable"}'
+            elif fault=='backend_change':
+                doc=json.loads(response);doc['backend']='lightgbm';response=json.dumps(doc).encode()
+            return response
+        monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    with pytest.raises((ValueError,RuntimeError,TimeoutError,OSError)):_agnostic_call(fixture)
+    assert a._native_state(fixture[3])['state']=='FAILED'
+    if fault=='foreign_output':assert list(out.iterdir())==[]
+    elif fault=='failure_marker':assert (out/'FAILURE.json').is_symlink()
+    else:assert (out/'FAILURE.json').exists()
+    if fault not in ('close','finalizer'):assert not (out/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError):_agnostic_call(fixture)
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    if fault not in ('phase','close','finalizer'):assert len(requests)<=1
+
+
+@pytest.mark.parametrize('fault',['source','catalog','extra','failure','close','seal_after_close'])
+def test_agnostic_fresh_verifier_fault_irreversibly_revokes_live_seal(tmp_path,monkeypatch,fault):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    from procure.evaluation import observed_admission as a
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);_native_wire_fit(monkeypatch);_agnostic_call(fixture);out=fixture[-1]
+    if fault in ('source','catalog'):
+        c=json.loads(fixture[1]);p=Path(c['sources']['bis']['file']['path'] if fault=='source' else c['catalog']['path'])
+        p.write_bytes(p.read_bytes()+b' ')
+    elif fault=='extra':(out/'unexpected').write_bytes(b'owned extra')
+    elif fault=='failure':(out/'FAILURE.json').mkdir()
+    else:
+        close=a._NativeLifetime.close
+        def changed(self):
+            close(self)
+            if fault=='close':raise ValueError('owned fresh close uncertainty')
+            a._fail_native_run(fixture[3],a._native_state(fixture[3])['token'])
+        monkeypatch.setattr(a._NativeLifetime,'close',changed)
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+    assert a._native_state(fixture[3])['state']=='FAILED' and (out/'NATIVE_COMPLETE.json').exists()
+    with pytest.raises(ValueError):observed_runner.verify_runner_run(out,expected_run=fixture[3])
+
+
+def test_agnostic_budget_enforces_selected_scope_unique144_cells_and_reserves(monkeypatch):
+    clock=[0.];monkeypatch.setattr(observed_runner.time,'monotonic',lambda:clock[0])
+    b=observed_runner._GenericBudget(['WB:arbitrary'])
+    assert b.remaining('WB:arbitrary','naive','validation')==45
+    assert b.remaining('WB:arbitrary','ets','validation')==60
+    for m in ('naive','ets','gbm'):
+        for split in ('validation','test'):
+            for o in observed_runner._range(observed_runner.MONTHS[split+'_start'],observed_runner.MONTHS[split+'_end']):
+                b.begin_attempt('WB:arbitrary',m,split,o,1.)
+    assert len(b.attempts)==144
+    with pytest.raises(RuntimeError):b.begin_attempt('WB:arbitrary','naive','validation','2021-09',1.)
+    with pytest.raises(RuntimeError):b.begin_attempt('foreign','naive','validation','2021-09',1.)
+    clock[0]=1767.
+    with pytest.raises(observed_runner._NativeBudgetUnavailable):b.remaining('WB:arbitrary','ets','validation')
+    clock[0]=1800.
+    with pytest.raises(TimeoutError):b.check()
+
+
+@pytest.mark.parametrize('mode',['weak_test','selected_unavailable'])
+def test_agnostic_validation_winner_is_frozen_even_when_test_is_weak_or_unavailable(tmp_path,monkeypatch,mode):
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch);requests=_native_wire_fit(monkeypatch)
+    wire=observed_runner.run_bounded_child;selected=json.loads(fixture[1])['selected_ids'];first=selected[0]
+    def transport(command,payload,*,timeout):
+        response=json.loads(wire(command,payload,timeout=timeout));req=json.loads(payload)
+        if req['model']=='ets':
+            is_test=len(req['months'])>=90
+            last=math.exp(req['values'][-1])
+            response['drift']=[-.02 if is_test and mode=='weak_test' else math.log((last+.01)/last)]*7
+        return json.dumps(response).encode()
+    monkeypatch.setattr(observed_runner,'run_bounded_child',transport)
+    if mode=='selected_unavailable':
+        remaining=observed_runner._GenericBudget.remaining
+        def budget(self,sid,model,split):
+            if sid==first and model=='ets' and split=='test':raise observed_runner._NativeBudgetUnavailable('model_phase_budget_unavailable')
+            return remaining(self,sid,model,split)
+        monkeypatch.setattr(observed_runner._GenericBudget,'remaining',budget)
+    closure=_agnostic_call(fixture);out=fixture[-1]
+    frozen=json.loads((out/'selection_freeze.json').read_bytes())
+    assert all(frozen['selection'][f'{sid}:{h}']=='ets' for sid in selected for h in (1,3,6))
+    assert json.loads((out/'legacy/selection.json').read_bytes())==frozen['selection']
+    if mode=='selected_unavailable':
+        assert closure['selected_unavailable']==[{'series_id':first,'horizon':h,'model':'ets','reason':'model_phase_budget_unavailable'}for h in (1,3,6)]
+    else:
+        rows=json.loads((out/'scored_rows.json').read_bytes())['predictions']
+        naive=next(r for r in rows if r['series_id']==first and r['split']=='test' and r['model']=='naive' and r['horizon']==1)
+        ets=next(r for r in rows if r['series_id']==first and r['split']=='test' and r['model']=='ets' and r['horizon']==1)
+        assert abs(ets['actual']-ets['p50'])>abs(naive['actual']-naive['p50'])
+
+
+def test_agnostic_constant_currency_zero_baseline_is_undefined_not_positive_skill(tmp_path,monkeypatch):
+    import csv,io
+    from test_forecast_series_catalog import generated_bis
+    from test_forecast_observed_admission import agnostic_owned_fixture
+    rows=list(csv.reader(io.StringIO(generated_bis().decode())))
+    for r in rows[1:]:r[5]='1' if r[2]=='USD' else '2'
+    out=io.StringIO();csv.writer(out).writerows(rows)
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,bis_raw=out.getvalue().encode());_native_wire_fit(monkeypatch)
+    _agnostic_call(fixture)
+    metrics=list(csv.DictReader((fixture[-1]/'legacy/scorecard/metrics.csv').open()))
+    test=[r for r in metrics if r['split']=='test']
+    assert test and all(float(r['mae'])==0 for r in test)
+    challengers=[r for r in test if r['model']!='naive']
+    assert challengers and all(r['skill'] in ('','None') and r['skill_reason']=='zero_naive_error' for r in challengers)

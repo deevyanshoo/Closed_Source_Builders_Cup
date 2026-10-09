@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,6 +50,28 @@ def test_unknown_status_does_not_replace_existing_export(destination, monkeypatc
     assert export.main() != 0
     assert destination.read_bytes() == b"existing verified export\n"
     assert list(destination.parent.iterdir()) == [destination]
+
+
+def test_malformed_replay_does_not_replace_existing_export(destination, monkeypatch):
+    content = copy.deepcopy(export.samples.load_replay_samples())
+    content["samples"][0]["record"].pop("evidence")
+    monkeypatch.setattr(export.samples, "load_replay_samples", lambda: content)
+    monkeypatch.setattr(export.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout="testrev\n"))
+
+    assert export.main() != 0
+    assert destination.read_bytes() == b"existing verified export\n"
+    assert list(destination.parent.iterdir()) == [destination]
+
+
+def test_intended_cutoff_rejection_remains_exported(destination, monkeypatch):
+    import json
+
+    monkeypatch.setattr(export.subprocess, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout="testrev\n"))
+    assert export.main() == 0
+    result = json.loads(destination.read_text())
+    assert (result["replay"]["results"]["eta-after-cutoff"]["status"],
+            result["replay"]["results"]["eta-after-cutoff"]["reasons"]) == (
+        "error", ["event_after_as_of"])
 
 
 def test_replace_failure_keeps_prior_bytes_and_removes_temporary_file(destination, monkeypatch, capsys):

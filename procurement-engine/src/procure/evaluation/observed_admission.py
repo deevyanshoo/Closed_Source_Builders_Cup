@@ -356,7 +356,112 @@ def _fixture_completion_identity(binding):
     return identities
 
 
-def _zip_guard(raw):
+def _generic_worksheet_targets(roots, admitted, members):
+    """Close the gap between ZIP shape checks and openpyxl's linked targets.
+
+    This generic-only profile supports one canonical XLSX workbook with direct
+    worksheet XML targets. Reader normalization, fallback and ambiguous links
+    are refused, not approximated. Internal table relationships remain metadata.
+    """
+    types_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    sheet_ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    doc_rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    workbook_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
+    worksheet_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+    workbook_types = {workbook_type,
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
+                      "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
+                      "application/vnd.ms-excel.template.macroEnabled.main+xml"}
+    required = {"[Content_Types].xml": "{" + types_ns + "}Types",
+                "xl/workbook.xml": "{" + sheet_ns + "}workbook",
+                "xl/_rels/workbook.xml.rels": "{" + rels_ns + "}Relationships"}
+    if any(name not in roots or roots[name].tag != tag for name, tag in required.items()):
+        raise ValueError("generic workbook canonical control parts required")
+
+    def text(value):
+        if not isinstance(value, str) or not 0 < len(value) <= 512 or any(ord(c) < 32 for c in value):
+            raise ValueError("generic workbook metadata field bound")
+        return value
+
+    types = roots["[Content_Types].xml"]
+    if len(types) > 1024:
+        raise ValueError("generic workbook content-type bound")
+    overrides, defaults = {}, set()
+    for node in types:
+        content_type = text(node.get("ContentType"))
+        if node.tag == "{" + types_ns + "}Override":
+            part = text(node.get("PartName"))
+            # Reject aliases/URI fragments; no normalized override can hide a
+            # second workbook part from the reader's ordered type selection.
+            if (not part.startswith("/") or part.startswith("//") or
+                    any(c in part for c in ("\\", "%", "?", "#", ":")) or
+                    any(p in ("", ".", "..") for p in part[1:].split("/")) or part in overrides):
+                raise ValueError("generic workbook noncanonical/ambiguous content type")
+            overrides[part] = content_type
+        elif node.tag == "{" + types_ns + "}Default":
+            extension = text(node.get("Extension"))
+            if extension in defaults or content_type in workbook_types:
+                raise ValueError("generic workbook content-type fallback/ambiguity")
+            defaults.add(extension)
+        else:
+            raise ValueError("generic workbook unsupported content-type metadata")
+    books = [(part, kind) for part, kind in overrides.items() if kind in workbook_types]
+    if books != [("/xl/workbook.xml", workbook_type)]:
+        raise ValueError("generic workbook unsupported or ambiguous workbook part")
+
+    rels = roots["xl/_rels/workbook.xml.rels"]
+    if len(rels) > 1024:
+        raise ValueError("generic workbook relationship bound")
+    links = {}
+    for node in rels:
+        if node.tag != "{" + rels_ns + "}Relationship":
+            raise ValueError("generic workbook unsupported relationship metadata")
+        rid = text(node.get("Id"))
+        if rid in links:
+            raise ValueError("generic workbook duplicate relationship ID")
+        text(node.get("Type"));text(node.get("Target"))
+        links[rid] = node
+
+    # Serialisable.from_tree uses local names and the last sheets container;
+    # inspect all matching local names, then require the exact namespace/one.
+    book = roots["xl/workbook.xml"]
+    groups = [n for n in book if n.tag.rsplit("}", 1)[-1] == "sheets"]
+    if len(groups) != 1 or groups[0].tag != "{" + sheet_ns + "}sheets" or not 0 < len(groups[0]) <= 1024:
+        raise ValueError("generic workbook missing/ambiguous sheets")
+    used_ids, names, targets, sheet_ids = set(), set(), set(), set()
+    for sheet in groups[0]:
+        if sheet.tag != "{" + sheet_ns + "}sheet":
+            raise ValueError("generic workbook unsupported sheet metadata")
+        rid, name, sheet_id = text(sheet.get("{" + doc_rel_ns + "}id")), text(sheet.get("name")), text(sheet.get("sheetId"))
+        if (rid not in links or rid in used_ids or name.casefold() in names or sheet_id in sheet_ids
+                or re.fullmatch(r"[1-9][0-9]*", sheet_id) is None):
+            raise ValueError("generic workbook missing/ambiguous sheet link")
+        used_ids.add(rid);names.add(name.casefold());sheet_ids.add(sheet_id)
+        link = links[rid]
+        # The reader treats any non-chartsheet referenced relationship as a
+        # worksheet; require the standard type instead of trusting its suffix.
+        if link.get("Type") != doc_rel_ns + "/worksheet" or link.get("TargetMode") not in (None, "Internal"):
+            raise ValueError("worksheet target relationship type/mode unsupported")
+        target = link.get("Target")
+        if re.fullmatch(r"(?:/xl/)?worksheets/[A-Za-z0-9_-]+\.xml", target) is None:
+            raise ValueError("worksheet target unsupported/noncanonical")
+        resolved = target[1:] if target.startswith("/") else "xl/" + target
+        if resolved in targets or resolved not in members or resolved not in admitted:
+            raise ValueError("worksheet target missing/ambiguous or shape admission absent")
+        if overrides.get("/" + resolved) != worksheet_type:
+            raise ValueError("worksheet target content type unsupported or absent")
+        targets.add(resolved)
+
+
+def _zip_guard(raw, *, worksheet_policy="legacy"):
+    # An explicit generic policy admits formatting tails, never more data rows.
+    # The no-argument narrow/legacy limits and parser remain unchanged.
+    if worksheet_policy not in ("legacy", "generic_style_tail_v1"):
+        raise ValueError("worksheet policy invalid")
+    generic = worksheet_policy == "generic_style_tail_v1"
+    physical_rows = 2048 if generic else 1006
+    control_roots, admitted = {}, set()
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         members = archive.infolist()
         if len(members) > 1024 or len({m.filename for m in members}) != len(members):
@@ -387,29 +492,77 @@ def _zip_guard(raw):
                 if b"<!DOCTYPE" in markup or b"<!ENTITY" in markup:
                     raise ValueError("XML DTD/entity forbidden")
                 root = ElementTree.fromstring(data)
-                if member.filename.startswith("xl/worksheets/"):
+                if generic and member.filename in {"[Content_Types].xml", "xl/workbook.xml", "xl/_rels/workbook.xml.rels"}:
+                    control_roots[member.filename] = root
+                # Generic shape checks apply to direct sheets, not table .rels.
+                # All XML/rels are still parsed and security-checked below.
+                if member.filename.startswith("xl/worksheets/") and (not generic or (
+                        path.parent == PurePosixPath("xl/worksheets") and path.suffix == ".xml")):
                     xml_rows = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "row"]
                     cells = [node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "c"]
                     row_ids = [int(node.attrib.get("r", "0")) for node in xml_rows]
-                    if (len(xml_rows) > 1006 or len(cells) > 100000 or row_ids != sorted(set(row_ids))
-                            or any(index < 1 or index > 1006 for index in row_ids)):
+                    if (len(xml_rows) > physical_rows or len(cells) > 100000 or row_ids != sorted(set(row_ids))
+                            or any(index < 1 or index > physical_rows for index in row_ids)):
                         raise ValueError("actual XML row/cell expansion bound")
+                    parents = {child: parent for parent in root.iter() for child in parent} if generic else {}
+                    row_nodes = set(xml_rows) if generic else set()
+                    if generic and any(re.fullmatch(r"[1-9][0-9]*", node.attrib.get("r", "")) is None for node in xml_rows):
+                        raise ValueError("actual XML invalid row coordinate")
                     seen, max_row, max_col = set(), 0, 0
+                    min_row, min_col = physical_rows + 1, 100001
                     for cell in cells:
                         ref = cell.attrib.get("r", "")
                         matched = re.fullmatch(r"([A-Z]+)([1-9][0-9]*)", ref)
                         if matched is None or ref in seen:
                             raise ValueError("actual XML duplicate/invalid cell")
                         seen.add(ref)
+                        if generic:
+                            parent = parents.get(cell)
+                            if parent not in row_nodes or parent.attrib.get("r") != matched[2]:
+                                raise ValueError("actual XML cell/row coordinate mismatch")
+                            if int(matched[2]) > 1006 and (
+                                    cell.attrib.get("t") == "e" or any(
+                                        node.tag.rsplit("}", 1)[-1] == "f" or (
+                                            bool(node.text) and (node.tag.rsplit("}", 1)[-1] in {"v", "t"}
+                                                                 or bool(node.text.strip())))
+                                        for node in cell.iter())):
+                                raise ValueError("actual XML meaningful tail cell beyond1006")
                         col = 0
                         for letter in matched[1]:
                             col = col * 26 + ord(letter) - 64
+                            if generic and col > 100000:
+                                raise ValueError("actual XML cell expansion bound")
+                        min_col, min_row = min(min_col, col), min(min_row, int(matched[2]))
                         max_col, max_row = max(max_col, col), max(max_row, int(matched[2]))
-                    if max_row > 1006 or max_row * max_col > 100000:
+                    if max_row > physical_rows or max_row * max_col > 100000:
                         raise ValueError("actual XML cell expansion bound")
+                    if generic:
+                        dimensions = [n for n in root if n.tag.rsplit("}", 1)[-1] == "dimension"]
+                        if len(dimensions) != 1:
+                            raise ValueError("actual XML dimension required")
+                        extent = re.fullmatch(r"([A-Z]{1,3})([1-9][0-9]{0,3})(?::([A-Z]{1,3})([1-9][0-9]{0,3}))?",
+                                              dimensions[0].attrib.get("ref", ""))
+                        if extent is None:
+                            raise ValueError("actual XML dimension invalid")
+                        def column(label):
+                            result = 0
+                            for letter in label:result = result * 26 + ord(letter) - 64
+                            return result
+                        first_col, first_row = column(extent[1]), int(extent[2])
+                        last_col, last_row = column(extent[3] or extent[1]), int(extent[4] or extent[2])
+                        if (last_row > physical_rows or last_row * last_col > 100000
+                                or first_row > last_row or first_col > last_col
+                                or max_row > last_row or max_col > last_col
+                                or (row_ids and (min(row_ids) < first_row or max(row_ids) > last_row))
+                                or (cells and (min_row < first_row or min_col < first_col))):
+                            raise ValueError("actual XML dimension/expansion mismatch")
+                    if generic:
+                        admitted.add(member.filename)
                 if member.filename.endswith(".rels") and any(
                         node.attrib.get("TargetMode", "").lower() == "external" for node in root):
                     raise ValueError("external workbook relationship")
+        if generic:
+            _generic_worksheet_targets(control_roots, admitted, {m.filename for m in members})
 
 
 def _native(cell):

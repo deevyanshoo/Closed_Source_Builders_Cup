@@ -24,7 +24,8 @@ WINDOW = tuple(f'{n // 12:04d}-{n % 12 + 1:02d}' for n in range(2016*12+8, 2026*
 BIS_REQUIRED = frozenset(('FREQ','REF_AREA','CURRENCY','COLLECTION','TIME_PERIOD','OBS_VALUE','OBS_STATUS','UNIT_MULT'))
 # SDMX attributes have explicit bounded support, not an arbitrary field bag.
 BIS_OPTIONAL = frozenset(('STRUCTURE','STRUCTURE_ID','ACTION','OBS_CONF','DECIMALS','TITLE',
-                          'TITLE_COMPL','SOURCE','COMMENT','BREAKS','UNIT','TIME_FORMAT'))
+                          'TITLE_COMPL','SOURCE','COMMENT','BREAKS','UNIT','TIME_FORMAT',
+                          'DATAFLOW','AVAILABILITY','OBS_PRE_BREAK'))
 
 
 def canonical_catalog(records):
@@ -134,14 +135,14 @@ def _wb(raw, source, profile):
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
     if len(raw)>MAX_WB_BYTES:raise ValueError('WB source byte bound')
-    _zip_guard(raw)
+    _zip_guard(raw,worksheet_policy='generic_style_tail_v1')
     stream=io.BytesIO(raw); book=load_workbook(stream,read_only=True,data_only=False,keep_links=False)
     records,values=[],{}
     try:
         for sheet_name,headers,start in [('Monthly Prices',(5,),7),('Monthly Indices',(6,7,8),9)]:
             if sheet_name not in book.sheetnames:raise ValueError('WB required sheet absent')
             sheet=book[sheet_name]
-            if not sheet.max_row or not sheet.max_column or sheet.max_row*sheet.max_column>100000 or sheet.max_row>1006:
+            if not sheet.max_row or not sheet.max_column or sheet.max_row*sheet.max_column>100000 or sheet.max_row>2048:
                 raise ValueError('WB sheet expansion bound')
             # Iterate once; native same-byte book, bounded by ZIP and sheet limits.
             rows=list(sheet.iter_rows())
@@ -220,7 +221,28 @@ def _bis(raw,source,profile,dispositions):
         if re.fullmatch('[A-Z0-9]{2,8}',area) is None or re.fullmatch('[A-Z]{3}',code) is None:
             raise ValueError('BIS area/currency code invalid')
         month=_month(r['TIME_PERIOD'])
-        g=grouped.setdefault((area,code),{'obs':{},'states':{},'duplicates':0,'flags':set(),'regime':set()})
+        g=grouped.setdefault((area,code),{'obs':{},'states':{},'duplicates':0,'flags':set(),'regime':set(),
+                                        'source_attrs':{},'prebreak':set(),'public':True})
+        # Official source attributes are checked even on duplicate observations.
+        # Missing optional columns retain the generated legacy schema path.
+        if 'DATAFLOW' in r and r['DATAFLOW'] != 'BIS:WS_XRU(1.0)':
+            raise ValueError('BIS DATAFLOW mismatch')
+        for key in ('DATAFLOW','AVAILABILITY'):
+            if key in r:g['source_attrs'].setdefault(key,set()).add(r[key])
+        if 'AVAILABILITY' in r and r['AVAILABILITY'] != 'A':g['public']=False
+        token=r.get('OBS_PRE_BREAK','')
+        if token:
+            if re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?',token) is None:
+                raise ValueError('BIS OBS_PRE_BREAK numeric token invalid')
+            try:
+                prebreak=Decimal(token)
+                number=float(prebreak)
+                if not prebreak.is_finite() or prebreak<=0 or not math.isfinite(number) or number<=0:
+                    raise ValueError('BIS OBS_PRE_BREAK nonpositive/nonfinite')
+            except (InvalidOperation,OverflowError) as exc:
+                raise ValueError('BIS OBS_PRE_BREAK numeric token invalid') from exc
+            g['prebreak'].add((month,hashlib.sha256(token.encode('utf-8')).hexdigest()))
+            g['flags'].add('prebreak_observation_review_required')
         if month in g['states']:
             g['duplicates']+=1;g['states'][month]='duplicate';g['obs'].pop(month,None)
             continue
@@ -246,7 +268,13 @@ def _bis(raw,source,profile,dispositions):
                   'regime_evidence':[{'attribute':k,'value':v} for k,v in sorted(g['regime'])],
                   'area_currency_codes':sorted(area_codes[area]),'csv_header':header}
         from .observed_admission import canonical
-        regime_id=hashlib.sha256(canonical({k:evidence[k] for k in ('regime_evidence','area_currency_codes')})).hexdigest()
+        if g['source_attrs']:
+            evidence['source_attributes']={k:sorted(v) for k,v in sorted(g['source_attrs'].items())}
+        regime_namespace={k:evidence[k] for k in ('regime_evidence','area_currency_codes')}
+        if g['prebreak']:
+            evidence['prebreak_observations']=[{'month':m,'token_sha256':d} for m,d in sorted(g['prebreak'])]
+            regime_namespace['prebreak_observations']=evidence['prebreak_observations']
+        regime_id=hashlib.sha256(canonical(regime_namespace)).hexdigest()
         sid=f'BIS:bis-xru-monthly-average-v1:{area}:{code}:A:R{regime_id}'
         rec=_base(source,profile,sid,code+' / '+area,'fx','exchange_rate',code+'/USD',code,
                   {'REF_AREA':area,'CURRENCY':code,'FREQ':'M','COLLECTION':'A'},evidence)
@@ -254,6 +282,7 @@ def _bis(raw,source,profile,dispositions):
         rec['regime_id']=regime_id
         rec['regime_decision']='no flagged break in parsed metadata; historical authenticity not inferred'
         reason='duplicate_source_key' if g['duplicates'] else None
+        if not g['public']:reason=reason or 'source_availability_not_public'
         if flags:
             disposition=dispositions.get(sid)
             evidence_sha=hashlib.sha256(canonical(evidence)).hexdigest()

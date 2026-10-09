@@ -634,3 +634,32 @@ def test_agnostic_large_bis_same_owned_fd_hash_parse_and_close(tmp_path,monkeypa
         assert read.receipt['catalog_status']
     assert parsed==[(pin['bytes'],pin['sha256'])] and read.lifetime.closed
     admission._fail_native_run(fixture[3],token) # test-owned terminal cleanup, no completion minted
+
+
+def test_source_shape_generic_policy_does_not_relax_default_zip_guard():
+    from test_forecast_series_catalog import shape_wb
+    raw=shape_wb()
+    with pytest.raises(ValueError,match='row/cell'):admission._zip_guard(raw)
+    admission._zip_guard(raw,worksheet_policy='generic_style_tail_v1')
+    with pytest.raises(ValueError,match='policy'):
+        admission._zip_guard(raw,worksheet_policy='arbitrary_bounds')
+
+
+def test_source_shape_issued_reader_style_tail_and_official_header_use_same_owned_fds(tmp_path,monkeypatch):
+    from test_forecast_series_catalog import shape_wb,shape_bis
+    from procure.evaluation import series_catalog as catalog
+    wb,bis=shape_wb(),shape_bis()
+    fixture=agnostic_owned_fixture(tmp_path.resolve(),monkeypatch,wb_raw=wb,bis_raw=bis)
+    parsed=[];real=catalog.build_catalog
+    def parse(wb_raw,bis_raw,**kwargs):
+        parsed.append((len(wb_raw),admission.digest(wb_raw),len(bis_raw),admission.digest(bis_raw)))
+        return real(wb_raw,bis_raw,**kwargs)
+    monkeypatch.setattr(catalog,'build_catalog',parse)
+    binding=fixture[3];token=admission._begin_native_run(binding)
+    try:
+        with admission.open_root_generic_snapshot(binding) as read:
+            assert len(read.series)==2 and all(len(v)==120 for v in read.series.values())
+            assert read.receipt['catalog_status']
+        assert read.lifetime.closed
+        assert parsed==[(len(wb),admission.digest(wb),len(bis),admission.digest(bis))]
+    finally:admission._fail_native_run(binding,token)  # test terminal cleanup, no completion

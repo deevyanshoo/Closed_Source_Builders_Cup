@@ -1,0 +1,22 @@
+{
+  "synthetic": true,
+  "notice": "SYNTHETIC holiday table for testing working-day lead times. Every date and name is invented; none is a real public holiday, and the Saturday and Sunday weekend is a fixture assumption, not a statement about any country.",
+  "fixture_version": 1,
+  "provider_id": "synthetic-holiday-table",
+  "years": [2026],
+  "countries": {
+    "IN": {
+      "weekend": ["saturday", "sunday"],
+      "holidays": [
+        {"date": "2026-09-29", "name": "Synthetic closure day IN-B"},
+        {"date": "2026-10-10", "name": "Synthetic closure day IN-C"},
+        {"date": "2026-10-14", "name": "Synthetic closure day IN-A"}
+      ]
+    },
+    "CN": {"weekend": ["saturday", "sunday"], "holidays": [{"date": "2026-10-05", "name": "Synthetic closure day CN-A"}]},
+    "CL": {"weekend": ["saturday", "sunday"], "holidays": [{"date": "2026-09-22", "name": "Synthetic closure day CL-A"}]},
+    "AE": {"weekend": ["saturday", "sunday"], "holidays": [{"date": "2026-10-12", "name": "Synthetic closure day AE-A"}]},
+    "BR": {"weekend": ["saturday", "sunday"], "holidays": [{"date": "2026-10-13", "name": "Synthetic closure day BR-A"}]},
+    "ZA": {"weekend": ["saturday", "sunday"], "holidays": [{"date": "2026-09-24", "name": "Synthetic closure day ZA-A"}]}
+  }
+}

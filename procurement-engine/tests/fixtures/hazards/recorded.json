@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "notice": "SYNTHETIC recorded responses for offline hazard and weather tests. Bodies are hand-written in the public Open-Meteo and GDACS response shapes (generate_payloads.py); no provider was called. Retrieval times are invented.",
+  "as_of": "2026-10-08T12:00:00Z",
+  "responses": [
+    {"provider": "open-meteo", "location": "INNSA", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_innsa.json", "case": "heavy rain above threshold"},
+    {"provider": "open-meteo", "location": "INNSA", "http_status": 200, "retrieved_at": "2026-10-08T10:00:00Z", "file": "open_meteo_innsa.json", "case": "repeated fetch, same payload"},
+    {"provider": "open-meteo", "location": "INNSA", "http_status": 200, "retrieved_at": "2026-10-08T13:00:00Z", "file": "open_meteo_innsa.json", "case": "retrieved after as_of"},
+    {"provider": "open-meteo", "location": "INMAA", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_inmaa.json", "case": "below every threshold"},
+    {"provider": "open-meteo", "location": "AEJEA", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_aejea.json", "case": "gaps in precipitation"},
+    {"provider": "open-meteo", "location": "INMUN", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_inmun.json", "case": "answer for a different grid point"},
+    {"provider": "open-meteo", "location": "INPRT", "http_status": 200, "retrieved_at": "2026-10-07T00:00:00Z", "file": "open_meteo_inprt.json", "case": "gale forecast retrieved too long ago"},
+    {"provider": "open-meteo", "location": "CLVAP", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_clvap_malformed.json", "case": "malformed body"},
+    {"provider": "open-meteo", "location": "BRTUB", "http_status": 400, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_error.json", "case": "provider error"},
+    {"provider": "open-meteo", "location": "CNSHA", "http_status": 429, "retrieved_at": "2026-10-08T09:00:00Z", "file": null, "case": "rate limited"},
+    {"provider": "gdacs", "location": null, "http_status": 200, "retrieved_at": "2026-10-08T08:00:00Z", "file": "gdacs_events.json", "case": "event list"}
+  ]
+}

@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, OffersError } from './offers';
+import { NavLink } from 'react-router-dom';
+import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
+import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
 import './offers.css';
 
@@ -19,6 +20,19 @@ function Quote({ text, quote }: { text: string; quote: string }) {
   const at = quote ? text.toLowerCase().indexOf(quote.toLowerCase()) : -1;
   if (at < 0) return <>{text}</>;
   return <>{text.slice(0, at)}<mark>{text.slice(at, at + quote.length)}</mark>{text.slice(at + quote.length)}</>;
+}
+
+
+// Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
+const WORKSPACE_PAGES: [string, string][] = [
+  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
+  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
+];
+
+function WorkspaceNav() {
+  return <nav className="workspace-nav" aria-label="Workspace pages">
+    {WORKSPACE_PAGES.map(([to, label]) => <NavLink key={to} className="recovery-back" to={to} end>{label}</NavLink>)}
+  </nav>;
 }
 
 export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean }) {
@@ -77,6 +91,21 @@ export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSu
 
 function Reasons({ reasons, title }: { reasons: BlockingReason[]; title: string }) {
   return <div className="notice notice-error offers-reasons" role="alert"><strong>{title}</strong><ul>{reasons.map(r => <li key={`${r.code}:${r.field}`}>{fieldLabel(r.field)}: {statusLabel(r.code.replace('field_', ''))}</li>)}</ul></div>;
+}
+
+export function FieldName({ name, field, selected, onSelect }: { name: string; field: Field; selected: boolean; onSelect: (name: string) => void }) {
+  return <button type="button" className="offers-field-button" aria-pressed={selected} onClick={event => { event.stopPropagation(); onSelect(name); }}>
+    <span className="sr-only">Show source for </span>{fieldLabel(name)}{field.critical && <small>critical</small>}
+  </button>;
+}
+
+export function EditButton({ name, onEdit }: { name: string; onEdit: (name: string) => void }) {
+  return <button className="text-button" type="button" aria-label={`Edit ${fieldLabel(name)}`} onClick={event => { event.stopPropagation(); onEdit(name); }}>Edit</button>;
+}
+
+export function FieldStatus({ field }: { field: Field }) {
+  return <><span className="offers-chip" data-status={field.status}><span className="sr-only">Field status: </span>{field.status}</span>
+    {field.source === 'user' && <small>reviewer entry</small>}</>;
 }
 
 export function OffersPage() {
@@ -138,11 +167,11 @@ export function OffersPage() {
 
   const evidenceLocators = new Set(selected && offer ? fieldEntries(offer).find(([n]) => n === selected)?.[1].evidence.map(e => e.locator) : []);
 
-  return <main className="shell">
-    <header className="masthead">
+  return <main className="shell offers-shell">
+    <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot">●</span></div>
-      <Link className="recovery-back" to="/planning">Planning</Link>
+      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
+      <WorkspaceNav />
     </header>
 
     <section className="recovery-intro">
@@ -197,20 +226,20 @@ export function OffersPage() {
           <caption>Extracted fields and their source</caption>
           <thead><tr><th>Field</th><th>Value</th><th>Status</th><th>Source text</th><th></th></tr></thead>
           <tbody>{fieldEntries(offer).map(([name, field]) => <tr key={name} className={selected === name ? 'offers-selected' : ''} onClick={() => setSelected(name)}>
-            <th scope="row">{fieldLabel(name)}{field.critical && <small>critical</small>}</th>
+            <th scope="row"><FieldName name={name} field={field} selected={selected === name} onSelect={setSelected} /></th>
             <td>{editing === name
               ? <Editor field={field} busy={busy} onCancel={() => setEditing(null)} onSubmit={value => run(() => adapter.correct(offer.offer_id, name, value, offer.version), `Corrected ${fieldLabel(name)}.`)} />
               : formatValue(field.kind, field.value)}
               {field.status === 'conflict' && <ul className="offers-candidates">{field.candidates.filter(c => c.verified).map((c, i) => <li key={i}>{formatValue(field.kind, c.value)} <code>{c.locators.join(', ')}</code></li>)}</ul>}
               {field.status === 'unverified' && field.reasons.length > 0 && <small className="offers-reason">{field.reasons.slice(0, 3).join(', ').replaceAll('_', ' ')}</small>}
             </td>
-            <td><span className="offers-chip" data-status={field.status}>{field.status}</span>{field.source === 'user' && <small>reviewer entry</small>}</td>
+            <td><FieldStatus field={field} /></td>
             <td>{field.evidence.length ? field.evidence.map((e, i) => {
               const seg = offer.segments.find(s => s.locator === e.locator);
               return <div className="offers-evidence" key={`${e.locator}:${i}`}><code>{e.locator}</code> {seg ? <Quote text={seg.text} quote={e.quote} /> : e.quote}</div>;
             }) : <span className="inline-empty">{field.status === 'missing' ? 'Not stated in the document' : field.source === 'user' ? 'Entered by reviewer' : 'No verified source'}</span>}</td>
             <td>{field.kind !== 'shipments' && editing !== name && ['extracted', 'needs_review', 'corrected'].includes(offer.status) &&
-              <button className="text-button" type="button" onClick={e => { e.stopPropagation(); setEditing(name); }}>Edit</button>}</td>
+              <EditButton name={name} onEdit={setEditing} />}</td>
           </tr>)}</tbody>
         </table></div>
 
@@ -227,6 +256,7 @@ export function OffersPage() {
         <button className="primary-button" type="button" disabled={busy || !['extracted', 'needs_review', 'corrected'].includes(offer.status)}
           onClick={() => run(() => adapter.save(offer.offer_id, offer.version), 'Offer saved in this browser tab.')}>
           Save offer <span>→</span></button>
+        <ReportDownloads label={`offer ${offer.offer_id} version ${offer.version}`} build={() => offerReport(offer, new Date())} />
         <p className="limit-note">Saving here is local to the fixture adapter. This preview checks the current UTC date, but cannot replace service normalization, source checks, or audit. Corrected economic values cannot be saved here until authoritative revalidation. Nothing is sent to a supplier.</p>
       </div>
     </section>}

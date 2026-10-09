@@ -20,9 +20,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from procure.dispatch import affected_shipments, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.calendars import SyntheticHolidayProvider  # noqa: E402
+from procure.dispatch import affected_shipments, replay_event, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.dispatch.lead_time import shipment_lead_time  # noqa: E402
 from procure.events.ingest import normalize_milestones  # noqa: E402
 from procure.route_evidence import evidence_for_locations, normalize_route_evidence  # noqa: E402
+from procure.route_evidence.hazards import hazard_exposure, hazards_for_locations, recorded_assessments  # noqa: E402
 
 OUT = ROOT.parent / "apps" / "web" / "src" / "dispatch-fixtures.json"
 AS_OF = "2026-10-08T12:00:00Z"
@@ -39,13 +42,32 @@ def main() -> int:
         timelines = {row["shipment_id"]: shipment_timeline(normalized, row["shipment_id"], now=AS_OF,
                                                            records=data["milestones"]["records"])
                      for row in listing["shipments"]}
+        calendar = SyntheticHolidayProvider()
+        for timeline in timelines.values():
+            timeline["lead_time"] = shipment_lead_time(timeline, calendar)
         unavailable = sorted(e["event_id"] for e in normalized["events"] if not e["operating_evidence"])
         affected = {e["event_id"]: affected_shipments(normalized, e["event_id"], now=AS_OF)
                     for e in normalized["events"] if e["operating_evidence"]}
         route = {row["shipment_id"]: evidence_for_locations(evidence, row["location_keys"])
                  for row in listing["shipments"] if row["location_keys"]}
+        keys = sorted({k for row in listing["shipments"] for k in row["location_keys"]})
+        exposure = hazard_exposure(recorded_assessments(samples.HAZARD_RECORDINGS, as_of=AS_OF, location_codes=keys),
+                                   as_of=AS_OF)
+        hazards = {row["shipment_id"]: hazards_for_locations(exposure, row["location_keys"])
+                   for row in listing["shipments"] if row["location_keys"]}
         for result in (*timelines.values(), *affected.values(), *route.values()):
             _require_readable(result)
+        replay_content = samples.load_replay_samples()
+        replay_results = {}
+        for sample in replay_content["samples"]:
+            result = replay_event(data["milestones"]["records"], sample["record"], as_of=AS_OF, now=AS_OF,
+                                  snapshot=data["snapshot"],
+                                  route_evidence_records=data["route_evidence"]["records"])
+            _require_replay_result(result, sample)
+            replay_results[sample["sample_id"]] = {**result, "sample": samples.sample_view(sample)}
+        replay = {"notice": replay_content["notice"],
+                  "samples": [samples.sample_view(sample) for sample in replay_content["samples"]],
+                  "results": replay_results}
         revision_result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                                          capture_output=True, text=True, check=True)
         revision = revision_result.stdout.strip()
@@ -56,7 +78,10 @@ def main() -> int:
         out = {"synthetic": True, "source": "local_fixture_adapter", "generated_from_revision": revision,
                "as_of": listing["as_of"], "notice": samples.SOURCE["notice"], "files": samples.source_info()["files"],
                "source_sha256": source_hashes, "unavailable_affected_event_ids": unavailable,
-               "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route}
+               "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route,
+               "replay": replay,
+               "hazards": hazards, "hazard_notice": json.loads(samples.HAZARD_RECORDINGS.read_text())["notice"],
+               "hazard_source_sha256": hashlib.sha256(samples.HAZARD_RECORDINGS.read_bytes()).hexdigest()}
         payload = (json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         fd, name = tempfile.mkstemp(prefix=f".{OUT.name}.", suffix=".tmp", dir=OUT.parent)
         temporary = Path(name)
@@ -73,7 +98,7 @@ def main() -> int:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    print(f"Wrote {len(timelines)} shipments, {len(affected)} events to {OUT} ({len(payload) // 1024} KiB)")
+    print(f"Wrote {len(timelines)} shipments, {len(affected)} events, {len(replay['results'])} replays to {OUT} ({len(payload) // 1024} KiB)")
     return 0
 
 
@@ -82,6 +107,17 @@ def _require_readable(result: object) -> None:
             or not isinstance(result.get("reasons"), list)
             or not all(isinstance(reason, str) for reason in result["reasons"])):
         raise ValueError("unreadable_dispatch_result")
+
+
+def _require_replay_result(result: object, sample: dict) -> None:
+    if isinstance(result, dict) and result.get("status") == "error":
+        if result.get("reasons") != ["event_after_as_of"]:
+            raise ValueError("unreadable_replay_result")
+        later = normalize_milestones([sample["record"]], as_of="9999-12-31T23:59:59Z")
+        if later["rejected"] or len(later["events"]) != 1:
+            raise ValueError("invalid_cutoff_replay_sample")
+        return
+    _require_readable(result)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,9 @@ SOURCE = {"kind": "synthetic_fixture",
                     "weather data."}
 
 
+HAZARD_RECORDINGS = PROJECT_ROOT / "tests" / "fixtures" / "hazards" / "recorded.json"
+
+
 class SampleUnavailable(RuntimeError):
     pass
 
@@ -37,6 +40,31 @@ def load_samples() -> dict:
             raise SampleUnavailable(name)
         data[name] = content
     return data
+
+
+REPLAY_FILE = PROJECT_ROOT / "tests" / "fixtures" / "shipments" / "replay_events.json"
+
+
+def load_replay_samples() -> dict:
+    """The labelled synthetic replay events, keyed by sample ID, with the file notice."""
+    try:
+        content = json.loads(Path(REPLAY_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SampleUnavailable("replay_events") from exc
+    if not isinstance(content, dict) or content.get("synthetic") is not True or \
+            not isinstance(content.get("samples"), list) or \
+            not all(isinstance(s, dict) and isinstance(s.get("record"), dict) and s["record"].get("synthetic") is True
+                    for s in content["samples"]):
+        raise SampleUnavailable("replay_events")
+    return content
+
+
+def sample_view(sample: dict) -> dict:
+    """What a client needs to offer a replay sample, without the full record."""
+    record = sample["record"]
+    return {"sample_id": sample.get("sample_id"), "title": sample.get("title"), "description": sample.get("description"),
+            "event_id": record.get("event_id"), "shipment_id": record.get("shipment_id"),
+            "event_type": record.get("type"), "synthetic": True}
 
 
 def source_info() -> dict:

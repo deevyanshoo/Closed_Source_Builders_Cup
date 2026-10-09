@@ -25,6 +25,7 @@ from procure.dispatch import affected_shipments, replay_event, samples, shipment
 from procure.dispatch.lead_time import shipment_lead_time  # noqa: E402
 from procure.events.ingest import normalize_milestones  # noqa: E402
 from procure.route_evidence import evidence_for_locations, normalize_route_evidence  # noqa: E402
+from procure.route_evidence.hazards import hazard_exposure, hazards_for_locations, recorded_assessments  # noqa: E402
 
 OUT = ROOT.parent / "apps" / "web" / "src" / "dispatch-fixtures.json"
 AS_OF = "2026-10-08T12:00:00Z"
@@ -49,6 +50,11 @@ def main() -> int:
                     for e in normalized["events"] if e["operating_evidence"]}
         route = {row["shipment_id"]: evidence_for_locations(evidence, row["location_keys"])
                  for row in listing["shipments"] if row["location_keys"]}
+        keys = sorted({k for row in listing["shipments"] for k in row["location_keys"]})
+        exposure = hazard_exposure(recorded_assessments(samples.HAZARD_RECORDINGS, as_of=AS_OF, location_codes=keys),
+                                   as_of=AS_OF)
+        hazards = {row["shipment_id"]: hazards_for_locations(exposure, row["location_keys"])
+                   for row in listing["shipments"] if row["location_keys"]}
         for result in (*timelines.values(), *affected.values(), *route.values()):
             _require_readable(result)
         replay_content = samples.load_replay_samples()
@@ -70,7 +76,9 @@ def main() -> int:
                "as_of": listing["as_of"], "notice": samples.SOURCE["notice"], "files": samples.source_info()["files"],
                "source_sha256": source_hashes, "unavailable_affected_event_ids": unavailable,
                "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route,
-               "replay": replay}
+               "replay": replay,
+               "hazards": hazards, "hazard_notice": json.loads(samples.HAZARD_RECORDINGS.read_text())["notice"],
+               "hazard_source_sha256": hashlib.sha256(samples.HAZARD_RECORDINGS.read_bytes()).hexdigest()}
         payload = (json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         fd, name = tempfile.mkstemp(prefix=f".{OUT.name}.", suffix=".tmp", dir=OUT.parent)
         temporary = Path(name)

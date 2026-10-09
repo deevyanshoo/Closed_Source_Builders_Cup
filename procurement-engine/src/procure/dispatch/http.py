@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from ..calendars import SyntheticHolidayProvider
 from ..events.ingest import normalize_milestones
 from ..route_evidence import evidence_for_locations, normalize_route_evidence
+from ..route_evidence.hazards import hazard_exposure, hazards_for_locations, recorded_assessments
 from . import samples
 from .lead_time import shipment_lead_time
 from .read_models import _instant, affected_shipments, shipment_timeline
@@ -134,3 +135,23 @@ def replay_sample(sample: str | None = Query(None), as_of: str | None = Query(No
     result = replay_event(data["milestones"]["records"], chosen["record"], as_of=as_of, now=now,
                           snapshot=data["snapshot"], route_evidence_records=data["route_evidence"]["records"])
     return _respond({**result, "sample": samples.sample_view(chosen)}, now, now_source)
+
+
+@router.get("/hazards")
+def get_hazards(as_of: str | None = Query(None), location: list[str] = Query(default_factory=list),
+                now: str | None = Query(None)):
+    """Hazard and weather exposure from the recorded synthetic Open-Meteo and GDACS responses."""
+    ctx = _context(as_of, now)
+    if isinstance(ctx, JSONResponse):
+        return ctx
+    _data, _normalized, now, now_source = ctx
+    if not location or len(location) > 100:
+        return _error(400, "invalid_location_keys")
+    try:
+        result = hazard_exposure(recorded_assessments(samples.HAZARD_RECORDINGS, as_of=as_of, location_codes=location),
+                                 as_of=as_of)
+    except (OSError, ValueError):
+        return _error(503, "sample_data_unavailable")
+    view = hazards_for_locations(result, location)
+    view["rejected"] = [r for r in result["rejected"] if r["location"]["code"] in set(location)]
+    return _respond(view, now, now_source)

@@ -89,12 +89,31 @@ export type ReplayResponse = {
     exposure: { evidence_id: string; kind: string }[]; changed_by_replay: false; note: string } | null;
   material_screen: MaterialScreen | null; recovery_link: string; note: string;
 };
+export type HazardState = 'exposure_found' | 'no_exposure_found' | 'insufficient_data' | 'unsupported_location' | 'offline'
+  | 'provider_failure' | 'rate_limited' | 'malformed_payload' | 'not_fetched' | 'retrieved_after_as_of';
+export type HazardValue = {
+  rule_id: string; met: boolean | null; reason: string | null; threshold: string; unit: string;
+  value?: string | null; variable?: string; aggregate?: string; at?: string | null; basis?: string;
+  event_id?: string; event_type?: string; alert_level?: string; distance_km?: string; name?: string | null;
+  period?: { start: string; end: string };
+};
+export type HazardAssessment = {
+  provider_id: string; location: { code: string; name: string | null; registry_version: string; status: string; verified: boolean | null };
+  state: HazardState; reason: string | null; retrieved_at: string | null; period: { start: string; end: string } | null;
+  values: HazardValue[]; thresholds_version: string; payload_sha256: string | null; valid_until: string | null;
+  evidence_ids: string[]; synthetic: boolean; request: string | null; freshness: 'current' | 'stale' | null; usable: boolean;
+};
+export type HazardResponse = {
+  status: ReadStatus; reasons: string[]; as_of: string | null; thresholds_version: string | null; location_keys: string[];
+  assessments: HazardAssessment[]; evidence: EvidenceResponse; note: string;
+};
 type FixtureData = {
   synthetic: true; source: string; generated_from_revision: string; as_of: string; notice: string; files: string[];
   source_sha256?: Record<string, string>; unavailable_affected_event_ids?: string[];
   shipments: ListResponse; timelines: Record<string, TimelineResponse>; affected: Record<string, AffectedResponse>;
   route_evidence: Record<string, EvidenceResponse>;
   replay: { notice: string; samples: ReplaySample[]; results: Record<string, ReplayResponse> };
+  hazards?: Record<string, HazardResponse>; hazard_notice?: string;
 };
 
 export class DispatchError extends Error {
@@ -102,7 +121,9 @@ export class DispatchError extends Error {
 }
 
 const data = JSON.parse(raw) as FixtureData;
-export const dispatchFixtureInfo = { asOf: data.as_of, revision: data.generated_from_revision, notice: data.notice, files: data.files };
+export const dispatchFixtureInfo = {
+  asOf: data.as_of, revision: data.generated_from_revision, notice: data.notice, files: data.files, hazardNotice: data.hazard_notice ?? null,
+};
 
 function readable<T extends { status: ReadStatus; reasons: string[] }>(value: T): T {
   if (!value || !['ok', 'empty', 'stale'].includes(value.status) || !Array.isArray(value.reasons)
@@ -144,6 +165,13 @@ export function createDispatchFixtureAdapter() {
       const found = data.replay.results[sampleId];
       if (!found) throw new DispatchError(`No synthetic replay sample ${sampleId}.`, 'not_found');
       return structuredClone(found);
+    },
+    async hazards(shipmentId: string): Promise<HazardResponse> {
+      const found = data.hazards?.[shipmentId];
+      if (found) return readable(found);
+      return { status: 'empty', reasons: ['no_assessments'], as_of: data.as_of, thresholds_version: null, location_keys: [], assessments: [],
+        evidence: { status: 'empty', reasons: [], as_of: data.as_of, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] },
+        note: 'Exposure only, not confirmed.' };
     },
   };
 }
@@ -243,3 +271,17 @@ export function formatLeadTime(lead: LeadTime): { headline: string; detail: stri
     source,
   };
 }
+
+const HAZARD_STATES: Record<HazardState, string> = {
+  exposure_found: 'Exposure found, not confirmed',
+  no_exposure_found: 'No exposure found (not a safety check)',
+  insufficient_data: 'Undecided: data missing',
+  unsupported_location: 'Location not in registry',
+  offline: 'Offline mode: not fetched',
+  provider_failure: 'Provider failure',
+  rate_limited: 'Rate limited by provider',
+  malformed_payload: 'Malformed provider answer',
+  not_fetched: 'Not fetched',
+  retrieved_after_as_of: 'Retrieved after the cutoff: rejected',
+};
+export const hazardStateLabel = (state: HazardState) => HAZARD_STATES[state] ?? humanize(state);

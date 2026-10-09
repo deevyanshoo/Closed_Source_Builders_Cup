@@ -22,6 +22,9 @@ SOURCE = {"kind": "synthetic_fixture",
                     "weather data."}
 
 
+HAZARD_RECORDINGS = PROJECT_ROOT / "tests" / "fixtures" / "hazards" / "recorded.json"
+
+
 class SampleUnavailable(RuntimeError):
     pass
 

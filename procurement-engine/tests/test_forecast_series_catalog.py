@@ -762,3 +762,119 @@ def test_generic_rectangle_legacy_default_retains100000_rectangle():
     snap=build(raw,generated_bis())
     assert len(snap.records)==12
     assert any(r['label']=='Cotton A Index'and r['forecast_eligible']for r in snap.records)
+
+
+# WB header profiles: generated header metadata and synthetic values only.
+def wb_header_layout_fixture(*, extended=True, fault=None):
+    book=Workbook();prices=book.active;prices.title='Monthly Prices'
+    indices=book.create_sheet('Monthly Indices');indices.cell(2,1,'Indices (2010=100)')
+    for col in range(2,73):
+        prices.cell(5,col,f'Synthetic price {col}');prices.cell(6,col,'($/kg)')
+    index_cols=(2,3,4,5,6,7,8,9,10,12,13)
+    leaf_cols=(8,9,10,12,13)
+    for col in index_cols:
+        if col in leaf_cols:
+            #Only row9 labels these columns under the extended profile.
+            indices.cell(9 if extended else 8,col,f'Unlisted leaf {col}')
+        else:
+            indices.cell(6,col,f'Synthetic index {col}')
+            if extended:indices.cell(9,col,' ')
+    for i,n in enumerate(range(1959*12+11,2026*12+8)):
+        label=f'{n//12:04d}M{n%12+1:02d}'
+        prices.cell(i+7,1,label)
+        indices.cell(i+(10 if extended else 9),1,label)
+        for col in range(2,73):prices.cell(i+7,col,100.+i+col)
+        for col in index_cols:indices.cell(i+(10 if extended else 9),col,500.+i+col)
+    if fault is not None:
+        if fault in ('numeric','formula','error','boolean','date','oversized','control'):
+            from datetime import datetime
+            value={'numeric':7,'formula':'=1','error':'#DIV/0!','boolean':True,
+                   'date':datetime(2026,1,1),'oversized':'x'*513,'control':'bad\tlabel'}[fault]
+            indices.cell(9,8,value)
+        elif fault in ('blank','whitespace_only'):
+            for col in index_cols:indices.cell(9,col).value=None if fault=='blank'else' '
+        elif fault in ('a9_text','a9_space','a9_noncanonical','a9_numeric','a9_date','a9_month_with_header'):
+            from datetime import datetime
+            indices.cell(9,1,{'a9_text':'Header','a9_space':' ','a9_noncanonical':'1959-12',
+                             'a9_numeric':195912,'a9_date':datetime(1959,12,1),'a9_month_with_header':'1959M12'}[fault])
+        elif fault in ('a10_missing','a10_invalid','a10_noncanonical','extra_header_row'):
+            indices.cell(10,1).value={'a10_missing':None,'a10_invalid':'1959M13','a10_noncanonical':'1959-12','extra_header_row':None}[fault]
+            if fault=='extra_header_row':indices.cell(10,2,'Fifth header')
+        elif fault=='gap':indices.cell(11,1,'1960M02')
+        elif fault=='duplicate':indices.cell(11,1,'1959M12')
+        elif fault=='monthless_hidden':indices.cell(11,1).value=None
+        elif fault=='after_data_header':indices.cell(811,8,'Unknown footer')
+        elif fault=='after_data_space':indices.cell(811,8,' ')
+        elif fault=='after_data_monthless_value':indices.cell(811,8,12.)
+        elif fault=='later_header':
+            indices.cell(11,1).value=None;indices.cell(11,8,'Unknown later header')
+        elif fault=='observation_space':indices.cell(691,8,' ')
+        elif fault=='earlier_whitespace':
+            for col in leaf_cols:indices.cell(6,col,' ');indices.cell(7,col,'   ')
+        else:raise AssertionError(fault)
+    out=io.BytesIO();book.save(out);book.close();return out.getvalue()
+
+
+def test_wb_header_layout_four_rows_preserve_all82_leaf_columns_units_and_values():
+    raw=wb_header_layout_fixture()
+    snap=build(raw,shape_bis())
+    wb=[r for r in snap.records if r['series_kind']=='commodity']
+    assert len(wb)==82
+    indices=[r for r in wb if r['locator']['sheet']=='Monthly Indices']
+    assert len(indices)==11 and all(r['forecast_eligible']for r in indices)
+    assert all(r['locator']['header_rows']==[6,7,8,9]for r in indices)
+    assert all(r['quoted_unit']=='2010=100'and r['measure_type']=='index'for r in indices)
+    assert all(r['required_window_mask']==['valid']*120 for r in wb)
+    for column,col in [('H',8),('I',9),('J',10),('L',12),('M',13)]:
+        leaf=next(r for r in indices if r['locator']['column']==column)
+        assert leaf['label']==f'Unlisted leaf {col}'
+        assert leaf['header_unit_evidence']['headers']==[{'cell':column+'9','text':f'Unlisted leaf {col}','data_type':'s'}]
+        assert leaf['series_id']=='WB:wb-monthly-v1:Monthly_Indices:'+column
+    h=next(r for r in indices if r['locator']['column']=='H')
+    assert h['source_first_period']=='1959-12'and h['source_last_period']=='2026-08'
+    assert snap.values[h['series_id']]['2016-09']==1189.
+    assert snap.values[h['series_id']]['2026-08']==1308.
+    price=next(r for r in wb if r['locator']['sheet']=='Monthly Prices'and r['locator']['column']=='C')
+    assert price['locator']['header_rows']==[5]and price['quoted_unit']=='$/kg'
+    assert snap.values[price['series_id']]['2016-09']==784.
+    assert snap.values[price['series_id']]['2026-08']==903.
+
+
+@pytest.mark.parametrize('fault',[
+    'numeric','formula','error','boolean','date','oversized','control',
+    'blank','whitespace_only','a9_text','a9_space','a9_noncanonical','a9_numeric','a9_date','a9_month_with_header',
+    'a10_missing','a10_invalid','a10_noncanonical','extra_header_row',
+    'gap','duplicate','monthless_hidden','after_data_header','after_data_space','after_data_monthless_value','later_header',
+])
+def test_wb_header_layout_unsupported_header_or_calendar_never_skipped(fault):
+    with pytest.raises(ValueError):build(wb_header_layout_fixture(fault=fault),generated_bis())
+
+
+@pytest.mark.parametrize('extended',[False,True])
+def test_wb_header_layout_whitespace_is_only_ignored_as_header_evidence(extended):
+    snap=build(wb_header_layout_fixture(extended=extended,fault='earlier_whitespace'),generated_bis())
+    h=next(r for r in snap.records if r['locator'].get('sheet')=='Monthly Indices'and r['locator']['column']=='H')
+    assert h['label']=='Unlisted leaf 8'and h['forecast_eligible']
+    assert h['locator']['header_rows']==([6,7,8,9]if extended else[6,7,8])
+    assert h['header_unit_evidence']['headers']==[{'cell':'H9'if extended else'H8','text':'Unlisted leaf 8','data_type':'s'}]
+
+
+def test_wb_header_layout_observation_whitespace_stays_invalid_not_missing():
+    snap=build(wb_header_layout_fixture(fault='observation_space'),generated_bis())
+    h=next(r for r in snap.records if r['locator'].get('sheet')=='Monthly Indices'and r['locator']['column']=='H')
+    assert not h['forecast_eligible']and h['invalid_count']==1 and h['missing_count']==0
+    assert h['required_window_mask'][0]=='invalid'
+    assert '2016-09'not in snap.values[h['series_id']]
+    assert any(r['locator'].get('sheet')=='Monthly Indices'and r['locator']['column']=='I'and r['forecast_eligible']for r in snap.records)
+
+
+def test_wb_header_layout_old_three_row_profile_retains_exact_results():
+    snap=build(wb_header_layout_fixture(extended=False),shape_bis())
+    wb=[r for r in snap.records if r['series_kind']=='commodity']
+    assert len(wb)==82 and all(r['forecast_eligible']for r in wb)
+    h=next(r for r in wb if r['locator']['sheet']=='Monthly Indices'and r['locator']['column']=='H')
+    assert h['locator']=={'sheet':'Monthly Indices','column':'H','header_rows':[6,7,8]}
+    assert h['header_unit_evidence']['headers']==[{'cell':'H8','text':'Unlisted leaf 8','data_type':'s'}]
+    assert h['source_first_period']=='1959-12'and h['source_last_period']=='2026-08'
+    assert snap.values[h['series_id']]['2016-09']==1189. and snap.values[h['series_id']]['2026-08']==1308.
+    assert h['quoted_unit']=='2010=100'and h['required_window_mask']==['valid']*120

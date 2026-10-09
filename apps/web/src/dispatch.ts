@@ -28,9 +28,18 @@ export type TimelineCurrent = {
   last_event_type: string | null; open_eta: { eta: string; event_id: string } | null; on_hold: boolean;
   delivered_quantity: Record<string, string>; unusable_event_ids: string[];
 };
+export type LeadTime = {
+  status: 'ok' | 'not_available' | 'unsupported_country' | 'unsupported_year' | 'source_unavailable' | 'invalid_range';
+  reason: string | null; basis: 'departure_to_arrival' | 'cutoff_to_expected_arrival' | null; country: string | null;
+  location: string | null; start: string | null; end: string | null; working_days: number | null;
+  calendar_days: number | null; weekend_days: number | null; holidays: { date: string; name: string }[];
+  not_applied: { date: string; name: string; reason: string }[]; synthetic: boolean | null;
+  source: { provider_id: string; kind: string } | null; convention: string; note: string;
+};
 export type TimelineResponse = {
   status: ReadStatus; reasons: string[]; as_of: string | null; shipment_id: string; events: TimelineEvent[];
   current: TimelineCurrent | null; flags: string[]; rejected_records: { record_index: number; event_id: string | null; reason: string }[];
+  lead_time?: LeadTime;
 };
 export type AffectedRow = { shipment_id: string; relation: 'self' | 'shares_location'; basis: string[]; latest_event_type: string; status: 'exposure' };
 export type AffectedResponse = {
@@ -47,11 +56,45 @@ export type EvidenceResponse = {
   status: ReadStatus; reasons: string[]; as_of: string | null; location_keys: string[];
   confirmed: EvidenceItem[]; exposure: EvidenceItem[]; expired: EvidenceItem[]; outside_period: EvidenceItem[];
 };
+export type ReplaySample = {
+  sample_id: string; title: string; description: string; event_id: string; shipment_id: string; event_type: string; synthetic: true;
+};
+export type ReplaySamplesResponse = { notice: string; samples: ReplaySample[] };
+export type ReplayChange = {
+  shipment_id: string; before: ShipmentRow | null; after: ShipmentRow | null; changed: string[];
+  signals_added: string[]; signals_removed: string[];
+};
+export type MaterialScreen =
+  | { status: 'not_run'; reason: string; event_id: string }
+  | { status: 'unsupported'; reason: string; details: string[] }
+  | {
+    status: 'screened'; synthetic: true; event_id: string; scenario_id: string; as_of: string;
+    arrival_changes: { line_id: string; component_id: string; quantity: string; unit: string; baseline_at: string; changed_at: string }[];
+    affected_commitments: {
+      commitment_id: string; production_order_id: string; required_at: string; due_at: string; material_at_risk: boolean;
+      demands: { component_id: string; unit: string; quantity: string; comparison: string;
+        baseline: { shortfall: string }; changed: { shortfall: string } }[];
+    }[];
+    limitations: string[]; assumptions: string[];
+  };
+export type ReplayResponse = {
+  status: ReadStatus; reasons: string[]; as_of: string | null; synthetic: true; sample: ReplaySample;
+  injected: { event_id: string; shipment_id: string; event_type: string; synthetic: true; label: string } | null;
+  rejection: { reason: string; details: string[] } | null;
+  shipments: { before: ShipmentRow[]; after: ShipmentRow[] }; changes: ReplayChange[];
+  timeline: { shipment_id: string; before: TimelineEvent[]; after: (TimelineEvent & { replay_injected: boolean })[];
+    current_before: TimelineCurrent | null; current_after: TimelineCurrent | null } | null;
+  affected: { before: AffectedRow[]; after: AffectedResponse | null };
+  route_evidence: { location_keys: string[]; confirmed: { evidence_id: string; operating_status: string }[];
+    exposure: { evidence_id: string; kind: string }[]; changed_by_replay: false; note: string } | null;
+  material_screen: MaterialScreen | null; recovery_link: string; note: string;
+};
 type FixtureData = {
   synthetic: true; source: string; generated_from_revision: string; as_of: string; notice: string; files: string[];
   source_sha256?: Record<string, string>; unavailable_affected_event_ids?: string[];
   shipments: ListResponse; timelines: Record<string, TimelineResponse>; affected: Record<string, AffectedResponse>;
   route_evidence: Record<string, EvidenceResponse>;
+  replay: { notice: string; samples: ReplaySample[]; results: Record<string, ReplayResponse> };
 };
 
 export class DispatchError extends Error {
@@ -94,6 +137,14 @@ export function createDispatchFixtureAdapter() {
       if (found) return readable(found);
       return { status: 'empty', reasons: [], as_of: data.as_of, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] };
     },
+    async replaySamples(): Promise<ReplaySamplesResponse> {
+      return structuredClone({ notice: data.replay.notice, samples: data.replay.samples });
+    },
+    async replay(sampleId: string): Promise<ReplayResponse> {
+      const found = data.replay.results[sampleId];
+      if (!found) throw new DispatchError(`No synthetic replay sample ${sampleId}.`, 'not_found');
+      return structuredClone(found);
+    },
   };
 }
 
@@ -124,4 +175,71 @@ export function formatQuantities(quantities: Record<string, string>): string {
 export function freshness(asOf: string, now: Date, maxAgeSeconds = 86_400): { ageSeconds: number; stale: boolean } {
   const ageSeconds = Math.max(0, Math.floor((now.getTime() - Date.parse(asOf)) / 1000));
   return { ageSeconds, stale: ageSeconds > maxAgeSeconds };
+}
+
+function expectedText(row: ShipmentRow | null): string {
+  const e = row?.expected_arrival;
+  if (!e) return 'no usable ETA';
+  return `${formatInstant(e.at)} (${e.basis === 'eta' ? 'stated ETA' : 'actual arrival'})`;
+}
+
+/** One line per changed field, in the read model's field order. */
+export function explainChange(change: ReplayChange): string[] {
+  const { before, after } = change;
+  const status = (row: ShipmentRow | null) => (row ? statusLabel(row.status) : 'not listed');
+  const words = (items: string[]) => (items.length ? items.map(humanize).join(', ') : 'none');
+  const lines: Record<string, () => string> = {
+    status: () => `Status: ${status(before)} → ${status(after)}`,
+    expected_arrival: () => `Expected arrival: ${expectedText(before)} → ${expectedText(after)}`,
+    signals: () => `Signals added: ${words(change.signals_added)} · removed: ${words(change.signals_removed)}`,
+    on_hold: () => `On hold: ${before?.on_hold ? 'yes' : 'no'} → ${after?.on_hold ? 'yes' : 'no'}`,
+    last_event_type: () => `Last milestone: ${humanize(before?.last_event_type ?? 'none')} → ${humanize(after?.last_event_type ?? 'none')}`,
+    delivered_quantity: () => `Delivered: ${formatQuantities(before?.delivered_quantity ?? {})} → ${formatQuantities(after?.delivered_quantity ?? {})}`,
+  };
+  return change.changed.map(field => (lines[field] ?? (() => humanize(field)))());
+}
+
+const REPLAY_REASONS: Record<string, string> = {
+  event_after_as_of: 'Rejected: the event happened, was observed or had evidence retrieved after the data cutoff, so it was not known then.',
+  injected_not_synthetic: 'Rejected: a replay event must be labelled synthetic.',
+  injected_event_rejected: 'Rejected by the milestone normaliser.',
+  event_id_already_used: 'Rejected: the event ID is already used by a recorded milestone.',
+  no_changes: 'No shipment status, ETA or signal changed.',
+  hold_without_new_eta: 'A hold without a new ETA is exposure, not a measured delay, so no arrival change is screened.',
+  no_arrival_information: 'This event states no new arrival time, so no arrival change is screened.',
+  superseded_by_later_event: 'A later event for this shipment already states the arrival.',
+  shipment_not_in_snapshot: 'The plan snapshot has no arrival line for this shipment.',
+  as_of_differs_from_snapshot: 'The plan snapshot is at a different cutoff, so the material screen was not run.',
+  no_snapshot: 'No plan snapshot, so the material screen was not run.',
+};
+export const replayReason = (reason: string) => REPLAY_REASONS[reason] ?? humanize(reason);
+
+const LEAD_TIME_UNAVAILABLE: Record<string, string> = {
+  not_available: 'No departure and arrival, or cutoff and ETA, to count between.',
+  unsupported_country: 'No approved holiday calendar for this country',
+  unsupported_year: 'No holiday calendar for that year',
+  source_unavailable: 'The holiday calendar source is unavailable',
+  invalid_range: 'The expected arrival is before the start date',
+};
+
+/** Lead time as display text. Never shows a number unless the calendar supports the country and year. */
+export function formatLeadTime(lead: LeadTime): { headline: string; detail: string; source: string } {
+  const source = lead.synthetic
+    ? 'Synthetic holiday table: invented dates, not real public holidays.'
+    : lead.source ? `Holidays from ${lead.source.provider_id}.` : '';
+  if (lead.status !== 'ok' || lead.working_days === null) {
+    const where = lead.country ? ` (${lead.country})` : '';
+    const reason = lead.reason && lead.status !== 'not_available' ? `: ${humanize(lead.reason)}` : '';
+    return { headline: 'Not available', detail: `${LEAD_TIME_UNAVAILABLE[lead.status] ?? humanize(lead.status)}${where}${reason}`, source };
+  }
+  const span = lead.basis === 'departure_to_arrival' ? `Departure ${lead.start} to arrival ${lead.end}` : `Cutoff ${lead.start} to expected arrival ${lead.end}`;
+  const holidays = lead.holidays.length
+    ? `${lead.holidays.length} ${lead.holidays.length === 1 ? 'holiday' : 'holidays'} (${lead.holidays.map(h => h.name).join(', ')})`
+    : 'no holidays';
+  const where = lead.location ? ` (${humanize(lead.location)})` : '';
+  return {
+    headline: `${lead.working_days} working ${lead.working_days === 1 ? 'day' : 'days'}`,
+    detail: `${span} in ${lead.country}${where}: ${lead.calendar_days} calendar days, ${lead.weekend_days} weekend days, ${holidays}.`,
+    source,
+  };
 }

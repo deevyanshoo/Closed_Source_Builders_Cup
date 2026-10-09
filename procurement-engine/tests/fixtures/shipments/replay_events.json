@@ -1,0 +1,110 @@
+{
+  "synthetic": true,
+  "notice": "SYNTHETIC replay events for the dispatch workspace. Each one is an invented milestone injected over the synthetic shipment fixtures to show what would change; none is a real port notice, carrier update or observed delay.",
+  "fixture_version": 1,
+  "as_of": "2026-10-08T12:00:00Z",
+  "samples": [
+    {
+      "sample_id": "innsa-hold-new-eta",
+      "title": "Port hold at INNSA with a new ETA",
+      "description": "A synthetic port notice holds SHP-SYN-002 at Nhava Sheva and states a later ETA.",
+      "record": {
+        "synthetic": true,
+        "event_id": "rpl-innsa-hold",
+        "shipment_id": "SHP-SYN-002",
+        "type": "port_hold",
+        "occurred_at": "2026-10-08T11:00:00+05:30",
+        "observed_at": "2026-10-08T06:00:00Z",
+        "eta": "2026-10-16T08:00:00+05:30",
+        "facility": {"kind": "port", "code": "INNSA", "name": "Nhava Sheva (synthetic)"},
+        "source": {"provider_id": "synthetic-replay", "kind": "port_notice", "reference": "SYN-REPLAY-001"},
+        "evidence": [
+          {
+            "evidence_id": "ev-rpl-001",
+            "kind": "port_notice",
+            "locator": "synthetic://replay/001",
+            "content_sha256": "b1f0000000000000000000000000000000000000000000000000000000000001",
+            "retrieved_at": "2026-10-08T06:00:00Z",
+            "valid_until": "2026-10-18T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "sample_id": "innsa-release",
+      "title": "Port release at INNSA",
+      "description": "A synthetic port notice releases the hold on SHP-SYN-002. It states no new arrival time.",
+      "record": {
+        "synthetic": true,
+        "event_id": "rpl-innsa-release",
+        "shipment_id": "SHP-SYN-002",
+        "type": "port_released",
+        "occurred_at": "2026-10-08T14:30:00+05:30",
+        "observed_at": "2026-10-08T09:15:00Z",
+        "facility": {"kind": "port", "code": "INNSA", "name": "Nhava Sheva (synthetic)"},
+        "source": {"provider_id": "synthetic-replay", "kind": "port_notice", "reference": "SYN-REPLAY-002"},
+        "evidence": [
+          {
+            "evidence_id": "ev-rpl-002",
+            "kind": "port_notice",
+            "locator": "synthetic://replay/002",
+            "content_sha256": "b1f0000000000000000000000000000000000000000000000000000000000002",
+            "retrieved_at": "2026-10-08T09:15:00Z",
+            "valid_until": "2026-10-18T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "sample_id": "inmaa-hold-no-eta",
+      "title": "Port hold at INMAA without a new ETA",
+      "description": "A synthetic port notice holds SHP-SYN-004 at Chennai and states no new arrival time.",
+      "record": {
+        "synthetic": true,
+        "event_id": "rpl-inmaa-hold",
+        "shipment_id": "SHP-SYN-004",
+        "type": "port_hold",
+        "occurred_at": "2026-10-08T08:00:00Z",
+        "observed_at": "2026-10-08T08:20:00Z",
+        "facility": {"kind": "port", "code": "INMAA", "name": "Chennai (synthetic)"},
+        "source": {"provider_id": "synthetic-replay", "kind": "port_notice", "reference": "SYN-REPLAY-003"},
+        "evidence": [
+          {
+            "evidence_id": "ev-rpl-003",
+            "kind": "port_notice",
+            "locator": "synthetic://replay/003",
+            "content_sha256": "b1f0000000000000000000000000000000000000000000000000000000000003",
+            "retrieved_at": "2026-10-08T08:20:00Z",
+            "valid_until": "2026-10-18T00:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "sample_id": "eta-after-cutoff",
+      "title": "ETA update observed after the cutoff",
+      "description": "A synthetic ETA update for SHP-SYN-004 observed after the data cutoff. The replay rejects it.",
+      "record": {
+        "synthetic": true,
+        "event_id": "rpl-late-eta",
+        "shipment_id": "SHP-SYN-004",
+        "type": "eta_changed",
+        "occurred_at": "2026-10-08T13:00:00Z",
+        "observed_at": "2026-10-08T13:05:00Z",
+        "eta": "2026-10-20T00:00:00Z",
+        "lane": {"origin": "AEJEA", "destination": "INMAA", "mode": "ocean"},
+        "source": {"provider_id": "synthetic-replay", "kind": "carrier_update", "reference": "SYN-REPLAY-004"},
+        "evidence": [
+          {
+            "evidence_id": "ev-rpl-004",
+            "kind": "carrier_update",
+            "locator": "synthetic://replay/004",
+            "content_sha256": "b1f0000000000000000000000000000000000000000000000000000000000004",
+            "retrieved_at": "2026-10-08T13:05:00Z",
+            "valid_until": null
+          }
+        ]
+      }
+    }
+  ]
+}

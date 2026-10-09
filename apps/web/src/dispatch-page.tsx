@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, formatInstant, formatQuantities, freshness, humanize, statusLabel,
+  createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness, humanize,
+  replayReason, statusLabel,
 } from './dispatch';
-import type { AffectedResponse, EvidenceItem, EvidenceResponse, ListResponse, ShipmentRow, TimelineEvent, TimelineResponse } from './dispatch';
+import type {
+  AffectedResponse, DispatchAdapter, EvidenceItem, EvidenceResponse, LeadTime, ListResponse, MaterialScreen, ReplayResponse, ReplaySample,
+  ReplaySamplesResponse, ShipmentRow, TimelineEvent, TimelineResponse,
+} from './dispatch';
 import './dispatch.css';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
 
-export function StateNotice({ kind, message }: { kind: 'loading' | 'empty' | 'error' | 'stale'; message?: string }) {
+export function StateNotice({ kind, message, title }: { kind: 'loading' | 'empty' | 'error' | 'stale'; message?: string; title?: string }) {
   if (kind === 'loading') return <p className="dispatch-state" aria-busy="true">Loading dispatch data…</p>;
-  if (kind === 'error') return <div className="notice notice-error" role="alert"><strong>Could not load</strong><p>{message}</p></div>;
+  if (kind === 'error') return <div className="notice notice-error" role="alert"><strong>{title ?? 'Could not load'}</strong><p>{message}</p></div>;
   if (kind === 'stale') return <div className="notice notice-error dispatch-stale" role="status"><strong>Old data</strong><p>{message}</p></div>;
   return <p className="dispatch-state dispatch-empty">{message ?? 'Nothing to show.'}</p>;
 }
@@ -44,6 +48,14 @@ function location(event: TimelineEvent): string {
   return parts.join('; ');
 }
 
+function LeadTimeFact({ lead }: { lead: LeadTime }) {
+  const view = formatLeadTime(lead);
+  return <div className="dispatch-lead-time" data-status={lead.status}>
+    <dt>Working-day lead time</dt>
+    <dd><strong>{view.headline}</strong><small>{view.detail}</small>{view.source && <small>{view.source}</small>}</dd>
+  </div>;
+}
+
 export function ShipmentDetail({ row, timeline, onShowAffected }: { row: ShipmentRow; timeline: TimelineResponse; onShowAffected: (eventId: string) => void }) {
   if (timeline.status === 'error' || !['ok', 'empty', 'stale'].includes(timeline.status))
     return <StateNotice kind="error" message={readError(timeline.reasons)} />;
@@ -60,6 +72,7 @@ export function ShipmentDetail({ row, timeline, onShowAffected }: { row: Shipmen
       <div><dt>Plan baseline</dt><dd>{row.baseline_arrival_at ? formatInstant(row.baseline_arrival_at) : 'No plan baseline'}</dd></div>
       <div><dt>Delivered so far</dt><dd>{formatQuantities(current?.delivered_quantity ?? row.delivered_quantity)}</dd></div>
       <div><dt>On hold</dt><dd>{(current?.on_hold ?? row.on_hold) ? 'Yes' : 'No'}</dd></div>
+      {timeline.lead_time && <LeadTimeFact lead={timeline.lead_time} />}
     </dl>
     <p className="dispatch-recovery">
       <Link className="secondary-button" to="/shipment-recovery">View recovery options</Link>
@@ -145,6 +158,119 @@ export function AffectedPanel({ affected }: { affected: AffectedResponse }) {
   </section>;
 }
 
+export function ReplaySamplePicker({ samples, selected, onSelect }: { samples: ReplaySample[]; selected: string | null; onSelect: (id: string) => void }) {
+  return <ul className="dispatch-replay-samples" aria-label="Sample events">
+    {samples.map(sample => <li key={sample.sample_id}>
+      <button type="button" aria-pressed={selected === sample.sample_id} onClick={() => onSelect(sample.sample_id)}>
+        <strong>{sample.title}</strong>
+        <span className="dispatch-chip" data-kind="synthetic">synthetic</span>
+        <small>{sample.description}</small>
+      </button>
+    </li>)}
+  </ul>;
+}
+
+function MaterialScreenView({ screen }: { screen: MaterialScreen | null }) {
+  if (!screen) return null;
+  if (screen.status === 'not_run') return <p className="field-hint">{replayReason(screen.reason)}</p>;
+  if (screen.status === 'unsupported') return <p className="field-hint">The propagation screen could not use this change: {humanize(screen.reason)}.</p>;
+  return <div className="dispatch-material">
+    <ul>{screen.arrival_changes.map(c => <li key={c.line_id}>
+      <strong>{c.line_id}</strong> {c.quantity} {c.unit} of {c.component_id}: plan {formatInstant(c.baseline_at)} → {formatInstant(c.changed_at)}
+    </li>)}</ul>
+    {screen.affected_commitments.map(c => <p key={c.commitment_id}>
+      {c.commitment_id} ({c.production_order_id}), needed {formatInstant(c.required_at)}: {c.material_at_risk ? 'material shortfall at the requirement time' : 'no material shortfall at the requirement time'}
+      {c.demands.map(d => ` · ${d.component_id} shortfall ${d.baseline.shortfall} → ${d.changed.shortfall} ${d.unit} (${humanize(d.comparison)})`).join('')}
+    </p>)}
+    <p className="field-hint">{[...screen.assumptions, ...screen.limitations].join(' ')}</p>
+  </div>;
+}
+
+export function ReplayResult({ result }: { result: ReplayResponse }) {
+  if (result.status === 'error') {
+    const why = result.reasons.map(replayReason).join(' ');
+    const detail = result.rejection ? ` (${humanize(result.rejection.reason)})` : '';
+    return <StateNotice kind="error" title="Event rejected" message={`${why}${detail}`} />;
+  }
+  const timeline = result.timeline;
+  return <div className="dispatch-replay-result">
+    {result.injected && <p className="dispatch-note">{result.injected.label}: {humanize(result.injected.event_type)} for {result.injected.shipment_id} ({result.injected.event_id}).</p>}
+    {result.status === 'stale' && <StateNotice kind="stale" message="The data cutoff is older than a day. The replay describes that cutoff, not now." />}
+    <h3>What changed</h3>
+    {result.changes.length === 0
+      ? <StateNotice kind="empty" message={replayReason('no_changes')} />
+      : <ul className="dispatch-changes">{result.changes.map(change => <li key={change.shipment_id}>
+        <div className="dispatch-event-head">
+          <strong>{change.shipment_id}</strong>
+          <span>
+            {change.before && <span className="dispatch-status" data-status={change.before.status}>{statusLabel(change.before.status)}</span>}
+            {' → '}
+            {change.after && <span className="dispatch-status" data-status={change.after.status}>{statusLabel(change.after.status)}</span>}
+          </span>
+        </div>
+        <ul>{explainChange(change).map(line => <li key={line}>{line}</li>)}</ul>
+      </li>)}</ul>}
+    {timeline && <>
+      <h3>Milestones for {timeline.shipment_id}, after the replay</h3>
+      <ol className="dispatch-timeline">{timeline.after.map(event => <li key={event.event_id} data-injected={event.replay_injected}>
+        <div className="dispatch-event-head"><strong>{humanize(event.event_type)}</strong>{event.replay_injected ? <span className="dispatch-chip" data-kind="synthetic">Injected (synthetic)</span> : <code>{event.event_id}</code>}</div>
+        <p>Occurred {formatInstant(event.occurred_at, event.occurred_at_offset)}{event.eta ? ` · stated ETA ${formatInstant(event.eta)}` : ''}</p>
+      </li>)}</ol>
+    </>}
+    {result.affected.after && <AffectedPanel affected={result.affected.after} />}
+    {result.route_evidence && <section className="dispatch-replay-route" aria-label="Route evidence at the event location">
+      <h3>Route evidence at {result.route_evidence.location_keys.join(', ')}</h3>
+      <p className="field-hint">{result.route_evidence.note}</p>
+      <p>Confirmed: {result.route_evidence.confirmed.length ? result.route_evidence.confirmed.map(e => `${e.evidence_id} (${e.operating_status})`).join(', ') : 'none'}</p>
+      <p>Exposure: {result.route_evidence.exposure.length ? result.route_evidence.exposure.map(e => `${e.evidence_id} (${humanize(e.kind)})`).join(', ') : 'none'}</p>
+    </section>}
+    <h3>Material screen</h3>
+    <MaterialScreenView screen={result.material_screen} />
+    <p className="dispatch-recovery">
+      <Link className="secondary-button" to={result.recovery_link}>View recovery options</Link>
+      <small>{result.note}</small>
+    </p>
+  </div>;
+}
+
+function ReplaySection({ adapter }: { adapter: DispatchAdapter }) {
+  const [samples, setSamples] = useState<Load<ReplaySamplesResponse>>({ kind: 'loading' });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [result, setResult] = useState<Load<ReplayResponse> | null>(null);
+  const serial = useRef(0);
+
+  useEffect(() => {
+    adapter.replaySamples()
+      .then(value => setSamples({ kind: 'ready', value }))
+      .catch(error => setSamples({ kind: 'error', message: error instanceof Error ? error.message : 'Samples unavailable.' }));
+  }, [adapter]);
+
+  function run(id: string) {
+    const mine = ++serial.current;
+    setSelected(id);
+    setResult({ kind: 'loading' });
+    adapter.replay(id)
+      .then(value => { if (mine === serial.current) setResult({ kind: 'ready', value }); })
+      .catch(error => { if (mine === serial.current) setResult({ kind: 'error', message: error instanceof Error ? error.message : 'Replay unavailable.' }); });
+  }
+
+  return <section className="dispatch-replay" aria-label="Replay a sample delay">
+    <h2>Replay a sample delay</h2>
+    <p className="field-hint">Inject one synthetic event over the same fixtures and compare before and after. Nothing is saved, and recovery is not computed here.</p>
+    {samples.kind === 'loading' && <StateNotice kind="loading" />}
+    {samples.kind === 'error' && <StateNotice kind="error" message={samples.message} />}
+    {samples.kind === 'ready' && <>
+      {samples.value.samples.length === 0
+        ? <StateNotice kind="empty" message="No sample events." />
+        : <ReplaySamplePicker samples={samples.value.samples} selected={selected} onSelect={run} />}
+      <p className="field-hint">{samples.value.notice}</p>
+    </>}
+    {result?.kind === 'loading' && <StateNotice kind="loading" />}
+    {result?.kind === 'error' && <StateNotice kind="error" message={result.message} />}
+    {result?.kind === 'ready' && <ReplayResult result={result.value} />}
+  </section>;
+}
+
 export function DispatchPage() {
   const adapter = useMemo(() => createDispatchFixtureAdapter(), []);
   const [list, setList] = useState<Load<ListResponse>>({ kind: 'loading' });
@@ -224,6 +350,7 @@ export function DispatchPage() {
         </>}
       </div>
     </div>
+    <ReplaySection adapter={adapter} />
     <footer><span>Synthetic shipments, ports and hazards only</span><span>Read only · no supplier messages or plan changes</span></footer>
   </main>;
 }

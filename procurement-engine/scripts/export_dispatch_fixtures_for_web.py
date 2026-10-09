@@ -20,7 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from procure.dispatch import affected_shipments, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.calendars import SyntheticHolidayProvider  # noqa: E402
+from procure.dispatch import affected_shipments, replay_event, samples, shipment_list, shipment_timeline  # noqa: E402
+from procure.dispatch.lead_time import shipment_lead_time  # noqa: E402
 from procure.events.ingest import normalize_milestones  # noqa: E402
 from procure.route_evidence import evidence_for_locations, normalize_route_evidence  # noqa: E402
 
@@ -39,6 +41,9 @@ def main() -> int:
         timelines = {row["shipment_id"]: shipment_timeline(normalized, row["shipment_id"], now=AS_OF,
                                                            records=data["milestones"]["records"])
                      for row in listing["shipments"]}
+        calendar = SyntheticHolidayProvider()
+        for timeline in timelines.values():
+            timeline["lead_time"] = shipment_lead_time(timeline, calendar)
         unavailable = sorted(e["event_id"] for e in normalized["events"] if not e["operating_evidence"])
         affected = {e["event_id"]: affected_shipments(normalized, e["event_id"], now=AS_OF)
                     for e in normalized["events"] if e["operating_evidence"]}
@@ -46,6 +51,14 @@ def main() -> int:
                  for row in listing["shipments"] if row["location_keys"]}
         for result in (*timelines.values(), *affected.values(), *route.values()):
             _require_readable(result)
+        replay_content = samples.load_replay_samples()
+        replay = {"notice": replay_content["notice"],
+                  "samples": [samples.sample_view(sample) for sample in replay_content["samples"]],
+                  "results": {sample["sample_id"]: {
+                      **replay_event(data["milestones"]["records"], sample["record"], as_of=AS_OF, now=AS_OF,
+                                     snapshot=data["snapshot"],
+                                     route_evidence_records=data["route_evidence"]["records"]),
+                      "sample": samples.sample_view(sample)} for sample in replay_content["samples"]}}
         revision_result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                                          capture_output=True, text=True, check=True)
         revision = revision_result.stdout.strip()
@@ -56,7 +69,8 @@ def main() -> int:
         out = {"synthetic": True, "source": "local_fixture_adapter", "generated_from_revision": revision,
                "as_of": listing["as_of"], "notice": samples.SOURCE["notice"], "files": samples.source_info()["files"],
                "source_sha256": source_hashes, "unavailable_affected_event_ids": unavailable,
-               "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route}
+               "shipments": listing, "timelines": timelines, "affected": affected, "route_evidence": route,
+               "replay": replay}
         payload = (json.dumps(out, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         fd, name = tempfile.mkstemp(prefix=f".{OUT.name}.", suffix=".tmp", dir=OUT.parent)
         temporary = Path(name)
@@ -73,7 +87,7 @@ def main() -> int:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    print(f"Wrote {len(timelines)} shipments, {len(affected)} events to {OUT} ({len(payload) // 1024} KiB)")
+    print(f"Wrote {len(timelines)} shipments, {len(affected)} events, {len(replay['results'])} replays to {OUT} ({len(payload) // 1024} KiB)")
     return 0
 
 

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import { AffectedPanel, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
+import { AffectedPanel, ReplayResult, ReplaySamplePicker, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
 import { createDispatchFixtureAdapter } from './dispatch';
 
 const adapter = createDispatchFixtureAdapter();
@@ -24,6 +24,17 @@ describe('dispatch workspace components', () => {
     expect(html).toContain('href="/shipment-recovery"');
     expect(html).toContain('View recovery options');
     expect(html).toContain('does not preselect');
+  });
+
+  it('shows the working-day lead time with its synthetic calendar, or why it is not available', async () => {
+    const list = await adapter.listShipments();
+    const render = async (id: string) => renderToStaticMarkup(<MemoryRouter><ShipmentDetail row={list.shipments.find(s => s.shipment_id === id)!} timeline={await adapter.timeline(id)} onShowAffected={() => {}} /></MemoryRouter>);
+    const ok = await render('SHP-SYN-004');
+    expect(ok).toContain('Working-day lead time');
+    expect(ok).toContain('4 working days');
+    expect(ok).toContain('Synthetic holiday table');
+    const none = await render('SHP-SYN-003');
+    expect(none).toContain('Not available');
   });
 
   it('labels route evidence as confirmed or exposure with source, times and expiry', async () => {
@@ -84,5 +95,44 @@ describe('dispatch workspace components', () => {
     expect(stale).toContain('Old data');
     expect(stale).toContain('2026-10-08');
     expect(stale).toContain('SHP-SYN-004');
+  });
+});
+
+describe('replay a sample delay', () => {
+  const render = async (id: string) => renderToStaticMarkup(<MemoryRouter><ReplayResult result={await adapter.replay(id)} /></MemoryRouter>);
+
+  it('lists the samples as synthetic', async () => {
+    const html = renderToStaticMarkup(<ReplaySamplePicker samples={(await adapter.replaySamples()).samples} selected="innsa-release" onSelect={() => {}} />);
+    expect(html).toContain('Port hold at INNSA with a new ETA');
+    expect(html.match(/>synthetic</g)?.length).toBe(4);
+    expect(html).toContain('aria-pressed="true"');
+  });
+
+  it('compares before and after and says why', async () => {
+    const html = await render('innsa-release');
+    expect(html).toContain('Synthetic replay event, not observed data');
+    expect(html).toContain('Status: On hold → Delayed');
+    expect(html).toContain('removed: on hold');
+    expect(html).toContain('Injected (synthetic)');
+    expect(html).toContain('This event states no new arrival time');
+    expect(html).toContain('href="/shipment-recovery"');
+  });
+
+  it('keeps affected shipments as exposure and route evidence unchanged', async () => {
+    const html = await render('innsa-hold-new-eta');
+    expect(html).toContain('Exposure only');
+    expect(html).toContain('rev-port-002');
+    expect(html).toContain('Unchanged by the replay');
+    expect(html).toContain('LINE-002-A');
+    expect(html).toContain('3000 kg');
+  });
+
+  it('shows a rejected event as an error with the reason', async () => {
+    const html = await render('eta-after-cutoff');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('Event rejected');
+    expect(html).not.toContain('Could not load');
+    expect(html).toContain('after the data cutoff');
+    expect(html).not.toContain('What changed');
   });
 });

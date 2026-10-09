@@ -64,3 +64,6 @@
 .offers-field-button{all:unset;cursor:pointer;display:block;text-align:left;font:inherit}
 .offers-field-button small{display:block}
 .offers-field-button[aria-pressed=true]{text-decoration:underline;text-underline-offset:3px}
+.workspace-nav a{display:inline-flex;align-items:center;min-height:24px}
+.offers-table .text-button{min-width:24px;min-height:24px;padding:4px 2px}
+.offers-field-button{min-height:24px}

@@ -521,3 +521,515 @@ def open_observed_native_snapshot(source_file: Path, admission_raw: bytes, *, ex
     except BaseException:
         life.close()
         raise
+
+# Native host configuration is private, in-process and deliberately nonpersistent.
+# Identity registries are not hostile same-UID security or a signature service.
+import threading
+from datetime import datetime, timezone
+from collections.abc import Mapping
+
+_NATIVE_HOSTS = weakref.WeakKeyDictionary()
+_NATIVE_RUNS = weakref.WeakKeyDictionary()
+_NATIVE_LIVES = weakref.WeakKeyDictionary()
+_NATIVE_ACTIVE = None
+_NATIVE_LOCK = threading.RLock()
+_NATIVE_PACKAGES = frozenset(('numpy', 'pandas', 'openpyxl', 'scikit-learn', 'statsmodels', 'lightgbm'))
+_NATIVE_CODE = frozenset(('procurement-engine/src/procure/evaluation/observed_admission.py',
+                         'procurement-engine/src/procure/evaluation/observed_runner.py',
+                         'procurement-engine/src/procure/evaluation/forecast_scorecard.py',
+                         'procurement-engine/src/procure/forecast/models.py'))
+_NATIVE_TESTS = frozenset(('procurement-engine/tests/test_forecast_observed_admission.py',
+                          'procurement-engine/tests/test_observed_forecast_runner.py'))
+NATIVE_BUDGETS = {'fit_seconds': 60, 'per_series_seconds': 900, 'total_seconds': 1800,
+                  'max_attempts': 288, 'validation_max_attempts': 144, 'test_max_attempts': 144,
+                  'cleanup_reserve_seconds': 3, 'finalizer_reserve_seconds': 30,
+                  'per_model_seconds': {'naive': 120, 'ets': 360, 'gbm': 360},
+                  'validation_model_seconds': {'naive': 48, 'ets': 144, 'gbm': 144},
+                  'test_model_seconds': {'naive': 72, 'ets': 216, 'gbm': 216}, 'retries': 0}
+NATIVE_CALENDAR = {'as_of': '2026-10-08', 'training_start': '2016-09', 'validation_start': '2021-09',
+                   'validation_end': '2023-08', 'purge_start': '2023-09', 'purge_end': '2024-02',
+                   'test_start': '2024-03', 'test_end': '2026-02', 'latest_eligible_actual': '2026-08',
+                   'source_months': 801, 'selected_months': 120, 'validation_origins': 24,
+                   'purged_origins': 6, 'test_origins': 24, 'minimum_training_months': 60,
+                   'training_cutoff': 'origin_minus_1', 'horizons': [1, 3, 6], 'model_leads': [2, 4, 7],
+                   'fit_steps': 7, 'gbm_refit_every': 1, 'base_seed': 42, 'n_paths': 1000,
+                   'bootstrap_rng': 'numpy.PCG64', 'quantile_method': 'linear',
+                   'calibration_grid': [.8, .9, 1., 1.1, 1.2, 1.35, 1.5],
+                   'selection_relative_improvement': .02}
+
+
+def _native_keys(value, keys):
+    if not isinstance(value, Mapping) or set(value) != set(keys):
+        raise ValueError('native exact schema keys required')
+
+
+def _native_sha(value, length=64):
+    if not isinstance(value, str) or re.fullmatch('[0-9a-f]{%d}' % length, value) is None:
+        raise ValueError('native hash/revision invalid')
+
+
+def _native_id(value):
+    if not isinstance(value, str) or re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,63}', value) is None:
+        raise ValueError('native identifier invalid')
+
+
+def _native_path(value):
+    if not isinstance(value, str) or str(_absolute(value)) != value:
+        raise ValueError('native canonical path required')
+    return Path(value)
+
+
+def _native_utc(value):
+    if not isinstance(value, str) or re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z', value) is None:
+        raise ValueError('native canonical UTC required')
+    return datetime.strptime(value, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+
+
+def _native_equal(actual, expected):
+    # JSON bool/int and int/float equality must not weaken the frozen protocol.
+    if type(actual) is not type(expected):
+        raise ValueError('native frozen field type drift')
+    if isinstance(expected, dict):
+        _native_keys(actual, expected)
+        for key in expected:
+            _native_equal(actual[key], expected[key])
+    elif isinstance(expected, list):
+        if len(actual) != len(expected):
+            raise ValueError('native frozen list drift')
+        for a, b in zip(actual, expected):
+            _native_equal(a, b)
+    elif actual != expected:
+        raise ValueError('native frozen field drift')
+
+
+def _native_identity_doc(value, directory=False, link=False):
+    keys = ('dev', 'ino', 'mode', 'uid') if directory else ('dev', 'ino', 'mode', 'uid', 'nlink', 'size', 'mtime_ns', 'ctime_ns')
+    _native_keys(value, keys)
+    if any(type(value[k]) is not int or value[k] < 0 for k in keys):
+        raise ValueError('native identity type invalid')
+    if directory:
+        valid = stat.S_ISDIR(value['mode'])
+    elif link:
+        valid = stat.S_ISLNK(value['mode'])
+    else:
+        valid = stat.S_ISREG(value['mode']) and value['nlink'] == 1
+    if not valid:
+        raise ValueError('native identity file type/link invalid')
+    return tuple(value[k] for k in keys)
+
+
+def _native_ancestors(path, ancestors):
+    if not isinstance(ancestors, (list, tuple)) or not 1 <= len(ancestors) <= 32:
+        raise ValueError('native ancestor bound')
+    expected = list(reversed(path.parents))
+    if [x.get('path') for x in ancestors] != [str(p) for p in expected]:
+        raise ValueError('native ancestor chain mismatch')
+    for item in ancestors:
+        _native_keys(item, ('path', 'identity'))
+        _native_identity_doc(item['identity'], True)
+
+
+def _native_pin_schema(pin):
+    _native_keys(pin, ('path', 'bytes', 'sha256', 'identity', 'ancestors'))
+    path = _native_path(pin['path'])
+    if type(pin['bytes']) is not int or not 0 < pin['bytes'] <= 16 * 1024 * 1024:
+        raise ValueError('native file size bound')
+    _native_sha(pin['sha256'])
+    identity = _native_identity_doc(pin['identity'])
+    if identity[5] != pin['bytes']:
+        raise ValueError('native size identity mismatch')
+    _native_ancestors(path, pin['ancestors'])
+
+
+class _NativeLifetime(Lifetime):
+    """Native-only prefix sharing; every FD is owned before first fstat."""
+    def __init__(self):
+        super().__init__()
+        self._dirs = {}
+
+    def open(self, path, *, private=False, limit=MAX_SOURCE):
+        if self.closed:
+            raise ValueError('native lifetime closed')
+        path = _absolute(path)
+        parent = None
+        for index, part in enumerate(path.parts):
+            at = Path('/') if index == 0 else at / part
+            directory = index < len(path.parts) - 1
+            if directory and at in self._dirs:
+                fd = self._dirs[at]
+                self.check()
+            else:
+                if len(self.fds) >= 128:
+                    raise ValueError('native descriptor capacity unavailable')
+                flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | (os.O_DIRECTORY if directory else 0)
+                fd = os.open('/' if index == 0 else part, flags, dir_fd=parent)
+                self.fds.append(fd)
+                info = os.fstat(fd)
+                if directory and not stat.S_ISDIR(info.st_mode):
+                    raise ValueError('native ancestor type changed')
+                if not directory and (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit):
+                    raise ValueError('native bounded single-link file required')
+                if not directory and private:
+                    p = os.fstat(parent)
+                    if info.st_uid != os.getuid() or p.st_uid != os.getuid() or p.st_mode & 0o077:
+                        raise ValueError('native private input parent required')
+                self.records.append((at, fd, _identity(info, directory), directory))
+                if directory:
+                    self._dirs[at] = fd
+            parent = fd
+        return fd
+
+
+def _native_pin_open(life, pin, *, private=False, body=True):
+    fd = life.open(pin['path'], private=private, limit=pin['bytes'])
+    if _identity(os.fstat(fd)) != _native_identity_doc(pin['identity']):
+        raise ValueError('native pinned file identity changed')
+    for item in pin['ancestors']:
+        if _identity(os.lstat(item['path']), True) != _native_identity_doc(item['identity'], True):
+            raise ValueError('native pinned ancestor changed')
+    if body:
+        raw = life.read(fd, pin['bytes'])
+        if len(raw) != pin['bytes'] or digest(raw) != pin['sha256']:
+            raise ValueError('native pinned file hash changed')
+        return raw
+    return fd
+
+
+def _native_freeze(value):
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _native_freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_native_freeze(v) for v in value)
+    return value
+
+
+def _native_plain(value):
+    if isinstance(value, Mapping):
+        return {k: _native_plain(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return [_native_plain(v) for v in value]
+    return value
+
+
+@dataclass(frozen=True, eq=False)
+class RootNativeHostAuthority:
+    acceptance_id: str
+
+
+@dataclass(frozen=True, eq=False)
+class RootNativeRunBinding:
+    run_id: str
+
+
+def _issue_root_native_host_authority(*, acceptance_id, accepted_control, integrated_head, integrated_tree, profile):
+    """ROOT private bootstrap only, once per parent; never called by products."""
+    global _NATIVE_ACTIVE
+    _native_id(acceptance_id)
+    _native_pin_schema(accepted_control)
+    _native_sha(integrated_head, 40); _native_sha(integrated_tree, 40)
+    if profile not in ('native_observed', 'native_fixture_test'):
+        raise ValueError('native host profile required')
+    with _NATIVE_LOCK:
+        if _NATIVE_ACTIVE is not None:
+            raise ValueError('native issuer already configured; no reset/rotation')
+        life = _NativeLifetime()
+        try:
+            _native_pin_open(life, accepted_control, private=True)
+        finally:
+            life.close()
+        authority = RootNativeHostAuthority(acceptance_id)
+        record = {'pin': _native_freeze(accepted_control), 'head': integrated_head, 'tree': integrated_tree,
+                  'profile': profile, 'epoch': object(), 'used_controls': set(), 'used_ids': set(), 'used_outputs': set()}
+        _NATIVE_HOSTS[authority] = record
+        _NATIVE_ACTIVE = authority
+        return authority
+
+
+def _native_host(authority):
+    if authority is not _NATIVE_ACTIVE:
+        raise ValueError('issued active native host authority required')
+    return _registered(authority, _NATIVE_HOSTS)
+
+
+def _native_control_schema(c, host, authority):
+    required = ('schema_version', 'status', 'profile', 'acceptance_id', 'run_id', 'integrated_head', 'integrated_tree',
+                'integration_receipt_sha256', 'design_acceptance_sha256', 'numerical_review_sha256', 'runtime_review_sha256',
+                'issued_at_utc', 'expires_at_utc', 'analysis_as_of_utc', 'source', 'controls', 'code', 'test_artifact_blobs',
+                'runtime', 'calendar', 'outputs', 'budgets', 'permissions')
+    _native_keys(c, required)
+    observed = host['profile'] == 'native_observed'
+    status = 'ROOT_ACCEPTED_NATIVE_OBSERVED_RUN' if observed else 'ROOT_ACCEPTED_NATIVE_FIXTURE_TEST'
+    if (c['schema_version'], c['status'], c['profile'], c['acceptance_id'], c['integrated_head'], c['integrated_tree']) != (
+            'root-native-run-control.v1', status, host['profile'], authority.acceptance_id, host['head'], host['tree']):
+        raise ValueError('native authority/control/profile mismatch')
+    _native_id(c['run_id'])
+    for key in ('integration_receipt_sha256', 'design_acceptance_sha256', 'numerical_review_sha256', 'runtime_review_sha256'):
+        _native_sha(c[key])
+    issued, expiry, asof = map(_native_utc, (c['issued_at_utc'], c['expires_at_utc'], c['analysis_as_of_utc']))
+    if not issued <= datetime.now(timezone.utc) < expiry or issued >= expiry or asof.date().isoformat() != '2026-10-08':
+        raise ValueError('native expiry/as-of refused')
+    _native_equal(c['calendar'], NATIVE_CALENDAR); _native_equal(c['budgets'], NATIVE_BUDGETS)
+    _native_equal(c['permissions'], {'local_source_body_read': True, 'local_statistical_execution': observed,
+                                   'observed_execution': observed, 'synthetic_test_execution': not observed,
+                                   'network': False, 'provider': False, 'source_download': False, 'sql': False})
+    source = c['source']
+    _native_keys(source, ('file', 'source_id', 'source_url', 'retrieved_utc', 'rights_disposition_sha256', 'sheet',
+                         'month_range', 'series', 'representation', 'full_parent_snapshot_exposed',
+                         'physical_test_actuals_untouched', 'vintage_status', 'availability_proxy'))
+    _native_pin_schema(source['file'])
+    _native_sha(source['rights_disposition_sha256'])
+    if source['file']['bytes'] > MAX_SOURCE or _native_utc(source['retrieved_utc']) > asof:
+        raise ValueError('native source size/retrieval invalid')
+    if not isinstance(source['source_id'], str) or not isinstance(source['source_url'], str):
+        raise ValueError('native source provenance type invalid')
+    _native_equal({k: source[k] for k in ('sheet', 'month_range', 'representation', 'full_parent_snapshot_exposed',
+                                         'physical_test_actuals_untouched', 'vintage_status', 'availability_proxy')},
+                  {'sheet': 'Monthly Prices', 'month_range': '1960M01-2026M09', 'representation': 'openpyxl_native_binary64',
+                   'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                   'vintage_status': 'latest_vintage_only_historical_publication_unknown',
+                   'availability_proxy': 'month_m_available_at_end_of_m_plus_1; not historical publication proof'})
+    _native_equal(source['series'], {
+        'copper': {'column': 'BM', 'index': 65, 'label': 'Copper', 'native_unit': '($/mt)', 'unit': 'USD/metric tonne', 'currency': 'USD'},
+        'aluminum': {'column': 'BK', 'index': 63, 'label': 'Aluminum', 'native_unit': '($/mt)', 'unit': 'USD/metric tonne', 'currency': 'USD'}})
+    if observed:
+        if (source['source_id'] != 'worldbank_pinksheet_monthly_oct2026' or source['file']['sha256'] != _HELD_OBSERVED_SHA256
+                or source['file']['bytes'] != 586099
+                or source['rights_disposition_sha256'] != 'f34d8348dc638969f61b629c77e20a277b108a169848844cc2b944ee7a37c1ee'
+                or source['retrieved_utc'] != '2026-10-08T07:44:34.000000Z'
+                or source['source_url'] != 'https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/related/CMO-Historical-Data-Monthly.xlsx'):
+            raise ValueError('native observed source/rights pin mismatch')
+    elif (source['file']['sha256'] == _HELD_OBSERVED_SHA256 or source['source_id'] != 'owned_fixture'
+          or Path(source['file']['path']).name == 'worldbank_pinksheet_monthly.xlsx'):
+        raise ValueError('observed original cannot become native test fixture')
+    controls = c['controls']
+    _native_keys(controls, ('protocol', 'manifest', 'root_acceptance_path'))
+    for key in ('protocol', 'manifest'):
+        _native_pin_schema(controls[key])
+    if controls['root_acceptance_path'] != host['pin']['path']:
+        raise ValueError('native external control path mismatch')
+    if not isinstance(c['code'], list) or len(c['code']) != 4 or {p.get('repository_path') for p in c['code']} != _NATIVE_CODE:
+        raise ValueError('native exact code pins required')
+    repo = Path(__file__).resolve().parents[4]
+    for item in c['code']:
+        _native_keys(item, ('repository_path', 'file', 'git_blob'))
+        _native_sha(item['git_blob'], 40); _native_pin_schema(item['file'])
+        if item['file']['path'] != str(repo / item['repository_path']):
+            raise ValueError('native foreign code path')
+    _native_keys(c['test_artifact_blobs'], _NATIVE_TESTS)
+    for blob in c['test_artifact_blobs'].values():
+        _native_sha(blob, 40)
+    runtime = c['runtime']
+    _native_keys(runtime, ('executable_alias', 'resolved_executable', 'alias_chain', 'python_version', 'packages', 'model_backends'))
+    _native_path(runtime['executable_alias']); _native_pin_schema(runtime['resolved_executable'])
+    if runtime['executable_alias'] != sys.executable or runtime['resolved_executable']['path'] != str(Path(sys.executable).resolve()):
+        raise ValueError('native interpreter path mismatch')
+    if runtime['python_version'] != sys.version.split()[0]:
+        raise ValueError('native Python version mismatch')
+    _native_equal(runtime['model_backends'], {'naive': 'naive', 'ets': 'ets', 'gbm': 'sklearn'})
+    if not isinstance(runtime['alias_chain'], list) or len(runtime['alias_chain']) > 8:
+        raise ValueError('native alias bound')
+    for item in runtime['alias_chain']:
+        _native_keys(item, ('path', 'target', 'identity', 'ancestors'))
+        _native_path(item['path']); _native_identity_doc(item['identity'], link=True)
+        _native_ancestors(Path(item['path']), item['ancestors'])
+        if not isinstance(item['target'], str) or not item['target']:
+            raise ValueError('native alias target invalid')
+    if not isinstance(runtime['packages'], list) or len(runtime['packages']) != 6 or {p.get('distribution') for p in runtime['packages']} != _NATIVE_PACKAGES:
+        raise ValueError('native six package pins required')
+    for item in runtime['packages']:
+        _native_keys(item, ('distribution', 'version', 'metadata', 'module_origin'))
+        if not isinstance(item['version'], str) or not 0 < len(item['version']) <= 128 or any(ord(x) < 32 for x in item['version']):
+            raise ValueError('native package version invalid')
+        _native_pin_schema(item['metadata']); _native_path(item['module_origin'])
+    outputs = c['outputs']
+    _native_keys(outputs, ('path', 'parent', 'parent_identity', 'owner_uid', 'create_mode', 'absent_required', 'overwrite'))
+    output = _native_path(outputs['path'])
+    if str(output.parent) != outputs['parent'] or outputs['owner_uid'] != os.getuid() or type(outputs['owner_uid']) is not int:
+        raise ValueError('native output parent/owner mismatch')
+    parent = _native_identity_doc(outputs['parent_identity'], True)
+    if parent[3] != os.getuid() or parent[2] & 0o077:
+        raise ValueError('native output parent must be private')
+    _native_equal({k: outputs[k] for k in ('create_mode', 'absent_required', 'overwrite')},
+                  {'create_mode': 448, 'absent_required': True, 'overwrite': False})
+    inputs = [Path(source['file']['path']), Path(host['pin']['path']), Path(controls['protocol']['path']), Path(controls['manifest']['path'])]
+    if any(output == p or output in p.parents or output.parent == p.parent for p in inputs) or len(set(inputs)) != len(inputs):
+        raise ValueError('native distinct input/output paths required')
+
+
+def _native_alias_guard(runtime):
+    current = Path(sys.executable)
+    observed = []
+    while current.is_symlink():
+        if len(observed) >= 8:
+            raise ValueError('native executable alias cycle')
+        observed.append((str(current), os.readlink(current), _identity(os.lstat(current))))
+        target = Path(os.readlink(current))
+        next_path = target if target.is_absolute() else current.parent / target
+        current = next_path.parent.resolve() / next_path.name
+    expected = [(x['path'], x['target'], _native_identity_doc(x['identity'], link=True)) for x in runtime['alias_chain']]
+    if observed != expected or str(current.resolve()) != runtime['resolved_executable']['path']:
+        raise ValueError('native executable alias changed')
+    for item in runtime['alias_chain']:
+        for ancestor in item['ancestors']:
+            if _identity(os.lstat(ancestor['path']), True) != _native_identity_doc(ancestor['identity'], True):
+                raise ValueError('native executable ancestor changed')
+
+
+def _native_pins_lifetime(run):
+    c = run['control']; life = _NativeLifetime()
+    try:
+        _native_alias_guard(c['runtime'])
+        _native_pin_open(life, run['root_pin'], private=True)
+        p_raw = _native_pin_open(life, c['controls']['protocol'], private=True)
+        m_raw = _native_pin_open(life, c['controls']['manifest'], private=True)
+        for item in c['code']:
+            _native_pin_open(life, item['file'])
+        _native_pin_open(life, c['runtime']['resolved_executable'])
+        from importlib.machinery import PathFinder
+        from email.parser import BytesParser
+        for item in c['runtime']['packages']:
+            raw = _native_pin_open(life, item['metadata'])
+            if BytesParser().parsebytes(raw).get('Version') != item['version']:
+                raise ValueError('native package metadata version drift')
+            module = {'scikit-learn': 'sklearn'}.get(item['distribution'], item['distribution'])
+            # Top-level find_spec resolves an origin without importing the package.
+            spec = PathFinder.find_spec(module)
+            if spec is None or spec.origin != item['module_origin']:
+                raise ValueError('native module origin drift')
+        _native_pin_open(life, c['source']['file'], private=True, body=False)
+        p, m = decode(p_raw), decode(m_raw)
+        from .observed_runner import _check_protocol
+        observed = c['profile'] == 'native_observed'
+        _check_protocol({**p, 'protocol_sha256': digest(p_raw), 'source_sha256': c['source']['file']['sha256'],
+                         'snapshot_sha256': c['source']['file']['sha256']}, '2026-10-08')
+        if (p['observed_execution_authorized'] is not observed or m.get('observed_execution_authorized') is not observed
+                or m.get('is_synthetic') is not (not observed) or m.get('observed_authenticity') is not observed
+                or m.get('source_id') != c['source']['source_id'] or m.get('sha256') != c['source']['file']['sha256']
+                or type(m.get('bytes')) is not int or m['bytes'] != c['source']['file']['bytes']):
+            raise ValueError('native control body/source/profile mismatch')
+        life.check()
+        return life
+    except BaseException:
+        life.close()
+        raise
+
+
+def register_root_accepted_native_run(authority, root_acceptance_raw, *, source_file, protocol_path, manifest_path, output_dir):
+    host = _native_host(authority)  # no source metadata or body before identity
+    if not isinstance(root_acceptance_raw, bytes) or len(root_acceptance_raw) > 128 * 1024 or digest(root_acceptance_raw) != host['pin']['sha256']:
+        raise ValueError('native external control SHA mismatch')
+    c = decode(root_acceptance_raw)
+    _native_control_schema(c, host, authority)
+    if tuple(map(str, (source_file, protocol_path, manifest_path, output_dir))) != (
+            c['source']['file']['path'], c['controls']['protocol']['path'], c['controls']['manifest']['path'], c['outputs']['path']):
+        raise ValueError('native caller paths mismatch')
+    with _NATIVE_LOCK:
+        if (host['pin']['sha256'] in host['used_controls'] or c['run_id'] in host['used_ids'] or c['outputs']['path'] in host['used_outputs']):
+            raise ValueError('native reservation consumed; no reset')
+        host['used_controls'].add(host['pin']['sha256']); host['used_ids'].add(c['run_id']); host['used_outputs'].add(c['outputs']['path'])
+    run = _native_freeze({'authority': authority, 'epoch': host['epoch'], 'control': c, 'root_pin': host['pin'],
+                          'output': c['outputs']['path'], 'parent_identity': _native_identity_doc(c['outputs']['parent_identity'], True),
+                          'raw': root_acceptance_raw})
+    life = _native_pins_lifetime(run)
+    try:
+        if os.path.lexists(run['output']) or _identity(os.lstat(Path(run['output']).parent), True) != run['parent_identity']:
+            raise ValueError('native absent output/private parent changed')
+    finally:
+        life.close()
+    binding = RootNativeRunBinding(c['run_id'])
+    _NATIVE_RUNS[binding] = run
+    _NATIVE_LIVES[binding] = {'state': 'READY', 'token': None, 'created': None, 'sealed': None, 'closure_sha': None}
+    return binding
+
+
+def native_run_record(binding):
+    run = _registered(binding, _NATIVE_RUNS)
+    host = _native_host(run['authority'])
+    if run['epoch'] is not host['epoch']:
+        raise ValueError('native foreign host epoch')
+    return run
+
+
+def _begin_native_run(binding):
+    run = native_run_record(binding)
+    with _NATIVE_LOCK:
+        state = _registered(binding, _NATIVE_LIVES)
+        if state['state'] != 'READY' or datetime.now(timezone.utc) >= _native_utc(run['control']['expires_at_utc']):
+            raise ValueError('native attempted/expired run; no reset')
+        state.update(state='RUNNING', token=object())
+        return state['token']
+
+
+def _native_state(binding, token=None):
+    native_run_record(binding)
+    state = _registered(binding, _NATIVE_LIVES)
+    if token is not None and state['token'] is not token:
+        raise ValueError('native foreign execution token')
+    return state
+
+
+def _capture_native_output(binding, token, identity):
+    run = native_run_record(binding); state = _native_state(binding, token)
+    if state['state'] != 'RUNNING' or state['created'] is not None:
+        raise ValueError('native output capture already consumed')
+    ids = (run['parent_identity'], tuple(identity))
+    with _RunDirectoryAnchor(run['output'], ids):
+        pass
+    state['created'] = ids
+
+
+def _seal_native_run(binding, token, raw):
+    run = native_run_record(binding); state = _native_state(binding, token)
+    if state['state'] != 'RUNNING' or state['created'] is None:
+        raise ValueError('native completion token unavailable')
+    with _RunDirectoryAnchor(run['output'], state['created']):
+        if os.path.lexists(Path(run['output']) / 'FAILURE.json'):
+            raise ValueError('native failure entry dominates')
+    state.update(state='SEALED', sealed=state['created'], closure_sha=digest(raw))
+
+
+def _fail_native_run(binding, token):
+    _native_state(binding, token)['state'] = 'FAILED'
+
+
+def _native_completion(binding):
+    state = _native_state(binding)
+    if state['state'] != 'SEALED' or not state['sealed'] or not state['closure_sha']:
+        raise ValueError('native issued completion absent/failed')
+    return state['sealed'], state['closure_sha']
+
+
+class _NativeRead(ObservedNativeRead):
+    def __enter__(self):
+        try:
+            self.check()
+        except BaseException:
+            self.close()
+            raise
+        return self
+
+
+def open_root_native_snapshot(binding):
+    run = native_run_record(binding)
+    if _native_state(binding)['state'] != 'RUNNING':
+        raise ValueError('native running host token required before source body')
+    life = _native_pins_lifetime(run)
+    try:
+        c = run['control']; pin = c['source']['file']
+        raw = _native_pin_open(life, pin, private=True)  # one source-body read after all pins
+        values = _parse_native(raw)
+        life.check()
+        basis = {sid: {month: {'hex': value.hex(), 'numerator': str(Fraction.from_float(value).numerator),
+                              'denominator': str(Fraction.from_float(value).denominator)} for month, value in series.items()}
+                 for sid, series in values.items()}
+        observed = c['profile'] == 'native_observed'
+        receipt = {'source_sha256': pin['sha256'], 'source_bytes': pin['bytes'], 'source_id': c['source']['source_id'],
+                   'is_synthetic': not observed, 'observed_authenticity': observed, 'observed_execution_authorized': observed,
+                   'full_parent_snapshot_exposed': True, 'physical_test_actuals_untouched': False,
+                   'numeric_policy': 'native-cell binary64; no XML decimal certificate',
+                   'source_labels': 801, 'required_months': 120, 'stored_value_basis': basis,
+                   'stored_value_basis_sha256': digest(canonical(basis)), 'root_control_sha256': run['root_pin']['sha256']}
+        return _NativeRead(life, values, receipt)
+    except BaseException:
+        life.close()
+        raise

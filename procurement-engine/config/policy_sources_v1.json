@@ -1,0 +1,46 @@
+{
+  "version": "policy-sources-v1",
+  "notice": "Official policy-notice listing pages. Nothing is fetched: parsers run only on saved HTML. robots.txt and terms were NOT checked in this offline phase; each note says what must be read before any fetch. fetch_allowed stays false until that review is recorded.",
+  "providers": {
+    "dgft": {
+      "provider_id": "dgft", "source_kind": "official", "publisher": "Directorate General of Foreign Trade",
+      "source_id": "dgft.gov.in", "listing_url": "https://www.dgft.gov.in/CP/?opt=trade-notice", "language": "en",
+      "document_hosts": ["dgft.gov.in"], "publication_timezone": "Asia/Kolkata",
+      "parser": "dgft_table_v1",
+      "robots_note": "Not checked. Read https://www.dgft.gov.in/robots.txt and honour any disallow for the listing path before fetching.",
+      "terms_note": "Government of India website terms (website policies page). Not reviewed. Notices are public documents; reuse terms must be confirmed.",
+      "attribution": "Source: Directorate General of Foreign Trade, Government of India",
+      "rights_status": "unreviewed", "permitted_uses": [], "fetch_allowed": false
+    },
+    "cbic": {
+      "provider_id": "cbic", "source_kind": "official", "publisher": "Central Board of Indirect Taxes and Customs",
+      "source_id": "cbic.gov.in", "listing_url": "https://www.cbic.gov.in/entities/view-sticker", "language": "en",
+      "document_hosts": ["cbic.gov.in"], "publication_timezone": "Asia/Kolkata",
+      "parser": "cbic_list_v1",
+      "robots_note": "Not checked. Read https://www.cbic.gov.in/robots.txt before fetching; the listing may be rendered by script.",
+      "terms_note": "Government of India website terms. Not reviewed.",
+      "attribution": "Source: Central Board of Indirect Taxes and Customs, Government of India",
+      "rights_status": "unreviewed", "permitted_uses": [], "fetch_allowed": false
+    },
+    "pib": {
+      "provider_id": "pib", "source_kind": "official", "publisher": "Press Information Bureau",
+      "source_id": "pib.gov.in", "listing_url": "https://pib.gov.in/allRel.aspx", "language": "en",
+      "document_hosts": ["pib.gov.in"], "publication_timezone": "Asia/Kolkata",
+      "parser": "pib_releases_v1",
+      "robots_note": "Not checked. Read https://pib.gov.in/robots.txt before fetching.",
+      "terms_note": "PIB press releases are issued for publication; reuse terms must still be confirmed. Not reviewed.",
+      "attribution": "Source: Press Information Bureau, Government of India",
+      "rights_status": "unreviewed", "permitted_uses": [], "fetch_allowed": false
+    },
+    "jnpa": {
+      "provider_id": "jnpa", "source_kind": "official", "publisher": "Jawaharlal Nehru Port Authority",
+      "source_id": "jnport.gov.in", "listing_url": "https://www.jnport.gov.in/circulars", "language": "en",
+      "document_hosts": ["jnport.gov.in"], "publication_timezone": "Asia/Kolkata",
+      "parser": "jnpa_circulars_v1",
+      "robots_note": "Not checked. Read https://www.jnport.gov.in/robots.txt before fetching.",
+      "terms_note": "Port authority website terms. Not reviewed.",
+      "attribution": "Source: Jawaharlal Nehru Port Authority",
+      "rights_status": "unreviewed", "permitted_uses": [], "fetch_allowed": false
+    }
+  }
+}

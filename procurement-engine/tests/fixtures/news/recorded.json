@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "notice": "SYNTHETIC recorded responses for offline news snapshot tests. Bodies are hand-written in the GDELT DOC 2.0 artlist JSON and Google News RSS shapes; publishers, URLs and headlines are invented (.test domains). No provider was called.",
+  "as_of": "2026-10-08T12:00:00Z",
+  "responses": [
+    {"provider": "gdelt", "material": "copper", "http_status": 200, "retrieved_at": "2026-10-08T07:00:00Z", "file": "gdelt_copper.json", "case": "articles incl. an instruction-like headline and one without an event type"},
+    {"provider": "google_news_rss", "material": "copper", "http_status": 200, "retrieved_at": "2026-10-08T08:00:00Z", "file": "rss_copper.xml", "case": "same story as GDELT, a second publisher, a resolved and an ambiguous event"},
+    {"provider": "gdelt", "material": "aluminium", "http_status": 200, "retrieved_at": "2026-10-08T10:00:00Z", "file": "gdelt_copper_later.json", "case": "later revision of the export-curb story"},
+    {"provider": "gdelt", "material": "copper", "http_status": 200, "retrieved_at": "2026-10-08T07:00:00Z", "file": "gdelt_copper.json", "case": "repeated fetch, same content"},
+    {"provider": "gdelt", "material": "copper", "http_status": 200, "retrieved_at": "2026-10-08T13:00:00Z", "file": "gdelt_after_cutoff.json", "case": "retrieved after as_of"},
+    {"provider": "gdelt", "material": "iron_ore", "http_status": 429, "retrieved_at": "2026-10-08T09:00:00Z", "file": null, "case": "rate limited"},
+    {"provider": "google_news_rss", "material": "aluminium", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "rss_malformed.xml", "case": "malformed feed"}
+  ]
+}

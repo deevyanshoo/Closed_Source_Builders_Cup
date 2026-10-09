@@ -1,0 +1,65 @@
+{
+  "version": "news-sources-v1",
+  "notice": "Provider terms and tagging rules for news snapshots. Headlines are untrusted text: rules read them, nothing in them is followed. Snapshots store headline, link and metadata only, never full article text. A provider whose rights are not reviewed grants no use, so the event gate excludes its snapshots until a review records permitted uses.",
+  "providers": {
+    "gdelt": {
+      "provider_id": "gdelt",
+      "endpoint": "https://api.gdeltproject.org/api/v2/doc/doc",
+      "terms_note": "GDELT states its data is open for unlimited and unrestricted use, including commercial use, with attribution. Confirm on gdeltproject.org before live use; linked articles keep their publishers' rights.",
+      "attribution": "Source: The GDELT Project (gdeltproject.org)",
+      "rights_status": "unreviewed",
+      "permitted_uses": [],
+      "fetch_allowed": false,
+      "rate_limit_note": "About one request every 5 seconds; HTTP 429 when exceeded."
+    },
+    "google_news_rss": {
+      "provider_id": "google_news_rss",
+      "endpoint": "https://news.google.com/rss/search",
+      "terms_note": "Google News RSS is for personal, non-commercial feed reading under Google's terms; headlines and links belong to their publishers. Needs a rights review before any product use.",
+      "attribution": "Headline and link via Google News; publisher named per item",
+      "rights_status": "unreviewed",
+      "permitted_uses": [],
+      "fetch_allowed": false,
+      "rate_limit_note": "No published quota; keep requests sparse."
+    }
+  },
+  "entities": {
+    "materials": {
+      "copper": ["copper", "cathode", "cathodes"],
+      "aluminium": ["aluminium", "aluminum"],
+      "iron_ore": ["iron ore"]
+    },
+    "ports": {
+      "INNSA": ["Nhava Sheva", "JNPT", "Jawaharlal Nehru Port"],
+      "INMAA": ["Chennai port", "port of Chennai"],
+      "INMUN": ["Mundra"],
+      "INPRT": ["Paradip"],
+      "AEJEA": ["Jebel Ali"],
+      "CLVAP": ["Valparaiso", "Valparaíso"],
+      "CNSHA": ["port of Shanghai", "Shanghai port"],
+      "BRTUB": ["Tubarao", "Tubarão"]
+    },
+    "routes": {
+      "red_sea": ["Red Sea"],
+      "suez_canal": ["Suez Canal"],
+      "strait_of_hormuz": ["Strait of Hormuz"],
+      "panama_canal": ["Panama Canal"],
+      "cape_of_good_hope": ["Cape of Good Hope"]
+    },
+    "event_types": {
+      "strike": ["strike", "strikes", "walkout"],
+      "closure": ["closed", "closure", "shut", "shuts", "shutdown"],
+      "export_restriction": ["export curb", "export curbs", "export ban", "export restriction", "export duty"],
+      "weather": ["cyclone", "typhoon", "hurricane", "flood", "flooding", "storm"],
+      "sanctions": ["sanction", "sanctions"]
+    },
+    "effect_class_for_event_type": {
+      "strike": "delay",
+      "closure": "delay",
+      "weather": "delay",
+      "export_restriction": "export_restriction",
+      "sanctions": "policy"
+    },
+    "instruction_patterns": ["ignore previous instructions", "ignore all previous", "system prompt", "you are now", "disregard the above"]
+  }
+}

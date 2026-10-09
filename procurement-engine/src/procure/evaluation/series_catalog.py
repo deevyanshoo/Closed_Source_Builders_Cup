@@ -255,15 +255,17 @@ def _bis(raw,source,profile,dispositions):
         if 'AVAILABILITY' in r and r['AVAILABILITY'] != 'A':g['public']=False
         token=r.get('OBS_PRE_BREAK','')
         if token:
-            if re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?',token) is None:
-                raise ValueError('BIS OBS_PRE_BREAK numeric token invalid')
-            try:
-                prebreak=Decimal(token)
-                number=float(prebreak)
-                if not prebreak.is_finite() or prebreak<=0 or not math.isfinite(number) or number<=0:
-                    raise ValueError('BIS OBS_PRE_BREAK nonpositive/nonfinite')
-            except (InvalidOperation,OverflowError) as exc:
-                raise ValueError('BIS OBS_PRE_BREAK numeric token invalid') from exc
+            # Exact optional unavailable marker still binds evidence and the regime hold.
+            if token!='NaN':
+                if re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?',token) is None:
+                    raise ValueError('BIS OBS_PRE_BREAK numeric token invalid')
+                try:
+                    prebreak=Decimal(token)
+                    number=float(prebreak)
+                    if not prebreak.is_finite() or prebreak<=0 or not math.isfinite(number) or number<=0:
+                        raise ValueError('BIS OBS_PRE_BREAK nonpositive/nonfinite')
+                except (InvalidOperation,OverflowError) as exc:
+                    raise ValueError('BIS OBS_PRE_BREAK numeric token invalid') from exc
             g['prebreak'].add((month,hashlib.sha256(token.encode('utf-8')).hexdigest()))
             g['flags'].add('prebreak_observation_review_required')
         if month in g['states']:

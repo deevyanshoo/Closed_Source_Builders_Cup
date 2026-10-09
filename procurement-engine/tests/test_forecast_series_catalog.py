@@ -339,7 +339,8 @@ def test_source_shape_prebreak_digest_month_hold_and_exact_disposition():
     assert not next(r for r in build(wb,bis,regime_dispositions=disposition).records if r['series_id']==aa['series_id'])['forecast_eligible']
 
 
-@pytest.mark.parametrize('token',['unknown','NaN','Infinity','-1','0','1e9999',' 2 ', 'x'*129])
+#Exact NaN is tested as an evidence-bearing unavailable marker below, not malformed.
+@pytest.mark.parametrize('token',['unknown','Infinity','-1','0','1e9999',' 2 ', 'x'*129])
 def test_source_shape_malformed_prebreak_fails_closed(token):
     with pytest.raises(ValueError,match='prebreak|PRE_BREAK|field width'):build(generated_wb(),shape_bis(prebreak=token))
 
@@ -878,3 +879,116 @@ def test_wb_header_layout_old_three_row_profile_retains_exact_results():
     assert h['source_first_period']=='1959-12'and h['source_last_period']=='2026-08'
     assert snap.values[h['series_id']]['2016-09']==1189. and snap.values[h['series_id']]['2026-08']==1308.
     assert h['quoted_unit']=='2010=100'and h['required_window_mask']==['valid']*120
+
+
+# Exact optional BIS prebreak marker: generated observations/metadata only.
+def bis_prebreak_marker_fixture(*, token='NaN', marker_months=('2016-09','2016-10'), availability='A'):
+    rows=list(csv.DictReader(io.StringIO(shape_bis().decode())))
+    for row in rows:
+        if row['REF_AREA']in ('AA','ZZ'):
+            original=row['REF_AREA'];row.update(REF_AREA='BY'if original=='AA'else'TM',CURRENCY='BYN'if original=='AA'else'TMT',AVAILABILITY=availability)
+    for area,month in zip(('BY','TM'),marker_months):
+        found=next((r for r in rows if r['REF_AREA']==area and r['TIME_PERIOD']==month),None)
+        if found is None:
+            found=dict(next(r for r in rows if r['REF_AREA']==area));found.update(TIME_PERIOD=month,OBS_VALUE='7'if area=='BY'else'11');rows.append(found)
+        found['OBS_PRE_BREAK']=token
+    out=io.StringIO();writer=csv.DictWriter(out,fieldnames=OFFICIAL_BIS_HEADER);writer.writeheader();writer.writerows(rows)
+    return out.getvalue().encode()
+
+
+def test_bis_prebreak_marker_exact_nan_holds_two_lines_without_replacing_values():
+    wb=generated_wb();bis=bis_prebreak_marker_fixture();snap=build(wb,bis)
+    token_digest='d5b592c05dc25b5032553f1b27f4139be95e881f73db33b02b05ab20c3f9981e'
+    for area,code,month,expected in [('BY','BYN','2016-09',2.),('TM','TMT','2016-10',2.01)]:
+        r=next(r for r in snap.records if r['locator'].get('REF_AREA')==area)
+        assert r['currency']==code and r['observation_eligible']and not r['forecast_eligible']
+        assert r['eligibility_reason']=='currency_regime_disposition_required'
+        assert r['regime_decision']=='unavailable_pending_explicit_regime_disposition'
+        assert r['header_unit_evidence']['prebreak_observations']==[{'month':month,'token_sha256':token_digest}]
+        assert r['semantic_review_flags']==['prebreak_observation_review_required']
+        assert r['required_window_mask']==['valid']*120
+        assert snap.values[r['series_id']][month]==expected  #Never replace OBS_VALUE with marker.
+        namespace={'regime_evidence':[],'area_currency_codes':[code],
+                   'prebreak_observations':[{'month':month,'token_sha256':token_digest}]}
+        regime=hashlib.sha256(a.canonical(namespace)).hexdigest()
+        assert r['regime_id']==regime and r['series_id']==f'BIS:bis-xru-monthly-average-v1:{area}:{code}:A:R{regime}'
+    assert next(r for r in snap.records if r['currency']=='EUR'and r['forecast_eligible'])['locator']['REF_AREA']=='DE'
+    assert any(r['currency']=='XDR'and r['forecast_eligible']for r in snap.records)
+    from procure.evaluation.series_catalog import finite_batches
+    queued=[sid for batch in finite_batches(snap.records)for sid in batch]
+    assert queued==sorted(r['series_id']for r in snap.records if r['forecast_eligible'])
+    assert not any(r['series_kind']=='fx'and r['currency']in ('BYN','TMT','USD')and r['series_id']in queued for r in snap.records)
+
+
+@pytest.mark.parametrize('token',['nan','NAN','Nan','nAn','NaN ',' NaN','NaN\t','+NaN','-NaN','sNaN'])
+def test_bis_prebreak_marker_case_or_whitespace_variants_refused(token):
+    with pytest.raises(ValueError,match='PRE_BREAK|field width'):
+        build(generated_wb(),bis_prebreak_marker_fixture(token=token))
+
+
+def test_bis_prebreak_marker_outside_window_still_binds_regime_evidence():
+    snap=build(generated_wb(),bis_prebreak_marker_fixture(marker_months=('2016-07','2009-01')))
+    for area,month in [('BY','2016-07'),('TM','2009-01')]:
+        r=next(r for r in snap.records if r['locator'].get('REF_AREA')==area)
+        assert r['header_unit_evidence']['prebreak_observations']==[{'month':month,'token_sha256':'d5b592c05dc25b5032553f1b27f4139be95e881f73db33b02b05ab20c3f9981e'}]
+        assert r['required_window_mask']==['valid']*120 and not r['forecast_eligible']
+        assert r['eligibility_reason']=='currency_regime_disposition_required'
+        assert month not in snap.values[r['series_id']] #Output remains exact120 window, not a source rewrite.
+
+
+def test_bis_prebreak_marker_obs_value_nan_is_invalid_observation():
+    rows=list(csv.DictReader(io.StringIO(bis_prebreak_marker_fixture().decode())))
+    next(r for r in rows if r['REF_AREA']=='BY'and r['TIME_PERIOD']=='2016-09')['OBS_VALUE']='NaN'
+    out=io.StringIO();w=csv.DictWriter(out,fieldnames=OFFICIAL_BIS_HEADER);w.writeheader();w.writerows(rows)
+    snap=build(generated_wb(),out.getvalue().encode())
+    r=next(r for r in snap.records if r['locator'].get('REF_AREA')=='BY')
+    assert not r['observation_eligible']and not r['forecast_eligible']
+    assert r['invalid_count']==1 and r['missing_count']==0 and r['required_window_mask'][0]=='invalid'
+    assert '2016-09'not in snap.values[r['series_id']]
+    assert r['semantic_review_flags']==['prebreak_observation_review_required']
+    assert any(r['currency']=='XDR'and r['forecast_eligible']for r in snap.records)
+
+
+@pytest.mark.parametrize('availability',['B','K','Z','','AA'])
+def test_bis_prebreak_marker_nonpublic_source_not_approved_by_disposition(availability):
+    wb,bis=generated_wb(),bis_prebreak_marker_fixture(availability=availability)
+    snap=build(wb,bis);affected=[r for r in snap.records if r['currency']in ('BYN','TMT')]
+    dispositions={r['series_id']:{'evidence_sha256':hashlib.sha256(a.canonical(r['header_unit_evidence'])).hexdigest(),
+                 'disposition_sha256':'9'*64,'decision':'retain_single_source_regime'}for r in affected}
+    final=build(wb,bis,regime_dispositions=dispositions)
+    for r in final.records:
+        if r['currency']in ('BYN','TMT'):
+            assert r['observation_eligible']and not r['forecast_eligible']
+            assert r['eligibility_reason']=='source_availability_not_public'
+            assert r['header_unit_evidence']['source_attributes']['AVAILABILITY']==[availability]
+            assert r['semantic_review_flags']==['prebreak_observation_review_required']
+
+
+def test_bis_prebreak_marker_only_exact_evidence_disposition_can_release_hold():
+    wb,bis=generated_wb(),bis_prebreak_marker_fixture()
+    snap=build(wb,bis);r=next(r for r in snap.records if r['locator'].get('REF_AREA')=='BY');sid=r['series_id']
+    valid={'evidence_sha256':hashlib.sha256(a.canonical(r['header_unit_evidence'])).hexdigest(),
+           'disposition_sha256':'9'*64,'decision':'retain_single_source_regime'}
+    for changed in [dict(valid,evidence_sha256='0'*64),dict(valid,decision='APPROVED'),
+                    dict(valid,disposition_sha256='bad'),{'APPROVED':True}]:
+        held=next(r for r in build(wb,bis,regime_dispositions={sid:changed}).records if r['series_id']==sid)
+        assert not held['forecast_eligible']and held['eligibility_reason']=='currency_regime_disposition_required'
+    released=build(wb,bis,regime_dispositions={sid:valid})
+    approved=next(r for r in released.records if r['series_id']==sid)
+    assert approved['forecast_eligible']and approved['semantic_review_flags']==['prebreak_observation_review_required']
+    assert approved['regime_decision']=='explicit_root_disposition_single_source_no_splice'
+    assert released.values[sid]==snap.values[sid]
+    moved=bis_prebreak_marker_fixture(marker_months=('2016-10','2016-10'))
+    moved_by=next(r for r in build(wb,moved).records if r['locator'].get('REF_AREA')=='BY')
+    assert moved_by['series_id']!=sid
+    with pytest.raises(ValueError,match='foreign regime'):build(wb,moved,regime_dispositions={sid:valid})
+
+
+def test_bis_prebreak_marker_duplicate_observation_still_disqualified():
+    rows=list(csv.DictReader(io.StringIO(bis_prebreak_marker_fixture().decode())))
+    rows.append(dict(next(r for r in rows if r['REF_AREA']=='BY'and r['TIME_PERIOD']=='2016-09')))
+    out=io.StringIO();w=csv.DictWriter(out,fieldnames=OFFICIAL_BIS_HEADER);w.writeheader();w.writerows(rows)
+    snap=build(generated_wb(),out.getvalue().encode());r=next(r for r in snap.records if r['locator'].get('REF_AREA')=='BY')
+    assert r['duplicate_count']==1 and not r['forecast_eligible']and not r['observation_eligible']
+    assert r['eligibility_reason']=='duplicate_source_key'and '2016-09'not in snap.values[r['series_id']]
+    assert len(r['header_unit_evidence']['prebreak_observations'])==1

@@ -1,4 +1,4 @@
-.dispatch-nav{display:flex;gap:14px}
+
 .dispatch-grid{display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr);border-top:1px solid #111}
 .dispatch-column{min-width:0;padding:20px 24px}
 .dispatch-column>h2{font-size:16px;text-transform:uppercase;letter-spacing:-.02em;margin:0 0 12px}
@@ -44,7 +44,7 @@
 .dispatch-evidence-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;margin:8px 0 0}
 .dispatch-state{font-size:13px;color:#555;padding:12px 0}
 .dispatch-stale{margin:16px 30px}
-@media(max-width:800px){.dispatch-grid{grid-template-columns:1fr}.dispatch-main{border-left:0;border-top:1px solid #111}.dispatch-column{padding:16px}.dispatch-facts,.dispatch-evidence-card dl{grid-template-columns:1fr}.dispatch-stale{margin:12px 16px}.dispatch-nav{flex-direction:column;gap:4px}}
+@media(max-width:800px){.dispatch-grid{grid-template-columns:1fr}.dispatch-main{border-left:0;border-top:1px solid #111}.dispatch-column{padding:16px}.dispatch-facts,.dispatch-evidence-card dl{grid-template-columns:1fr}.dispatch-stale{margin:12px 16px}}
 .dispatch-adapter{display:flex;flex-direction:column;gap:6px;padding:14px 30px;border-bottom:1px solid #111;background:#f0e9e6;border-left:6px solid #e61919;font-size:12px;line-height:1.5}
 .dispatch-adapter strong{font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.07em}
 @media(max-width:800px){.dispatch-adapter{padding:12px 16px}}
@@ -68,3 +68,7 @@
 .dispatch-lead-time{grid-column:1/-1}
 .dispatch-lead-time small{display:block;color:#555;font-size:11px;line-height:1.5;margin-top:2px}
 .dispatch-lead-time[data-status=ok] strong{font-size:15px}
+.workspace-masthead{height:auto;min-height:67px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}
+.workspace-nav{display:flex;flex-wrap:wrap;gap:6px 16px;flex-basis:100%;order:3}
+.workspace-nav a[aria-current=page]{color:#e61919;text-decoration-thickness:2px}
+@media(max-width:600px){.workspace-masthead{padding:12px 16px}.workspace-nav{gap:8px 14px}.workspace-nav a{font-size:10px;padding:4px 0}}

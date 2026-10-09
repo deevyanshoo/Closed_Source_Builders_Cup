@@ -54,3 +54,7 @@
   .offers-editor{width:100%;box-sizing:border-box}
   .offers-editor input,.offers-editor select{width:100%;box-sizing:border-box}
 }
+.workspace-masthead{height:auto;min-height:67px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}
+.workspace-nav{display:flex;flex-wrap:wrap;gap:6px 16px;flex-basis:100%;order:3}
+.workspace-nav a[aria-current=page]{color:#e61919;text-decoration-thickness:2px}
+@media(max-width:600px){.workspace-masthead{padding:12px 16px}.workspace-nav{gap:8px 14px}.workspace-nav a{font-size:10px;padding:4px 0}}

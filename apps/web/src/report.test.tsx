@@ -13,6 +13,9 @@ describe('csv helpers', () => {
     expect(csvCell('+1')).toBe("'+1");
     expect(csvCell('-2')).toBe("'-2");
     expect(csvCell('@cmd')).toBe("'@cmd");
+    expect(csvCell(' =1+1')).toBe("' =1+1");
+    expect(csvCell('\n\t@SUM(1)')).toBe("\"'\n\t@SUM(1)\"");
+    expect(csvCell('\u0001=1+1')).toBe("'\u0001=1+1");
     expect(csvCell(null)).toBe('');
     expect(toCsv(['a', 'b'], [['1', 'x\ny']])).toBe('a,b\r\n1,"x\ny"\r\n');
   });
@@ -48,6 +51,20 @@ describe('offer report', () => {
     expect(lines[1].startsWith('notice,')).toBe(true);
     expect(report.csv).toContain('evidence,incoterm,,,document,p1:l11,');
   });
+
+  it('keeps both verified prices and their locators when a quote conflicts', () => {
+    const conflict = createFixtureAdapter().list().find(o => o.fixture_id === 'Q18')!;
+    const exported = offerReport(conflict, AT);
+    const pricing = JSON.parse(exported.json).fields.find((f: { name: string }) => f.name === 'items[0].pricing');
+    expect(pricing.candidates).toEqual([
+      { value: { type: 'fixed', unit_price: { amount: '9388', currency: 'USD' }, per_unit: 'tonne' }, verified: true,
+        problems: [], locators: ['Offers!D8', 'Offers!D9'] },
+      { value: { type: 'fixed', unit_price: { amount: '9420.00', currency: 'USD' }, per_unit: 'tonne' }, verified: true,
+        problems: [], locators: ['Terms!A5'] },
+    ]);
+    expect(exported.csv).toContain('candidate,items[0].pricing,verified,USD 9388 per tonne,document,Offers!D8; Offers!D9');
+    expect(exported.csv).toContain('candidate,items[0].pricing,verified,USD 9420.00 per tonne,document,Terms!A5');
+  });
 });
 
 describe('dispatch report', () => {
@@ -63,11 +80,24 @@ describe('dispatch report', () => {
     expect(json.route_evidence.confirmed.map((e: { evidence_id: string }) => e.evidence_id)).toEqual(['rev-port-002']);
     expect(json.hazards.map((h: { state: string }) => h.state)).toContain('exposure_found');
     expect(json.lead_time.working_days).toBe(2);
+    expect(json.route_evidence.confirmed[0].source.reference).toBe('SYN-PA-117');
+    expect(json.route_evidence.confirmed[0].content_sha256).toBe('b2e0000000000000000000000000000000000000000000000000000000000002');
+    expect(json.route_evidence.confirmed[0].observed_period.start).toBe('2026-10-05T00:00:00+00:00');
+    expect(json.hazards.find((h: { provider_id: string }) => h.provider_id === 'open-meteo').payload_sha256)
+      .toBe('99acbf09e031b7c9693e62af720d43d7d9c97dda748d66921f3da6e9977d71c3');
+    expect(json.hazards.find((h: { provider_id: string }) => h.provider_id === 'open-meteo').evidence_ids)
+      .toContain('haz-open-meteo-INNSA-99acbf09e031');
     expect(report.basename).toBe('synthetic-dispatch-SHP-SYN-002');
     const lines = report.csv.trimEnd().split('\r\n');
     expect(lines.slice(1).every(line => line.endsWith(',true'))).toBe(true);
     expect(report.csv).toContain('route_evidence,rev-port-002,confirmed');
     expect(report.csv).toContain('hazard,');
+    expect(report.csv).toContain('lead_time,SHP-SYN-002,ok,2 working days');
+    expect(report.csv).toContain('rain_heavy_24h: 76.8 mm; threshold 64.5 mm; met true');
+    expect(report.csv).toContain('gdacs_alert_within_radius: Green FL alert; distance 32 km; event 9100002; threshold Orange or Red within 300 km; met false');
+    expect(report.csv).not.toContain('Green km');
+    expect(report.csv).not.toContain('300 km km');
+    expect(report.csv).toContain('haz-open-meteo-INNSA-99acbf09e031');
   });
 
   it('exports without hazards when they have not loaded', async () => {
@@ -76,6 +106,18 @@ describe('dispatch report', () => {
     const json = JSON.parse(dispatchReport({ row, timeline: await a.timeline(row.shipment_id), evidence: await a.routeEvidence(row.shipment_id),
       hazards: null }, AT).json);
     expect(json.hazards).toBeNull();
+    expect(json.hazard_status).toBe('not_loaded');
+  });
+
+  it('labels a failed hazard load in both export formats', async () => {
+    const a = createDispatchFixtureAdapter();
+    const row = (await a.listShipments()).shipments.find(s => s.shipment_id === 'SHP-SYN-002')!;
+    const report = dispatchReport({ row, timeline: await a.timeline(row.shipment_id), evidence: await a.routeEvidence(row.shipment_id),
+      hazards: null, hazard_state: { kind: 'error', message: 'Provider unavailable' } }, AT);
+    const json = JSON.parse(report.json);
+    expect(json.hazard_status).toBe('error');
+    expect(json.hazard_error).toBe('Provider unavailable');
+    expect(report.csv).toContain('hazard_state,SHP-SYN-002,error,,Provider unavailable,true');
   });
 });
 

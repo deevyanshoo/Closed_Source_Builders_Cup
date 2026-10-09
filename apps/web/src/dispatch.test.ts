@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness, hazardStateLabel, replayReason, statusLabel } from './dispatch';
+import { createDispatchFixtureAdapter, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness, hazardStateLabel, readableReplay, replayReason, statusLabel } from './dispatch';
 import type { LeadTime, ShipmentStatus } from './dispatch';
 
 describe('local dispatch fixture adapter', () => {
@@ -107,6 +107,19 @@ describe('port-delay replay (local adapter)', () => {
     const r = await adapter.replay('eta-after-cutoff');
     expect([r.status, r.reasons]).toEqual(['error', ['event_after_as_of']]);
     await expect(adapter.replay('nope')).rejects.toBeInstanceOf(DispatchError);
+  });
+
+  it('refuses malformed or unexpected replay responses without hiding the valid cutoff rejection', async () => {
+    const cutoff = await adapter.replay('eta-after-cutoff');
+    expect(readableReplay(cutoff, 'eta-after-cutoff').reasons).toEqual(['event_after_as_of']);
+    expect(() => readableReplay({ ...cutoff, reasons: ['unavailable'] }, 'eta-after-cutoff')).toThrow(DispatchError);
+    expect(() => readableReplay({ ...cutoff, sample: { ...cutoff.sample, sample_id: 'other' } }, 'eta-after-cutoff')).toThrow(DispatchError);
+    expect(() => readableReplay({ ...cutoff, sample: { ...cutoff.sample, synthetic: false } } as never, 'eta-after-cutoff')).toThrow(DispatchError);
+    expect(() => readableReplay({ ...cutoff, synthetic: false } as never, 'eta-after-cutoff')).toThrow(DispatchError);
+    const release = await adapter.replay('innsa-release');
+    expect(() => readableReplay({ ...release, changes: null } as never, 'innsa-release')).toThrow(DispatchError);
+    expect(() => readableReplay({ ...release, timeline: null }, 'innsa-release')).toThrow(DispatchError);
+    expect(() => readableReplay({ ...release, timeline: { ...release.timeline!, after: null } } as never, 'innsa-release')).toThrow(DispatchError);
   });
 
   it('explains what changed and why', async () => {

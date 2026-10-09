@@ -76,7 +76,8 @@ class NagerDateProvider:
             return fail("unsupported_year", "no_holidays_returned")
         national, regional, other = [], [], []
         for row in rows:
-            if not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"].strip() \
+            if not isinstance(row, dict) or row.get("countryCode") != country or \
+                    not isinstance(row.get("name"), str) or not row["name"].strip() \
                     or not isinstance(row.get("global"), bool) or not isinstance(row.get("types"), list):
                 return fail("source_unavailable", "invalid_response")
             try:

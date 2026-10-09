@@ -192,9 +192,14 @@ def assess_open_meteo(code: str, *, status: int, body: bytes, retrieved_at: str,
     hours = [stamps[i] for i in index]
     values = [_rule(rule, hours, [columns[rule["variable"]][i] for i in index]) for rule in cfg["rules"]]
     met = [v for v in values if v["met"]]
-    state = "exposure_found" if met else ("insufficient_data" if any(v["met"] is None for v in values)
+    complete_window = (len(hours) == cfg["window_hours"] and hours[0] == cutoff
+                       and hours[-1] + timedelta(hours=1) == end)
+    undecided_rule = any(v["met"] is None for v in values)
+    state = "exposure_found" if met else ("insufficient_data" if not complete_window or undecided_rule
                                           else "no_exposure_found")
-    out.update(state=state, reason=None if state != "insufficient_data" else "rule_undecided", values=values,
+    reason = (("forecast_does_not_cover_window" if not complete_window else "rule_undecided")
+              if state == "insufficient_data" else None)
+    out.update(state=state, reason=reason, values=values,
                period={"start": hours[0].isoformat(), "end": (hours[-1] + timedelta(hours=1)).isoformat()},
                valid_until=(retrieved + timedelta(hours=cfg["valid_hours"])).isoformat())
     if met:

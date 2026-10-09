@@ -85,7 +85,7 @@ The final click path and expected screens are in `docs/Demo_Quotes_and_Dispatch.
 - **Shipments:** lists them by status, and shows the selected shipment's timeline, working-day lead time and route evidence.
 - **Hazard and weather exposure:** a panel labelled "Exposure, not confirmed".
 - **Replay:** a sample delay, before and after.
-- **Export:** "Download synthetic JSON" and "Download synthetic CSV" (`dispatchReport` in `apps/web/src/dispatch.ts`) save the selected shipment's status, timeline, lead time, route evidence and hazards. Every JSON file and every CSV row is labelled synthetic, and cells are neutralised against spreadsheet formulas.
+- **Export:** "Download synthetic JSON" and "Download synthetic CSV" (`dispatchReport` in `apps/web/src/dispatch.ts`) save the selected shipment's status, timeline, lead time, route evidence and hazards. If hazards are loading or unavailable, the report explicitly records that state. JSON retains source hashes, periods, expiry and evidence identifiers; CSV has lead-time and hazard-rule rows. Every JSON file and every CSV row is labelled synthetic. Formula-like CSV text, including after leading whitespace, is apostrophe-prefixed; spreadsheet application behavior has not been independently checked.
 - **Accessibility:** header navigation marks the current page. Status, signal, evidence and assessment chips carry screen-reader text. All controls are keyboard reachable with a visible focus outline, and tap targets are at least 24 by 24 px. It was checked with a contrast and labelling audit in headless Chrome at 1440, 768 and 390 px.
 
 ## What is synthetic

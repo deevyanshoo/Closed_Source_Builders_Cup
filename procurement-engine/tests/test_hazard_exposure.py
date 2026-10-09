@@ -131,6 +131,29 @@ def test_below_threshold_is_no_exposure_found_not_safe():
     assert out["assessments"][0]["usable"] is True
 
 
+def test_below_threshold_short_forecast_does_not_clear_full_window():
+    payload = json.loads(body("open_meteo_inmaa.json"))
+    payload["hourly"] = {key: values[12:36] for key, values in payload["hourly"].items()}
+    assessment = om("INMAA", "", raw=json.dumps(payload).encode())
+    assert (assessment["state"], assessment["reason"]) == ("insufficient_data", "forecast_does_not_cover_window")
+    assert assessment["period"] == {"start": "2026-10-08T12:00:00+00:00",
+                                    "end": "2026-10-09T12:00:00+00:00"}
+    assert hazard_exposure([assessment], as_of=AS_OF)["assessments"][0]["usable"] is False
+
+
+def test_short_forecast_still_reports_measured_exposure():
+    payload = json.loads(body("open_meteo_innsa.json"))
+    payload["hourly"] = {key: values[12:36] for key, values in payload["hourly"].items()}
+    payload["hourly"]["wind_speed_10m"][0] = 62
+    assessment = om("INNSA", "", raw=json.dumps(payload).encode())
+    assert assessment["state"] == "exposure_found"
+
+
+def test_hourly_forecast_cannot_clear_partial_start_hour():
+    assessment = om("INMAA", "open_meteo_inmaa.json", as_of="2026-10-08T12:30:00Z")
+    assert (assessment["state"], assessment["reason"]) == ("insufficient_data", "forecast_does_not_cover_window")
+
+
 def test_gaps_make_a_rule_undecided():
     a = om("AEJEA", "open_meteo_aejea.json")
     assert a["state"] == "insufficient_data"

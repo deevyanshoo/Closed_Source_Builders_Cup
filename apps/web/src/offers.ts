@@ -225,6 +225,7 @@ export function offerReport(offer: Offer, generatedAt: Date): Report {
     name, kind: field.kind, status: field.status, critical: field.critical, source: field.source, value: field.value,
     display: formatValue(field.kind, field.value), reasons: field.reasons,
     evidence: field.evidence.map(e => ({ locator: e.locator, quote: e.quote, text_sha256: e.text_sha256 })),
+    candidates: field.candidates.map(c => ({ value: c.value, verified: c.verified, problems: c.problems, locators: c.locators })),
   }));
   const json = {
     report: 'offer_review', synthetic: true, notice: REPORT_NOTICE, source: 'local_fixture_adapter',
@@ -241,6 +242,8 @@ export function offerReport(offer: Offer, generatedAt: Date): Report {
   for (const f of fields) {
     rows.push(['field', f.name, f.status, f.display, f.source, null, f.reasons.join('; ') || null]);
     for (const e of f.evidence) rows.push(['evidence', f.name, null, null, 'document', e.locator, e.quote]);
+    for (const c of f.candidates) rows.push(['candidate', f.name, c.verified ? 'verified' : 'unverified',
+      formatValue(f.kind, c.value), 'document', c.locators.join('; '), c.problems.join('; ') || null]);
   }
   for (const r of offer.blocking_reasons) rows.push(['blocking_reason', r.field, r.code, null, null, null, r.message]);
   for (const r of offer.review_flags) rows.push(['review_flag', null, r.flag, null, null, r.locator, r.text]);

@@ -9,7 +9,7 @@ type Cell = string | number | boolean | null | undefined;
 export function csvCell(value: Cell): string {
   if (value === null || value === undefined) return '';
   let text = String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  if (/^(?:[\t\r]|[\x00-\x1f\x7f\s\uFEFF\u200B]*[=+\-@])/.test(text)) text = `'${text}`;
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

@@ -58,13 +58,16 @@ def main() -> int:
         for result in (*timelines.values(), *affected.values(), *route.values()):
             _require_readable(result)
         replay_content = samples.load_replay_samples()
+        replay_results = {}
+        for sample in replay_content["samples"]:
+            result = replay_event(data["milestones"]["records"], sample["record"], as_of=AS_OF, now=AS_OF,
+                                  snapshot=data["snapshot"],
+                                  route_evidence_records=data["route_evidence"]["records"])
+            _require_replay_result(result, sample)
+            replay_results[sample["sample_id"]] = {**result, "sample": samples.sample_view(sample)}
         replay = {"notice": replay_content["notice"],
                   "samples": [samples.sample_view(sample) for sample in replay_content["samples"]],
-                  "results": {sample["sample_id"]: {
-                      **replay_event(data["milestones"]["records"], sample["record"], as_of=AS_OF, now=AS_OF,
-                                     snapshot=data["snapshot"],
-                                     route_evidence_records=data["route_evidence"]["records"]),
-                      "sample": samples.sample_view(sample)} for sample in replay_content["samples"]}}
+                  "results": replay_results}
         revision_result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                                          capture_output=True, text=True, check=True)
         revision = revision_result.stdout.strip()
@@ -104,6 +107,17 @@ def _require_readable(result: object) -> None:
             or not isinstance(result.get("reasons"), list)
             or not all(isinstance(reason, str) for reason in result["reasons"])):
         raise ValueError("unreadable_dispatch_result")
+
+
+def _require_replay_result(result: object, sample: dict) -> None:
+    if isinstance(result, dict) and result.get("status") == "error":
+        if result.get("reasons") != ["event_after_as_of"]:
+            raise ValueError("unreadable_replay_result")
+        later = normalize_milestones([sample["record"]], as_of="9999-12-31T23:59:59Z")
+        if later["rejected"] or len(later["events"]) != 1:
+            raise ValueError("invalid_cutoff_replay_sample")
+        return
+    _require_readable(result)
 
 
 if __name__ == "__main__":

@@ -423,7 +423,8 @@ export function DispatchPage() {
           <section className="dispatch-export" aria-label="Export this shipment">
             <h3>Export</h3>
             <ReportDownloads label={`shipment ${row.shipment_id}`} build={() => dispatchReport({ row, timeline: detail.value.timeline,
-              evidence: detail.value.evidence, hazards: hazards?.kind === 'ready' ? hazards.value : null }, new Date())} />
+              evidence: detail.value.evidence, hazards: hazards?.kind === 'ready' ? hazards.value : null,
+              hazard_state: hazards?.kind === 'loading' || hazards?.kind === 'error' ? hazards : undefined }, new Date())} />
           </section>
         </>}
       </div>

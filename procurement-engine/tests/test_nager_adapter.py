@@ -109,6 +109,14 @@ def test_bad_responses_and_transport_errors_are_source_unavailable(fetch):
     assert r["status"] == "source_unavailable" and r["holidays"] == []
 
 
+@pytest.mark.parametrize("country_code", ["SG", None])
+def test_response_for_another_country_or_without_country_is_unavailable(country_code):
+    row = {**MOCK_HOLIDAYS[0], "countryCode": country_code}
+    result = working_days(provider(MockFetch(200, [row])), "ZZ", date(2026, 10, 2), date(2026, 10, 9))
+    assert (result["status"], result["reason"], result["working_days"]) == (
+        "source_unavailable", "invalid_response", None)
+
+
 def test_invalid_requests_are_not_sent():
     fetch = MockFetch(200, MOCK_HOLIDAYS)
     assert provider(fetch).holidays("zz/../x", 2026)["status"] == "unsupported_country"

@@ -52,7 +52,7 @@ export type EvidenceItem = {
   evidence_id: string; kind: string; summary: string | null; location_keys: string[];
   source: { provider_id: string; kind: string; reference: string | null }; retrieved_at: string;
   observed_period: { start: string; end: string | null }; status: 'exposure' | 'confirmed'; operating_status: string | null;
-  valid_until: string | null; expiry: string; period_state?: string; synthetic: boolean;
+  valid_until: string | null; expiry: string; period_state?: string; content_sha256?: string; synthetic: boolean;
 };
 export type EvidenceResponse = {
   status: ReadStatus; reasons: string[]; as_of: string | null; location_keys: string[];
@@ -91,6 +91,24 @@ export type ReplayResponse = {
     exposure: { evidence_id: string; kind: string }[]; changed_by_replay: false; note: string } | null;
   material_screen: MaterialScreen | null; recovery_link: string; note: string;
 };
+
+/** Reject incomplete fixture responses while retaining the deliberate cutoff rejection for display. */
+export function readableReplay(value: ReplayResponse, sampleId: string): ReplayResponse {
+  const v = value as ReplayResponse | null;
+  const validBase = v && v.synthetic === true && v.sample?.synthetic === true && v.sample.sample_id === sampleId
+    && Array.isArray(v.reasons) && v.reasons.every(r => typeof r === 'string')
+    && Array.isArray(v.changes) && Array.isArray(v.shipments?.before) && Array.isArray(v.shipments?.after)
+    && Array.isArray(v.affected?.before) && typeof v.recovery_link === 'string';
+  const validSuccess = validBase && ['ok', 'empty', 'stale'].includes(v.status)
+    && Array.isArray(v.timeline?.before) && Array.isArray(v.timeline?.after)
+    && (v.affected.after === null || Array.isArray(v.affected.after?.affected))
+    && (v.route_evidence === null || Array.isArray(v.route_evidence?.confirmed) && Array.isArray(v.route_evidence?.exposure));
+  const validCutoff = validBase && v.status === 'error' && v.reasons.length === 1
+    && v.reasons[0] === 'event_after_as_of' && sampleId === 'eta-after-cutoff'
+    && v.injected === null && v.timeline === null && v.changes.length === 0;
+  if (!validSuccess && !validCutoff) throw new DispatchError('Replay data is unavailable at this cutoff.', 'unavailable');
+  return structuredClone(v);
+}
 export type HazardState = 'exposure_found' | 'no_exposure_found' | 'insufficient_data' | 'unsupported_location' | 'offline'
   | 'provider_failure' | 'rate_limited' | 'malformed_payload' | 'not_fetched' | 'retrieved_after_as_of';
 export type HazardValue = {
@@ -166,7 +184,7 @@ export function createDispatchFixtureAdapter() {
     async replay(sampleId: string): Promise<ReplayResponse> {
       const found = data.replay.results[sampleId];
       if (!found) throw new DispatchError(`No synthetic replay sample ${sampleId}.`, 'not_found');
-      return structuredClone(found);
+      return readableReplay(found, sampleId);
     },
     async hazards(shipmentId: string): Promise<HazardResponse> {
       const found = data.hazards?.[shipmentId];
@@ -288,7 +306,8 @@ const HAZARD_STATES: Record<HazardState, string> = {
 };
 export const hazardStateLabel = (state: HazardState) => HAZARD_STATES[state] ?? humanize(state);
 
-export type DispatchView = { row: ShipmentRow; timeline: TimelineResponse; evidence: EvidenceResponse; hazards: HazardResponse | null };
+export type DispatchView = { row: ShipmentRow; timeline: TimelineResponse; evidence: EvidenceResponse; hazards: HazardResponse | null;
+  hazard_state?: { kind: 'loading' | 'error'; message?: string } };
 
 /** The selected shipment's dispatch view (status, timeline, evidence, hazards) as downloadable JSON and CSV. */
 export function dispatchReport(view: DispatchView, generatedAt: Date): Report {
@@ -298,26 +317,43 @@ export function dispatchReport(view: DispatchView, generatedAt: Date): Report {
     report: 'dispatch_shipment', synthetic: true, notice: REPORT_NOTICE, source: 'local_fixture_adapter',
     generated_at: generatedAt.toISOString(), cutoff: timeline.as_of ?? dispatchFixtureInfo.asOf, fixture_revision: dispatchFixtureInfo.revision,
     shipment: row, current: timeline.current, lead_time: timeline.lead_time ?? null,
-    timeline: timeline.events.map(e => ({ event_id: e.event_id, event_type: e.event_type, occurred_at: e.occurred_at, observed_at: e.observed_at,
-      eta: e.eta, quantity: e.quantity, operating_evidence: e.operating_evidence, flags: e.flags,
-      evidence: e.evidence.map(x => ({ evidence_id: x.evidence_id, status: x.status })) })),
-    route_evidence: Object.fromEntries(buckets.map(b => [b, evidence[b].map(e => ({ evidence_id: e.evidence_id, kind: e.kind, status: e.status,
-      operating_status: e.operating_status, source: e.source, retrieved_at: e.retrieved_at, valid_until: e.valid_until, summary: e.summary }))])),
-    hazards: hazards ? hazards.assessments.map(a => ({ provider_id: a.provider_id, location: a.location.code, state: a.state, reason: a.reason,
-      usable: a.usable, freshness: a.freshness, retrieved_at: a.retrieved_at, valid_until: a.valid_until, thresholds_version: a.thresholds_version,
-      values: a.values })) : null,
+    hazard_status: hazards?.status ?? view.hazard_state?.kind ?? 'not_loaded',
+    hazard_error: view.hazard_state?.kind === 'error' ? view.hazard_state.message ?? 'Hazard assessment unavailable.' : null,
+    timeline: timeline.events,
+    route_evidence: Object.fromEntries(buckets.map(b => [b, evidence[b]])),
+    hazards: hazards ? hazards.assessments : null,
     note: 'Exposure is not a confirmed delay. Recovery options are on the shipment recovery page.',
   };
   const rows: (string | null)[][] = [
     ['notice', null, null, null, REPORT_NOTICE],
     ['shipment', row.shipment_id, row.status, row.expected_arrival?.at ?? null, row.signals.join('; ') || null],
+    ['hazard_state', row.shipment_id, hazards?.status ?? view.hazard_state?.kind ?? 'not_loaded', null,
+      view.hazard_state?.kind === 'error' ? view.hazard_state.message ?? 'Hazard assessment unavailable.' : null],
   ];
+  if (timeline.lead_time) {
+    const lead = timeline.lead_time;
+    rows.push(['lead_time', row.shipment_id, lead.status,
+      lead.working_days === null ? null : `${lead.working_days} working ${lead.working_days === 1 ? 'day' : 'days'}`,
+      [lead.start && lead.end ? `${lead.start} to ${lead.end}` : null, lead.reason,
+        lead.synthetic ? 'Synthetic holiday table' : lead.source?.provider_id ?? null].filter(Boolean).join('; ') || null]);
+  }
   for (const e of timeline.events)
     rows.push(['event', e.event_id, e.operating_evidence ? 'operating_evidence' : 'evidence_expired', e.occurred_at,
       [e.event_type, e.eta ? `eta ${e.eta}` : null, e.quantity ? `${e.quantity.amount} ${e.quantity.unit}` : null].filter(Boolean).join('; ')]);
   for (const b of buckets) for (const e of evidence[b]) rows.push(['route_evidence', e.evidence_id, b, e.retrieved_at, e.summary]);
   for (const a of hazards?.assessments ?? [])
-    rows.push(['hazard', `${a.provider_id}:${a.location.code}`, a.state, a.retrieved_at, `${a.usable ? 'usable' : 'not usable'}; ${a.thresholds_version}`]);
+  {
+    rows.push(['hazard', `${a.provider_id}:${a.location.code}`, a.state, a.retrieved_at,
+      `${a.usable ? 'usable' : 'not usable'}; ${a.thresholds_version}; evidence ${a.evidence_ids.join('; ') || 'none'}`]);
+    for (const v of a.values) {
+      const measured = v.rule_id === 'gdacs_alert_within_radius'
+        ? `${[v.alert_level, v.event_type, 'alert'].filter(Boolean).join(' ')}${v.distance_km ? `; distance ${v.distance_km} km` : ''}`
+        : `${v.value ?? 'not available'} ${v.unit}`;
+      const threshold = v.rule_id === 'gdacs_alert_within_radius' ? v.threshold : `${v.threshold} ${v.unit}`;
+      rows.push(['hazard_rule', `${a.provider_id}:${a.location.code}`, a.state, v.at ?? a.retrieved_at,
+        `${v.rule_id}: ${measured}${v.event_id ? `; event ${v.event_id}` : ''}; threshold ${threshold}; met ${v.met}; evidence ${a.evidence_ids.join('; ') || 'none'}`]);
+    }
+  }
   return {
     basename: `synthetic-dispatch-${row.shipment_id}`,
     json: JSON.stringify(json, null, 2),

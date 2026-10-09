@@ -114,10 +114,10 @@ The final click path and expected screens are in `docs/Demo_Quotes_and_Dispatch.
 5. Download the reviewed offer as synthetic JSON or CSV (`offerReport` in `apps/web/src/offers.ts`).
 
 What the export contains:
-- **Per field:** status, exact value, source and evidence (locator and quote).
+- **Per field:** status, exact value, source and evidence (locator and quote). Conflicting candidates retain each exact value, verification flag and locator in both formats.
 - **For the offer:** the blocking reasons and review flags.
 - **Labels:** every JSON file and every CSV row is labelled synthetic.
-- **Untrusted text:** quote text is untrusted, so CSV cells are neutralised against spreadsheet formulas.
+- **Untrusted text:** CSV text beginning with a formula character, including after leading whitespace, is prefixed with an apostrophe. Execution behavior in spreadsheet applications has not been independently checked.
 
 Accessibility:
 - Each field name is a keyboard-reachable button with `aria-pressed`.

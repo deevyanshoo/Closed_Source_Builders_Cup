@@ -12,6 +12,7 @@ before-and-after replay of one synthetic event. Nothing here writes, sends or co
 | `../route_evidence/evidence.py` | Route and hazard evidence, split into confirmed operating status and exposure, with expiry |
 | `lead_time.py` | Working-day lead time for a timeline over a holiday provider (`../calendars/`) |
 | `replay.py` | `replay_event`: inject one labelled synthetic milestone and compare before and after |
+| `../route_evidence/hazards.py` | Open-Meteo and GDACS exposure from recorded synthetic responses (see `../route_evidence/HAZARDS.md`) |
 | `samples.py`, `http.py` | The synthetic fixtures the routes serve, and the read-only `/dispatch` routes |
 
 ## Status rules
@@ -62,6 +63,7 @@ curl "http://127.0.0.1:8000/dispatch/events/evt-002-hold/affected?as_of=2026-10-
 curl "http://127.0.0.1:8000/dispatch/route-evidence?location=INNSA&as_of=2026-10-08T12:00:00Z"
 curl "http://127.0.0.1:8000/dispatch/replay/samples"
 curl "http://127.0.0.1:8000/dispatch/replay?sample=innsa-release&as_of=2026-10-08T12:00:00Z"
+curl "http://127.0.0.1:8000/dispatch/hazards?location=INNSA&location=INPRT&as_of=2026-10-08T12:00:00Z"
 ```
 
 `make api` fits the forecast models at startup, so wait for "Application startup complete" (about 20 seconds
@@ -76,11 +78,22 @@ The web page is `/dispatch` in `apps/web` (`npm run dev`). It uses a labelled lo
 Python output exported by `scripts/export_dispatch_fixtures_for_web.py` at the fixed cutoff
 2026-10-08T12:00:00Z. Re-run that script after changing any read model.
 
+## The page
+
+The final click path and expected screens are in `docs/Demo_Quotes_and_Dispatch.md`, and the release checks in
+`docs/Walkthrough_Checklist_Taher.md`. The page:
+- **Shipments:** lists them by status, and shows the selected shipment's timeline, working-day lead time and route evidence.
+- **Hazard and weather exposure:** a panel labelled "Exposure, not confirmed".
+- **Replay:** a sample delay, before and after.
+- **Export:** "Download synthetic JSON" and "Download synthetic CSV" (`dispatchReport` in `apps/web/src/dispatch.ts`) save the selected shipment's status, timeline, lead time, route evidence and hazards. Every JSON file and every CSV row is labelled synthetic, and cells are neutralised against spreadsheet formulas.
+- **Accessibility:** header navigation marks the current page. Status, signal, evidence and assessment chips carry screen-reader text. All controls are keyboard reachable with a visible focus outline, and tap targets are at least 24 by 24 px. It was checked with a contrast and labelling audit in headless Chrome at 1440, 768 and 390 px.
+
 ## What is synthetic
 
 Everything:
 - the milestones, plan snapshot, route evidence and replay events in `tests/fixtures/shipments` and `tests/fixtures/route_evidence`
 - the holiday table in `tests/fixtures/calendars`, whose dates are invented
+- the Open-Meteo and GDACS payloads in `tests/fixtures/hazards`, which are hand-written
 
 Every file is labelled `synthetic: true`, and the routes refuse to serve a file that is not.
 
@@ -95,7 +108,13 @@ Every file is labelled `synthetic: true`, and the routes refuse to serve a file 
 ## Known limits
 
 - **No live data.** There is no shipment store, carrier feed, port feed or weather feed.
-- **Gateway.** The page is not connected to the gateway yet. The routes it needs are listed in PR #48.
+- **Gateway.** The page is not connected to the gateway yet. It needs these routes under `GET /v2/workspaces/{workspace_id}/dispatch/`:
+  - `shipments` and `shipments/{id}`
+  - `events/{id}/affected`
+  - `route-evidence`
+  - `replay/samples` and `replay`
+  - `hazards`
+- **Hazards.** No provider has been called live. The location coordinates are unverified, and shipment statuses do not yet use hazard exposure.
 - **Recovery link.** `/shipment-recovery` is linked but cannot preselect the shipment yet.
 - **Sample coverage.** At the sample cutoff, no shipment is `delivered` or `at_risk`. Unit tests cover both statuses.
 - **Lead time.**

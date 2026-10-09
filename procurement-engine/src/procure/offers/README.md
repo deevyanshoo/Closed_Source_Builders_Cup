@@ -103,10 +103,35 @@ Everything:
   `evaluation/offers/README.md`, with the files and revisions behind each figure. Read the caveat there: the same
   author wrote fixtures and rules, so held-out scores are likely optimistic.
 
+## The page
+
+The final click path and expected screens are in `docs/Demo_Quotes_and_Dispatch.md`, and the release checks in
+`docs/Walkthrough_Checklist_Taher.md`. In short:
+1. Upload `SYN-Q01_atacama_copper_cif.pdf`.
+2. Select a field name to highlight its source line.
+3. Correct the settlement currency.
+4. Try to save. The local adapter blocks it until the service revalidates.
+5. Download the reviewed offer as synthetic JSON or CSV (`offerReport` in `apps/web/src/offers.ts`).
+
+What the export contains:
+- **Per field:** status, exact value, source and evidence (locator and quote).
+- **For the offer:** the blocking reasons and review flags.
+- **Labels:** every JSON file and every CSV row is labelled synthetic.
+- **Untrusted text:** quote text is untrusted, so CSV cells are neutralised against spreadsheet formulas.
+
+Accessibility:
+- Each field name is a keyboard-reachable button with `aria-pressed`.
+- Edit buttons are named after their field.
+- Status chips carry screen-reader text.
+- The current page is marked in the header navigation, and focus is visible.
+- Tap targets are at least 24 by 24 px.
+- It was checked in headless Chrome at 1440, 768 and 390 px.
+
 ## Known limits
 
 - **Settlement currency.** No synthetic quote states one, so it is `missing` on all 18 and blocks save until a
   reviewer supplies it. The fixture set has no positive example.
+- **Gateway.** The page is not connected yet. It needs the `/offers` routes exposed through the gateway under the workspace; see `CONTRACT_PROPOSAL.md`.
 - **Saving in the browser.** The local web adapter cannot re-run normalisation or FX. A corrected price, quantity, currency,
   Incoterm, validity, origin, minimum or capacity therefore blocks save with "revalidation required", until the
   page is connected to the service through the gateway.

@@ -35,7 +35,7 @@ SOURCES_FILE = PROJECT_ROOT / "config" / "news_sources_v1.json"
 COUNTRIES_FILE = PROJECT_ROOT / "config" / "iso3166_alpha2.csv"
 CANDIDATE_NOTE = ("Candidate evidence only: a headline can raise exposure for review. It never confirms an operating "
                   "status and never sets a price effect.")
-CORROBORATION_RULE = "Distinct publishers with the same normalised headline; the same publisher counts once."
+CORROBORATION_RULE = "Distinct publishers with the same normalised headline, counted only after first retrieval."
 
 
 def load_sources(path: Path | None = None) -> dict:
@@ -44,8 +44,14 @@ def load_sources(path: Path | None = None) -> dict:
             not isinstance(content.get("entities"), dict):
         raise ValueError("invalid news source registry")
     for provider in content["providers"].values():
-        if not isinstance(provider.get("permitted_uses"), list):
-            raise ValueError("permitted_uses must be a list")
+        uses = provider.get("permitted_uses")
+        if not isinstance(uses, list) or any(use not in ("planning", "training") for use in uses):
+            raise ValueError("permitted_uses must be a bounded use list")
+        if provider.get("rights_status") not in ("unreviewed", "reviewed") or (
+                provider["rights_status"] == "unreviewed" and uses):
+            raise ValueError("unreviewed news rights grant no use")
+        if provider.get("fetch_allowed") is not False:
+            raise ValueError("news live fetching remains disabled")
     return content
 
 
@@ -100,17 +106,32 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
             rejected.append({"provider": f["provider"], "material": f["material"], "retrieved_at": f["retrieved_at"],
                              "reason": "retrieved_after_as_of", "items": len(f["items"])})
             continue
-        items += [{**item, "synthetic": f["synthetic"], "query_material": f["material"]} for item in f["items"]]
+        for item in f["items"]:
+            try:
+                published = utc(item["published_at"]) if item["published_at"] is not None else None
+                retrieved = utc(item["retrieved_at"])
+            except (KeyError, ValueError):
+                reason = "invalid_publication_time"
+            else:
+                reason = "publication_after_retrieval" if published is not None and published > retrieved else None
+            if reason:
+                rejected.append({"provider": f["provider"], "material": f["material"],
+                                 "retrieved_at": f["retrieved_at"], "reason": reason, "items": 1})
+                continue
+            items.append({**item, "synthetic": f["synthetic"], "query_material": f["material"]})
 
-    # Story keys: URL-identified items first, then RSS items adopt a matching publisher+headline.
+    # An RSS GUID may adopt only a URL already observed by its retrieval time;
+    # a later URL cannot rename an earlier story at a historical origin.
     by_headline = {}
     for item in items:
         if item["url"]:
             item["story_key"] = f"url:{item['url']}"
-            by_headline.setdefault((item["source_id"], normalised_title(item["title"])), set()).add(item["story_key"])
+            by_headline.setdefault((item["source_id"], normalised_title(item["title"])), []).append(
+                (item["retrieved_at"], item["story_key"]))
     for item in items:
         if not item["url"]:
-            keys = sorted(by_headline.get((item["source_id"], normalised_title(item["title"])), ()))
+            keys = sorted({key for seen, key in by_headline.get(
+                (item["source_id"], normalised_title(item["title"])), ()) if seen <= item["retrieved_at"]})
             item["story_key"] = keys[0] if len(keys) == 1 else f"guid:{item['provider']}:{item['guid']}"
 
     groups: dict[str, list[dict]] = {}
@@ -120,7 +141,7 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
         item.update(story_id=story_id, content_sha256=content, revision_id=f"rev-{content[:16]}")
         groups.setdefault(f"{item['source_id']}:{story_id}:{item['revision_id']}", []).append(item)
 
-    snapshots, duplicates = [], []
+    snapshots, duplicates, member_history = [], [], {}
     for snapshot_id in sorted(groups):
         members = sorted(groups[snapshot_id], key=lambda i: (i["retrieved_at"], i["provider"]))
         first = members[0]
@@ -131,65 +152,100 @@ def build_snapshots(fetches: list[dict], *, as_of: str, sources: dict | None = N
             if len(times) > 1:
                 duplicates.append({"snapshot_id": snapshot_id, "provider": provider, "kept_retrieved_at": times[0],
                                    "dropped_retrieved_at": times[1:]})
-        published = sorted(m["published_at"] for m in members if m["published_at"])
-        dates = sorted(m["published_date"] for m in members if m.get("published_date"))
-        kind = "official" if any(sources["providers"][m["provider"]].get("source_kind") == "official"
-                                 for m in members) else "news"
-        provider_seen = sorted(m["provider_first_seen_at"] for m in members if m["provider_first_seen_at"])
-        providers = sorted(seen_per_provider)
         entities = {**tag_entities(first["title"], rules), "rules_version": sources["version"]}
         flags = ["embedded_instruction"] if any(p in first["title"].casefold() for p in rules["instruction_patterns"]) \
             else []
-        snapshots.append({
-            "snapshot_id": snapshot_id, "providers": providers,
-            "source": {"source_id": first["source_id"], "publisher": next((m["publisher"] for m in members
-                                                                            if m["publisher"]), None),
-                       "kind": kind},
-            "story_id": first["story_id"], "revision_id": first["revision_id"],
-            "url": next((m["url"] for m in members if m["url"]), None), "title": first["title"],
-            "language": first["language"], "first_seen_at": first["retrieved_at"],
-            "retrieved_at": sorted({m["retrieved_at"] for m in members}),
-            "provider_first_seen_at": provider_seen[0] if provider_seen else None,
-            "published_at": published[0] if published else None,
-            "published_date": dates[0] if dates else None,
-            "published_at_status": "stated" if published else ("date_only" if dates else "not_stated"),
-            "content_sha256": first["content_sha256"],
-            "rights": [{"provider": p, "rights_status": sources["providers"][p]["rights_status"],
-                        "permitted_uses": list(sources["providers"][p]["permitted_uses"]),
-                        "attribution": sources["providers"][p]["attribution"],
-                        "terms_note": sources["providers"][p]["terms_note"]} for p in providers],
-            "synthetic": any(m["synthetic"] for m in members), "sample": False,
-            "query_materials": sorted({m["query_material"] for m in members if m["query_material"]}),
-            "entities": entities, "review_flags": flags, "evidence_status": "candidate", "note": CANDIDATE_NOTE,
-        })
+
+        def snapshot_from(known_members):
+            providers = sorted({m["provider"] for m in known_members})
+            published = sorted(m["published_at"] for m in known_members if m["published_at"])
+            dates = sorted(m["published_date"] for m in known_members if m.get("published_date"))
+            provider_seen = sorted(m["provider_first_seen_at"] for m in known_members if m["provider_first_seen_at"])
+            kind = "official" if any(sources["providers"][m["provider"]].get("source_kind") == "official"
+                                     for m in known_members) else "news"
+            return {
+                "snapshot_id": snapshot_id, "providers": providers,
+                "source": {"source_id": first["source_id"],
+                           "publisher": next((m["publisher"] for m in known_members if m["publisher"]), None),
+                           "kind": kind},
+                "story_id": first["story_id"], "revision_id": first["revision_id"],
+                "url": next((m["url"] for m in known_members if m["url"]), None), "title": first["title"],
+                "language": first["language"], "first_seen_at": first["retrieved_at"],
+                "retrieved_at": sorted({m["retrieved_at"] for m in known_members}),
+                "provider_first_seen_at": provider_seen[0] if provider_seen else None,
+                "published_at": published[0] if published else None,
+                "published_date": dates[0] if dates else None,
+                "published_at_status": "stated" if published else ("date_only" if dates else "not_stated"),
+                "content_sha256": first["content_sha256"],
+                "rights": [{"provider": p, "rights_status": sources["providers"][p]["rights_status"],
+                            "permitted_uses": list(sources["providers"][p]["permitted_uses"]),
+                            "attribution": sources["providers"][p]["attribution"],
+                            "terms_note": sources["providers"][p]["terms_note"]} for p in providers],
+                "synthetic": any(m["synthetic"] for m in known_members), "sample": False,
+                "query_materials": sorted({m["query_material"] for m in known_members if m["query_material"]}),
+                "entities": entities, "review_flags": flags, "evidence_status": "candidate", "note": CANDIDATE_NOTE,
+            }
+
+        # Reconstruct all provider/rights/story fields from the members known at
+        # each arrival; the final public snapshot remains the latest version.
+        versions = [(known, snapshot_from([m for m in members if m["retrieved_at"] <= known]))
+                    for known in sorted({m["retrieved_at"] for m in members})]
+        snapshots.append(versions[-1][1])
+        member_history[snapshot_id] = versions
 
     by_title: dict[str, list[dict]] = {}
     for s in snapshots:
         by_title.setdefault(normalised_title(s["title"]), []).append(s)
     for s in snapshots:
-        others = [o for o in by_title[normalised_title(s["title"])]
-                  if o["source"]["source_id"] != s["source"]["source_id"]]
-        known = max([s["first_seen_at"], *([min(o["first_seen_at"] for o in others)] if others else [])])
-        s["corroboration"] = {"status": "corroborated" if others else "uncorroborated",
-                              "distinct_sources": 1 + len({o["source"]["source_id"] for o in others}),
-                              "evidence_refs": sorted(o["snapshot_id"] for o in others), "known_at": known,
-                              "rule": CORROBORATION_RULE}
-        s["gate_row"], s["gate_row_reason"] = _gate_row(s, rules)
+        # One earliest exact-title witness per other publisher. Each arrival
+        # yields a complete dated metadata snapshot for older gate origins.
+        earliest = {}
+        for other in by_title[normalised_title(s["title"])]:
+            source_id = other["source"]["source_id"]
+            if source_id != s["source"]["source_id"]:
+                prior = earliest.get(source_id)
+                if prior is None or (other["first_seen_at"], other["snapshot_id"]) < (
+                        prior["first_seen_at"], prior["snapshot_id"]):
+                    earliest[source_id] = other
+        arrivals = sorted({s["first_seen_at"], *(o["first_seen_at"] for o in earliest.values()
+                                                  if o["first_seen_at"] > s["first_seen_at"])})
+        history = []
+        for known in arrivals:
+            visible = [o for o in earliest.values() if o["first_seen_at"] <= known]
+            history.append({"status": "corroborated" if visible else "uncorroborated",
+                            "distinct_sources": 1 + len(visible),
+                            "evidence_refs": sorted(o["snapshot_id"] for o in visible),
+                            "known_at": known, "rule": CORROBORATION_RULE})
+        s["corroboration_history"] = history
+        s["corroboration"] = history[-1]
+        timeline = sorted({known for known, _ in member_history[s["snapshot_id"]]} |
+                          {entry["known_at"] for entry in history})
+        rows = []
+        for known in timeline:
+            partial = next(version for at, version in reversed(member_history[s["snapshot_id"]]) if at <= known)
+            partial["corroboration"] = next(entry for entry in reversed(history) if entry["known_at"] <= known)
+            row, _ = _gate_row(partial, rules, known_at=known)
+            if row is not None:
+                rows.append(row)
+        s["gate_rows"] = rows
+        s["gate_row"], s["gate_row_reason"] = _gate_row(s, rules, known_at=timeline[-1])
 
     duplicates.sort(key=lambda d: (d["snapshot_id"], d["provider"]))
     return {"as_of": cutoff, "registry_version": sources["version"], "fetches": states, "rejected": rejected,
             "duplicates": duplicates, "snapshots": snapshots, "note": CANDIDATE_NOTE}
 
 
-def _gate_row(s: dict, rules: dict) -> tuple[dict | None, str | None]:
+def _gate_row(s: dict, rules: dict, *, known_at: str | None = None) -> tuple[dict | None, str | None]:
     if s["review_flags"]:
         return None, "needs_review_instruction_like_text"
     if not s["source"]["source_id"]:
         return None, "source_unresolved"
     if s["entities"]["event_type_status"] != "resolved":
         return None, f"event_type_{s['entities']['event_type_status']}"
-    uses = set.intersection(*(set(r["permitted_uses"]) for r in s["rights"]))
+    uses = (set.intersection(*(set(r["permitted_uses"]) for r in s["rights"]))
+            if all(r["rights_status"] == "reviewed" for r in s["rights"]) else set())
     seen = s["first_seen_at"]
+    metadata_known = known_at or seen
     return {
         "source_id": s["source"]["source_id"], "source_url": s["url"], "story_id": s["story_id"],
         "revision_id": s["revision_id"], "content_hash": s["content_sha256"], "source_kind": s["source"]["kind"],
@@ -201,13 +257,13 @@ def _gate_row(s: dict, rules: dict) -> tuple[dict | None, str | None]:
         "first_seen_witness": {"source_id": s["source"]["source_id"], "revision_id": s["revision_id"],
                                "content_hash": s["content_sha256"]},
         "archive_witnesses": [],
-        "permissions": {"known_at": seen, "uses": sorted(uses)},
+        "permissions": {"known_at": metadata_known, "uses": sorted(uses)},
         "corroboration": {"known_at": s["corroboration"]["known_at"], "status": s["corroboration"]["status"],
                           "evidence_refs": s["corroboration"]["evidence_refs"]},
-        "scope": {"known_at": seen, "materials": s["entities"]["materials"], "countries": s["entities"]["countries"],
+        "scope": {"known_at": metadata_known, "materials": s["entities"]["materials"], "countries": s["entities"]["countries"],
                   "hs": [], "routes": s["entities"]["routes"], "ports": s["entities"]["ports"], "global": []},
     }, None
 
 
 def gate_rows(result: dict) -> list[dict]:
-    return [s["gate_row"] for s in result["snapshots"] if s["gate_row"] is not None]
+    return [row for s in result["snapshots"] for row in s["gate_rows"]]

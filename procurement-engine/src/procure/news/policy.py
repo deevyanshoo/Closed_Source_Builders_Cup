@@ -21,13 +21,16 @@ import json
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..settings import PROJECT_ROOT
-from .fetch import _item, clean_title, utc
+from .fetch import _item, canonical_url, clean_title, utc
 
 POLICY_FILE = PROJECT_ROOT / "config" / "policy_sources_v1.json"
 MAX_BODY = 2 << 20
+MAX_NODES = 20_000
+MAX_DEPTH = 128
 
 
 class _Node:
@@ -41,11 +44,13 @@ class _Node:
 
     def find_all(self, tag: str, cls: str | None = None, ident: str | None = None) -> list["_Node"]:
         found = []
-        for child in self.children:
+        pending = list(reversed(self.children))
+        while pending:
+            child = pending.pop()
             if child.tag == tag and (cls is None or cls in child.attrs.get("class", "").split()) and \
                     (ident is None or child.attrs.get("id") == ident):
                 found.append(child)
-            found += child.find_all(tag, cls, ident)
+            pending.extend(reversed(child.children))
         return found
 
     def kids(self, tag: str) -> list["_Node"]:
@@ -59,8 +64,12 @@ class _Builder(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.root = _Node("#root", {})
         self.stack = [self.root]
+        self.nodes = 0
 
     def handle_starttag(self, tag, attrs):
+        self.nodes += 1
+        if self.nodes > MAX_NODES or len(self.stack) >= MAX_DEPTH:
+            raise _Layout("html_structure_bound")
         node = _Node(tag, {k: v or "" for k, v in attrs})
         self.stack[-1].children.append(node)
         if tag not in self.VOID:
@@ -97,8 +106,16 @@ def _rows_dgft(root: _Node):
     headers = [th.text() for th in tables[0].find_all("th")]
     if headers != ["Notice No.", "Subject", "Date", "Download"]:
         raise _Layout("header_mismatch")
-    body = tables[0].find_all("tbody")
-    for tr in (body[0].kids("tr") if body else []):
+    body = tables[0].kids("tbody")
+    if len(body) != 1:
+        raise _Layout("missing_table_body")
+    direct_rows = body[0].kids("tr")
+    direct_ids = {id(tr) for tr in direct_rows}
+    cells_in_rows = {id(td) for tr in direct_rows for td in tr.find_all("td")}
+    if any(id(tr) not in direct_ids and tr.find_all("td") for tr in tables[0].find_all("tr")) or \
+            any(id(td) not in cells_in_rows for td in tables[0].find_all("td")):
+        raise _Layout("row_outside_table_body")
+    for tr in direct_rows:
         cells = tr.kids("td")
         links = cells[3].find_all("a") if len(cells) == 4 else []
         if len(cells) != 4 or not links:
@@ -158,8 +175,20 @@ def load_policy_sources(path: Path | None = None) -> dict:
     content = json.loads(Path(path or POLICY_FILE).read_text(encoding="utf-8"))
     for key, source in content.get("providers", {}).items():
         if source.get("parser") not in PARSERS or source.get("fetch_allowed") is not False \
-                or not isinstance(source.get("permitted_uses"), list):
+                or not isinstance(source.get("permitted_uses"), list) \
+                or source.get("rights_status") not in ("unreviewed", "reviewed") \
+                or (source["rights_status"] == "unreviewed" and source["permitted_uses"]):
             raise ValueError(f"invalid policy source {key}")
+        hosts = source.get("document_hosts")
+        if not isinstance(hosts, list) or not hosts or any(not isinstance(host, str) or not host
+                or host != host.lower() or "/" in host for host in hosts) or source.get("source_id") not in hosts:
+            raise ValueError(f"invalid policy document hosts {key}")
+        try:
+            if source.get("publication_timezone") != "Asia/Kolkata":
+                raise ValueError("unsupported policy publication timezone")
+            ZoneInfo(source["publication_timezone"])
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError(f"invalid policy publication timezone {key}") from exc
     return content
 
 
@@ -177,6 +206,23 @@ def _page(provider: str, source: dict, *, state: str, reason: str | None, retrie
     return {"provider": provider, "material": None, "state": state, "reason": reason, "retrieved_at": utc(retrieved_at),
             "items": items, "rejected_rows": rejected, "synthetic": synthetic, "request": source["listing_url"],
             "layout": source["parser"]}
+
+
+def _document_url(source: dict, href: str | None) -> str | None:
+    if not isinstance(href, str) or not href.strip():
+        return None
+    try:
+        url = urljoin(source["listing_url"], href.strip())
+        parsed = urlsplit(url)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+                or parsed.password is not None or parsed.port not in (None, 443)):
+            return None
+        host = parsed.hostname.lower().removeprefix("www.")
+        if host not in source["document_hosts"]:
+            return None
+        return canonical_url(url)
+    except ValueError:
+        return None
 
 
 def parse_saved_page(provider: str, raw: bytes, *, http_status: int, retrieved_at: str, registry: dict | None = None,
@@ -197,8 +243,11 @@ def parse_saved_page(provider: str, raw: bytes, *, http_status: int, retrieved_a
     if "<html" not in text[:2048].lower():
         return _page(provider, source, state="malformed_payload", reason="not_html", **base)
     builder = _Builder()
-    builder.feed(text)
-    builder.close()
+    try:
+        builder.feed(text)
+        builder.close()
+    except _Layout:
+        return _page(provider, source, state="malformed_payload", reason="html_structure_bound", **base)
     root = builder.root
     html = root.find_all("html")
     language = (html[0].attrs.get("lang") if html else None) or source.get("language") or "unknown"
@@ -209,12 +258,20 @@ def parse_saved_page(provider: str, raw: bytes, *, http_status: int, retrieved_a
                 rejected.append({"row": index, "reason": "unexpected_row_shape", "text": (raw_row or "")[:200]})
                 continue
             stated = _date(date_text or "", fmt)
-            url = urljoin(source["listing_url"], href or "")
             if stated is None:
                 rejected.append({"row": index, "reason": "invalid_date", "text": (date_text or "")[:40]})
                 continue
             if not clean_title(title) or not href:
                 rejected.append({"row": index, "reason": "missing_title_or_link", "text": clean_title(title)[:200]})
+                continue
+            local_day = datetime.fromisoformat(utc(retrieved_at)).astimezone(
+                ZoneInfo(source["publication_timezone"])).date().isoformat()
+            if stated > local_day:
+                rejected.append({"row": index, "reason": "future_publication_date", "text": stated})
+                continue
+            url = _document_url(source, href)
+            if url is None:
+                rejected.append({"row": index, "reason": "untrusted_document_url", "text": (href or "")[:200]})
                 continue
             item = _item(provider, title=clean_title(title), url=url, source_id=source["source_id"],
                          publisher=source["publisher"], language=language, published_at=None,

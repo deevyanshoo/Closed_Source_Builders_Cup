@@ -9,6 +9,7 @@
       "attribution": "Source: The GDELT Project (gdeltproject.org)",
       "rights_status": "unreviewed",
       "permitted_uses": [],
+      "fetch_allowed": false,
       "rate_limit_note": "About one request every 5 seconds; HTTP 429 when exceeded."
     },
     "google_news_rss": {
@@ -18,6 +19,7 @@
       "attribution": "Headline and link via Google News; publisher named per item",
       "rights_status": "unreviewed",
       "permitted_uses": [],
+      "fetch_allowed": false,
       "rate_limit_note": "No published quota; keep requests sparse."
     }
   },

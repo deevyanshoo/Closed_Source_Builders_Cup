@@ -1,9 +1,8 @@
-"""Fetch GDELT and Google News RSS headlines into provider items, with explicit states.
+"""Parse GDELT and Google News RSS headlines into provider items, with explicit states.
 
-Reuses the existing fetch path: ``ingest.http.http_get`` (which refuses under ``OFFLINE=1``), the
-``GDELT_URL`` and ``RSS_URL`` endpoints and the per-material queries from ``config/materials.yaml``,
-with the same request parameters as ``ingest/news.py``. That module and ``news_signal.py`` are not
-changed. Tests replay recorded, hand-written responses (``recorded_fetches``) or stub ``http_get``.
+Public live entrypoints preserve endpoint and per-material query metadata but are disabled until
+a source-specific rights approval and bounded transport are reviewed. ``recorded_fetches``
+replays hand-written synthetic responses through the same parsers.
 
 Fetch states: ok, empty, offline, rate_limited (HTTP 429), provider_failure, malformed_payload.
 Headline text is untrusted data: it is parsed, never followed.
@@ -18,17 +17,15 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import httpx
-
-from ..ingest.http import OfflineError, http_get
 from ..ingest.news import GDELT_URL, RSS_URL
-from ..settings import material_cfg
+from ..settings import PROJECT_ROOT, material_cfg
 
 MAX_BODY = 2 << 20
 MAX_TITLE = 500
 _SEENDATE = re.compile(r"^\d{8}T\d{6}Z$")
 _TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$")
 ENDPOINTS = {"gdelt": GDELT_URL, "google_news_rss": RSS_URL}
+NEWS_SOURCES_FILE = PROJECT_ROOT / "config" / "news_sources_v1.json"
 
 
 class NewsMalformed(Exception):
@@ -91,12 +88,17 @@ def parse_gdelt(raw: bytes, *, retrieved_at: str) -> list[dict]:
         if not isinstance(art, dict) or not isinstance(art.get("url"), str) or not clean_title(art.get("title")) \
                 or not isinstance(art.get("seendate"), str) or not _SEENDATE.fullmatch(art["seendate"]):
             raise NewsMalformed("invalid_article")
-        seen = datetime.strptime(art["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).isoformat()
-        domain = art.get("domain") if isinstance(art.get("domain"), str) and art["domain"].strip() else None
-        out.append(_item("gdelt", title=clean_title(art["title"]), url=art["url"],
-                         source_id=host(f"https://{domain}") if domain else host(art["url"]), publisher=domain,
-                         language=art.get("language") if isinstance(art.get("language"), str) else "unknown",
-                         published_at=None, provider_first_seen_at=seen, retrieved_at=retrieved_at, guid=None))
+        try:
+            seen = datetime.strptime(art["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).isoformat()
+            domain = art.get("domain") if isinstance(art.get("domain"), str) and art["domain"].strip() else None
+            if canonical_url(art["url"]) is None:
+                raise ValueError("invalid article URL")
+            out.append(_item("gdelt", title=clean_title(art["title"]), url=art["url"],
+                             source_id=host(f"https://{domain}") if domain else host(art["url"]), publisher=domain,
+                             language=art.get("language") if isinstance(art.get("language"), str) else "unknown",
+                             published_at=None, provider_first_seen_at=seen, retrieved_at=retrieved_at, guid=None))
+        except ValueError:
+            raise NewsMalformed("invalid_article") from None
     return out
 
 
@@ -127,11 +129,14 @@ def parse_rss(raw: bytes, *, retrieved_at: str) -> list[dict]:
                 published = parsedate_to_datetime(node.findtext("pubDate")).astimezone(timezone.utc).isoformat()
             except (TypeError, ValueError):
                 raise NewsMalformed("invalid_pubdate") from None
-        source_url = source.get("url") if source is not None else None
-        out.append(_item("google_news_rss", title=title, url=None, source_id=host(source_url), publisher=publisher,
-                         language=language, published_at=published, provider_first_seen_at=None,
-                         retrieved_at=retrieved_at, guid=clean_title(node.findtext("guid")) or
-                         clean_title(node.findtext("link")) or None))
+        try:
+            source_url = source.get("url") if source is not None else None
+            out.append(_item("google_news_rss", title=title, url=None, source_id=host(source_url), publisher=publisher,
+                             language=language, published_at=published, provider_first_seen_at=None,
+                             retrieved_at=retrieved_at, guid=clean_title(node.findtext("guid")) or
+                             clean_title(node.findtext("link")) or None))
+        except ValueError:
+            raise NewsMalformed("invalid_item") from None
     return out
 
 
@@ -162,21 +167,16 @@ def _from_body(provider: str, material: str, status: int, raw: bytes, retrieved_
 
 
 def _live(provider: str, material: str, url: str, params: dict, retrieved_at: str) -> dict:
+    # No bounded, rights-reviewed transport exists for this feature yet. The
+    # source-specific default is recorded, but changing it alone cannot fetch.
     try:
-        response = http_get(url, params=params, retries=1)
-    except OfflineError:
-        return outcome(provider, material, state="offline", reason="offline_mode", retrieved_at=retrieved_at,
-                       items=[], synthetic=False)
-    except httpx.HTTPStatusError as exc:
-        code = exc.response.status_code if exc.response is not None else 0
-        return _from_body(provider, material, code, b"", retrieved_at, False)
-    except httpx.TimeoutException:
-        return outcome(provider, material, state="provider_failure", reason="timeout", retrieved_at=retrieved_at,
-                       items=[], synthetic=False)
-    except Exception:  # any transport failure is explicit, never "no news"
-        return outcome(provider, material, state="provider_failure", reason="transport_error",
-                       retrieved_at=retrieved_at, items=[], synthetic=False)
-    return _from_body(provider, material, response.status_code, response.content, retrieved_at, False)
+        source = json.loads(NEWS_SOURCES_FILE.read_text(encoding="utf-8"))["providers"][provider]
+        allowed = source.get("fetch_allowed") is True and source.get("rights_status") != "unreviewed"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        allowed = False
+    return outcome(provider, material, state="offline",
+                   reason="bounded_transport_unavailable" if allowed else "fetch_not_approved",
+                   retrieved_at=retrieved_at, items=[], synthetic=False)
 
 
 def fetch_gdelt_items(material: str, *, retrieved_at: str, maxrecords: int = 50) -> dict:

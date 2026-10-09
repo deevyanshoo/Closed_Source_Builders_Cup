@@ -132,3 +132,68 @@ def test_saved_pages_are_labelled_synthetic():
     assert manifest["synthetic"] is True
     for name in ("dgft.html", "cbic.html", "pib.html", "jnpa.html"):
         assert "SYNTHETIC" in (HERE / name).read_text()
+
+
+@pytest.mark.parametrize("href", [
+    "https://attacker.test/tn-21.pdf",
+    "https://attacker.test@dgft.gov.in/tn-21.pdf",
+    "javascript:alert(1)",
+    "https://dgft.gov.in:444/tn-21.pdf",
+])
+def test_official_notice_rejects_untrusted_document_origin(href):
+    raw = (HERE / "dgft.html").read_bytes().replace(b"/uploads/synthetic/tn-21.pdf", href.encode())
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert not any(item["guid"] == "Trade Notice 21/2026-27" for item in result["items"])
+    assert any(row["reason"] == "untrusted_document_url" for row in result["rejected_rows"])
+
+
+def test_future_date_only_notice_is_quarantined_before_snapshot_gate():
+    raw = (HERE / "dgft.html").read_bytes().replace(b"08/10/2026", b"12/10/2026", 1)
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert not any(item["guid"] == "Trade Notice 21/2026-27" for item in result["items"])
+    assert any(row["reason"] == "future_publication_date" for row in result["rejected_rows"])
+
+
+def test_source_local_day_accepts_utc_previous_evening_without_inventing_time():
+    raw = (HERE / "dgft.html").read_bytes().replace(b"08/10/2026", b"09/10/2026", 1)
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T20:00:00Z",
+                              registry=POLICY, synthetic=True)
+    notice = next(item for item in result["items"] if item["guid"] == "Trade Notice 21/2026-27")
+    assert notice["published_date"] == "2026-10-09" and notice["published_at"] is None
+
+
+def test_deep_saved_html_returns_bounded_malformed_state():
+    raw = ("<html>" + "<div>" * 1200 + "</div>" * 1200 + "</html>").encode()
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert (result["state"], result["reason"], result["items"]) == (
+        "malformed_payload", "html_structure_bound", [])
+
+
+def test_wide_saved_html_returns_bounded_malformed_state():
+    raw = ("<html>" + "<br>" * 20001 + "</html>").encode()
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert (result["state"], result["reason"], result["items"]) == (
+        "malformed_payload", "html_structure_bound", [])
+
+
+def test_missing_required_dgft_tbody_is_layout_change_not_empty():
+    raw = (HERE / "dgft.html").read_bytes().replace(b"<tbody>", b"<div>").replace(b"</tbody>", b"</div>")
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert (result["state"], result["reason"], result["items"]) == (
+        "layout_changed", "missing_table_body", [])
+
+
+def test_dgft_row_outside_present_empty_body_is_layout_change():
+    row = (b'<tr><td>TN 99</td><td>Copper export restriction</td>'
+           b'<td>08/10/2026</td><td><a href="/test.pdf">PDF</a></td></tr>')
+    raw = (HERE / "dgft_empty.html").read_bytes().replace(b"</tbody>", b"</tbody>" + row, 1)
+    result = parse_saved_page("dgft", raw, http_status=200, retrieved_at="2026-10-08T09:00:00Z",
+                              registry=POLICY, synthetic=True)
+    assert (result["state"], result["reason"], result["items"]) == (
+        "layout_changed", "row_outside_table_body", [])
+    assert page("dgft", "dgft_empty.html")["state"] == "empty"

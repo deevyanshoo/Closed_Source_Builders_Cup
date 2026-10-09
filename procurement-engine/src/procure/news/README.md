@@ -6,8 +6,9 @@ change `ingest/news.py`, `news_signal.py` or the gate.
 
 ## Pieces
 
-- **`fetch.py`:** reuses `ingest.http.http_get`, which refuses under `OFFLINE=1`. It uses the `GDELT_URL` and `RSS_URL`
-  endpoints and the per-material queries from `config/materials.yaml`, with the same parameters as `ingest/news.py`.
+- **`fetch.py`:** parses saved synthetic GDELT and RSS responses. Public live entrypoints retain endpoint and query
+  metadata but return `offline` until each source has an approved fetch policy and a separately reviewed bounded
+  transport. Changing `fetch_allowed` alone cannot enable a network request.
   - Fetch states: `ok`, `empty`, `offline`, `rate_limited` (HTTP 429), `provider_failure`, `malformed_payload`.
   - `recorded_fetches` replays recorded responses through the same parsers.
 - **`snapshots.py`:** `build_snapshots(fetches, as_of=...)` and `gate_rows(result)`.
@@ -46,23 +47,27 @@ Only headlines, links and metadata are stored, never article text.
   - The same publisher and headline seen via two providers is one snapshot.
   - A repeated fetch of identical content keeps the earliest retrieval.
   - A changed headline for the same story is a new revision, so the gate picks the revision known at its origin.
-- **Corroboration:** counts distinct publishers with the same normalised headline (wire copies). The same publisher via two providers counts once.
+- **Corroboration:** counts distinct publishers with the same normalised headline (wire copies). The same publisher
+  via two providers counts once. Every arriving publisher creates a dated corroboration snapshot; gate rows expose
+  only the references known at that date, so an earlier gate origin cannot use a later witness.
 - **Cutoff:** a fetch retrieved after `as_of` is rejected whole.
 - **Gate rows:**
   - `source_kind` is `news`.
   - `effect_class` maps from the event type: delay, export restriction or policy. It is never price.
   - `confidence` is 0, because no source states one and none is inferred.
-  - Permissions, corroboration and scope are snapshots dated at first sight.
+  - Permissions and scope are dated at first sight. Corroboration uses its own witness-arrival date.
 - **Output:** candidate evidence only, never a confirmed operating status or a price effect.
 
 ## Rights
 
 Both providers are `unreviewed` and grant no use, so the gate currently excludes every row with `permission_denied`.
-That is the intended state until a rights review records permitted uses.
+An unreviewed source cannot acquire a use merely by listing one in `permitted_uses`; the registry rejects that
+inconsistency and the gate also denies it for caller-supplied registries. A separate rights review must approve use.
 - **GDELT:** states its data is open with attribution.
 - **Google News RSS:** for personal, non-commercial reading under Google's terms.
 
-Confirm both on the providers' pages before any live run. Headlines and links belong to their publishers.
+Confirm both on the providers' pages and review a bounded transport before any live run. Headlines and links belong
+to their publishers.
 
 ## Tests
 
@@ -73,7 +78,7 @@ with `.test` domains. It covers:
 - a later revision
 - an item retrieved after `as_of`
 - GDELT 429
-- `OFFLINE=1`
+- live entrypoints remaining offline even when `OFFLINE=0`
 - an instruction-like headline
 - acceptance by the real gate
 
@@ -91,6 +96,10 @@ releases and JNPA port circulars. It produces the same item shape, so `build_sna
 - **Parser:**
   - Uses the standard library `html.parser`, so it adds no dependency.
   - [Scrapling](https://github.com/D4Vinci/Scrapling) is a proposed swap that needs approval as a new dependency.
+  - Saved HTML is limited to 2 MiB, 20,000 elements and 128 nesting levels. Traversal is iterative.
+  - Document links must resolve to the configured HTTPS official origin, without userinfo or a nonstandard port.
+  - A stated date is compared with the retrieval date in the configured India source timezone; a future local date
+    is rejected without inventing a publication time.
 - **Layouts:** each source has a versioned layout (container, header labels, row shape).
   - A page without them is `layout_changed`, never an empty listing.
   - Rows with an invalid date or shape are rejected individually.

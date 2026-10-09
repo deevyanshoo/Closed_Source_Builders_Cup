@@ -1,12 +1,11 @@
 """News snapshots in the shape #14's point-in-time event gate accepts. Offline: recorded,
-hand-written synthetic responses only; live fetches are replaced by a stub or blocked by OFFLINE=1."""
+hand-written synthetic responses only; live fetch entrypoints cannot reach transport."""
 from __future__ import annotations
 
 import copy
 import json
 from pathlib import Path
 
-import httpx
 import pytest
 
 from procure.event_features import project_events
@@ -65,36 +64,20 @@ def test_offline_mode_never_fetches():
     assert fetch_rss_items("copper", retrieved_at=AS_OF)["state"] == "offline"
 
 
-def test_gdelt_429_is_rate_limited_and_other_failures_are_explicit(monkeypatch):
-    request = httpx.Request("GET", "https://api.gdeltproject.org/api/v2/doc/doc")
-
-    def limited(*args, **kwargs):
-        raise httpx.HTTPStatusError("429", request=request, response=httpx.Response(429, request=request))
-    monkeypatch.setattr(fetch_module, "http_get", limited)
-    assert (fetch_gdelt_items("copper", retrieved_at=AS_OF)["state"]) == "rate_limited"
-
-    def broken(*args, **kwargs):
-        raise httpx.ConnectError("down", request=request)
-    monkeypatch.setattr(fetch_module, "http_get", broken)
-    assert fetch_rss_items("copper", retrieved_at=AS_OF)["state"] == "provider_failure"
-
-    monkeypatch.setattr(fetch_module, "http_get", lambda *a, **k: httpx.Response(200, content=b'{"articles": []}',
-                                                                                 request=request))
-    assert fetch_gdelt_items("copper", retrieved_at=AS_OF)["state"] == "empty"
+def test_recorded_http_states_are_explicit():
+    response = fetch_module._from_body("gdelt", "copper", 429, b"", AS_OF, True)
+    assert (response["state"], response["reason"]) == ("rate_limited", "http_429")
+    response = fetch_module._from_body("google_news_rss", "copper", 503, b"", AS_OF, True)
+    assert (response["state"], response["reason"]) == ("provider_failure", "http_503")
+    response = fetch_module._from_body("gdelt", "copper", 200, b'{"articles": []}', AS_OF, True)
+    assert (response["state"], response["reason"]) == ("empty", "no_items")
 
 
-def test_fetch_reuses_the_existing_queries(monkeypatch):
-    calls = []
-
-    def recorder(url, params=None, **kwargs):
-        calls.append((url, params))
-        return httpx.Response(200, content=(HERE / "gdelt_copper.json").read_bytes(), request=httpx.Request("GET", url))
-    monkeypatch.setattr(fetch_module, "http_get", recorder)
-    out = fetch_gdelt_items("copper", retrieved_at="2026-10-08T07:00:00Z")
+def test_recorded_response_reuses_existing_item_parser():
+    raw = (HERE / "gdelt_copper.json").read_bytes()
+    out = fetch_module._from_body("gdelt", "copper", 200, raw, "2026-10-08T07:00:00Z", True)
     assert out["state"] == "ok" and len(out["items"]) == 4
-    url, params = calls[0]
-    assert url == "https://api.gdeltproject.org/api/v2/doc/doc"
-    assert params["query"].startswith("(copper OR smelter)") and params["mode"] == "artlist"
+    assert out["items"] == parse_gdelt(raw, retrieved_at="2026-10-08T07:00:00Z")
 
 
 # Snapshots
@@ -201,7 +184,7 @@ def test_gate_accepts_rows_and_denies_unreviewed_rights(built):
 def test_gate_selects_corroborated_strike_once_rights_allow_planning():
     sources = copy.deepcopy(SOURCES)
     for provider in sources["providers"].values():
-        provider["permitted_uses"] = ["planning"]
+        provider.update(rights_status="reviewed", permitted_uses=["planning"])
     result = build_snapshots(recorded_fetches(HERE / "recorded.json"), as_of=AS_OF, sources=sources)
     projection = project_events(gate_rows(result), as_of=AS_OF, scope={"material": "copper"}, purpose="planning",
                                 allow_demo=True)
@@ -216,7 +199,7 @@ def test_gate_selects_corroborated_strike_once_rights_allow_planning():
 def test_gate_point_in_time_picks_the_revision_known_then():
     sources = copy.deepcopy(SOURCES)
     for provider in sources["providers"].values():
-        provider["permitted_uses"] = ["planning"]
+        provider.update(rights_status="reviewed", permitted_uses=["planning"])
     result = build_snapshots(recorded_fetches(HERE / "recorded.json"), as_of=AS_OF, sources=sources)
     rows, titles = gate_rows(result), {s["revision_id"]: s["title"] for s in result["snapshots"]}
     early = project_events(rows, as_of="2026-10-08T09:00:00Z", scope={"material": "aluminium"}, purpose="planning",
@@ -224,3 +207,167 @@ def test_gate_point_in_time_picks_the_revision_known_then():
     late = project_events(rows, as_of=AS_OF, scope={"material": "aluminium"}, purpose="planning", allow_demo=True)
     assert [titles[p["revision_id"]] for f in early.features for p in f["provenance"]] == ["India weighs aluminium export curb"]
     assert [titles[p["revision_id"]] for f in late.features for p in f["provenance"]] == ["India imposes aluminium export curb"]
+
+
+def test_corroboration_at_early_origin_excludes_later_publisher():
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["gdelt"].update(rights_status="reviewed", permitted_uses=["planning"])
+    fetches = []
+    for hour, domain in (("07", "a.test"), ("08", "b.test"), ("10", "c.test")):
+        retrieved = f"2026-10-08T{hour}:00:00Z"
+        body = json.dumps({"articles": [{"url": f"https://{domain}/strike",
+                                          "title": "Copper strike at Chennai port",
+                                          "seendate": "20261008T060000Z", "domain": domain,
+                                          "language": "English"}]}).encode()
+        fetches.append({"provider": "gdelt", "material": "copper", "state": "ok", "reason": None,
+                        "retrieved_at": f"2026-10-08T{hour}:00:00+00:00", "request": "synthetic",
+                        "synthetic": True, "items": parse_gdelt(body, retrieved_at=retrieved)})
+    rows = gate_rows(build_snapshots(fetches, as_of="2026-10-08T12:00:00Z", sources=sources))
+    early = project_events(rows, as_of="2026-10-08T08:30:00Z", scope={"material": "copper"},
+                           purpose="planning", allow_demo=True)
+    provenance = [p for f in early.features for p in f["provenance"]]
+    assert {p["source_id"] for p in provenance} == {"a.test", "b.test"}
+    assert all("c.test" not in " ".join(p["evidence_refs"]) for p in provenance)
+    assert all(p["corroboration_snapshot"]["known_at"] <= "2026-10-08T08:30:00+00:00"
+               for p in provenance)
+
+
+def test_unreviewed_rights_cannot_grant_planning_use():
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["gdelt"]["permitted_uses"] = ["planning"]
+    body = json.dumps({"articles": [{"url": "https://wire.test/strike",
+                                  "title": "Copper strike at Chennai port",
+                                  "seendate": "20261008T060000Z", "domain": "wire.test",
+                                  "language": "English"}]}).encode()
+    fetches = [{"provider": "gdelt", "material": "copper", "state": "ok", "reason": None,
+                "retrieved_at": "2026-10-08T09:00:00+00:00", "request": "synthetic", "synthetic": True,
+                "items": parse_gdelt(body, retrieved_at="2026-10-08T09:00:00Z")}]
+    projection = project_events(gate_rows(build_snapshots(fetches, as_of=AS_OF, sources=sources)),
+                                as_of=AS_OF, scope={"material": "copper"}, purpose="planning", allow_demo=True)
+    assert projection.features == ()
+    assert {e["reason"] for e in projection.exclusions} == {"permission_denied"}
+
+
+def test_unreviewed_rights_registry_inconsistency_is_rejected(tmp_path):
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["gdelt"]["permitted_uses"] = ["planning"]
+    path = tmp_path / "synthetic-news-sources.json"
+    path.write_text(json.dumps(sources))
+    with pytest.raises(ValueError, match="unreviewed news rights"):
+        load_sources(path)
+
+
+@pytest.mark.parametrize("article,reason", [
+    ({"url": "https://wire.test/story", "title": "Copper strike", "seendate": "20261340T250000Z"},
+     "invalid_article"),
+    ({"url": "https://[invalid", "title": "Copper strike", "seendate": "20261008T060000Z"},
+     "invalid_article"),
+])
+def test_malformed_gdelt_article_has_explicit_state(article, reason):
+    response = fetch_module._from_body("gdelt", "copper", 200,
+                                       json.dumps({"articles": [article]}).encode(), AS_OF, True)
+    assert (response["state"], response["reason"], response["items"]) == (
+        "malformed_payload", reason, [])
+
+
+def test_malformed_rss_source_url_has_explicit_state():
+    raw = (b'<rss><channel><item><title>Copper strike</title>'
+           b'<source url="https://[invalid">Wire</source></item></channel></rss>')
+    response = fetch_module._from_body("google_news_rss", "copper", 200, raw, AS_OF, True)
+    assert (response["state"], response["reason"], response["items"]) == (
+        "malformed_payload", "invalid_item", [])
+
+
+def test_live_fetch_entrypoints_refuse_without_approved_bounded_transport(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("network transport must not be reached")
+    monkeypatch.setattr(fetch_module, "http_get", forbidden, raising=False)
+    monkeypatch.setenv("OFFLINE", "0")
+    for call in (fetch_gdelt_items, fetch_rss_items):
+        result = call("copper", retrieved_at=AS_OF)
+        assert result["state"] == "offline" and result["reason"] == "fetch_not_approved"
+
+
+def test_reviewed_fetch_control_alone_cannot_enable_unreviewed_transport(monkeypatch, tmp_path):
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["gdelt"].update(rights_status="reviewed", fetch_allowed=True)
+    path = tmp_path / "synthetic-news-sources.json"
+    path.write_text(json.dumps(sources))
+    monkeypatch.setattr(fetch_module, "NEWS_SOURCES_FILE", path)
+    monkeypatch.setenv("OFFLINE", "0")
+    result = fetch_gdelt_items("copper", retrieved_at=AS_OF)
+    assert (result["state"], result["reason"], result["items"]) == (
+        "offline", "bounded_transport_unavailable", [])
+
+
+def _dated_synthetic_fetch(provider, source_id, hour, published=None):
+    retrieved = f"2026-10-08T{hour:02d}:00:00Z"
+    title = "Copper strike at Chennai port"
+    if provider == "gdelt":
+        body = json.dumps({"articles": [{"url": f"https://{source_id}/strike", "title": title,
+                                          "seendate": "20261008T060000Z", "domain": source_id,
+                                          "language": "English"}]}).encode()
+        items = parse_gdelt(body, retrieved_at=retrieved)
+    else:
+        date = f"<pubDate>{published}</pubDate>" if published else ""
+        body = (f'<rss><channel><item><title>{title} - Wire</title>'
+                f'<source url="https://{source_id}">Wire</source><guid>{source_id}-strike</guid>'
+                f'{date}</item></channel></rss>').encode()
+        items = parse_rss(body, retrieved_at=retrieved)
+    return {"provider": provider, "material": "copper", "state": "ok", "reason": None,
+            "retrieved_at": items[0]["retrieved_at"], "request": "generated-synthetic",
+            "synthetic": True, "items": items}
+
+
+def test_future_published_rss_witness_cannot_corroborate_prior_publisher():
+    sources = copy.deepcopy(SOURCES)
+    for provider in sources["providers"].values():
+        provider.update(rights_status="reviewed", permitted_uses=["planning"])
+    first = _dated_synthetic_fetch("gdelt", "a.test", 7)
+    contradictory = _dated_synthetic_fetch("google_news_rss", "b.test", 8,
+                                            "Thu, 08 Oct 2026 10:00:00 GMT")
+    result = build_snapshots([first, contradictory], as_of=AS_OF, sources=sources)
+    assert any(row["reason"] == "publication_after_retrieval" and row["provider"] == "google_news_rss"
+               for row in result["rejected"])
+    assert {s["source"]["source_id"] for s in result["snapshots"]} == {"a.test"}
+    projection = project_events(gate_rows(result), as_of="2026-10-08T08:30:00Z",
+                                scope={"material": "copper"}, purpose="planning", allow_demo=True)
+    assert len(projection.features) == 1
+    [provenance] = projection.features[0]["provenance"]
+    assert provenance["source_id"] == "a.test"
+    assert provenance["corroboration"] == "uncorroborated"
+    assert provenance["evidence_refs"] == ()
+
+
+def test_late_unreviewed_feed_copy_preserves_early_full_projection_and_later_denial():
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["gdelt"].update(rights_status="reviewed", permitted_uses=["planning"])
+    first = _dated_synthetic_fetch("gdelt", "a.test", 7)
+    later = _dated_synthetic_fetch("google_news_rss", "a.test", 10,
+                                   "Thu, 08 Oct 2026 06:00:00 GMT")
+    early = "2026-10-08T08:30:00Z"
+    project = lambda result, at: project_events(gate_rows(result), as_of=at, scope={"material": "copper"},
+                                                 purpose="planning", allow_demo=True)
+    first_early = project(build_snapshots([first], as_of=early, sources=sources), early)
+    both_early = project(build_snapshots([first, later], as_of=early, sources=sources), early)
+    assert first_early == both_early and len(both_early.features) == 1
+    full_archive = build_snapshots([first, later], as_of=AS_OF, sources=sources)
+    historical = project(full_archive, early)
+    assert historical.features == first_early.features
+    assert not any(x["reason"] == "permission_denied" for x in historical.exclusions)
+    late = project(full_archive, AS_OF)
+    assert late.features == ()
+    assert any(x["reason"] == "permission_denied" for x in late.exclusions)
+
+
+def test_later_url_cannot_rewrite_earlier_rss_story_identity():
+    sources = copy.deepcopy(SOURCES)
+    sources["providers"]["google_news_rss"].update(rights_status="reviewed", permitted_uses=["planning"])
+    first = _dated_synthetic_fetch("google_news_rss", "a.test", 7)
+    later = _dated_synthetic_fetch("gdelt", "a.test", 10)
+    early = "2026-10-08T08:30:00Z"
+    project = lambda result: project_events(gate_rows(result), as_of=early, scope={"material": "copper"},
+                                             purpose="planning", allow_demo=True)
+    early_only = project(build_snapshots([first], as_of=early, sources=sources))
+    full_archive = project(build_snapshots([first, later], as_of=AS_OF, sources=sources))
+    assert full_archive.features == early_only.features and len(full_archive.features) == 1

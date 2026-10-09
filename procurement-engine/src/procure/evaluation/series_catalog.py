@@ -146,6 +146,24 @@ def _wb(raw, source, profile):
                 raise ValueError('WB sheet expansion bound')
             # Iterate once; native same-byte book, bounded by ZIP and sheet limits.
             rows=list(sheet.iter_rows())
+            if sheet_name=='Monthly Indices':
+                if len(rows)<9:raise ValueError('WB index header profile absent')
+                if rows[8][0].value is None:
+                    # Only one explicit optional leaf-header row, never a prefix
+                    # search or a monthless data/footer skip.
+                    labels=0
+                    for cell in rows[8]:
+                        value=cell.value
+                        if value is None:continue
+                        if (cell.data_type in {'f','e'} or not isinstance(value,str)
+                                or len(value)>512 or any(ord(c)<32 for c in value)):
+                            raise ValueError('WB extended index header invalid')
+                        labels+=bool(value.strip())
+                    if not labels or len(rows)<10:raise ValueError('WB extended index header ambiguous')
+                    _month(rows[9][0].value,True)
+                    headers,start=(6,7,8,9),10
+                else:
+                    _month(rows[8][0].value,True)
             index_evidence=[]
             for row in rows[:start-1]:
                 for cell in row:
@@ -157,6 +175,11 @@ def _wb(raw, source, profile):
                 for r in headers:
                     cell=rows[r-1][col-1]
                     if cell.value is not None:
+                        if (sheet_name=='Monthly Indices' and cell.data_type not in {'f','e'}
+                                and isinstance(cell.value,str) and not cell.value.strip()):
+                            if len(cell.value)>512 or any(ord(c)<32 for c in cell.value):
+                                raise ValueError('source field type/width invalid')
+                            continue
                         evidence.append({'cell':cell.coordinate,'text':_text(cell.value), 'data_type':cell.data_type})
                 if not evidence:continue
                 label=' / '.join(e['text'] for e in evidence)

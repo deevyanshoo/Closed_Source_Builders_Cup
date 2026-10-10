@@ -531,11 +531,20 @@ export interface VoiceHTTPCall {
   arguments: VoiceHTTPCallArguments;
 }
 
-export interface VoiceHTTPTurnRequest {
+export interface VoiceHTTPTypedTurnRequest {
   contract_version: "0.2.0";
   context_version: string;
   call: VoiceHTTPCall;
 }
+
+export interface VoiceHTTPTextProposalTurnRequest {
+  contract_version: "0.2.0";
+  context_version: string;
+  input_mode: "text_proposal";
+  utterance: string;
+}
+
+export type VoiceHTTPTurnRequest = VoiceHTTPTypedTurnRequest | VoiceHTTPTextProposalTurnRequest;
 
 export interface VoiceHTTPSessionResponse {
   production_context_ref?: ProductionContextRef;
@@ -634,11 +643,26 @@ export interface VoiceHTTPUnavailableOutcome {
   reason: string;
 }
 
-export type VoiceHTTPOutcome = VoiceHTTPComparedOutcome | VoiceHTTPUnsupportedOutcome | VoiceHTTPClarificationOutcome | VoiceHTTPRejectedOutcome | VoiceHTTPUnavailableOutcome;
+export interface VoiceHTTPProposalOnlyOutcome {
+  status: "proposal_only";
+  tool_name: "compare_receipt_recovery";
+  read_only: true;
+  synthetic: true;
+  interpretation_verified: false;
+  ownership: VoiceHTTPToolOwnership;
+  call: VoiceHTTPCall;
+}
+
+export type VoiceHTTPOutcome = VoiceHTTPComparedOutcome | VoiceHTTPUnsupportedOutcome | VoiceHTTPClarificationOutcome | VoiceHTTPRejectedOutcome | VoiceHTTPUnavailableOutcome | VoiceHTTPProposalOnlyOutcome;
 
 export interface VoiceHTTPExecutionError {
   code: "execution_unavailable";
   message: string;
+}
+
+export interface VoiceHTTPTextProposalError {
+  code: "text_proposal_unavailable";
+  message: "Text proposal unavailable. Use the typed comparison form.";
 }
 
 export interface VoiceHTTPPendingResult {
@@ -676,7 +700,7 @@ export interface VoiceHTTPFailedResult {
   synthetic: true;
   turn_id: string;
   state: "failed";
-  error: VoiceHTTPExecutionError;
+  error: VoiceHTTPExecutionError | VoiceHTTPTextProposalError;
 }
 
 export type VoiceHTTPResultResponse = VoiceHTTPPendingResult | VoiceHTTPReadyResult | VoiceHTTPFailedResult;

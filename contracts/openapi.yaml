@@ -5790,7 +5790,7 @@
           "arguments"
         ]
       },
-      "VoiceHTTPTurnRequest": {
+      "VoiceHTTPTypedTurnRequest": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
@@ -5814,6 +5814,49 @@
           "call"
         ],
         "description": "Transport context-version precondition plus arguments only; model cannot supply ownership or snapshot/scenario overrides."
+      },
+      "VoiceHTTPTextProposalTurnRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context_version": {
+            "type": "string",
+            "minLength": 32,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]{32}$"
+          },
+          "input_mode": {
+            "type": "string",
+            "const": "text_proposal"
+          },
+          "utterance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context_version",
+          "input_mode",
+          "utterance"
+        ],
+        "description": "An unverified text proposal over the authenticated server-owned saved synthetic context; UTF-8 byte and ownership limits are enforced by the host."
+      },
+      "VoiceHTTPTurnRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VoiceHTTPTypedTurnRequest"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPTextProposalTurnRequest"
+          }
+        ]
       },
       "VoiceHTTPSessionResponse": {
         "type": "object",
@@ -6259,6 +6302,47 @@
           "reason"
         ]
       },
+      "VoiceHTTPProposalOnlyOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "proposal_only"
+          },
+          "tool_name": {
+            "type": "string",
+            "const": "compare_receipt_recovery"
+          },
+          "read_only": {
+            "type": "boolean",
+            "const": true
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          },
+          "interpretation_verified": {
+            "type": "boolean",
+            "const": false
+          },
+          "ownership": {
+            "$ref": "#/components/schemas/VoiceHTTPToolOwnership"
+          },
+          "call": {
+            "$ref": "#/components/schemas/VoiceHTTPCall"
+          }
+        },
+        "required": [
+          "status",
+          "tool_name",
+          "read_only",
+          "synthetic",
+          "interpretation_verified",
+          "ownership",
+          "call"
+        ]
+      },
       "VoiceHTTPOutcome": {
         "oneOf": [
           {
@@ -6275,6 +6359,9 @@
           },
           {
             "$ref": "#/components/schemas/VoiceHTTPUnavailableOutcome"
+          },
+          {
+            "$ref": "#/components/schemas/VoiceHTTPProposalOnlyOutcome"
           }
         ]
       },
@@ -6290,6 +6377,26 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "VoiceHTTPTextProposalError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "text_proposal_unavailable"
+          },
+          "message": {
+            "type": "string",
+            "enum": [
+              "Text proposal unavailable. Use the typed comparison form."
+            ]
           }
         },
         "required": [
@@ -6467,7 +6574,14 @@
             "const": "failed"
           },
           "error": {
-            "$ref": "#/components/schemas/VoiceHTTPExecutionError"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VoiceHTTPExecutionError"
+              },
+              {
+                "$ref": "#/components/schemas/VoiceHTTPTextProposalError"
+              }
+            ]
           }
         },
         "required": [

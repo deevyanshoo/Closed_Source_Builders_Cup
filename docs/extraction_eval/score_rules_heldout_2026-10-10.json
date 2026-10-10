@@ -1,0 +1,380 @@
+{
+  "kind": "offer_extraction_score",
+  "status": "completed",
+  "mode": "rules",
+  "split": "heldout",
+  "run_at": "2026-10-10T10:21:37+00:00",
+  "revision": "3f9ee96ab7ffd61e1267e24182923853aa2e348a",
+  "manifest_as_of": "2026-10-07",
+  "manifest_sha256": "670f5e938470d1ab8c9e808ab696a8d38880dcfac93358493038b4294723a815",
+  "input_sha256": {
+    "Q06": "2c2ac1c731cd5a14555f3bdcb728a83fa928338b565713e1cea0495c69a7a3e8",
+    "Q07": "191354c8aa7b4f0038223ac7acc929402bc749a4a563878b89eab914a74bd013",
+    "Q08": "d5a0f3a537972f619b99915a470dc6cdb75078fcb942e1e87b916d10b3c729b3",
+    "Q14": "21d7c20e54eeda7581e09bb4dd4b8c0adf4f63e24c1d8886bdab0dad3a26b5f4",
+    "Q15": "6a2809aa79dff46d05a08cdf6c1ca95a631c58043fbe6583cc3e4151c7c12f1d",
+    "Q16": "d5a75fb771c96d88cb0713db6d14cae9950a6ae662562db0c6ce8eda30407dbe",
+    "Q17": "a4bbb93c088ccae091152d8303aa5f357c6f759f8e026b45c5dc7ade3cd20a91",
+    "Q18": "20d053e3c8d8299594b11b608df3f4e440004c8630c49f07e8de11bea2f5fce7"
+  },
+  "source_sha256": {
+    "scripts/score_offer_extraction.py": "5d2acc4904aa057a8562a7aa47b7561de790853bd088be187641a76de209d469",
+    "src/procure/offers/__init__.py": "8421082353c1d148ed6f643fb9c17beecbf12816725f65099ebeca67f610f2a0",
+    "src/procure/offers/countries.py": "c03b36890807ea03df8f79af09b81c01b55ed8e5149571aa3445ebb7047be85b",
+    "src/procure/offers/evidence.py": "7526a58869781e8f61d2013d69af118bbdcdece69779eb0e264e05266e319150",
+    "src/procure/offers/extract_gemini.py": "f8639751d347ab4ce5e6b3e01c3f4b2456be3f89a4da1a4642df75d6bbb00988",
+    "src/procure/offers/extract_rules.py": "f704a4843be0a1de5118dd77b1b470745c679957a77a17675ba0b9f799439437",
+    "src/procure/offers/extraction.py": "4a99a2689448a952ee4bfc5ca74ceb0ecd0a836cdb6eece4df587e6a52cf7d40",
+    "src/procure/offers/fx_rates.py": "ef79c5d8b094048204b6223b09cbfdde09fed27105470377c5fc16f8633e03d2",
+    "src/procure/offers/http.py": "0ab78aa8e37de6c3b576bd36c91e13466346f0acb6c2496b2197d62804d7c9b7",
+    "src/procure/offers/lifecycle.py": "0b7d8ba9202eddd1681f051119b0ede5563865807fdbbbcf51d2f5b6d9855a88",
+    "src/procure/offers/normalize.py": "787a7ef92b8280e10d24aa2ee3b279dc695100d42ba5c6d99d6cab0f3077123e",
+    "src/procure/offers/scoring.py": "d6f8aa3a54cf644065d0620602cfbb02727ce652892e0759c3699a12d8f0dd01",
+    "src/procure/offers/store.py": "28050c722f33ad41823cf567596c7464ccd9906761829dac5e19b09fc97485dd",
+    "src/procure/documents/__init__.py": "72aa79facd0dfeb580461f846277b4cb713b12ee1d457dbd23d0816a1d16afe6",
+    "src/procure/documents/delimited.py": "9ee0eab89d9de69e288fc818fec30c57604ca431cd5ba38b197d052588c26ae2",
+    "src/procure/documents/models.py": "ad4685eda969baeb570a92fba34fc9eb4140a7f77674bde6091819eebd504c52",
+    "src/procure/documents/pdf.py": "da1b83a01b3c1c3fcaf638591e8a936f7aad67347ea4e11031780712b921b3a8",
+    "src/procure/documents/reader.py": "7622c59089c9d958b6a6fa8f070249b5f36ffa939dfd0fab6ada88dc75bf89b2",
+    "src/procure/documents/spreadsheet.py": "99882a41db040fedd0e84c92282c9afd8f2348ececf3986ecccd0342936d2f75",
+    "config/assumptions.yaml": "18ae516ea357d0cc31d432968ee2b8013d78b4c776a22bc724daee83b765b4f7",
+    "config/materials.yaml": "a67b41385cd51e4e0f40407a552b1ccd7cf2b3f6e8264c8fce42cd7d27cab6ac",
+    "config/iso3166_alpha2.csv": "8a93f683106278466970d16520ba86dcc0cd153310964d3f66cf3b3172e4736b"
+  },
+  "key_configured": false,
+  "live_calls": {
+    "used": 0,
+    "max": 0,
+    "enabled": false
+  },
+  "offline": true,
+  "synthetic_inputs": true,
+  "extractors_used": {
+    "rules": 8
+  },
+  "calls": {
+    "none": 8
+  },
+  "summary": {
+    "quotes": 8,
+    "correct": 115,
+    "total": 130,
+    "accuracy": 0.8846,
+    "per_field": {
+      "supplier_name": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "origin_country": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "incoterm": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "settlement_currency": {
+        "correct": 7,
+        "total": 8,
+        "accuracy": 0.875
+      },
+      "payment_terms": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "valid_until": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "lead_time_days": {
+        "correct": 8,
+        "total": 8,
+        "accuracy": 1.0
+      },
+      "min_order": {
+        "correct": 4,
+        "total": 8,
+        "accuracy": 0.5
+      },
+      "capacity": {
+        "correct": 5,
+        "total": 8,
+        "accuracy": 0.625
+      },
+      "shipments": {
+        "correct": 5,
+        "total": 8,
+        "accuracy": 0.625
+      },
+      "material": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "description": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "grade": {
+        "correct": 10,
+        "total": 10,
+        "accuracy": 1.0
+      },
+      "quantity": {
+        "correct": 9,
+        "total": 10,
+        "accuracy": 0.9
+      },
+      "pricing": {
+        "correct": 7,
+        "total": 10,
+        "accuracy": 0.7
+      }
+    },
+    "quotes_correct": 1,
+    "quote_accuracy": 0.125,
+    "errors": {
+      "not_extracted": 13,
+      "wrong_status": 1,
+      "wrong_value": 1
+    },
+    "extra_items": 0,
+    "flags": {
+      "missing": {
+        "expected": 16,
+        "flagged": 15
+      },
+      "conflict": {
+        "expected": 1,
+        "flagged": 1
+      },
+      "expired": {
+        "expected": 1,
+        "flagged": 1,
+        "false_positive": 0
+      },
+      "embedded_instruction": {
+        "expected": 1,
+        "flagged": 1
+      }
+    },
+    "field_accuracy": 0.8846
+  },
+  "quotes": [
+    {
+      "quote": "Q06",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.9333,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q07",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 1.0,
+      "quote_correct": true,
+      "extra_items": 0,
+      "errors": []
+    },
+    {
+      "quote": "Q08",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.92,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "settlement_currency",
+          "expected_status": "missing",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "wrong_status"
+        },
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q14",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8667,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "extracted",
+          "correct": false,
+          "error": "wrong_value"
+        }
+      ]
+    },
+    {
+      "quote": "Q15",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q16",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.9333,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "items[0].pricing",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q17",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.7333,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "shipments",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "items[0].quantity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    },
+    {
+      "quote": "Q18",
+      "extractor": "rules",
+      "call": "none",
+      "fallback_reason": null,
+      "error_kind": null,
+      "latency_ms": null,
+      "field_accuracy": 0.8667,
+      "quote_correct": false,
+      "extra_items": 0,
+      "errors": [
+        {
+          "field": "min_order",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        },
+        {
+          "field": "capacity",
+          "expected_status": "present",
+          "got_status": "unverified",
+          "correct": false,
+          "error": "not_extracted"
+        }
+      ]
+    }
+  ],
+  "caveat": "Synthetic documents written by the same author as the rules; scores are likely optimistic."
+}

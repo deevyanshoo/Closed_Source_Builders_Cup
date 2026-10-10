@@ -94,7 +94,7 @@ describe('dispatch report', () => {
     expect(report.csv).toContain('hazard,');
     expect(report.csv).toContain('lead_time,SHP-SYN-002,ok,2 working days');
     expect(report.csv).toContain('rain_heavy_24h: 76.8 mm; threshold 64.5 mm; met true');
-    expect(report.csv).toContain('gdacs_alert_within_radius: Green FL alert; distance 32 km; event 9100002; threshold Orange or Red within 300 km; met false');
+    expect(report.csv).toContain('gdacs_alert_within_radius: Green FL alert; distance 33 km; event 9100002; threshold Orange or Red within 300 km; met false');
     expect(report.csv).not.toContain('Green km');
     expect(report.csv).not.toContain('300 km km');
     expect(report.csv).toContain('haz-open-meteo-INNSA-99acbf09e031');

@@ -1,8 +1,10 @@
 """Versioned location registry: facility and port codes to coordinates for hazard providers.
 
-``load_registry(path)`` validates ``config/locations_v1.json``; ``resolve(registry, code)`` returns
+``load_registry(path)`` validates ``config/locations_v2.json``; ``resolve(registry, code)`` returns
 the entry or ``unsupported`` with a reason. A code that is not listed (including synthetic plant
-codes) is never given guessed coordinates. Coordinates stay decimal strings as written.
+codes) is never given guessed coordinates. Coordinates stay decimal strings as written. Every
+entry carries provenance: a verified entry cites ``source_url`` and ``checked_on``; an unverified
+entry states ``unverified_reason``. An entry with neither is refused.
 """
 from __future__ import annotations
 
@@ -13,9 +15,11 @@ from pathlib import Path
 
 from ..settings import PROJECT_ROOT
 
-REGISTRY_FILE = PROJECT_ROOT / "config" / "locations_v1.json"
+REGISTRY_FILE = PROJECT_ROOT / "config" / "locations_v2.json"
 _CODE = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}$")
 _COORD = re.compile(r"^-?\d{1,3}(?:\.\d{1,6})?$")
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+FIELDS = ("code", "kind", "name", "lat", "lon", "source", "verified", "source_url", "checked_on", "unverified_reason")
 
 
 def _coordinate(text: object, bound: int) -> bool:
@@ -25,6 +29,19 @@ def _coordinate(text: object, bound: int) -> bool:
         return -bound <= Decimal(text) <= bound
     except InvalidOperation:
         return False
+
+
+def _text(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _provenance(row: dict) -> bool:
+    if not isinstance(row.get("checked_on"), str) or not _DATE.fullmatch(row["checked_on"]):
+        return False
+    if row["verified"]:
+        return _text(row.get("source_url")) and row["source_url"].startswith("https://") \
+            and row.get("unverified_reason") is None
+    return _text(row.get("unverified_reason"))
 
 
 def load_registry(path: Path | None = None) -> dict:
@@ -39,13 +56,14 @@ def load_registry(path: Path | None = None) -> dict:
                 or not _coordinate(row.get("lon"), 180) or type(row.get("verified")) is not bool \
                 or not all(isinstance(row.get(k), str) and row[k].strip() for k in ("kind", "name", "source")):
             raise ValueError("invalid location registry entry")
-        entries[row["code"]] = {k: row[k] for k in ("code", "kind", "name", "lat", "lon", "source", "verified")}
+        if not _provenance(row):
+            raise ValueError(f"location {row['code']} needs a cited source or an unverified reason")
+        entries[row["code"]] = {k: row.get(k) for k in FIELDS}
     return {"version": content["version"], "notice": content.get("notice"), "entries": entries}
 
 
 def resolve(registry: dict, code: object) -> dict:
-    empty = {"code": code, "kind": None, "name": None, "lat": None, "lon": None, "source": None,
-             "verified": None, "registry_version": registry["version"]}
+    empty = {**{k: None for k in FIELDS}, "code": code, "registry_version": registry["version"]}
     if not isinstance(code, str) or not code:
         return {"status": "unsupported", "reason": "invalid_code", **empty}
     entry = registry["entries"].get(code)

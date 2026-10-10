@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { EditButton, Editor, FieldName, FieldStatus, OffersPage, ScenarioForm, ScenarioView } from './offers-page';
+import { EditButton, Editor, FieldName, FieldStatus, OffersPage, ScenarioForm, ScenarioView, ServiceOfferReview } from './offers-page';
 import { createFixtureAdapter } from './offers';
 
 describe('offer review editor', () => {
@@ -122,5 +122,47 @@ describe('decision date and payment timing panel', () => {
   it('says a missing validity is not stated and is not treated as open', async () => {
     const result = await adapter.scenario('fixture-q17', { decision_date: '2026-10-10', dates, rate_percent: null, alternative_offer_id: null });
     expect(renderToStaticMarkup(<ScenarioView state={{ kind: 'result', result }} offers={offers} />)).toContain('Validity not stated in the document');
+  });
+});
+
+describe('service quote mode', () => {
+  it('keeps fixture and service controls separate and labels service as local unavailable until selected', () => {
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/offers']}><OffersPage /></MemoryRouter>);
+    expect(html).toContain('Synthetic fixtures');
+    expect(html).toContain('Local quote service');
+    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER');
+  });
+  it('keeps reviewer assertions separate and an index-linked final price unknown', () => {
+    const userField = { name: 'settlement_currency', kind: 'currency', status: 'corrected', value: 'USD', critical: true,
+      source: 'user', reasons: [], evidence: [], candidates: [], evidence_status: 'user_entered_without_document_evidence' };
+    const offer = { offer_id: 'synthetic-10', version: 3, status: 'saved', synthetic: true, extraction_id: 'ext-10',
+      document: { document_id: 'sha256:synthetic', filename: 'SYN-Q10.pdf', media_type: 'application/pdf', byte_size: 100 },
+      fields: { settlement_currency: userField }, items: [{}], blocking_reasons: [], review_flags: [], normalized: {},
+      allowed_actions: [], segments: [] } as any;
+    const sourcing = { as_of: '2026-10-10', synthetic: true, excluded: [], candidates: [{ offer_id: 'synthetic-10', offer_version: 3,
+      document_id: 'sha256:synthetic', item_index: 0, material: 'copper',
+      quantity: { kg: '250000' }, price: { type: 'index_linked', premium_per_kg: { amount: '0.095', currency: 'USD' } },
+      landed_price: { status: 'index_linked_final_price_unknown', per_kg: null } }] } as any;
+    const html = renderToStaticMarkup(<ServiceOfferReview offer={offer} sourcing={sourcing} selected={null} onSelect={() => {}}
+      onEdit={() => {}} onSave={() => {}} canEdit={false} busy={false} />);
+    expect(html).toContain('Reviewer assertion; no document evidence');
+    expect(html).toContain('premium 0.095 USD per kg; final price unknown');
+    expect(html).toContain('disabled="">Save offer →</button>');
+    expect(html).not.toContain('fixture-q10');
+    const plannedHtml = renderToStaticMarkup(<ServiceOfferReview offer={{ ...offer, status: 'used_in_plan' }} sourcing={sourcing}
+      selected={null} onSelect={() => {}} onEdit={() => {}} onSave={() => {}} canEdit={false} busy={false} />);
+    expect(plannedHtml).toContain('premium 0.095 USD per kg; final price unknown');
+    expect(plannedHtml).toContain('used in plan');
+    for (const stale of [
+      { offer_version: 2 }, { document_id: 'sha256:other' }, { item_index: 1 }, { offer_id: 'other' },
+    ]) {
+      const staleSourcing = { ...sourcing, candidates: [{ ...sourcing.candidates[0], ...stale }] };
+      const staleHtml = renderToStaticMarkup(<ServiceOfferReview offer={offer} sourcing={staleSourcing} selected={null} onSelect={() => {}}
+        onEdit={() => {}} onSave={() => {}} canEdit={false} busy={false} />);
+      expect(staleHtml).not.toContain('premium 0.095 USD');
+      const stalePlannedHtml = renderToStaticMarkup(<ServiceOfferReview offer={{ ...offer, status: 'used_in_plan' }} sourcing={staleSourcing}
+        selected={null} onSelect={() => {}} onEdit={() => {}} onSave={() => {}} canEdit={false} busy={false} />);
+      expect(stalePlannedHtml).not.toContain('premium 0.095 USD');
+    }
   });
 });

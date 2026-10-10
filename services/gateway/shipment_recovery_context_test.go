@@ -107,6 +107,134 @@ func TestShipmentInstallOwnsBytesAndReplaceCancelsOldLease(t *testing.T) {
 	}
 }
 
+func TestShipmentHostCandidateBindingOwnsIdentityAndReplacement(t *testing.T) {
+	spec := shipmentTestSpec(t)
+	spec.CandidateBinding = &shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-a@v3#item0", OfferID: "offer-a", OfferVersion: 3, ItemIndex: 0, DocumentID: "sha256:" + strings.Repeat("a", 64)}
+	a := newShipmentAdapter(shipmentExecutorFunc(func(context.Context, []byte) ([]byte, error) { t.Fatal("executor called"); return nil, nil }))
+	meta, err := a.InstallHostContext(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, ok := a.boundCandidate("W", meta.ContextID, meta.Revision, meta.RequestSHA256)
+	if !ok || bound.Candidate.CandidateID != "offer-a@v3#item0" || bound.ContextID != meta.ContextID || bound.Revision != 1 || bound.RequestSHA256 != meta.RequestSHA256 || bound.PlanVersion != "v7" || bound.AsOf != spec.AsOf {
+		t.Fatalf("binding %+v %v", bound, ok)
+	}
+	spec.CandidateBinding.OfferID = "tampered"
+	bound.Candidate.OfferID = "tampered"
+	bound, ok = a.boundCandidate("W", meta.ContextID, 1, meta.RequestSHA256)
+	if !ok || bound.Candidate.OfferID != "offer-a" {
+		t.Fatal("caller mutated installed association")
+	}
+	if _, ok := a.boundCandidate("other", meta.ContextID, 1, meta.RequestSHA256); ok {
+		t.Fatal("foreign binding visible")
+	}
+	if _, ok := a.boundCandidate("W", meta.ContextID, 2, meta.RequestSHA256); ok {
+		t.Fatal("wrong revision visible")
+	}
+	if _, ok := a.boundCandidate("W", meta.ContextID, 1, strings.Repeat("0", 64)); ok {
+		t.Fatal("wrong digest visible")
+	}
+	spec.CandidateBinding.OfferID = "offer-a"
+	if _, err := a.InstallHostContext(spec); err == nil || len(a.list("W")) != 1 {
+		t.Fatal("duplicate binding retained")
+	}
+	lease, ctx, err := a.acquire(context.Background(), "P", "W", meta.ContextID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := shipmentTestSpec(t)
+	other.CandidateBinding = &shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-b@v1#item1", OfferID: "offer-b", OfferVersion: 1, ItemIndex: 1, DocumentID: "sha256:" + strings.Repeat("b", 64)}
+	if _, err := a.InstallHostContext(other); err != nil {
+		t.Fatal(err)
+	}
+	spec.CandidateBinding = other.CandidateBinding
+	if _, err := a.ReplaceHostContext("W", meta.ContextID, 1, spec); err == nil {
+		t.Fatal("duplicate replacement accepted")
+	}
+	if !a.current(lease) || ctx.Err() != nil {
+		t.Fatal("invalid replacement disturbed lease")
+	}
+	spec.CandidateBinding = nil
+	changed, err := a.ReplaceHostContext("W", meta.ContextID, 1, spec)
+	if err != nil || changed.Revision != 2 {
+		t.Fatalf("replacement %+v %v", changed, err)
+	}
+	if _, ok := a.boundCandidate("W", meta.ContextID, 2, changed.RequestSHA256); ok {
+		t.Fatal("old binding carried forward")
+	}
+	if a.current(lease) || ctx.Err() == nil {
+		t.Fatal("old lease not cancelled")
+	}
+	a.release(lease)
+	spec.CandidateBinding = &shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-a@v3#item0", OfferID: "offer-a", OfferVersion: 3, ItemIndex: 0, DocumentID: "sha256:" + strings.Repeat("a", 64)}
+	rebound, err := a.ReplaceHostContext("W", meta.ContextID, 2, spec)
+	if err != nil || rebound.Revision != 3 {
+		t.Fatalf("fresh explicit association %+v %v", rebound, err)
+	}
+	if _, ok := a.boundCandidate("W", meta.ContextID, 2, rebound.RequestSHA256); ok {
+		t.Fatal("old revision resolved")
+	}
+	if current, ok := a.boundCandidate("W", meta.ContextID, 3, rebound.RequestSHA256); !ok || current.Candidate.CandidateID != spec.CandidateBinding.CandidateID {
+		t.Fatal("fresh explicit association missing")
+	}
+}
+
+func TestShipmentHostCandidateBindingRejectsMalformedIdentity(t *testing.T) {
+	good := shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-a@v3#item0", OfferID: "offer-a", OfferVersion: 3, ItemIndex: 0, DocumentID: "sha256:" + strings.Repeat("a", 64)}
+	for name, change := range map[string]func(*shipmentCandidateBinding){
+		"workspace": func(b *shipmentCandidateBinding) { b.WorkspaceID = "foreign" },
+		"candidate": func(b *shipmentCandidateBinding) { b.CandidateID = "wrong" },
+		"version":   func(b *shipmentCandidateBinding) { b.OfferVersion = 0 },
+		"item":      func(b *shipmentCandidateBinding) { b.ItemIndex = -1 },
+		"document":  func(b *shipmentCandidateBinding) { b.DocumentID = "unverified" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			spec := shipmentTestSpec(t)
+			bad := good
+			change(&bad)
+			spec.CandidateBinding = &bad
+			if _, err := shipmentPreflight(spec); err == nil {
+				t.Fatal("malformed binding accepted")
+			}
+		})
+	}
+}
+
+func TestShipmentHostCandidateBindingSameIDForeignWorkspaceIsIndependent(t *testing.T) {
+	a := newShipmentAdapter(shipmentExecutorFunc(func(context.Context, []byte) ([]byte, error) { t.Fatal("executor called"); return nil, nil }))
+	first := shipmentTestSpec(t)
+	first.CandidateBinding = &shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-a@v3#item0", OfferID: "offer-a", OfferVersion: 3, ItemIndex: 0, DocumentID: "sha256:" + strings.Repeat("a", 64)}
+	m1, err := a.InstallHostContext(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := shipmentTestSpec(t)
+	second.WorkspaceID = "Other"
+	var request map[string]any
+	if err := json.Unmarshal(second.Request, &request); err != nil {
+		t.Fatal(err)
+	}
+	request["propagation_snapshot"].(map[string]any)["workspace_id"] = "Other"
+	request["production_snapshot"].(map[string]any)["workspace_id"] = "Other"
+	second.Request, _ = shipmentMarshal(request)
+	copyBinding := *first.CandidateBinding
+	copyBinding.WorkspaceID = "Other"
+	second.CandidateBinding = &copyBinding
+	m2, err := a.InstallHostContext(second)
+	if err != nil {
+		t.Fatalf("foreign workspace rejected: %v", err)
+	}
+	if _, ok := a.boundCandidate("W", m2.ContextID, m2.Revision, m2.RequestSHA256); ok {
+		t.Fatal("foreign context visible in W")
+	}
+	if _, ok := a.boundCandidate("Other", m1.ContextID, m1.Revision, m1.RequestSHA256); ok {
+		t.Fatal("W context visible in foreign workspace")
+	}
+	if _, ok := a.boundCandidate("Other", m2.ContextID, m2.Revision, m2.RequestSHA256); !ok {
+		t.Fatal("foreign binding unavailable")
+	}
+}
+
 func TestShipmentHostCutoffMustBeUTCButSnapshotOffsetMayMatchInstant(t *testing.T) {
 	spec := shipmentTestSpec(t)
 	spec.AsOf = "2026-10-09T01:00:00+01:00"

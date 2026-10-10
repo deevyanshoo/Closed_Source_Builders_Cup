@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 	"strconv"
@@ -29,6 +30,8 @@ var (
 	shipmentID               = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	shipmentHash             = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	shipmentTimestamp        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$`)
+	shipmentCandidateOfferID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	shipmentDocumentID       = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	errShipmentUnavailable   = errors.New("shipment recovery unavailable")
 	errShipmentStale         = errors.New("shipment context stale")
 	errShipmentUnknown       = errors.New("shipment context unavailable")
@@ -37,12 +40,32 @@ var (
 )
 
 type HostSpec struct {
-	WorkspaceID           string          `json:"workspace_id"`
-	PlanVersion           string          `json:"plan_version"`
-	PropagationSnapshotID string          `json:"propagation_snapshot_id"`
-	ProductionSnapshotID  string          `json:"production_snapshot_id"`
-	AsOf                  string          `json:"as_of"`
-	Request               json.RawMessage `json:"request"`
+	WorkspaceID           string                    `json:"workspace_id"`
+	PlanVersion           string                    `json:"plan_version"`
+	PropagationSnapshotID string                    `json:"propagation_snapshot_id"`
+	ProductionSnapshotID  string                    `json:"production_snapshot_id"`
+	AsOf                  string                    `json:"as_of"`
+	Request               json.RawMessage           `json:"request"`
+	CandidateBinding      *shipmentCandidateBinding `json:"candidate_binding,omitempty"`
+}
+
+// Host assertion only. A later public bridge must independently verify current sourcing.
+type shipmentCandidateBinding struct {
+	WorkspaceID  string `json:"workspace_id"`
+	CandidateID  string `json:"candidate_id"`
+	OfferID      string `json:"offer_id"`
+	OfferVersion int    `json:"offer_version"`
+	ItemIndex    int    `json:"item_index"`
+	DocumentID   string `json:"document_id"`
+}
+
+type shipmentCandidateAssociation struct {
+	Candidate     shipmentCandidateBinding
+	ContextID     string
+	Revision      int
+	RequestSHA256 string
+	PlanVersion   string
+	AsOf          string
 }
 
 type ContextMetadata struct {
@@ -67,6 +90,7 @@ type ShipmentExecutor interface {
 type shipmentContext struct {
 	metadata ContextMetadata
 	request  []byte
+	binding  *shipmentCandidateAssociation
 }
 
 type shipmentLease struct {
@@ -413,6 +437,9 @@ func shipmentPreflight(spec HostSpec) ([]byte, error) {
 		!shipmentText(spec.PropagationSnapshotID) || !shipmentText(spec.ProductionSnapshotID) || !shipmentTime(spec.AsOf) {
 		return nil, errors.New("invalid host metadata")
 	}
+	if spec.CandidateBinding != nil && !shipmentValidCandidateBinding(*spec.CandidateBinding, spec.WorkspaceID) {
+		return nil, errors.New("invalid candidate binding")
+	}
 	value, err := shipmentParse(spec.Request, shipmentInputLimits)
 	if err != nil {
 		return nil, err
@@ -502,6 +529,51 @@ func shipmentPreflight(spec HostSpec) ([]byte, error) {
 	return copyBytes, nil
 }
 
+func shipmentValidCandidateBinding(binding shipmentCandidateBinding, workspaceID string) bool {
+	if binding.WorkspaceID != workspaceID || !shipmentText(binding.WorkspaceID) ||
+		!shipmentCandidateOfferID.MatchString(binding.OfferID) ||
+		binding.OfferVersion < 1 || binding.OfferVersion > 2147483647 ||
+		binding.ItemIndex < 0 || binding.ItemIndex > 2147483647 ||
+		!shipmentDocumentID.MatchString(binding.DocumentID) {
+		return false
+	}
+	return binding.CandidateID == fmt.Sprintf("%s@v%d#item%d", binding.OfferID, binding.OfferVersion, binding.ItemIndex)
+}
+
+func shipmentOwnAssociation(spec HostSpec, metadata ContextMetadata) *shipmentCandidateAssociation {
+	if spec.CandidateBinding == nil {
+		return nil
+	}
+	return &shipmentCandidateAssociation{Candidate: *spec.CandidateBinding, ContextID: metadata.ContextID,
+		Revision: metadata.Revision, RequestSHA256: metadata.RequestSHA256, PlanVersion: metadata.PlanVersion, AsOf: metadata.AsOf}
+}
+
+func (a *shipmentAdapter) duplicateCandidate(workspaceID, contextID, candidateID string) bool {
+	for id, current := range a.contexts[workspaceID] {
+		if id != contextID && current.binding != nil && current.binding.Candidate.CandidateID == candidateID {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *shipmentAdapter) boundCandidate(workspaceID, contextID string, revision int, requestSHA256 string) (shipmentCandidateAssociation, bool) {
+	var empty shipmentCandidateAssociation
+	if a == nil {
+		return empty, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || !a.ready {
+		return empty, false
+	}
+	current := a.contexts[workspaceID][contextID]
+	if current == nil || current.binding == nil || current.metadata.Revision != revision || current.metadata.RequestSHA256 != requestSHA256 || current.metadata.WorkspaceID != workspaceID {
+		return empty, false
+	}
+	return *current.binding, true
+}
+
 func shipmentMarshal(value any) ([]byte, error) {
 	var out bytes.Buffer
 	e := json.NewEncoder(&out)
@@ -549,10 +621,13 @@ func (a *shipmentAdapter) InstallHostContext(spec HostSpec) (ContextMetadata, er
 	if total >= 4 {
 		return empty, errShipmentBusy
 	}
+	if spec.CandidateBinding != nil && a.duplicateCandidate(spec.WorkspaceID, "", spec.CandidateBinding.CandidateID) {
+		return empty, errors.New("duplicate candidate binding")
+	}
 	if a.contexts[spec.WorkspaceID] == nil {
 		a.contexts[spec.WorkspaceID] = map[string]*shipmentContext{}
 	}
-	a.contexts[spec.WorkspaceID][id] = &shipmentContext{metadata: metadata, request: owned}
+	a.contexts[spec.WorkspaceID][id] = &shipmentContext{metadata: metadata, request: owned, binding: shipmentOwnAssociation(spec, metadata)}
 	return metadata, nil
 }
 
@@ -580,12 +655,15 @@ func (a *shipmentAdapter) ReplaceHostContext(workspaceID, contextID string, expe
 	if current.metadata.Revision != expectedRevision || expectedRevision >= 2147483647 {
 		return empty, errShipmentStale
 	}
+	if spec.CandidateBinding != nil && a.duplicateCandidate(workspaceID, contextID, spec.CandidateBinding.CandidateID) {
+		return empty, errors.New("duplicate candidate binding")
+	}
 	sum := sha256.Sum256(owned)
 	metadata := ContextMetadata{ContextID: contextID, Revision: expectedRevision + 1, WorkspaceID: workspaceID,
 		PlanVersion: spec.PlanVersion, PropagationSnapshotID: spec.PropagationSnapshotID, ProductionSnapshotID: spec.ProductionSnapshotID,
 		AsOf: spec.AsOf, Synthetic: true, Source: "host_configured_synthetic", Persistence: "ephemeral",
 		SourceAuthenticity: "not_verified", RequestSHA256: hex.EncodeToString(sum[:])}
-	a.contexts[workspaceID][contextID] = &shipmentContext{metadata: metadata, request: owned}
+	a.contexts[workspaceID][contextID] = &shipmentContext{metadata: metadata, request: owned, binding: shipmentOwnAssociation(spec, metadata)}
 	for lease := range a.leases {
 		if lease.current == current {
 			lease.cancel()

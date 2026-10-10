@@ -153,7 +153,7 @@ func initShipmentHTTP(cfg stateConfig) *shipmentAdapter {
 	if err != nil || len(data) > shipmentCatalogLimit {
 		return nil
 	}
-	parsed, err := shipmentParse(data, shipmentJSONLimits{shipmentCatalogLimit, 19, 256, 65536 + 64, 128 << 10, false})
+	parsed, err := shipmentParse(data, shipmentJSONLimits{shipmentCatalogLimit, 19, 256, 65536 + 64, 128 << 10, true})
 	if err != nil {
 		return nil
 	}
@@ -172,8 +172,34 @@ func initShipmentHTTP(cfg stateConfig) *shipmentAdapter {
 		return nil
 	}
 	for i, value := range contexts {
-		if _, ok := shipmentObject(value, "workspace_id", "plan_version", "propagation_snapshot_id", "production_snapshot_id", "as_of", "request"); !ok {
+		entry, ok := value.(map[string]any)
+		if !ok || !shipmentKnownFields(entry, "workspace_id", "plan_version", "propagation_snapshot_id", "production_snapshot_id", "as_of", "request", "candidate_binding") ||
+			(len(entry) != 6 && len(entry) != 7) {
 			return nil
+		}
+		for _, key := range []string{"workspace_id", "plan_version", "propagation_snapshot_id", "production_snapshot_id", "as_of", "request"} {
+			if _, exists := entry[key]; !exists {
+				return nil
+			}
+		}
+		if binding, exists := entry["candidate_binding"]; exists {
+			fields, ok := shipmentObject(binding, "workspace_id", "candidate_id", "offer_id", "offer_version", "item_index", "document_id")
+			if !ok {
+				return nil
+			}
+			for _, key := range []string{"workspace_id", "candidate_id", "offer_id", "document_id"} {
+				if _, ok := fields[key].(string); !ok {
+					return nil
+				}
+			}
+			for _, key := range []string{"offer_version", "item_index"} {
+				if _, ok := fields[key].(json.Number); !ok {
+					return nil
+				}
+			}
+			if raw.Contexts[i].CandidateBinding == nil {
+				return nil
+			}
 		}
 		if _, err := adapter.InstallHostContext(raw.Contexts[i]); err != nil {
 			return nil

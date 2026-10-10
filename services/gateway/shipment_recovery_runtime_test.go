@@ -144,3 +144,48 @@ func TestShipmentCatalogAtomicInvalidAndEmptyAvailable(t *testing.T) {
 		t.Fatal("partial context exposed from invalid catalog")
 	}
 }
+
+func TestShipmentCatalogCandidateBindingStrictAndAtomic(t *testing.T) {
+	dir := t.TempDir()
+	python := filepath.Join(dir, "python")
+	if err := os.WriteFile(python, []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	catalog := filepath.Join(dir, "contexts.json")
+	cfg := stateConfig{ShipmentContextsPath: catalog, ShipmentPythonPath: python, ShipmentSourcePath: t.TempDir()}
+	spec := shipmentTestSpec(t)
+	spec.CandidateBinding = &shipmentCandidateBinding{WorkspaceID: "W", CandidateID: "offer-a@v3#item0", OfferID: "offer-a", OfferVersion: 3, ItemIndex: 0, DocumentID: "sha256:" + strings.Repeat("a", 64)}
+	good, err := shipmentMarshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(raw string) *shipmentAdapter {
+		t.Helper()
+		if err := os.WriteFile(catalog, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return initShipmentHTTP(cfg)
+	}
+	valid := `{"catalog_version":"1","contexts":[` + string(good) + `]}`
+	a := write(valid)
+	if a == nil || len(a.list("W")) != 1 {
+		t.Fatal("valid binding catalog rejected")
+	}
+	meta := a.list("W")[0]
+	if bound, ok := a.boundCandidate("W", meta.ContextID, 1, meta.RequestSHA256); !ok || bound.Candidate.CandidateID != spec.CandidateBinding.CandidateID {
+		t.Fatal("catalog binding absent")
+	}
+	for name, second := range map[string]string{
+		"duplicate_candidate":  string(good),
+		"unknown_key":          strings.Replace(string(good), `"candidate_binding":{`, `"candidate_binding":{"unknown":true,`, 1),
+		"duplicate_nested_key": strings.Replace(string(good), `"candidate_binding":{`, `"candidate_binding":{"workspace_id":"W",`, 1),
+		"wrong_type":           strings.Replace(string(good), `"offer_version":3`, `"offer_version":"3"`, 1),
+		"null":                 strings.Replace(string(good), `"candidate_binding":{`, `"candidate_binding":null,"unused":{`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := write(`{"catalog_version":"1","contexts":[` + string(good) + `,` + second + `]}`); got != nil {
+				t.Fatal("partial or malformed catalog installed")
+			}
+		})
+	}
+}

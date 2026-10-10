@@ -3,6 +3,7 @@ import type { SessionResponse } from '../../../contracts/generated/types';
 import { VoiceController, voiceMatches, voiceExample } from './voice';
 import resultRaw from '../../../contracts/examples/voice_http_recovery_result.json?raw';
 import precisionRaw from '../../../contracts/examples/voice_http_recovery_precision_result.json?raw';
+import proposalRaw from '../../../contracts/examples/voice_http_text_proposal_result.json?raw';
 
 const identity: SessionResponse = { contract_version: '0.2.0', principal_id: 'p', workspace_id: 'W', role: 'viewer', development_only: true };
 const id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -14,6 +15,196 @@ const accepted = () => ({ contract_version: '0.2.0', session_id: id, context_ver
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 const tick = () => new Promise<void>(done => queueMicrotask(done));
 const until = async (predicate: () => boolean) => { for (let i = 0; i < 100 && !predicate(); i++) await tick(); expect(predicate()).toBe(true); };
+
+describe('unverified saved-context text proposal', () => {
+  const ref = { context_id: 'd'.repeat(32), workspace_id: 'W', revision: 1 };
+  const snapshot = { ...voiceExample('recovery', 'W').snapshot, snapshot_id: 'saved-s1', plan_version: 'saved-v7' };
+  const context = { ...ref, snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, as_of: snapshot.as_of,
+    metadata: { synthetic: true, source: 'caller_supplied_synthetic', syntactic_validation: 'accepted', numerical_acceptance: 'not_claimed' },
+    created_by: 'p', updated_by: 'p', created_at: snapshot.as_of, updated_at: snapshot.as_of, snapshot };
+  const result = () => {
+    const value = JSON.parse(proposalRaw);
+    value.session_id = id; value.context_version = version; value.context_fingerprint = fingerprint; value.production_context_ref = ref;
+    value.outcome.ownership.session_id = id;
+    return value;
+  };
+  function harness() {
+    let currentIdentity = identity;
+    let currentRevision = 1;
+    let currentSnapshot = snapshot;
+    let creates = 0;
+    let closes = 0; let cancels = 0; let identityReads = 0; let resultReads = 0;
+    let heldIdentity: Promise<SessionResponse> | undefined;
+    const turns: unknown[] = [];
+    let nextResult: unknown = result();
+    let heldResult: Promise<Response> | undefined;
+    let rejectTurn = false;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/workspaces/W/production-contexts') return json({ contract_version: '0.2.0', contexts: [{ ...context, snapshot: undefined }], has_more: false });
+      if (path === `/v2/production-contexts/${ref.context_id}`) return json({ contract_version: '0.2.0', context: { ...context, revision: currentRevision, snapshot: currentSnapshot } });
+      if (path === '/v2/voice/saved-context-sessions') { creates++; return json({ ...created(), snapshot_id: snapshot.snapshot_id, plan_version: snapshot.plan_version, production_context_ref: ref }, 201); }
+      if (path.endsWith('/turns') && init?.method === 'POST') { turns.push(JSON.parse(String(init.body))); return rejectTurn ? json({ contract_version: '0.2.0', error: { code: 'conflict', message: 'changed' } }, 409) : json({ ...accepted(), production_context_ref: ref, turn_id: String(turns.length) }, 202); }
+      if (path.endsWith('/result')) {
+        resultReads++;
+        if (heldResult) return heldResult;
+        if (turns.length === 2) return json({ ...result(), turn_id: '2', outcome: { tool_name: 'compare_receipt_recovery', read_only: true, ownership: { session_id: id, turn_id: '2' }, status: 'rejected', reason: 'synthetic fixture' } });
+        return json(nextResult);
+      }
+      if (path.endsWith('/cancel')) { cancels++; return json({ ...accepted(), status: 'cancelled', turn_id: String(turns.length) }); }
+      if (init?.method === 'DELETE') { closes++; return json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' }); }
+      throw new Error(`unexpected ${init?.method} ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => { identityReads++; return heldIdentity ?? currentIdentity; } });
+    return { controller, turns, get creates() { return creates; }, get closes() { return closes; }, get cancels() { return cancels; }, get identityReads() { return identityReads; }, get resultReads() { return resultReads; },
+      identity: (value: SessionResponse) => { currentIdentity = value; }, gateIdentity: (value: Promise<SessionResponse> | undefined) => { heldIdentity = value; },
+      revision: (value: number) => { currentRevision = value; }, snapshot: (value: typeof snapshot) => { currentSnapshot = value; }, result: (value: unknown) => { nextResult = value; }, hold: (value: Promise<Response> | undefined) => { heldResult = value; }, reject: () => { rejectTurn = true; } };
+  }
+  async function selected(h: ReturnType<typeof harness>) {
+    await h.controller.refreshIdentity(); h.controller.selectSource('saved');
+    await until(() => h.controller.state.contexts.length === 1);
+    await h.controller.selectSaved(ref.context_id);
+  }
+  it('sends only text fields, retains unverified call, then confirms exact call on the same session', async () => {
+    const h = harness(); await selected(h);
+    await h.controller.proposeText('move r-C one hour');
+    expect(h.turns).toEqual([{ contract_version: '0.2.0', context_version: version, input_mode: 'text_proposal', utterance: 'move r-C one hour' }]);
+    expect(h.controller.state.kind).toBe('proposed');
+    expect(h.controller.state.proposal?.call).toEqual(result().outcome.call);
+    await h.controller.confirmProposal();
+    expect(h.creates).toBe(1);
+    expect(h.turns[1]).toEqual({ contract_version: '0.2.0', context_version: version, call: result().outcome.call });
+    expect(h.controller.state.kind).toBe('rejected');
+  });
+  it('clears a proposal and refuses a typed turn after identity or saved revision changes', async () => {
+    for (const change of ['identity', 'revision'] as const) {
+      const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
+      if (change === 'identity') h.identity({ ...identity, principal_id: 'other' }); else h.revision(2);
+      await h.controller.confirmProposal();
+      expect(h.turns).toHaveLength(1);
+      expect(h.controller.state.proposal).toBeUndefined();
+    }
+  });
+  it('refuses foreign outcome ownership and fixed failed proposals without presenting a call', async () => {
+    for (const kind of ['foreign', 'failed'] as const) {
+      const h = harness(); await selected(h);
+      const value = result();
+      if (kind === 'foreign') value.outcome.ownership.session_id = 'x'.repeat(32);
+      else { value.state = 'failed'; delete value.outcome; value.error = { code: 'text_proposal_unavailable', message: 'Text proposal unavailable. Use the typed comparison form.' }; }
+      h.result(value); await h.controller.proposeText('move r-C one hour');
+      expect(h.controller.state.proposal).toBeUndefined();
+      expect(h.turns).toHaveLength(1);
+    }
+  });
+  it('rejects a changed same-revision snapshot or role before confirmation', async () => {
+    for (const change of ['snapshot', 'role'] as const) {
+      const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
+      if (change === 'snapshot') h.snapshot({ ...snapshot, as_of: '2026-10-11T00:00:00Z' });
+      else h.identity({ ...identity, role: 'editor' });
+      await h.controller.confirmProposal();
+      expect(h.turns).toHaveLength(1);
+      expect(h.controller.state.proposal).toBeUndefined();
+    }
+  });
+  it('compares identity fields without delimiter collisions', async () => {
+    const h = harness(); h.identity({ ...identity, principal_id: 'p\u0000x' });
+    await selected(h); await h.controller.proposeText('move r-C one hour');
+    h.identity({ ...identity, principal_id: 'p', workspace_id: 'x\u0000W' });
+    await h.controller.confirmProposal();
+    expect(h.turns).toHaveLength(1);
+    expect(h.controller.state.proposal).toBeUndefined();
+  });
+  it('discards a late proposal result after cancellation and handles a 409 without fallback', async () => {
+    const h = harness(); await selected(h);
+    const held = deferred<Response>(); h.hold(held.promise);
+    const proposing = h.controller.proposeText('move r-C one hour');
+    await until(() => h.turns.length === 1);
+    const cancelling = h.controller.cancel();
+    held.resolve(json(result())); await proposing; await cancelling;
+    expect(h.controller.state.proposal).toBeUndefined();
+    expect(h.controller.state.kind).toBe('cancelled');
+    const rejected = harness(); await selected(rejected); rejected.reject();
+    await rejected.controller.proposeText('move r-C one hour');
+    expect(rejected.turns).toHaveLength(1);
+    expect(rejected.controller.state.proposal).toBeUndefined();
+  });
+  it('does not POST a text turn when a starting listener cancels the proposal', async () => {
+    const h = harness(); await selected(h);
+    let stopping: Promise<void> | undefined;
+    const unsubscribe = h.controller.subscribe(view => {
+      if (view.kind === 'starting' && !stopping) stopping = h.controller.cancel();
+    });
+    await h.controller.proposeText('move r-C one hour');
+    await stopping;
+    unsubscribe();
+    expect(h.turns).toHaveLength(0);
+    expect(h.controller.state.proposal).toBeUndefined();
+    expect(h.controller.state.kind).toBe('cancelled');
+    expect(h.creates).toBe(1);
+    expect(h.closes).toBe(1);
+  });
+  it('owns confirmation once before deferred identity resumes, without competing cleanup', async () => {
+    const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
+    const gate = deferred<SessionResponse>(); h.gateIdentity(gate.promise);
+    const reads = h.identityReads;
+    const first = h.controller.confirmProposal();
+    const duplicate = h.controller.confirmProposal();
+    await until(() => h.identityReads > reads);
+    gate.resolve(identity);
+    await Promise.all([first, duplicate]);
+    expect(h.identityReads).toBe(reads + 2); // owner revalidation and final result read; no duplicate revalidation
+    expect(h.turns).toHaveLength(2);
+    expect(h.controller.state.kind).toBe('rejected');
+    expect(h.closes).toBe(0);
+    expect(h.cancels).toBe(0);
+  });
+  it('cancels during revalidation and suppresses a late typed result', async () => {
+    const during = harness(); await selected(during); await during.controller.proposeText('move r-C one hour');
+    const gate = deferred<SessionResponse>(); during.gateIdentity(gate.promise);
+    const reads = during.identityReads;
+    const confirming = during.controller.confirmProposal();
+    await until(() => during.identityReads > reads);
+    const cancelling = during.controller.cancel(); gate.resolve(identity);
+    await Promise.all([confirming, cancelling]);
+    expect(during.turns).toHaveLength(1);
+    expect(during.controller.state.kind).toBe('cancelled');
+    const late = harness(); await selected(late); await late.controller.proposeText('move r-C one hour');
+    const resultGate = deferred<Response>(); late.hold(resultGate.promise);
+    const typed = late.controller.confirmProposal();
+    await until(() => late.turns.length === 2 && late.resultReads === 2);
+    const stop = late.controller.cancel();
+    resultGate.resolve(json({ ...result(), turn_id: '2', outcome: { tool_name: 'compare_receipt_recovery', read_only: true, ownership: { session_id: id, turn_id: '2' }, status: 'rejected', reason: 'synthetic fixture' } }));
+    await Promise.all([typed, stop]);
+    expect(late.controller.state.kind).toBe('cancelled');
+    expect(late.controller.state.proposal).toBeUndefined();
+    expect(late.turns).toHaveLength(2);
+  });
+  it('tracks the owner before a synchronous busy-state listener retires the run', async () => {
+    const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
+    let stopping: Promise<void> | undefined;
+    const unsubscribe = h.controller.subscribe(view => {
+      if (view.kind === 'starting' && !stopping) stopping = h.controller.cancel();
+    });
+    await h.controller.confirmProposal();
+    await stopping;
+    unsubscribe();
+    expect(h.turns).toHaveLength(1);
+    expect(h.controller.state.kind).toBe('cancelled');
+  });
+  it('does not POST the typed call after cancellation on the second starting notification', async () => {
+    const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
+    let starts = 0; let stopping: Promise<void> | undefined;
+    const unsubscribe = h.controller.subscribe(view => {
+      if (view.kind === 'starting' && ++starts === 2) stopping = h.controller.cancel();
+    });
+    await h.controller.confirmProposal();
+    await stopping;
+    unsubscribe();
+    expect(starts).toBe(2);
+    expect(h.turns).toHaveLength(1); // proposal only; no typed POST after revocation
+    expect(h.controller.state.kind).toBe('cancelled');
+  });
+});
 
 describe('typed voice lifecycle ownership', () => {
   it('uses the saved server reference and unchanged baseline inputs, then hides a stale final result', async () => {

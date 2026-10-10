@@ -2795,6 +2795,331 @@
           }
         }
       }
+    },
+    "/v2/offers": {
+      "get": {
+        "operationId": "listQuoteOffers",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOffersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/offers/{offer_id}": {
+      "get": {
+        "operationId": "getQuoteOffer",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOfferResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "include_events",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/offers/extractions": {
+      "post": {
+        "operationId": "uploadQuoteExtraction",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "201": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteUploadResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteUploadRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/offers/extractions/{extraction_id}": {
+      "get": {
+        "operationId": "getQuoteExtraction",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteExtractionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "extraction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ]
+      }
+    },
+    "/v2/offers/{offer_id}/corrections": {
+      "post": {
+        "operationId": "correctQuoteOffer",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOfferResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteCorrectionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/offers/{offer_id}/save": {
+      "post": {
+        "operationId": "saveQuoteOffer",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOfferResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteSaveRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/offers/sourcing-candidates": {
+      "get": {
+        "operationId": "listQuoteSourcingCandidates",
+        "description": "Local development quote adapter; disabled without separately reviewed runtime key and upstream configuration.",
+        "responses": {
+          "200": {
+            "description": "Authenticated quote response with gateway-derived context.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteSourcingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session unavailable"
+          },
+          "403": {
+            "description": "Viewer or private-machine mode denied"
+          },
+          "409": {
+            "description": "Stale version or replay conflict"
+          }
+        },
+        "parameters": [
+          {
+            "name": "as_of",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -6494,6 +6819,1359 @@
           "context",
           "outcome_json"
         ]
+      },
+      "QuoteResponseContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "viewer"
+            ]
+          },
+          "identity_mode": {
+            "type": "string",
+            "enum": [
+              "development"
+            ]
+          }
+        },
+        "required": [
+          "principal_id",
+          "workspace_id",
+          "role",
+          "identity_mode"
+        ]
+      },
+      "QuoteMoney": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ]
+      },
+      "QuoteQuantity": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "unit"
+        ]
+      },
+      "QuoteFixedPrice": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "fixed"
+            ]
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/QuoteMoney"
+          },
+          "per_unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "unit_price",
+          "per_unit"
+        ]
+      },
+      "QuoteIndexPrice": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "index_linked"
+            ]
+          },
+          "index": {
+            "type": "string"
+          },
+          "averaging_period": {
+            "type": "string"
+          },
+          "premium": {
+            "$ref": "#/components/schemas/QuoteMoney"
+          },
+          "per_unit": {
+            "type": "string"
+          },
+          "fx_basis": {
+            "type": "string"
+          },
+          "fx_terms": {
+            "type": "string"
+          },
+          "fx_conversion": {
+            "type": "string"
+          },
+          "quotational_period": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "index",
+          "averaging_period",
+          "premium",
+          "per_unit"
+        ]
+      },
+      "QuoteFieldValue": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "$ref": "#/components/schemas/QuoteQuantity"
+          },
+          {
+            "$ref": "#/components/schemas/QuoteFixedPrice"
+          },
+          {
+            "$ref": "#/components/schemas/QuoteIndexPrice"
+          },
+          {
+            "$ref": "#/components/schemas/QuoteIncoterm"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteShipment"
+            }
+          }
+        ]
+      },
+      "QuoteIncoterm": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "place": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "place"
+        ]
+      },
+      "QuoteShipment": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "quantity": {
+            "$ref": "#/components/schemas/QuoteQuantity"
+          },
+          "window": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "window"
+        ]
+      },
+      "QuoteEvidence": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "text_sha256": {
+            "type": "string"
+          },
+          "segment_text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_id",
+          "locator",
+          "quote",
+          "text_sha256"
+        ]
+      },
+      "QuoteFieldCandidate": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteFieldValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteEvidence"
+            }
+          }
+        },
+        "required": [
+          "value",
+          "verified",
+          "problems",
+          "evidence"
+        ]
+      },
+      "QuoteField": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteFieldValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteEvidence"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteFieldCandidate"
+            }
+          },
+          "evidence_status": {
+            "type": "string"
+          },
+          "corrected_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "status",
+          "value",
+          "critical",
+          "source",
+          "reasons",
+          "evidence",
+          "candidates"
+        ]
+      },
+      "QuoteFields": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "supplier_name": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "origin_country": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "incoterm": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "settlement_currency": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "payment_terms": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "valid_until": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "lead_time_days": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "min_order": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "shipments": {
+            "$ref": "#/components/schemas/QuoteField"
+          }
+        },
+        "required": []
+      },
+      "QuoteItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "material": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "description": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "grade": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/QuoteField"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/QuoteField"
+          }
+        },
+        "required": []
+      },
+      "QuoteDocument": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "document_id": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "byte_size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "filename",
+          "media_type",
+          "byte_size"
+        ]
+      },
+      "QuoteBlockingReason": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "field",
+          "message"
+        ]
+      },
+      "QuoteReviewFlag": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "flag": {
+            "type": "string"
+          },
+          "locator": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag",
+          "locator",
+          "text"
+        ]
+      },
+      "QuoteOffer": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "offer_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "extraction_id": {
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/QuoteDocument"
+          },
+          "extractor": {
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/QuoteFields"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteItem"
+            }
+          },
+          "blocking_reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteBlockingReason"
+            }
+          },
+          "review_flags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteReviewFlag"
+            }
+          },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "normalized": {
+            "$ref": "#/components/schemas/QuoteNormalized"
+          }
+        },
+        "required": [
+          "offer_id",
+          "version",
+          "status",
+          "synthetic",
+          "extraction_id",
+          "document",
+          "fields",
+          "items",
+          "blocking_reasons",
+          "review_flags",
+          "allowed_actions",
+          "normalized"
+        ]
+      },
+      "QuoteSegment": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "locator": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "text_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "locator",
+          "text",
+          "flags",
+          "text_sha256"
+        ]
+      },
+      "QuoteUpload": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "offer": {
+            "$ref": "#/components/schemas/QuoteOffer"
+          },
+          "extraction_id": {
+            "type": "string"
+          },
+          "deduplicated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "offer",
+          "extraction_id"
+        ]
+      },
+      "QuoteExtraction": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "extraction_id": {
+            "type": "string"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteSegment"
+            }
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/QuoteExtractionDetail"
+          }
+        },
+        "required": [
+          "extraction_id",
+          "segments",
+          "extraction"
+        ]
+      },
+      "QuoteSourcingMoney": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ]
+      },
+      "QuoteSourcingPrice": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "fixed",
+              "index_linked"
+            ]
+          },
+          "per_kg": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteSourcingMoney"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "premium_per_kg": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteSourcingMoney"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "type": "string"
+          },
+          "averaging_period": {
+            "type": "string"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/QuoteMoney"
+          },
+          "per_unit": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "QuoteLandedPrice": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "per_kg": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteSourcingMoney"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "per_kg"
+        ]
+      },
+      "QuoteSourcingCandidate": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "candidate_id": {
+            "type": "string"
+          },
+          "offer_id": {
+            "type": "string"
+          },
+          "offer_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offer_status": {
+            "type": "string"
+          },
+          "item_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "document_id": {
+            "type": "string"
+          },
+          "material": {
+            "type": "string"
+          },
+          "quantity": {
+            "$ref": "#/components/schemas/QuoteSourcingQuantity"
+          },
+          "price": {
+            "$ref": "#/components/schemas/QuoteSourcingPrice"
+          },
+          "landed_price": {
+            "$ref": "#/components/schemas/QuoteLandedPrice"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteSourcingEvidence"
+            }
+          },
+          "field_sources": {
+            "$ref": "#/components/schemas/QuoteFieldSources"
+          },
+          "payment_terms": {
+            "$ref": "#/components/schemas/QuotePaymentTerms"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "offer_id",
+          "offer_version",
+          "item_index",
+          "document_id",
+          "material",
+          "quantity",
+          "price",
+          "landed_price"
+        ]
+      },
+      "QuoteSourcing": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteSourcingCandidate"
+            }
+          },
+          "excluded": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteSourcingExclusion"
+            }
+          }
+        },
+        "required": [
+          "as_of",
+          "synthetic",
+          "candidates",
+          "excluded"
+        ]
+      },
+      "QuoteSourcingExclusion": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "offer_id": {
+            "type": "string"
+          },
+          "offer_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "item_index": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "detail": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "offer_id",
+          "offer_version",
+          "item_index",
+          "reason"
+        ]
+      },
+      "QuoteUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "content_base64": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "const": "rules"
+          },
+          "synthetic": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "filename",
+          "content_base64",
+          "mode",
+          "synthetic"
+        ]
+      },
+      "QuoteCorrectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteFieldValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "field",
+          "value",
+          "expected_version"
+        ]
+      },
+      "QuoteSaveRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "expected_version"
+        ]
+      },
+      "QuoteOfferSummary": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "offer_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "supplier_name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blocking_reasons": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "offer_id",
+          "version",
+          "status",
+          "synthetic",
+          "filename",
+          "supplier_name",
+          "materials",
+          "blocking_reasons",
+          "updated_at"
+        ]
+      },
+      "QuoteOffersResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteOfferSummary"
+            }
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "offers"
+        ]
+      },
+      "QuoteOfferResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "offer": {
+            "$ref": "#/components/schemas/QuoteOffer"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "offer"
+        ]
+      },
+      "QuoteUploadResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/QuoteUpload"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "upload"
+        ]
+      },
+      "QuoteExtractionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/QuoteExtraction"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "extraction"
+        ]
+      },
+      "QuoteSourcingResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "const": "0.2.0"
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "sourcing": {
+            "$ref": "#/components/schemas/QuoteSourcing"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "sourcing"
+        ]
+      },
+      "QuoteNormalizedBranch": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": []
+      },
+      "QuoteNormalizedItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "quantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizedBranch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pricing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizedBranch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": []
+      },
+      "QuoteNormalized": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "as_of": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteNormalizedItem"
+            }
+          },
+          "capacity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizedBranch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expiry": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "min_order": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizedBranch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin_country_code": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_terms": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuoteNormalizedBranch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reporting_currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "as_of",
+          "items"
+        ]
+      },
+      "QuoteExtractionDetail": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/QuoteDocument"
+          },
+          "as_of": {
+            "type": "string"
+          },
+          "extractor": {
+            "type": "string"
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "normalized": {
+            "$ref": "#/components/schemas/QuoteNormalized"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/QuoteFields"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteItem"
+            }
+          },
+          "review_flags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteReviewFlag"
+            }
+          }
+        },
+        "required": [
+          "document",
+          "as_of",
+          "extractor",
+          "synthetic"
+        ]
+      },
+      "QuoteSourcingQuantity": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "kg": {
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          }
+        },
+        "required": [
+          "amount",
+          "unit",
+          "kg"
+        ]
+      },
+      "QuoteSourcingEvidence": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "locator": {
+            "type": "string"
+          },
+          "text_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "document_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "locator",
+          "text_sha256",
+          "document_id"
+        ]
+      },
+      "QuoteFieldSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source"
+        ]
+      },
+      "QuoteFieldSources": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "supplier_name": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "origin_country": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "incoterm": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "settlement_currency": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "payment_terms": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "valid_until": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "lead_time_days": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "min_order": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          },
+          "shipments": {
+            "$ref": "#/components/schemas/QuoteFieldSource"
+          }
+        },
+        "required": [],
+        "x-additional-properties-schema": {
+          "$ref": "#/components/schemas/QuoteFieldSource"
+        }
+      },
+      "QuotePaymentTerms": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "text": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": []
       }
     },
     "securitySchemes": {

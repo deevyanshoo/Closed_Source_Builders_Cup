@@ -785,3 +785,334 @@ type ShipmentRecoveryResponse struct {
   Context ShipmentRecoveryContext `json:"context"`
   OutcomeJson string `json:"outcome_json"`
 }
+
+type QuoteResponseContext struct {
+  PrincipalId string `json:"principal_id"`
+  WorkspaceId string `json:"workspace_id"`
+  Role string `json:"role"`
+  IdentityMode string `json:"identity_mode"`
+}
+
+type QuoteMoney struct {
+  Amount string `json:"amount"`
+  Currency string `json:"currency"`
+}
+
+type QuoteQuantity struct {
+  Amount string `json:"amount"`
+  Unit string `json:"unit"`
+  Period *string `json:"period,omitempty"`
+}
+
+type QuoteFixedPrice struct {
+  Type string `json:"type"`
+  UnitPrice QuoteMoney `json:"unit_price"`
+  PerUnit string `json:"per_unit"`
+}
+
+type QuoteIndexPrice struct {
+  Type string `json:"type"`
+  Index string `json:"index"`
+  AveragingPeriod string `json:"averaging_period"`
+  Premium QuoteMoney `json:"premium"`
+  PerUnit string `json:"per_unit"`
+  FxBasis *string `json:"fx_basis,omitempty"`
+  FxTerms *string `json:"fx_terms,omitempty"`
+  FxConversion *string `json:"fx_conversion,omitempty"`
+  QuotationalPeriod *string `json:"quotational_period,omitempty"`
+}
+
+type QuoteFieldValue = json.RawMessage
+
+type QuoteIncoterm struct {
+  Code string `json:"code"`
+  Place *string `json:"place"`
+}
+
+type QuoteShipment struct {
+  Quantity QuoteQuantity `json:"quantity"`
+  Window string `json:"window"`
+}
+
+type QuoteEvidence struct {
+  DocumentId string `json:"document_id"`
+  Locator string `json:"locator"`
+  Quote string `json:"quote"`
+  TextSha256 string `json:"text_sha256"`
+  SegmentText *string `json:"segment_text,omitempty"`
+}
+
+type QuoteFieldCandidate struct {
+  Value *QuoteFieldValue `json:"value"`
+  Verified bool `json:"verified"`
+  Problems []string `json:"problems"`
+  Evidence []QuoteEvidence `json:"evidence"`
+}
+
+type QuoteField struct {
+  Name string `json:"name"`
+  Kind string `json:"kind"`
+  Status string `json:"status"`
+  Value *QuoteFieldValue `json:"value"`
+  Critical bool `json:"critical"`
+  Source string `json:"source"`
+  Reasons []string `json:"reasons"`
+  Evidence []QuoteEvidence `json:"evidence"`
+  Candidates []QuoteFieldCandidate `json:"candidates"`
+  EvidenceStatus *string `json:"evidence_status,omitempty"`
+  CorrectedBy *string `json:"corrected_by,omitempty"`
+}
+
+type QuoteFields struct {
+  SupplierName *QuoteField `json:"supplier_name,omitempty"`
+  OriginCountry *QuoteField `json:"origin_country,omitempty"`
+  Incoterm *QuoteField `json:"incoterm,omitempty"`
+  SettlementCurrency *QuoteField `json:"settlement_currency,omitempty"`
+  PaymentTerms *QuoteField `json:"payment_terms,omitempty"`
+  ValidUntil *QuoteField `json:"valid_until,omitempty"`
+  LeadTimeDays *QuoteField `json:"lead_time_days,omitempty"`
+  MinOrder *QuoteField `json:"min_order,omitempty"`
+  Capacity *QuoteField `json:"capacity,omitempty"`
+  Shipments *QuoteField `json:"shipments,omitempty"`
+}
+
+type QuoteItem struct {
+  Material *QuoteField `json:"material,omitempty"`
+  Description *QuoteField `json:"description,omitempty"`
+  Grade *QuoteField `json:"grade,omitempty"`
+  Quantity *QuoteField `json:"quantity,omitempty"`
+  Pricing *QuoteField `json:"pricing,omitempty"`
+}
+
+type QuoteDocument struct {
+  DocumentId string `json:"document_id"`
+  Filename string `json:"filename"`
+  MediaType string `json:"media_type"`
+  ByteSize int `json:"byte_size"`
+}
+
+type QuoteBlockingReason struct {
+  Code string `json:"code"`
+  Field string `json:"field"`
+  Message string `json:"message"`
+}
+
+type QuoteReviewFlag struct {
+  Flag string `json:"flag"`
+  Locator *string `json:"locator"`
+  Text string `json:"text"`
+}
+
+type QuoteOffer struct {
+  OfferId string `json:"offer_id"`
+  Version int `json:"version"`
+  Status string `json:"status"`
+  Synthetic bool `json:"synthetic"`
+  ExtractionId string `json:"extraction_id"`
+  Document QuoteDocument `json:"document"`
+  Extractor *string `json:"extractor,omitempty"`
+  Fields QuoteFields `json:"fields"`
+  Items []QuoteItem `json:"items"`
+  BlockingReasons []QuoteBlockingReason `json:"blocking_reasons"`
+  ReviewFlags []QuoteReviewFlag `json:"review_flags"`
+  AllowedActions []string `json:"allowed_actions"`
+  Normalized QuoteNormalized `json:"normalized"`
+}
+
+type QuoteSegment struct {
+  Locator string `json:"locator"`
+  Text string `json:"text"`
+  Flags []string `json:"flags"`
+  TextSha256 string `json:"text_sha256"`
+}
+
+type QuoteUpload struct {
+  Offer QuoteOffer `json:"offer"`
+  ExtractionId string `json:"extraction_id"`
+  Deduplicated *bool `json:"deduplicated,omitempty"`
+}
+
+type QuoteExtraction struct {
+  ExtractionId string `json:"extraction_id"`
+  Segments []QuoteSegment `json:"segments"`
+  Extraction QuoteExtractionDetail `json:"extraction"`
+}
+
+type QuoteSourcingMoney struct {
+  Amount string `json:"amount"`
+  Currency string `json:"currency"`
+}
+
+type QuoteSourcingPrice struct {
+  Type string `json:"type"`
+  PerKg *QuoteSourcingMoney `json:"per_kg,omitempty"`
+  PremiumPerKg *QuoteSourcingMoney `json:"premium_per_kg,omitempty"`
+  Index *string `json:"index,omitempty"`
+  AveragingPeriod *string `json:"averaging_period,omitempty"`
+  UnitPrice *QuoteMoney `json:"unit_price,omitempty"`
+  PerUnit *string `json:"per_unit,omitempty"`
+}
+
+type QuoteLandedPrice struct {
+  Status string `json:"status"`
+  PerKg *QuoteSourcingMoney `json:"per_kg"`
+}
+
+type QuoteSourcingCandidate struct {
+  CandidateId string `json:"candidate_id"`
+  OfferId string `json:"offer_id"`
+  OfferVersion int `json:"offer_version"`
+  OfferStatus *string `json:"offer_status,omitempty"`
+  ItemIndex int `json:"item_index"`
+  Synthetic *bool `json:"synthetic,omitempty"`
+  DocumentId string `json:"document_id"`
+  Material string `json:"material"`
+  Quantity QuoteSourcingQuantity `json:"quantity"`
+  Price QuoteSourcingPrice `json:"price"`
+  LandedPrice QuoteLandedPrice `json:"landed_price"`
+  Evidence *[]QuoteSourcingEvidence `json:"evidence,omitempty"`
+  FieldSources *QuoteFieldSources `json:"field_sources,omitempty"`
+  PaymentTerms *QuotePaymentTerms `json:"payment_terms,omitempty"`
+}
+
+type QuoteSourcing struct {
+  AsOf string `json:"as_of"`
+  Synthetic bool `json:"synthetic"`
+  Candidates []QuoteSourcingCandidate `json:"candidates"`
+  Excluded []QuoteSourcingExclusion `json:"excluded"`
+}
+
+type QuoteSourcingExclusion struct {
+  OfferId string `json:"offer_id"`
+  OfferVersion int `json:"offer_version"`
+  ItemIndex *int `json:"item_index"`
+  Reason string `json:"reason"`
+  Detail *string `json:"detail,omitempty"`
+}
+
+type QuoteUploadRequest struct {
+  Filename string `json:"filename"`
+  ContentBase64 string `json:"content_base64"`
+  Mode string `json:"mode"`
+  Synthetic bool `json:"synthetic"`
+}
+
+type QuoteCorrectionRequest struct {
+  Field string `json:"field"`
+  Value *QuoteFieldValue `json:"value"`
+  ExpectedVersion int `json:"expected_version"`
+}
+
+type QuoteSaveRequest struct {
+  ExpectedVersion int `json:"expected_version"`
+}
+
+type QuoteOfferSummary struct {
+  OfferId string `json:"offer_id"`
+  Version int `json:"version"`
+  Status string `json:"status"`
+  Synthetic bool `json:"synthetic"`
+  Filename string `json:"filename"`
+  SupplierName *string `json:"supplier_name"`
+  Materials []string `json:"materials"`
+  BlockingReasons int `json:"blocking_reasons"`
+  UpdatedAt string `json:"updated_at"`
+}
+
+type QuoteOffersResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Offers []QuoteOfferSummary `json:"offers"`
+}
+
+type QuoteOfferResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Offer QuoteOffer `json:"offer"`
+}
+
+type QuoteUploadResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Upload QuoteUpload `json:"upload"`
+}
+
+type QuoteExtractionResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Extraction QuoteExtraction `json:"extraction"`
+}
+
+type QuoteSourcingResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Sourcing QuoteSourcing `json:"sourcing"`
+}
+
+type QuoteNormalizedBranch struct {
+  Status *string `json:"status,omitempty"`
+}
+
+type QuoteNormalizedItem struct {
+  Quantity *QuoteNormalizedBranch `json:"quantity,omitempty"`
+  Pricing *QuoteNormalizedBranch `json:"pricing,omitempty"`
+}
+
+type QuoteNormalized struct {
+  AsOf string `json:"as_of"`
+  Items []QuoteNormalizedItem `json:"items"`
+  Capacity *QuoteNormalizedBranch `json:"capacity,omitempty"`
+  Expiry *string `json:"expiry,omitempty"`
+  MinOrder *QuoteNormalizedBranch `json:"min_order,omitempty"`
+  OriginCountryCode *string `json:"origin_country_code,omitempty"`
+  PaymentTerms *QuoteNormalizedBranch `json:"payment_terms,omitempty"`
+  ReportingCurrency *string `json:"reporting_currency,omitempty"`
+}
+
+type QuoteExtractionDetail struct {
+  Document QuoteDocument `json:"document"`
+  AsOf string `json:"as_of"`
+  Extractor string `json:"extractor"`
+  Synthetic bool `json:"synthetic"`
+  Normalized *QuoteNormalized `json:"normalized,omitempty"`
+  Fields *QuoteFields `json:"fields,omitempty"`
+  Items *[]QuoteItem `json:"items,omitempty"`
+  ReviewFlags *[]QuoteReviewFlag `json:"review_flags,omitempty"`
+}
+
+type QuoteSourcingQuantity struct {
+  Amount string `json:"amount"`
+  Unit string `json:"unit"`
+  Kg string `json:"kg"`
+}
+
+type QuoteSourcingEvidence struct {
+  Field string `json:"field"`
+  Locator string `json:"locator"`
+  TextSha256 string `json:"text_sha256"`
+  DocumentId string `json:"document_id"`
+}
+
+type QuoteFieldSource struct {
+  Status string `json:"status"`
+  Source string `json:"source"`
+}
+
+type QuoteFieldSources struct {
+  SupplierName *QuoteFieldSource `json:"supplier_name,omitempty"`
+  OriginCountry *QuoteFieldSource `json:"origin_country,omitempty"`
+  Incoterm *QuoteFieldSource `json:"incoterm,omitempty"`
+  SettlementCurrency *QuoteFieldSource `json:"settlement_currency,omitempty"`
+  PaymentTerms *QuoteFieldSource `json:"payment_terms,omitempty"`
+  ValidUntil *QuoteFieldSource `json:"valid_until,omitempty"`
+  LeadTimeDays *QuoteFieldSource `json:"lead_time_days,omitempty"`
+  MinOrder *QuoteFieldSource `json:"min_order,omitempty"`
+  Capacity *QuoteFieldSource `json:"capacity,omitempty"`
+  Shipments *QuoteFieldSource `json:"shipments,omitempty"`
+}
+
+type QuotePaymentTerms struct {
+  Source *string `json:"source,omitempty"`
+  Status *string `json:"status,omitempty"`
+  Text *string `json:"text,omitempty"`
+}

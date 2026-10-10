@@ -1,6 +1,7 @@
 // Offers workspace data layer.
 //
-// Until the gateway serves /v2/offers, the page uses a LOCAL FIXTURE ADAPTER: offers produced by the Python
+// This module is the explicit LOCAL FIXTURE ADAPTER; service data uses offers-service.ts.
+// The fixtures are offers produced by the Python
 // rules pipeline for the 18 synthetic quotes (scripts/export_offer_fixtures_for_web.py). An uploaded file is
 // matched to a fixture by its SHA-256; any other file is reported unavailable, never invented. Corrections and
 // saves happen in this browser tab only and are not persisted or evidence-checked here; the Python service does

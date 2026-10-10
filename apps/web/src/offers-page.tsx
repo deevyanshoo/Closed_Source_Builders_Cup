@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import { NavLink } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
 import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
+import { bindOfferExtraction, createQuoteService, loadQuoteSession, QuoteServiceError } from './offers-service';
+import type { QuoteSession, ServiceField, ServiceOffer, ServiceOfferSummary, Sourcing } from './offers-service';
 import { EVENTS } from './offers-scenario';
 import type { EventName, ScenarioInputs, ScenarioResult, Validity } from './offers-scenario';
 import './offers.css';
@@ -37,7 +39,7 @@ function WorkspaceNav() {
   </nav>;
 }
 
-export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean }) {
+export function Editor({ field, onSubmit, onCancel, busy, service = false }: { field: Pick<Field, 'name' | 'kind' | 'value'>; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean; service?: boolean }) {
   const v = (field.value ?? {}) as Record<string, any>;
   const [text, setText] = useState(typeof field.value === 'string' || typeof field.value === 'number' ? String(field.value) : '');
   const [amount, setAmount] = useState<string>(v.amount ?? v.unit_price?.amount ?? v.premium?.amount ?? '');
@@ -81,7 +83,9 @@ export function Editor({ field, onSubmit, onCancel, busy }: { field: Field; onSu
     {indexLinked && PRICE_TERMS.map(([name, label]) => <label className="field offers-wide" key={name}><span className="field-label">{label}</span><input value={priceTerms[name]} onChange={e => setPriceTerms({ ...priceTerms, [name]: e.target.value })} /></label>)}</>;
   else if (field.kind === 'incoterm') inputs = <><label className="field"><span className="field-label">Code</span><select value={code} onChange={e => setCode(e.target.value)}>{INCOTERMS.map(c => <option key={c}>{c}</option>)}</select></label>
     <label className="field offers-wide"><span className="field-label">Named place</span><input value={place} onChange={e => setPlace(e.target.value)} /></label></>;
-  else if (field.kind === 'material') inputs = <label className="field"><span className="field-label">Material</span><select value={text} onChange={e => setText(e.target.value)}><option value="">Choose</option>{fixtureInfo.materials.map(m => <option key={m}>{m}</option>)}</select></label>;
+  else if (field.kind === 'material') inputs = service
+    ? <label className="field"><span className="field-label">Material</span><input value={text} onChange={e => setText(e.target.value)} /></label>
+    : <label className="field"><span className="field-label">Material</span><select value={text} onChange={e => setText(e.target.value)}><option value="">Choose</option>{fixtureInfo.materials.map(m => <option key={m}>{m}</option>)}</select></label>;
   else inputs = <label className="field offers-wide"><span className="field-label">{field.kind === 'date' ? 'Date (YYYY-MM-DD)' : field.kind === 'currency' ? 'ISO currency' : 'Value'}</span><input value={text} onChange={e => setText(e.target.value)} /></label>;
 
   return <form className="offers-editor" onSubmit={submit} aria-label={`Correct ${fieldLabel(field.name)}`}>
@@ -95,7 +99,7 @@ function Reasons({ reasons, title }: { reasons: BlockingReason[]; title: string 
   return <div className="notice notice-error offers-reasons" role="alert"><strong>{title}</strong><ul>{reasons.map(r => <li key={`${r.code}:${r.field}`}>{fieldLabel(r.field)}: {statusLabel(r.code.replace('field_', ''))}</li>)}</ul></div>;
 }
 
-export function FieldName({ name, field, selected, onSelect }: { name: string; field: Field; selected: boolean; onSelect: (name: string) => void }) {
+export function FieldName({ name, field, selected, onSelect }: { name: string; field: Pick<Field, 'critical'>; selected: boolean; onSelect: (name: string) => void }) {
   return <button type="button" className="offers-field-button" aria-pressed={selected} onClick={event => { event.stopPropagation(); onSelect(name); }}>
     <span className="sr-only">Show source for </span>{fieldLabel(name)}{field.critical && <small>critical</small>}
   </button>;
@@ -105,7 +109,7 @@ export function EditButton({ name, onEdit }: { name: string; onEdit: (name: stri
   return <button className="text-button" type="button" aria-label={`Edit ${fieldLabel(name)}`} onClick={event => { event.stopPropagation(); onEdit(name); }}>Edit</button>;
 }
 
-export function FieldStatus({ field }: { field: Field }) {
+export function FieldStatus({ field }: { field: Pick<Field, 'status' | 'source'> }) {
   return <><span className="offers-chip" data-status={field.status}><span className="sr-only">Field status: </span>{field.status}</span>
     {field.source === 'user' && <small>reviewer entry</small>}</>;
 }
@@ -204,7 +208,7 @@ export function ScenarioView({ state, offers }: { state: ScenarioState; offers: 
   </div>;
 }
 
-export function OffersPage() {
+function FixtureOffersPage() {
   const adapter = useMemo(() => createFixtureAdapter(), []);
   const [view, setView] = useState<View>({ kind: 'empty' });
   const [offer, setOffer] = useState<Offer | null>(null);
@@ -381,4 +385,168 @@ export function OffersPage() {
     </section>}
     <footer><span>Synthetic quotes only</span><span>No supplier messages, orders or purchases</span></footer>
   </main>;
+}
+
+const sessionKey = (s: QuoteSession) => `${s.principal_id}\u0000${s.workspace_id}\u0000${s.role}\u0000${s.identity_mode}`;
+const safeMessage = (error: unknown) => error instanceof QuoteServiceError ? error.message : 'The local quote workspace is unavailable.';
+const fieldRows = (offer: ServiceOffer): [string, ServiceField][] => [
+  ...Object.entries(offer.fields), ...offer.items.flatMap((item, i) => Object.entries(item).map(([name, field]) => [`items[${i}].${name}`, field] as [string, ServiceField])),
+];
+const currencyPrice = (value: { amount: string; currency: string } | null | undefined) => value ? `${value.amount} ${value.currency}` : 'unknown';
+
+export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit, onSave, canEdit, busy }: {
+  offer: ServiceOffer; sourcing: Sourcing | null; selected: string | null; onSelect: (name: string) => void;
+  onEdit: (name: string, value: unknown) => void; onSave: () => void; canEdit: boolean; busy: boolean;
+}) {
+  const supplier = offer.fields.supplier_name?.value;
+  const matching = (offer.status === 'saved' || offer.status === 'used_in_plan') ? sourcing?.candidates.filter(c => c.offer_id === offer.offer_id &&
+    c.offer_version === offer.version && c.document_id === offer.document.document_id &&
+    c.item_index >= 0 && c.item_index < offer.items.length) ?? [] : [];
+  return <section className="offers-workspace" aria-label="Local quote service offer">
+    <div className="offers-head"><div><p className="eyebrow">{offer.document.filename} · {offer.document.media_type} · {offer.extractor ?? 'rules'} extractor</p>
+      <h2>{typeof supplier === 'string' ? supplier : 'Supplier unknown'}</h2><p className="revision-line">Document {offer.document.document_id} · version {offer.version}</p></div>
+      <div className="offers-status" data-status={offer.status}>{statusLabel(offer.status)}</div></div>
+    {offer.blocking_reasons.length > 0 && <Reasons reasons={offer.blocking_reasons} title="Save is blocked until these are resolved" />}
+    {offer.review_flags.length > 0 && <div className="offers-flags"><h3>Review flags</h3><ul>{offer.review_flags.map((f, i) => <li key={i}>{statusLabel(f.flag)} {f.locator && <code>{f.locator}</code>} <q>{f.text}</q></li>)}</ul></div>}
+    <div className="offers-grid"><div className="table-scroll"><table className="offers-table"><caption>Service fields and source evidence</caption>
+      <thead><tr><th>Field</th><th>Value</th><th>Status</th><th>Source</th><th>Review</th></tr></thead><tbody>{fieldRows(offer).map(([name, field]) => <tr key={name}>
+        <th><FieldName name={name} field={field} selected={name === selected} onSelect={onSelect} /></th>
+        <td>{formatValue(field.kind, field.value)}{field.status === 'conflict' && <ul className="offers-candidates">{field.candidates.filter(c => c.verified).map((c, i) => <li key={i}>{formatValue(field.kind, c.value)} {c.evidence.map(e => e.locator).join(', ')}</li>)}</ul>}</td>
+        <td><FieldStatus field={field} />{field.source === 'user' && <small>Reviewer entry; no document evidence</small>}</td>
+        <td>{field.evidence.length ? field.evidence.map((e, i) => <div key={i} className="offers-evidence"><code>{e.locator}</code><q>{e.quote}</q></div>) : <span className="inline-empty">{field.source === 'user' ? 'Reviewer assertion; no document evidence' : 'No verified source'}</span>}</td>
+        <td>{canEdit && offer.allowed_actions.includes('correct') && field.kind !== 'shipments' && <EditButton name={name} onEdit={() => onSelect(name)} />}</td>
+      </tr>)}</tbody></table></div>
+      <aside className="offers-document" aria-label="Document text"><h3>Document text</h3><p className="field-hint">Untrusted supplier text. Locators reference hash-checked extracted lines or cells.</p>
+        <ol>{(offer.segments ?? []).map(s => <li key={s.locator}><code>{s.locator}</code> {s.text}{s.flags.length > 0 && <small> [{s.flags.join(', ')}]</small>}</li>)}</ol></aside></div>
+    {selected && canEdit && (() => { const field = fieldRows(offer).find(([name]) => name === selected)?.[1]; return field && offer.allowed_actions.includes('correct') ?
+      <div className="offers-actions"><Editor key={`${offer.version}:${selected}`} field={field} busy={busy} service onCancel={() => onSelect('')} onSubmit={value => onEdit(selected, value)} /></div> : null; })()}
+    <section className="offers-scenario" aria-label="Saved offer sourcing"><h3>Saved-offer sourcing</h3>
+      {matching.length ? <ul>{matching.map((c, i) => <li key={i}><strong>{c.material ?? 'Material unknown'}</strong> · {c.quantity?.kg ?? 'unknown'} kg · {c.price?.type === 'index_linked'
+        ? <>Index-linked; premium {currencyPrice(c.price?.premium_per_kg)} per kg; final price unknown</>
+        : <>Quoted {currencyPrice(c.price?.per_kg)} per kg</>}. {c.landed_price?.per_kg ? <>Incoterm quote basis {currencyPrice(c.landed_price.per_kg)} per kg; duties and destination charges may remain excluded.</> : 'Comparable landed price unknown.'}
+        {c.payment_terms?.source === 'user' && <small> Payment terms are a reviewer assertion.</small>}</li>)}</ul> : <p>No saved sourcing candidate for this offer. Blocking or excluded reasons stay authoritative in the service.</p>}
+      {(sourcing?.excluded ?? []).filter(c => c.offer_id === offer.offer_id && c.offer_version === offer.version &&
+        (c.item_index === null || c.item_index >= 0 && c.item_index < offer.items.length)).map((c, i) => <p key={i}>Excluded: {c.reason}</p>)}
+    </section>
+    <div className="offers-actions"><button className="primary-button" type="button" disabled={!canEdit || busy || !offer.allowed_actions.includes('save')} onClick={onSave}>Save offer →</button>
+      <p className="limit-note">Local development quote service. Saving does not send an RFQ, place an order, or establish a final landed price. No fixture scenario or report is offered for service data.</p></div>
+  </section>;
+}
+
+function ServiceOffersPage() {
+  const [session, setSession] = useState<QuoteSession | null>(null);
+  const [offers, setOffers] = useState<ServiceOfferSummary[]>([]);
+  const [offer, setOffer] = useState<ServiceOffer | null>(null);
+  const [sourcing, setSourcing] = useState<Sourcing | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [message, setMessage] = useState('Checking the local development session…');
+  const [busy, setBusy] = useState(false);
+  const [syntheticConfirmed, setSyntheticConfirmed] = useState(false);
+  const generation = useRef(0);
+  const request = useRef<AbortController | null>(null);
+  const sessionRef = useRef<QuoteSession | null>(null);
+  function invalidate() {
+    generation.current += 1; request.current?.abort(); request.current = null;
+    sessionRef.current = null; setSession(null); setOffers([]); setOffer(null); setSourcing(null); setSelected(null); setBusy(false);
+  }
+  async function refresh(loadData: boolean) {
+    invalidate(); const mine = generation.current; const controller = new AbortController(); request.current = controller;
+    try {
+      const next = await loadQuoteSession(controller.signal);
+      if (mine !== generation.current) return;
+      sessionRef.current = next; setSession(next);
+      if (!loadData) { setMessage('Session refreshed. Choose Refresh workspace to load quotes.'); return; }
+      const api = createQuoteService(next, () => mine === generation.current, fetch, controller.signal);
+      const list = await api.list();
+      const candidates = await api.sourcing();
+      if (mine !== generation.current) return;
+      setOffers(list); setSourcing(candidates); setMessage(list.length ? 'Choose a service offer or upload a labeled synthetic quote.' : 'No service offers in this workspace.');
+    } catch (error) {
+      if (mine !== generation.current) return;
+      const text = safeMessage(error);
+      invalidate(); setMessage(text);
+      // Errors have no authenticated context. Revalidate only; do not silently reload old quote text.
+      try { const fresh = await loadQuoteSession(); if (generation.current === mine + 1) { sessionRef.current = fresh; setSession(fresh); } } catch { /* retry is explicit */ }
+    }
+  }
+  useEffect(() => {
+    void refresh(true);
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(false); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { document.removeEventListener('visibilitychange', onVisible); generation.current += 1; request.current?.abort(); };
+  }, []);
+  async function withService(operation: (api: ReturnType<typeof createQuoteService>, isCurrent: () => boolean) => Promise<void>) {
+    const captured = sessionRef.current;
+    if (!captured) { setMessage('Refresh the local session before continuing.'); return; }
+    request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    const mine = ++generation.current; setBusy(true);
+    try {
+      const fresh = await loadQuoteSession(controller.signal);
+      if (mine !== generation.current || sessionKey(fresh) !== sessionKey(captured)) throw new QuoteServiceError('identity_changed', 'The session changed. Refresh the workspace.');
+      const api = createQuoteService(captured, () => mine === generation.current && sessionRef.current === captured, fetch, controller.signal);
+      await operation(api, () => mine === generation.current && !controller.signal.aborted && sessionRef.current === captured);
+    } catch (error) {
+      if (mine === generation.current) { const text = safeMessage(error); invalidate(); setMessage(text); try { const fresh = await loadQuoteSession(); if (generation.current === mine + 1) { sessionRef.current = fresh; setSession(fresh); } } catch { /* explicit retry */ } }
+    } finally { if (mine === generation.current) setBusy(false); }
+  }
+  async function open(id: string) {
+    await withService(async (api, isCurrent) => {
+      const detail = await api.detail(id);
+      const extraction = await api.extraction(detail.extraction_id);
+      const bound = await bindOfferExtraction(detail, extraction, isCurrent);
+      const currentSourcing = await api.sourcing();
+      setOffer(bound); setSourcing(currentSourcing); setSelected(null); setMessage('Service offer loaded.');
+    });
+  }
+  async function upload(file: File) {
+    if (file.size > 8 * 1024 * 1024 || !/\.(pdf|xlsx|csv)$/i.test(file.name)) { setMessage('Choose a PDF, XLSX or CSV of at most 8 MiB.'); return; }
+    await withService(async (api, isCurrent) => {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = ''; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      const result = await api.upload(file.name, btoa(binary));
+      const detail = await api.detail(result.offer.offer_id);
+      const extraction = await api.extraction(result.extraction_id);
+      const bound = await bindOfferExtraction(detail, extraction, isCurrent);
+      const list = await api.list(); const currentSourcing = await api.sourcing();
+      setOffer(bound); setSourcing(currentSourcing); setSelected(null); setMessage(result.deduplicated ? 'Existing synthetic upload opened.' : 'Synthetic quote uploaded for review.');
+      setOffers(list);
+    });
+  }
+  async function mutate(kind: 'correct' | 'save', name?: string, value?: unknown) {
+    if (!offer || sessionRef.current?.role !== 'editor') return;
+    const current = offer;
+    await withService(async (api, isCurrent) => {
+      const key = crypto.randomUUID();
+      if (kind === 'correct') await api.correct(current.offer_id, name!, value, current.version, key);
+      else await api.save(current.offer_id, current.version, key);
+      const detail = await api.detail(current.offer_id);
+      const extraction = await api.extraction(detail.extraction_id);
+      const bound = await bindOfferExtraction(detail, extraction, isCurrent);
+      const list = await api.list(); const currentSourcing = await api.sourcing();
+      setOffer(bound); setSelected(null);
+      setOffers(list); setSourcing(currentSourcing);
+      setMessage(kind === 'save' ? 'Offer saved in the local service.' : 'Reviewer correction saved and revalidated by the service.');
+    });
+  }
+  return <main className="shell offers-shell"><header className="masthead workspace-masthead"><div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
+    <div className="masthead-meta">Local quote service · development only</div><WorkspaceNav /></header>
+    <section className="recovery-intro"><p className="eyebrow">Quote intelligence · local service</p><h1>Review supplier quotes</h1>
+      <p>Service values, evidence and blocking reasons are shown as returned. Reviewer entries are separate from document evidence.</p></section>
+    <div className="offers-adapter" role="note"><strong>LOCAL DEVELOPMENT SERVICE · GATEWAY ROUTE MAY BE DISABLED</strong>
+      <span>Same-origin session required. This browser has no bearer token or signing key. No source text is shown after an identity or service error.</span></div>
+    <div className="offers-load"><div><strong>{session ? `${session.role} · workspace ${session.workspace_id}` : 'Session unavailable'}</strong><p>{message}</p>
+      <button className="secondary-button" type="button" onClick={() => void refresh(true)} disabled={busy}>Refresh workspace</button></div>
+      <div><label className="field"><input type="checkbox" checked={syntheticConfirmed} onChange={e => setSyntheticConfirmed(e.target.checked)} /> I confirm this is synthetic test material.</label>
+      <label className="field"><span className="field-label">Upload synthetic PDF, XLSX or CSV</span><input type="file" accept=".pdf,.xlsx,.csv" disabled={!syntheticConfirmed || !session || session.role !== 'editor' || busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} /></label></div></div>
+    <div className="offers-actions"><h3>Workspace offers</h3>{offers.length ? <ul>{offers.map(o => <li key={o.offer_id}><button className="text-button" type="button" onClick={() => void open(o.offer_id)} disabled={busy}>{o.supplier_name ?? 'Supplier unknown'} · {o.filename} · {o.status} · version {o.version}</button></li>)}</ul> : <p>No offers loaded.</p>}</div>
+    {offer && <ServiceOfferReview offer={offer} sourcing={sourcing} selected={selected} onSelect={setSelected} onEdit={(name, value) => void mutate('correct', name, value)} onSave={() => void mutate('save')} canEdit={session?.role === 'editor'} busy={busy} />}
+    <footer><span>Service mode · local development</span><span>No supplier messages, orders or purchases</span></footer></main>;
+}
+
+export function OffersPage() {
+  const [mode, setMode] = useState<'fixture' | 'service'>('fixture');
+  return <><div className="offers-adapter" role="group" aria-label="Quote workspace mode">
+    <button className="secondary-button" type="button" aria-pressed={mode === 'fixture'} onClick={() => setMode('fixture')}>Synthetic fixtures</button>
+    <button className="secondary-button" type="button" aria-pressed={mode === 'service'} onClick={() => setMode('service')}>Local quote service</button>
+  </div>{mode === 'fixture' ? <FixtureOffersPage /> : <ServiceOffersPage />}</>;
 }

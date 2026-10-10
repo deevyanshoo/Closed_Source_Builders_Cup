@@ -162,7 +162,7 @@ describe('hazard and weather exposure panel', () => {
     const html = await render('SHP-SYN-008');
     expect(html).toContain('Exposure, not confirmed');
     expect(html).toContain('gdacs');
-    expect(html).toContain('121 km');
+    expect(html).toContain('130 km');
     expect(html).toContain('Orange or Red within 300 km');
     for (const label of ['Retrieved', 'Period', 'Threshold', 'Valid until']) expect(html).toContain(label);
     expect(html).toContain('Stale: retrieved too long before the cutoff. Not usable for planning.');

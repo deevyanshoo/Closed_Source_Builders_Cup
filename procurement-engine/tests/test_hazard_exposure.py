@@ -55,12 +55,44 @@ class Recorder:
 # Location registry
 
 
-def test_registry_is_versioned_and_says_coordinates_are_unverified():
-    assert REGISTRY["version"] == "locations-v1"
+UNLOCODE_MIRROR = "https://raw.githubusercontent.com/datasets/un-locode/main/data/code-list.csv"
+
+
+def test_registry_is_versioned_and_cites_a_checked_source():
+    assert REGISTRY["version"] == "locations-v2"
     found = resolve(REGISTRY, "INNSA")
     assert found == {"status": "ok", "reason": None, "code": "INNSA", "kind": "port", "name": "Nhava Sheva (JNPT)",
-                     "lat": "18.95", "lon": "72.95", "source": "hand-entered approximate port location",
-                     "verified": False, "registry_version": "locations-v1"}
+                     "lat": "18.9453", "lon": "72.9400", "verified": True,
+                     "source": "Jawaharlal Nehru Port Authority location page: 18 degrees 56' 43\" N, 72 degrees 56' 24\" E",
+                     "source_url": "https://www.jnport.gov.in/page/location/c3VwbldzMHkvRjQ1d0R5TWltVkpKQT09",
+                     "checked_on": "2026-10-10", "unverified_reason": None, "registry_version": "locations-v2"}
+
+
+def test_every_entry_has_a_cited_source_or_an_unverified_reason():
+    for code, entry in REGISTRY["entries"].items():
+        if entry["verified"]:
+            assert entry["source_url"].startswith("https://") and entry["checked_on"] == "2026-10-10", code
+            assert entry["unverified_reason"] is None, code
+        else:
+            assert entry["unverified_reason"] and entry["unverified_reason"].strip(), code
+    assert {c for c, e in REGISTRY["entries"].items() if e["verified"]} == {"INNSA", "INMAA", "INPRT", "CLVAP", "BRTUB"}
+    assert REGISTRY["entries"]["INMAA"]["source_url"] == UNLOCODE_MIRROR
+    assert "airport" in REGISTRY["entries"]["CNSHA"]["unverified_reason"]
+
+
+@pytest.mark.parametrize("change", [
+    {"verified": True, "source_url": None},
+    {"verified": True, "checked_on": None},
+    {"verified": False, "unverified_reason": None},
+    {"verified": False, "unverified_reason": "  "},
+])
+def test_entries_without_provenance_are_refused(tmp_path, change):
+    bad = json.loads((Path(__file__).parents[1] / "config" / "locations_v2.json").read_text())
+    bad["locations"][0].update(change)
+    path = tmp_path / "locations.json"
+    path.write_text(json.dumps(bad))
+    with pytest.raises(ValueError):
+        load_registry(path)
 
 
 @pytest.mark.parametrize("code,reason", [("SYN-PLANT-CHAKAN", "not_in_registry"), ("XXZZZ", "not_in_registry"),
@@ -71,7 +103,7 @@ def test_unknown_codes_stay_unsupported(code, reason):
 
 
 def test_bad_registry_file_is_refused(tmp_path):
-    bad = json.loads((Path(__file__).parents[1] / "config" / "locations_v1.json").read_text())
+    bad = json.loads((Path(__file__).parents[1] / "config" / "locations_v2.json").read_text())
     bad["locations"][0]["lat"] = "95.0"
     path = tmp_path / "locations.json"
     path.write_text(json.dumps(bad))
@@ -93,7 +125,7 @@ def test_heavy_rain_is_exposure_with_values_units_and_threshold():
     assert (wind["value"], wind["met"]) == ("41.0", False)
     assert a["period"] == {"start": "2026-10-08T12:00:00+00:00", "end": "2026-10-11T12:00:00+00:00"}
     assert a["payload_sha256"] == hashlib.sha256(body("open_meteo_innsa.json")).hexdigest()
-    assert a["location"]["registry_version"] == "locations-v1"
+    assert a["location"]["registry_version"] == "locations-v2"
 
 
 def test_exposure_becomes_a_valid_route_evidence_record_that_is_never_confirmed():
@@ -231,7 +263,7 @@ def test_fetch_builds_the_documented_request_and_assesses_it(monkeypatch):
     finally:
         reset_caches()
     assert rec.urls == ["https://api.open-meteo.com/v1/forecast?forecast_days=4&hourly=wind_speed_10m%2Cwind_gusts_10m"
-                        "%2Cprecipitation&latitude=18.95&longitude=72.95&precipitation_unit=mm&timezone=GMT"
+                        "%2Cprecipitation&latitude=18.9453&longitude=72.9400&precipitation_unit=mm&timezone=GMT"
                         "&wind_speed_unit=kmh"]
     assert a["state"] == "exposure_found"
 

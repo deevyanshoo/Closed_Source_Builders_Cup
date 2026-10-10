@@ -74,9 +74,9 @@ Everything is synthetic. If anything shows live data, a real supplier, or a real
 
 - [ ] The panel header shows the chip "EXPOSURE, NOT CONFIRMED". No hazard card says "confirmed" except as part of "not confirmed".
 - [ ] SHP-SYN-002, open-meteo at INNSA: "Exposure found, not confirmed", with rain heavy 24h 76.8 mm against a 64.5 mm threshold.
-- [ ] SHP-SYN-002, gdacs at INNSA: "No exposure found (not a safety check)", with a Green FL alert 32 km away and outcome "alert level below threshold".
+- [ ] SHP-SYN-002, gdacs at INNSA: "No exposure found (not a safety check)", with a Green FL alert 33 km away and outcome "alert level below threshold".
 - [ ] SHP-SYN-008:
-  - gdacs Paradip shows an Orange TC alert 121 km away, threshold met.
+  - gdacs Paradip shows an Orange TC alert 130 km away, threshold met.
   - open-meteo Paradip shows "Stale ... Not usable for planning".
   - open-meteo Tubarao shows "Provider failure", reason http 400.
 - [ ] SHP-SYN-003 shows "Location not in registry" for both providers. No coordinates are guessed.

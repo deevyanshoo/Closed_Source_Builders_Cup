@@ -310,3 +310,242 @@ def test_cancellation_and_fake_exception_are_sanitized():
     assert len(calls) == 2
     assert exc.value.__cause__ is None
     assert 'secret' not in str(exc.value)
+
+
+def test_configured_fake_sdk_single_tool_request_and_canonical_bytes(monkeypatch):
+    from google import genai
+    from google.genai import client as genai_client, types
+    from procure.agents import gemini_voice_source
+
+    def unexpected_client(*args, **kwargs):
+        raise AssertionError('SDK Client construction is prohibited')
+
+    monkeypatch.setattr(genai, 'Client', unexpected_client)
+    monkeypatch.setattr(genai_client.Client, '__init__', unexpected_client)
+
+    configured = getattr(gemini_voice_source, 'propose_configured_once', None)
+    if not callable(configured):
+        raise AssertionError('configured_source_missing')
+    source = projection()
+    seen = []
+
+    def fake_generate_content(*, model, contents, config):
+        seen.append((model, contents, config))
+        assert model == 'gemini-2.5-flash'
+        assert type(contents) is str
+        payload = json.loads(contents)
+        assert set(payload) == {'utterance', 'projection'}
+        assert payload == {
+            'utterance': 'Move receipt-1 to 11 October and assign both orders.',
+            'projection': projection(),
+        }
+        assert len(contents.encode('utf-8')) <= 32 << 10
+        assert type(config) is types.GenerateContentConfig
+        assert config.candidate_count == 1
+        assert config.max_output_tokens == 512
+        assert type(config.tools) is list and len(config.tools) == 1
+        declarations = config.tools[0].function_declarations
+        assert type(declarations) is list and len(declarations) == 1
+        assert declarations[0].name == 'compare_receipt_recovery'
+        calling = config.tool_config.function_calling_config
+        assert calling.mode is types.FunctionCallingConfigMode.ANY
+        assert calling.allowed_function_names == ['compare_receipt_recovery']
+        assert config.automatic_function_calling.disable is True
+        assert config.http_options.timeout == 3500
+        assert config.http_options.retry_options.attempts == 1
+        return sdk_response()
+
+    result = configured(
+        source,
+        'Move receipt-1 to 11 October and assign both orders.',
+        model='gemini-2.5-flash',
+        generate_content=fake_generate_content,
+        is_cancelled=lambda: False,
+    )
+    assert len(seen) == 1
+    assert source == projection()
+    assert isinstance(result, bytes)
+    assert json.loads(result) == {
+        'name': 'compare_receipt_recovery',
+        'arguments': arguments(),
+    }
+
+
+def test_configured_fake_sdk_invalid_model_and_pre_cancel_no_call():
+    from procure.agents import gemini_voice_source
+    from procure.agents.gemini_voice_source import SourceError
+
+    configured = getattr(gemini_voice_source, 'propose_configured_once', None)
+    if not callable(configured):
+        raise AssertionError('configured_source_missing')
+    calls = []
+
+    def fake_generate_content(**kwargs):
+        calls.append(kwargs)
+        return sdk_response()
+
+    for model in ('', 'unsafe\nmodel'):
+        with pytest.raises(SourceError, match='^invalid offline proposal$'):
+            configured(projection(), 'Move receipt-1.', model=model,
+                       generate_content=fake_generate_content,
+                       is_cancelled=lambda: False)
+    with pytest.raises(SourceError, match='^invalid offline proposal$'):
+        configured(projection(), 'Move receipt-1.', model='gemini-2.5-flash',
+                   generate_content=fake_generate_content,
+                   is_cancelled=lambda: True)
+    assert calls == []
+
+
+def test_configured_fake_sdk_bad_response_exception_and_post_cancel_no_retry():
+    from google.genai import types
+    from procure.agents import gemini_voice_source
+    from procure.agents.gemini_voice_source import SourceError
+
+    configured = getattr(gemini_voice_source, 'propose_configured_once', None)
+    if not callable(configured):
+        raise AssertionError('configured_source_missing')
+    calls = []
+
+    def run(fake, *, is_cancelled=lambda: False):
+        with pytest.raises(SourceError, match='^invalid offline proposal$') as exc:
+            configured(projection(), 'Move receipt-1.', model='gemini-2.5-flash',
+                       generate_content=fake, is_cancelled=is_cancelled)
+        assert exc.value.__cause__ is None
+        assert 'private fake failure' not in str(exc.value)
+
+    def malformed(**kwargs):
+        calls.append(kwargs)
+        return sdk_response(parts=[])
+
+    def failed(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError('private fake failure')
+
+    cancelled = False
+
+    def cancel_after_request(**kwargs):
+        nonlocal cancelled
+        calls.append(kwargs)
+        cancelled = True
+        return sdk_response()
+
+    run(malformed)
+    assert len(calls) == 1
+    run(failed)
+    assert len(calls) == 2
+    run(cancel_after_request, is_cancelled=lambda: cancelled)
+    assert len(calls) == 3
+
+    valid_part = sdk_response().candidates[0].content.parts[0]
+    bad_responses = (
+        sdk_multiple_candidates,
+        lambda: sdk_response(parts=[valid_part, types.Part(text='unexpected extra part')]),
+        lambda: sdk_response(parts=[valid_part, valid_part]),
+        sdk_continuation,
+        lambda: sdk_response(finish=types.FinishReason.MAX_TOKENS),
+    )
+    for make_response in bad_responses:
+        before = len(calls)
+
+        def one_bad_response(**kwargs):
+            calls.append(kwargs)
+            return make_response()
+
+        run(one_bad_response)
+        assert len(calls) == before + 1
+
+
+def test_configured_fake_sdk_input_caps_and_detached_context():
+    from procure.agents import gemini_voice_source
+    from procure.agents.gemini_voice_bridge import sdk_function_declaration
+    from procure.agents.gemini_voice_source import SourceError
+
+    configured = getattr(gemini_voice_source, 'propose_configured_once', None)
+    if not callable(configured):
+        raise AssertionError('configured_source_missing')
+    source = projection()
+    calls = []
+
+    def fake_generate_content(*, model, contents, config):
+        calls.append((model, contents, config))
+        payload = json.loads(contents)
+        payload['projection']['receipts'][0]['receipt_id'] = 'mutated-copy'
+        return sdk_response()
+
+    result = configured(
+        source, 'Move receipt-1.', model='gemini-2.5-flash',
+        generate_content=fake_generate_content, is_cancelled=lambda: False,
+    )
+    assert isinstance(result, bytes)
+    assert len(calls) == 1
+    assert source == projection()
+
+    with pytest.raises(SourceError, match='^invalid offline proposal$'):
+        configured(projection(), 'x' * 4097, model='gemini-2.5-flash',
+                   generate_content=fake_generate_content,
+                   is_cancelled=lambda: False)
+    with pytest.raises(SourceError, match='^invalid offline proposal$'):
+        configured(projection(), 'é' * 2049, model='gemini-2.5-flash',
+                   generate_content=fake_generate_content,
+                   is_cancelled=lambda: False)
+    oversized = projection()
+    oversized['orders'] = [
+        {'order_id': f'order-{index}'} for index in range(65)
+    ]
+    with pytest.raises(SourceError, match='^invalid offline proposal$'):
+        configured(oversized, 'Move receipt-1.', model='gemini-2.5-flash',
+                   generate_content=fake_generate_content,
+                   is_cancelled=lambda: False)
+    assert len(calls) == 1
+
+    # Exact UTF-8 utterance ceiling is accepted when the full request is small.
+    edge = configured(projection(), 'é' * 2048, model='gemini-2.5-flash',
+                      generate_content=fake_generate_content,
+                      is_cancelled=lambda: False)
+    assert isinstance(edge, bytes) and len(calls) == 2
+
+    aggregate = {'receipts': [], 'orders': [], 'periods': []}
+    for index in range(64):
+        aggregate['receipts'].append({'receipt_id': f'r{index}-' + 'r' * 120,
+                                      'arrival_at': '2026-10-10T12:00:00Z'})
+        aggregate['orders'].append({'order_id': f'o{index}-' + 'o' * 120})
+        aggregate['periods'].append({'period_id': f'p{index}-' + 'p' * 120})
+    tool = json.loads(sdk_function_declaration().model_dump_json(
+        by_alias=True, exclude_none=True))
+
+    def entire_size(utterance):
+        return len(json.dumps({'utterance': utterance, 'projection': aggregate,
+                               'tool': tool}, separators=(',', ':'),
+                              ensure_ascii=False).encode('utf-8'))
+
+    allowed_count = 32768 - entire_size('')
+    assert 1 <= allowed_count < 4096
+    assert entire_size('x' * allowed_count) == 32768
+    assert entire_size('x' * (allowed_count + 1)) == 32769
+    complete_args = {
+        'arrival_replacements': [{
+            'receipt_id': aggregate['receipts'][0]['receipt_id'],
+            'expected_arrival_at': aggregate['receipts'][0]['arrival_at'],
+            'arrival_at': '2026-10-11T12:00:00Z',
+        }],
+        'assignments': [
+            {'order_id': order['order_id'], 'period_id': aggregate['periods'][0]['period_id']}
+            for order in aggregate['orders']
+        ],
+    }
+    boundary_calls = []
+
+    def boundary_fake(*, model, contents, config):
+        boundary_calls.append((model, contents, config))
+        return sdk_response(complete_args)
+
+    assert isinstance(configured(aggregate, 'x' * allowed_count,
+                                 model='gemini-2.5-flash',
+                                 generate_content=boundary_fake,
+                                 is_cancelled=lambda: False), bytes)
+    assert len(boundary_calls) == 1
+    with pytest.raises(SourceError, match='^invalid offline proposal$'):
+        configured(aggregate, 'x' * (allowed_count + 1),
+                   model='gemini-2.5-flash', generate_content=boundary_fake,
+                   is_cancelled=lambda: False)
+    assert len(boundary_calls) == 1

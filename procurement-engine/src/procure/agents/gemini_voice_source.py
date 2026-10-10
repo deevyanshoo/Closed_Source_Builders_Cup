@@ -205,3 +205,63 @@ def propose_once(projection: object, utterance: object, generate_once: object, *
         return encoded
     except Exception:
         raise SourceError(_ERROR) from None
+
+
+def propose_configured_once(
+    projection: object,
+    utterance: object,
+    *,
+    model: object,
+    generate_content: object,
+    is_cancelled: object,
+) -> bytes:
+    """Build one bounded SDK-shaped fake request and return unverified tool bytes.
+
+    ``generate_content`` is an injected callback, never an SDK client. The
+    caller still owns context, semantic confirmation, and typed execution.
+    A synchronous, noncooperative callback cannot be interrupted here.
+    """
+    try:
+        if (type(model) is not str or not model or len(model) > 128 or
+                not all(char.isascii() and (char.isalnum() or char in '-._/')
+                        for char in model)):
+            _invalid()
+        _utf8(model, 128)
+        if not callable(generate_content) or not callable(is_cancelled) or is_cancelled() is not False:
+            _invalid()
+
+        # This creates only pinned SDK data models; no Client or transport is
+        # constructed. The declaration's serialized bytes count in the entire
+        # callback-request budget before any projection copy.
+        from google.genai import types
+
+        declaration = sdk_function_declaration()
+        tool_json = declaration.model_dump_json(by_alias=True, exclude_none=True)
+        tool_size = _utf8(tool_json, _MAX_TOOL_BYTES)
+        owned, arrivals, orders, periods = _projection(projection, utterance, tool_size)
+        contents = json.dumps({'utterance': utterance, 'projection': owned},
+                              sort_keys=True, separators=(',', ':'),
+                              ensure_ascii=False, allow_nan=False)
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(function_declarations=[declaration])],
+            tool_config=types.ToolConfig(function_calling_config=types.FunctionCallingConfig(
+                mode=types.FunctionCallingConfigMode.ANY,
+                allowed_function_names=['compare_receipt_recovery'])),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            candidate_count=1,
+            max_output_tokens=512,
+            http_options=types.HttpOptions(
+                timeout=3500, retry_options=types.HttpRetryOptions(attempts=1)),
+        )
+        if is_cancelled() is not False:
+            _invalid()
+        response = generate_content(model=model, contents=contents, config=config)
+        if is_cancelled() is not False:
+            _invalid()
+        encoded = proposal_call_bytes(response)
+        _call(encoded, arrivals, orders, periods)
+        if is_cancelled() is not False:
+            _invalid()
+        return encoded
+    except Exception:
+        raise SourceError(_ERROR) from None

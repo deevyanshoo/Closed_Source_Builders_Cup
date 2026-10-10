@@ -1116,3 +1116,42 @@ type QuotePaymentTerms struct {
   Status *string `json:"status,omitempty"`
   Text *string `json:"text,omitempty"`
 }
+
+type QuoteShipmentBridgeCandidate struct {
+  CandidateId string `json:"candidate_id"`
+  OfferId string `json:"offer_id"`
+  OfferVersion int `json:"offer_version"`
+  ItemIndex int `json:"item_index"`
+  DocumentId string `json:"document_id"`
+}
+
+type QuoteShipmentBridgeShipmentContext struct {
+  ContextId string `json:"context_id"`
+  Revision int `json:"revision"`
+  RequestSha256 string `json:"request_sha256"`
+  PlanVersion string `json:"plan_version"`
+}
+
+type QuoteShipmentBridgeEvidenceRef struct {
+  Field string `json:"field"`
+  Locator string `json:"locator"`
+  TextSha256 string `json:"text_sha256"`
+  DocumentId string `json:"document_id"`
+}
+
+type QuoteShipmentBridge struct {
+  Candidate QuoteShipmentBridgeCandidate `json:"candidate"`
+  ShipmentContext QuoteShipmentBridgeShipmentContext `json:"shipment_context"`
+  HostBinding string `json:"host_binding"`
+  SourceAuthenticity string `json:"source_authenticity"`
+  ContextAsOf string `json:"context_as_of"`
+  SourceAsOf string `json:"source_as_of"`
+  SourceCheckedAt string `json:"source_checked_at"`
+  EvidenceRefs []QuoteShipmentBridgeEvidenceRef `json:"evidence_refs"`
+}
+
+type QuoteShipmentBridgeResponse struct {
+  ContractVersion string `json:"contract_version"`
+  Context QuoteResponseContext `json:"context"`
+  Bridge QuoteShipmentBridge `json:"bridge"`
+}

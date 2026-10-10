@@ -3120,6 +3120,146 @@
           }
         ]
       }
+    },
+    "/v2/workspaces/{workspace_id}/shipment-recovery/quote-bridge": {
+      "get": {
+        "operationId": "getQuoteShipmentBridge",
+        "description": "LOCAL development-only read; default and private-machine paths closed. Uses server UTC date for a single signed sourcing read and rechecks current host binding. No quote body, price, quantity, capacity, or provider authenticity claim.",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "description": "Must exactly match the authenticated server workspace."
+          },
+          {
+            "name": "candidate_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "offer_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "offer_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "item_index",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            }
+          },
+          {
+            "name": "document_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "x-request-max-bytes": 0,
+        "x-response-max-bytes": 65536,
+        "responses": {
+          "200": {
+            "description": "Current synthetic host association to a fresh server-checked local quote candidate; source authenticity is not verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteShipmentBridgeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Development identity required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Local or role access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Opaque unavailable candidate or binding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Read only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Malformed or oversize request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Disabled or signed source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8172,6 +8312,173 @@
           }
         },
         "required": []
+      },
+      "QuoteShipmentBridgeCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "offer_id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "offer_version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "item_index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "document_id": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "offer_id",
+          "offer_version",
+          "item_index",
+          "document_id"
+        ]
+      },
+      "QuoteShipmentBridgeShipmentContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "request_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "plan_version": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "context_id",
+          "revision",
+          "request_sha256",
+          "plan_version"
+        ]
+      },
+      "QuoteShipmentBridgeEvidenceRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "locator": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "text_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "document_id": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "field",
+          "locator",
+          "text_sha256",
+          "document_id"
+        ]
+      },
+      "QuoteShipmentBridge": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/QuoteShipmentBridgeCandidate"
+          },
+          "shipment_context": {
+            "$ref": "#/components/schemas/QuoteShipmentBridgeShipmentContext"
+          },
+          "host_binding": {
+            "type": "string",
+            "enum": [
+              "host_configured_synthetic"
+            ]
+          },
+          "source_authenticity": {
+            "type": "string",
+            "enum": [
+              "not_verified"
+            ]
+          },
+          "context_as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_as_of": {
+            "type": "string",
+            "format": "date"
+          },
+          "source_checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/QuoteShipmentBridgeEvidenceRef"
+            }
+          }
+        },
+        "required": [
+          "candidate",
+          "shipment_context",
+          "host_binding",
+          "source_authenticity",
+          "context_as_of",
+          "source_as_of",
+          "source_checked_at",
+          "evidence_refs"
+        ]
+      },
+      "QuoteShipmentBridgeResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "enum": [
+              "0.2.0"
+            ]
+          },
+          "context": {
+            "$ref": "#/components/schemas/QuoteResponseContext"
+          },
+          "bridge": {
+            "$ref": "#/components/schemas/QuoteShipmentBridge"
+          }
+        },
+        "required": [
+          "contract_version",
+          "context",
+          "bridge"
+        ]
       }
     },
     "securitySchemes": {

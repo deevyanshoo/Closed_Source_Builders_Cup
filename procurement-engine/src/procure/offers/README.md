@@ -11,6 +11,7 @@ Supplier quote documents (PDF, XLSX, CSV) become evidence-checked, reviewable of
 | `normalize.py`, `fx_rates.py` | Decimal numbers, exact unit conversion, dated Frankfurter rates (live or cache, else unavailable) |
 | `extraction.py` | Runs the above and adds review flags and normalised values |
 | `scoring.py` | Compares an extraction with the synthetic manifest answer key |
+| `sourcing.py` | Read-only sourcing candidates from accepted, unexpired offers; shape in `CONTRACT_PROPOSAL.md` section 9 |
 
 Field statuses: `extracted`, `missing`, `conflict`, `unverified` (and `corrected` after review). Only `extracted` and
 `corrected` carry a value; nothing is filled in by guesswork.

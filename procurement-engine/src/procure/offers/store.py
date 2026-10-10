@@ -509,6 +509,17 @@ def planning_input(offer_ids: list[str], *, buyer: dict, actor: str, idempotency
     return _idempotent("planning_input", scope, idempotency_key, apply, expire_ids=offer_ids, today=today)
 
 
+def sourcing_candidates(*, today: dt.date | None = None) -> dict:
+    """Read-only: every stored offer viewed on `today`, as sourcing candidates and exclusions (see sourcing.py)."""
+    from .sourcing import sourcing_candidates as build
+
+    today = today or _today()
+    ensure_schema()
+    with db._LOCK:
+        views = [_view(*_load(r["id"]), today) for r in _rows("SELECT id FROM offers ORDER BY created_at")]
+    return build(views, as_of=today)
+
+
 def draft_rfq(offer_id: str, *, buyer: dict, actor: str, idempotency_key: str, item_index: int = 0,
               today: dt.date | None = None) -> dict:
     """Saved offer -> legacy recommendation -> existing local RFQ draft. Nothing is sent."""

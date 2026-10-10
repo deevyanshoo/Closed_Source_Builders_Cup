@@ -182,7 +182,9 @@ export function ScenarioView({ state, offers }: { state: ScenarioState; offers: 
       <tbody>{r.schedule.lines.map((l, i) => <tr key={i}>
         <td>{l.percent ? `${l.percent}%` : 'Not stated'}{l.percent_basis === 'single_term' && <small>single term, whole price</small>}</td>
         <td>{words(l.instrument)}</td>
-        <td>{l.anchor === 'not_stated' ? 'event not stated' : `${words(l.timing)} ${words(l.anchor)} + ${l.days ?? 0} days`}</td>
+        <td>{l.anchor === 'not_stated' ? 'event not stated' : l.timing === 'on_or_before'
+          ? (l.days ? `by ${l.days} days before ${words(l.anchor)}` : `on or before ${words(l.anchor)}`)
+          : `${words(l.timing)} ${words(l.anchor)} + ${l.days ?? 0} days`}</td>
         <td>{l.due_date ? <>{l.due_date}<small>day {l.days_from_decision}</small></> : <span className="offers-reason">{words(l.reason ?? 'unknown').replace(':', ': ')}</span>}</td>
         <td>{moneyLabel(l.amount) ?? 'Not available'}</td>
       </tr>)}</tbody>

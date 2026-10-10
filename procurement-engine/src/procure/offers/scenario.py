@@ -26,7 +26,7 @@ ASSUMPTIONS = (
     "A quote is open through its valid-until date. A missing date is not stated and is never treated as open.",
     "The order is placed on the decision date, so advance payments fall on it.",
     "Shipment, bill of lading, documents, invoice, delivery and arrival dates are user inputs, not forecasts.",
-    "An instalment due before an event is placed on that event's date, the latest it may be paid.",
+    "An instalment due before an event is placed on its stated deadline, the latest it may be paid.",
     "Amounts are quantity times unit price in the quote currency, with no FX conversion, tax or freight added.",
     "The value of paying later uses the annual rate you enter, simple interest on actual days over 365, "
     "rounded half-even to 0.01. No rate is assumed.",
@@ -124,7 +124,8 @@ def cash_timing(terms: dict, *, amount: dict | None, dates: dict, decision_date:
         elif events.get(inst["anchor"]) is None:
             reason = f"date_not_entered:{inst['anchor']}"
         else:
-            due = events[inst["anchor"]] + dt.timedelta(days=inst["days"] or 0)
+            offset = -(inst["days"] or 0) if inst["timing"] == "on_or_before" else (inst["days"] or 0)
+            due = events[inst["anchor"]] + dt.timedelta(days=offset)
         if inst["percent"] is None:
             reason = reason or "percent_not_stated"
         share = None

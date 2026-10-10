@@ -62,6 +62,24 @@ def test_days_without_a_stated_event_keep_the_event_not_stated(text):
     assert (only["anchor"], only["days"]) == ("not_stated", int(text.split()[1]))
 
 
+@pytest.mark.parametrize("text", ["30 days before shipment by TT", "30 days prior to loading by TT"])
+def test_nonzero_before_shipment_keeps_a_before_event_deadline(text):
+    [term] = parse_payment_terms(field(text))["instalments"]
+    assert (term["anchor"], term["days"], term["timing"]) == ("shipment", 30, "on_or_before")
+
+
+def test_explicit_after_shipment_event_outweighs_cad_instrument_default():
+    [term] = parse_payment_terms(field("CAD 30 days after shipment"))["instalments"]
+    assert (term["instrument"], term["anchor"], term["days"]) == (
+        "cash_against_documents", "shipment", 30)
+
+
+def test_explicit_invoice_event_outweighs_sight_instrument_default():
+    [term] = parse_payment_terms(field("LC at sight 30 days from invoice"))["instalments"]
+    assert (term["instrument"], term["anchor"], term["days"]) == (
+        "letter_of_credit", "invoice", 30)
+
+
 def test_missing_field_is_not_stated_and_nothing_is_assumed():
     result = parse_payment_terms(field(None, status="missing"))
     assert result == {"status": "not_stated", "text": None, "instalments": [], "unrecognised": [], "evidence": [],

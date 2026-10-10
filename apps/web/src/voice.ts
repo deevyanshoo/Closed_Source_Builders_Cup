@@ -1,6 +1,6 @@
 import { recoveryExamples } from '../../../contracts/generated/recovery-examples';
 import { voiceHTTPSchema } from '../../../contracts/generated/voice-http-schema';
-import type { ProductionContextRef, ProductionContextResponse, ProductionContextSummary, ProductionContextsResponse, ProductionSnapshot, StoredProductionContext, ReceiptRecoveryComparison, RecoveryComparisonRequest, SessionResponse, VoiceHTTPOutcome, VoiceHTTPCancelResponse, VoiceHTTPCloseResponse, VoiceHTTPResultResponse, VoiceHTTPSessionResponse, VoiceHTTPTurnResponse } from '../../../contracts/generated/types';
+import type { ProductionContextRef, ProductionContextResponse, ProductionContextSummary, ProductionContextsResponse, ProductionSnapshot, StoredProductionContext, ReceiptRecoveryComparison, RecoveryComparisonRequest, SessionResponse, VoiceHTTPOutcome, VoiceHTTPProposalOnlyOutcome, VoiceHTTPCall, VoiceHTTPCancelResponse, VoiceHTTPCloseResponse, VoiceHTTPResultResponse, VoiceHTTPSessionResponse, VoiceHTTPTurnResponse, VoiceHTTPTextProposalTurnRequest, VoiceHTTPTypedTurnRequest } from '../../../contracts/generated/types';
 import noopRaw from '../../../contracts/examples/recovery_noop_request.json?raw';
 import unsupportedRaw from '../../../contracts/examples/recovery_unsupported_request.json?raw';
 import { buildComparisonRequest, validateComparisonResponse } from './recovery';
@@ -8,10 +8,10 @@ import { fetchSession } from './state';
 import { contextRef, contextRefMatches, parseSnapshot, savedScenario } from './production-context';
 
 export type VoiceExample = 'recovery' | 'recovery_noop' | 'recovery_precision' | 'recovery_unsupported';
-export type VoiceKind = 'checking' | 'signed_out' | 'idle' | 'closing' | 'creating' | 'created' | 'starting' | 'pending' | 'compared' | 'unsupported' | 'clarification' | 'rejected' | 'failed' | 'expired' | 'capacity' | 'unavailable' | 'cancelled' | 'loading_contexts' | 'stale';
+export type VoiceKind = 'checking' | 'signed_out' | 'idle' | 'closing' | 'creating' | 'created' | 'starting' | 'pending' | 'proposed' | 'compared' | 'unsupported' | 'clarification' | 'rejected' | 'failed' | 'expired' | 'capacity' | 'unavailable' | 'cancelled' | 'loading_contexts' | 'stale';
 export type VoiceView = { kind: VoiceKind; example: VoiceExample; identity?: SessionResponse; base?: RecoveryComparisonRequest;
   arrivals: Record<string, string>; assignments: Record<string, string>; session?: VoiceHTTPSessionResponse;
-  turn?: VoiceHTTPTurnResponse; outcome?: VoiceHTTPOutcome; comparison?: ReceiptRecoveryComparison; message?: string;
+  turn?: VoiceHTTPTurnResponse; outcome?: VoiceHTTPOutcome; proposal?: VoiceHTTPProposalOnlyOutcome; comparison?: ReceiptRecoveryComparison; message?: string;
   source: 'inline' | 'saved'; contexts: ProductionContextSummary[]; hasMore: boolean; selected?: StoredProductionContext; snapshotText: string };
 type Schema = { $ref?: string; oneOf?: Schema[]; anyOf?: Schema[]; type?: string; const?: unknown; enum?: unknown[];
   properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean; items?: Schema;
@@ -61,7 +61,7 @@ export class VoiceError extends Error {
   constructor(message: string, readonly kind: 'validation' | 'session' | 'expired' | 'capacity' | 'unavailable' | 'invalid_response' | 'cleanup') { super(message); }
 }
 const invalid = (): never => { throw new VoiceError('The voice comparison service returned an invalid response.', 'invalid_response'); };
-const identityKey = (value: SessionResponse) => [value.principal_id, value.workspace_id, value.role, value.identity_mode ?? 'development'].join('\u0000');
+const identityKey = (value: SessionResponse) => JSON.stringify([value.principal_id, value.workspace_id, value.role, value.identity_mode ?? 'development']);
 const validIdentity = (value: SessionResponse) => value?.contract_version === '0.2.0'
   && typeof value.principal_id === 'string' && value.principal_id.length > 0 && value.principal_id.length <= 256
   && typeof value.workspace_id === 'string' && value.workspace_id.length > 0 && value.workspace_id.length <= 256
@@ -81,7 +81,7 @@ async function readJSON(response: Response, limit: number): Promise<unknown> {
   try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); } catch { return invalid(); }
 }
 type Options = { transport?: typeof fetch; loadSession?: (signal?: AbortSignal) => Promise<SessionResponse>; pause?: (ms: number, signal: AbortSignal) => Promise<void>; now?: () => number; requestTimeoutMs?: number };
-type Run = { generation: number; identity: SessionResponse; input: RecoveryComparisonRequest; ref?: ProductionContextRef; session?: VoiceHTTPSessionResponse; turn?: VoiceHTTPTurnResponse; revoked: boolean; readAbort: AbortController; done: Promise<void> };
+type Run = { generation: number; identity: SessionResponse; input: RecoveryComparisonRequest; ref?: ProductionContextRef; session?: VoiceHTTPSessionResponse; turn?: VoiceHTTPTurnResponse; proposal?: { call: VoiceHTTPCall; turnId: string; snapshot: string }; confirming?: boolean; revoked: boolean; readAbort: AbortController; done: Promise<void> };
 const defaultPause = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal.aborted) { reject(signal.reason); return; }
   const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
@@ -119,7 +119,7 @@ export class VoiceController {
   private validRunRef(actual: ProductionContextRef | undefined, expected: ProductionContextRef | undefined) {
     return expected ? contextRefMatches(actual, expected) : actual === undefined;
   }
-  private clear(kind: VoiceKind) { this.emit({ kind, session: undefined, turn: undefined, outcome: undefined, comparison: undefined, message: undefined }); }
+  private clear(kind: VoiceKind) { this.emit({ kind, session: undefined, turn: undefined, outcome: undefined, proposal: undefined, comparison: undefined, message: undefined }); }
   private signedOut(message = 'The authenticated local session is unavailable. Check the session again.') {
     this.clear('signed_out'); this.emit({ identity: undefined, base: undefined, selected: undefined, contexts: [], hasMore: false, arrivals: {}, assignments: {}, snapshotText: '', message });
   }
@@ -420,6 +420,145 @@ export class VoiceController {
         this.emit({ kind: 'failed', message: cleanupError instanceof Error ? cleanupError.message : 'Cleanup failed.' });
       }
     }
+  }
+  private async textFailure(run: Run, error: unknown): Promise<void> {
+    if (!this.isCurrent(run)) return;
+    const kind = error instanceof VoiceError ? error.kind : 'unavailable';
+    run.proposal = undefined;
+    if (kind === 'session') this.signedOut(error instanceof VoiceError ? error.message : undefined);
+    else {
+      const stale = kind === 'validation' && error instanceof VoiceError && error.message.includes('changed');
+      this.clear(stale ? 'stale' : kind === 'expired' ? 'expired' : kind === 'capacity' ? 'capacity' : 'failed');
+      this.emit({ selected: stale ? undefined : this.state.selected, base: stale ? undefined : this.state.base,
+        message: error instanceof VoiceError ? error.message : 'Text proposal unavailable. Use the typed comparison form.' });
+    }
+    try { await this.cleanup(run); } catch (cleanupError) {
+      this.cleanupFailed = true; this.cleanupFailure = cleanupError;
+      this.emit({ kind: 'failed', message: cleanupError instanceof Error ? cleanupError.message : 'Cleanup failed.' });
+    }
+  }
+  private async pollText(run: Run, turn: VoiceHTTPTurnResponse, proposed: boolean): Promise<void> {
+    const session = run.session!;
+    const deadline = this.now() + 45000; let delay = 120;
+    while (this.isCurrent(run)) {
+      if (this.now() >= deadline) throw new VoiceError('The local turn timed out. Start a fresh comparison.', 'expired');
+      const result = await this.request<VoiceHTTPResultResponse>('GET', `${root}/${encodeURIComponent(session.session_id)}/turns/${encodeURIComponent(turn.turn_id)}/result`, 'VoiceHTTPResultResponse', undefined, run.readAbort.signal);
+      if (!this.isCurrent(run)) return;
+      if (result.session_id !== session.session_id || result.turn_id !== turn.turn_id || result.context_version !== session.context_version || result.context_fingerprint !== session.context_fingerprint || result.read_only !== true || result.synthetic !== true || !this.validRunRef(result.production_context_ref, run.ref)) return invalid();
+      if (result.state === 'failed') {
+        if (proposed && result.error.code === 'text_proposal_unavailable') throw new VoiceError('Text proposal unavailable. Use the typed comparison form.', 'unavailable');
+        throw new VoiceError('The local comparison failed. Review the supplied scenario or try again.', 'unavailable');
+      }
+      if (result.state === 'ready') {
+        const outcome = result.outcome;
+        if (outcome.ownership.session_id !== session.session_id || outcome.ownership.turn_id !== turn.turn_id || outcome.read_only !== true || outcome.tool_name !== 'compare_receipt_recovery') return invalid();
+        if (proposed ? outcome.status !== 'proposal_only' || outcome.synthetic !== true || outcome.interpretation_verified !== false : outcome.status === 'proposal_only') return invalid();
+        const latest = await this.checkIdentity();
+        if (!this.isCurrent(run)) return;
+        if (identityKey(latest) !== identityKey(run.identity) || !this.state.identity || identityKey(this.state.identity) !== identityKey(run.identity)) throw new VoiceError('The authenticated identity changed.', 'session');
+        if (!run.ref || this.state.source !== 'saved' || !this.state.selected || !contextRefMatches(contextRef(this.state.selected), run.ref)) throw new VoiceError('The saved context changed.', 'validation');
+        const context = await this.readContext(run.ref.context_id, run.ref);
+        if (!this.isCurrent(run)) return;
+        if (JSON.stringify(context.snapshot) !== JSON.stringify(run.input.snapshot) || JSON.stringify(this.state.selected.snapshot) !== JSON.stringify(run.input.snapshot)) throw new VoiceError('The saved context changed.', 'validation');
+        if (proposed && outcome.status === 'proposal_only') {
+          const call = structuredClone(outcome.call);
+          run.proposal = { call, turnId: turn.turn_id, snapshot: JSON.stringify(run.input.snapshot) };
+          this.emit({ kind: 'proposed', session, turn, outcome, proposal: { ...outcome, call: structuredClone(call) }, comparison: undefined });
+        } else if (outcome.status === 'compared') {
+          const comparison = validateComparisonResponse({ contract_version: '0.2.0', comparison: outcome.result }, run.input).comparison;
+          this.emit({ kind: 'compared', session, turn, outcome, proposal: undefined, comparison });
+        } else {
+          const kind = outcome.status === 'unsupported' ? 'unsupported' : outcome.status === 'clarification_required' ? 'clarification' : outcome.status === 'rejected' ? 'rejected' : 'unavailable';
+          this.emit({ kind, session, turn, outcome, proposal: undefined });
+        }
+        return;
+      }
+      await this.pause(delay, run.readAbort.signal); delay = Math.min(1000, delay * 2);
+    }
+  }
+  private async executeText(run: Run, utterance: string): Promise<void> {
+    try {
+      if (!run.ref) return invalid();
+      const context = await this.readContext(run.ref.context_id, run.ref);
+      if (!this.isCurrent(run)) return;
+      if (JSON.stringify(context.snapshot) !== JSON.stringify(run.input.snapshot)) throw new VoiceError('The saved context changed.', 'validation');
+      const created = await this.request<VoiceHTTPSessionResponse>('POST', '/v2/voice/saved-context-sessions', 'VoiceHTTPSessionResponse', { contract_version: '0.2.0', context_id: run.ref.context_id, expected_revision: run.ref.revision });
+      run.session = created;
+      if (created.snapshot_id !== run.input.snapshot.snapshot_id || created.plan_version !== run.input.snapshot.plan_version || !this.validRunRef(created.production_context_ref, run.ref) || created.read_only !== true || created.synthetic !== true) return invalid();
+      if (!this.isCurrent(run)) return;
+      this.emit({ kind: 'created', session: created });
+      const latest = await this.checkIdentity();
+      if (!this.isCurrent(run)) return;
+      if (identityKey(latest) !== identityKey(run.identity)) throw new VoiceError('The authenticated identity changed.', 'session');
+      const fresh = await this.readContext(run.ref.context_id, run.ref);
+      if (!this.isCurrent(run)) return;
+      if (JSON.stringify(fresh.snapshot) !== JSON.stringify(run.input.snapshot)) throw new VoiceError('The saved context changed.', 'validation');
+      const body: VoiceHTTPTextProposalTurnRequest = { contract_version: '0.2.0', context_version: created.context_version, input_mode: 'text_proposal', utterance };
+      this.emit({ kind: 'starting' });
+      const turn = await this.request<VoiceHTTPTurnResponse>('POST', `${root}/${encodeURIComponent(created.session_id)}/turns`, 'VoiceHTTPTurnResponse', body);
+      if (turn.session_id !== created.session_id || turn.context_version !== created.context_version || turn.context_fingerprint !== created.context_fingerprint || !this.validRunRef(turn.production_context_ref, run.ref) || turn.read_only !== true || turn.synthetic !== true) return invalid();
+      run.turn = turn;
+      if (!this.isCurrent(run)) return;
+      this.emit({ kind: 'pending', turn });
+      await this.pollText(run, turn, true);
+    } catch (error) { await this.textFailure(run, error); }
+  }
+  async proposeText(utterance: string): Promise<void> {
+    const cleanup = this.retire('closing'); const generation = this.generation;
+    try { await cleanup; } catch (error) { if (generation === this.generation) this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Cleanup failed.' }); return; }
+    if (generation !== this.generation || this.disposed) return;
+    const identity = this.state.identity; const selected = this.state.selected;
+    if (!identity || this.state.source !== 'saved' || !selected || selected.workspace_id !== identity.workspace_id) { this.emit({ kind: 'failed', message: 'Select a saved synthetic context first.' }); return; }
+    if (!utterance.trim() || byteLength(utterance) > 4096) { this.emit({ kind: 'failed', message: 'Enter a text proposal request of at most 4096 UTF-8 bytes.' }); return; }
+    let latest: SessionResponse;
+    try { latest = await this.checkIdentity(); } catch (error) { if (generation === this.generation) this.signedOut(error instanceof VoiceError ? error.message : undefined); return; }
+    if (generation !== this.generation || this.disposed) return;
+    if (identityKey(latest) !== identityKey(identity)) { this.signedOut('The authenticated identity changed. Check the session again.'); return; }
+    const run: Run = { generation, identity, input: savedScenario(selected.snapshot), ref: contextRef(selected), revoked: false, readAbort: new AbortController(), done: Promise.resolve() };
+    this.current = run; this.emit({ kind: 'creating', proposal: undefined });
+    run.done = this.executeText(run, utterance); await run.done;
+  }
+  async confirmProposal(): Promise<void> {
+    const run = this.current; const bound = run?.proposal; const session = run?.session;
+    if (run?.confirming) return;
+    if (!run || !bound || !session || !run.ref || !this.isCurrent(run) || this.state.kind !== 'proposed' || this.state.outcome?.status !== 'proposal_only' || !this.state.proposal ||
+      this.state.session?.session_id !== session.session_id || this.state.turn?.turn_id !== bound.turnId || this.state.source !== 'saved' || !this.state.selected || !contextRefMatches(contextRef(this.state.selected), run.ref) ||
+      !this.state.identity || identityKey(this.state.identity) !== identityKey(run.identity) || JSON.stringify(this.state.proposal.call) !== JSON.stringify(bound.call) || JSON.stringify(this.state.selected.snapshot) !== bound.snapshot) {
+      if (run) { run.proposal = undefined; this.emit({ kind: 'stale', proposal: undefined, outcome: undefined, message: 'The proposal changed. Request a fresh text proposal.' }); }
+      return;
+    }
+    run.confirming = true;
+    run.done = Promise.resolve().then(() => this.executeConfirmation(run, bound, session));
+    this.emit({ kind: 'starting' });
+    await run.done;
+  }
+  private async executeConfirmation(run: Run, bound: NonNullable<Run['proposal']>, session: VoiceHTTPSessionResponse): Promise<void> {
+    try {
+      if (!this.isCurrent(run)) return;
+      const ref = run.ref;
+      if (!ref) return invalid();
+      const latest = await this.checkIdentity();
+      if (!this.isCurrent(run)) return;
+      if (identityKey(latest) !== identityKey(run.identity)) throw new VoiceError('The authenticated identity changed.', 'session');
+      const context = await this.readContext(ref.context_id, ref);
+      if (!this.isCurrent(run)) return;
+      if (JSON.stringify(context.snapshot) !== bound.snapshot || this.state.source !== 'saved' || !this.state.selected || !contextRefMatches(contextRef(this.state.selected), ref) || JSON.stringify(this.state.selected.snapshot) !== bound.snapshot) throw new VoiceError('The saved context changed.', 'validation');
+      if (this.state.kind !== 'starting' || !run.confirming || this.state.turn?.turn_id !== bound.turnId || run.turn?.turn_id !== bound.turnId || run.proposal !== bound ||
+        this.state.session?.session_id !== session.session_id || this.state.session.context_version !== session.context_version || this.state.session.context_fingerprint !== session.context_fingerprint ||
+        !this.state.identity || identityKey(this.state.identity) !== identityKey(run.identity) || !this.state.proposal || JSON.stringify(this.state.proposal.call) !== JSON.stringify(bound.call)) throw new VoiceError('The proposal changed.', 'validation');
+      const body: VoiceHTTPTypedTurnRequest = { contract_version: '0.2.0', context_version: session.context_version, call: structuredClone(bound.call) };
+      run.proposal = undefined; this.emit({ kind: 'starting', proposal: undefined, outcome: undefined });
+      if (!this.isCurrent(run)) return;
+      const turn = await this.request<VoiceHTTPTurnResponse>('POST', `${root}/${encodeURIComponent(session.session_id)}/turns`, 'VoiceHTTPTurnResponse', body);
+      if (turn.session_id !== session.session_id || turn.context_version !== session.context_version || turn.context_fingerprint !== session.context_fingerprint || !this.validRunRef(turn.production_context_ref, run.ref) || turn.read_only !== true || turn.synthetic !== true) return invalid();
+      run.turn = turn;
+      if (!this.isCurrent(run)) return;
+      run.input.scenario.scenario_id = session.scenario_id; run.input.recovery.scenario_id = session.scenario_id;
+      run.input.scenario.arrival_replacements = structuredClone(body.call.arguments.arrival_replacements);
+      run.input.recovery.assignments = structuredClone(body.call.arguments.assignments);
+      this.emit({ kind: 'pending', turn });
+      await this.pollText(run, turn, false);
+    } catch (error) { await this.textFailure(run, error); }
   }
   async run(): Promise<void> {
     const cleanup = this.retire('closing'); const generation = this.generation;

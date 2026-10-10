@@ -198,4 +198,3 @@ async def serve_signed_quote(scope, receive, send, *, backend, verifier, ready):
         return
     await JSONResponse({'workspace_id': context.workspace_id, 'data': result},
                        status_code=safe_status, headers={'Cache-Control': 'no-store'})(scope, replay, send)
-

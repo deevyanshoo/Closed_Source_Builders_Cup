@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT.parent / "apps" / "web" / "src" / "offers-fixtures.json"
+
 FIXTURES = ROOT / "tests" / "fixtures" / "offers"
 
 
@@ -58,6 +59,10 @@ def main() -> int:
     os.environ.pop("GEMINI_API_KEY", None)  # settings import loads .env; rules only for the export
     reset_caches()
     from procure.offers import store
+    from procure.offers.context import OfferContext
+    global CONTEXT, SYSTEM_CONTEXT
+    CONTEXT = OfferContext("synthetic-reviewer", "synthetic-workspace", "editor")
+    SYSTEM_CONTEXT = OfferContext("system", "synthetic-workspace", "system")
     from procure.settings import materials_config
 
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
@@ -65,10 +70,10 @@ def main() -> int:
     offers = []
     for q in manifest["quotes"]:
         path = FIXTURES / q["file"]
-        created = store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=as_of, actor="export",
-                                           allow_duplicate=True)
+        created = store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=as_of,
+                                           allow_duplicate=True, context=CONTEXT)
         offer = created["offer"]
-        segments = store.get_extraction(created["extraction_id"])["segments"]
+        segments = store.get_extraction(created["extraction_id"], context=CONTEXT)["segments"]
         offers.append({
             "fixture_id": q["id"], "split": q["split"], "offer_id": f"fixture-{q['id'].lower()}",
             "version": offer["version"], "status": offer["status"], "synthetic": True,

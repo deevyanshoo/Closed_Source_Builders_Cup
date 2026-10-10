@@ -1,8 +1,6 @@
-"""Record one end-to-end run: synthetic quote -> reviewed, saved offer -> planning input -> existing recommend()
--> existing local RFQ draft. Nothing is sent.
+"""Record one synthetic quote -> reviewed, saved offer -> scoped planning input.
 
-Runs offline in a temporary data directory (synthetic market data and sample news, labelled as such), so it
-never touches data/app.duckdb and never calls a provider.
+Runs offline in a temporary data directory and never touches data/app.duckdb or a provider.
 
 Run from procurement-engine/:  .venv/bin/python scripts/offer_e2e_demo.py
 Output: evaluation/offers/e2e_demo_<UTC date>_<unique run id>.json
@@ -21,6 +19,7 @@ from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 ROOT = SOURCE_ROOT
+
 FIXTURES = SOURCE_ROOT / "tests" / "fixtures" / "offers"
 BUYER = {"need_by_month": 3, "current_stock_kg": "20000", "monthly_consumption_kg": "15000", "risk_appetite": "medium"}
 
@@ -55,33 +54,34 @@ def main() -> int:
 
     os.environ.pop("GEMINI_API_KEY", None)
     reset_caches()
-    from procure.ingest.refresh import refresh_all
     from procure.offers import store
+    from procure.offers.context import OfferContext
+    global CONTEXT, SYSTEM_CONTEXT
+    CONTEXT = OfferContext("synthetic-reviewer", "synthetic-workspace", "editor")
+    SYSTEM_CONTEXT = OfferContext("system", "synthetic-workspace", "system")
 
-    refresh = refresh_all(include_news=True, evaluate_models=True)
     manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
     today = dt.date.fromisoformat(manifest["as_of"])
     q01 = next(q for q in manifest["quotes"] if q["id"] == "Q01")
     path = FIXTURES / q01["file"]
 
     steps = []
-    offer = store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=today, actor="buyer")["offer"]
+    offer = store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=today, context=CONTEXT)["offer"]
     steps.append({"step": "extracted", "status": offer["status"], "blocking_reasons": offer["blocking_reasons"]})
     # Q01 states a USD unit price, but not a settlement currency. This synthetic
     # demo uses an explicit reviewer assertion and never calls it document-verified.
     offer = store.correct_field(offer["offer_id"], field="settlement_currency", value="USD",
-                                evidence=None, expected_version=offer["version"],
-                                actor="reviewer", idempotency_key="demo-correct-0001", today=today)
+                                evidence=None, expected_version=offer["version"], idempotency_key="demo-correct-0001", today=today, context=CONTEXT)
     steps.append({"step": "corrected", "status": offer["status"], "field": "settlement_currency",
                   "source": offer["fields"]["settlement_currency"]["source"],
                   "evidence": offer["fields"]["settlement_currency"]["evidence"],
                   "evidence_status": offer["fields"]["settlement_currency"]["evidence_status"],
                   "reviewer_assertion": "USD settlement currency entered for this synthetic demo; not stated by Q01"})
-    offer = store.save_offer(offer["offer_id"], expected_version=offer["version"], actor="reviewer",
-                             idempotency_key="demo-save-0001", today=today)
+    offer = store.save_offer(offer["offer_id"], expected_version=offer["version"],
+                             idempotency_key="demo-save-0001", today=today, context=CONTEXT)
     steps.append({"step": "saved", "status": offer["status"], "version": offer["version"]})
-    plan = store.planning_input([offer["offer_id"]], buyer=BUYER, actor="planner",
-                                idempotency_key="demo-plan-0001", today=today)
+    plan = store.planning_input([offer["offer_id"]], buyer=BUYER,
+                                idempotency_key="demo-plan-0001", today=today, context=CONTEXT)
     # Keep both provenance paths visible without requiring a newer planning
     # contract: only the price is backed by the source's p1:l10 unit-price line.
     settlement = offer["fields"]["settlement_currency"]
@@ -97,11 +97,9 @@ def main() -> int:
                                                                  for e in field.get("evidence") or []]}
                                         for name, field in provenance.items()},
                   "legacy_request": plan["legacy_recommend_requests"][0], "limitations": plan["limitations"]})
-    rfq = store.draft_rfq(offer["offer_id"], buyer=BUYER, actor="planner", idempotency_key="demo-rfq-0001",
-                          today=today)
-    steps.append({"step": "rfq_drafted", "status": rfq["offer"]["status"], "recommendation": rfq["recommendation"],
-                  "rfq": rfq["rfq"], "sent": rfq["sent"]})
-    events = store.get_offer(offer["offer_id"], include_events=True, today=today)["events"]
+    steps.append({"step": "rfq_unavailable", "status": "service_route_unavailable",
+                  "sent": False, "reason": "Global actions and recommendations are not tenant scoped"})
+    events = store.get_offer(offer["offer_id"], include_events=True, today=today, context=CONTEXT)["events"]
 
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=SOURCE_ROOT, capture_output=True,
                               text=True).stdout.strip()
@@ -112,10 +110,10 @@ def main() -> int:
                                 (SOURCE_ROOT / "scripts" / "offer_e2e_demo.py",
                                  SOURCE_ROOT / "src" / "procure" / "offers" / "store.py",
                                  SOURCE_ROOT / "src" / "procure" / "offers" / "extraction.py")},
-              "market_data": {s["source"]: s["used"] for s in refresh["sources"]},
-              "note": "Synthetic quote and offline synthetic market data. USD settlement was entered by a reviewer "
+              "market_data": "not_used",
+              "note": "Synthetic quote only. USD settlement was entered by a reviewer "
                       "without document evidence; Q01 separately states a USD unit price. Legacy planning ignores "
-                      "the offer price, MOQ, capacity and payment terms. A local RFQ draft only; nothing was sent.",
+                      "the offer price, MOQ, capacity and payment terms. RFQ draft is unavailable; nothing was sent.",
               "steps": steps, "audit_events": events}
     out = _publish_record(record)
     print(json.dumps([{k: s[k] for k in s if k in ("step", "status", "sent")} for s in steps], indent=1))

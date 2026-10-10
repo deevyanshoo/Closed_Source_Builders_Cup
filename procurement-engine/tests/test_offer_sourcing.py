@@ -13,7 +13,11 @@ from pathlib import Path
 import pytest
 
 from procure.offers import store
+from procure.offers.context import OfferContext
 from procure.offers.sourcing import CONTRACT, incoterm_cost_split, sourcing_candidates
+
+CONTEXT = OfferContext("synthetic-reviewer", "synthetic-workspace", "editor")
+SYSTEM_CONTEXT = OfferContext("system", "synthetic-workspace", "system")
 
 FIXTURES = Path(__file__).parent / "fixtures" / "offers"
 QUOTES = {q["id"]: q for q in json.loads((FIXTURES / "manifest.json").read_text())["quotes"]}
@@ -27,22 +31,22 @@ def key() -> str:
 
 def fresh(quote_id):
     path = FIXTURES / QUOTES[quote_id]["file"]
-    return store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=TODAY, actor="tester",
-                                    allow_duplicate=True)["offer"]
+    return store.create_from_upload(path.read_bytes(), path.name, mode="rules", as_of=TODAY,
+                                    allow_duplicate=True, context=CONTEXT)["offer"]
 
 
 def saved_q01():
     offer = fresh("Q01")
     offer = store.correct_field(offer["offer_id"], field="settlement_currency", value="USD", evidence=None,
-                                expected_version=offer["version"], actor="reviewer@example.test",
-                                idempotency_key=key(), today=TODAY)
-    return store.save_offer(offer["offer_id"], expected_version=offer["version"], actor="reviewer@example.test",
-                            idempotency_key=key(), today=TODAY)
+                                expected_version=offer["version"],
+                                idempotency_key=key(), today=TODAY, context=CONTEXT)
+    return store.save_offer(offer["offer_id"], expected_version=offer["version"],
+                            idempotency_key=key(), today=TODAY, context=CONTEXT)
 
 
 def test_saved_offer_becomes_a_candidate_with_price_basis_validity_terms_and_evidence():
     offer = saved_q01()
-    result = sourcing_candidates([store.get_offer(offer["offer_id"], today=TODAY)], as_of=TODAY)
+    result = sourcing_candidates([store.get_offer(offer["offer_id"], today=TODAY, context=CONTEXT)], as_of=TODAY)
     assert (result["contract"], result["as_of"], result["synthetic"]) == (CONTRACT, "2026-10-07", True)
     [c] = result["candidates"]
     assert c["candidate_id"] == f"{offer['offer_id']}@v{offer['version']}#item0"
@@ -73,10 +77,10 @@ def test_saved_offer_becomes_a_candidate_with_price_basis_validity_terms_and_evi
 
 
 def test_offers_that_are_not_accepted_or_have_expired_are_excluded_with_reasons():
-    unsaved = store.get_offer(fresh("Q02")["offer_id"], today=TODAY)
+    unsaved = store.get_offer(fresh("Q02")["offer_id"], today=TODAY, context=CONTEXT)
     saved = saved_q01()
     late = dt.date(2026, 11, 1)
-    result = sourcing_candidates([unsaved, store.get_offer(saved["offer_id"], today=late)], as_of=late)
+    result = sourcing_candidates([unsaved, store.get_offer(saved["offer_id"], today=late, context=CONTEXT)], as_of=late)
     assert result["candidates"] == []
     assert [(e["offer_id"], e["reason"]) for e in result["excluded"]] == [
         (unsaved["offer_id"], "not_accepted"), (saved["offer_id"], "expired")]
@@ -85,18 +89,18 @@ def test_offers_that_are_not_accepted_or_have_expired_are_excluded_with_reasons(
 
 def test_reading_candidates_changes_nothing():
     offer = saved_q01()
-    before = store.get_offer(offer["offer_id"], today=TODAY)
+    before = store.get_offer(offer["offer_id"], today=TODAY, context=CONTEXT)
     snapshot = copy.deepcopy(before)
     sourcing_candidates([before], as_of=TODAY)
-    store.sourcing_candidates(today=TODAY)
-    after = store.get_offer(offer["offer_id"], today=TODAY)
+    store.sourcing_candidates(today=TODAY, context=CONTEXT)
+    after = store.get_offer(offer["offer_id"], today=TODAY, context=CONTEXT)
     assert before == snapshot
     assert (after["status"], after["version"]) == ("saved", offer["version"])
 
 
 def test_store_lists_candidates_for_every_saved_offer():
     offer = saved_q01()
-    result = store.sourcing_candidates(today=TODAY)
+    result = store.sourcing_candidates(today=TODAY, context=CONTEXT)
     assert offer["offer_id"] in {c["offer_id"] for c in result["candidates"]}
     assert all(c["offer_status"] in ("saved", "used_in_plan") for c in result["candidates"])
 

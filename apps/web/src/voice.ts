@@ -495,6 +495,7 @@ export class VoiceController {
       if (JSON.stringify(fresh.snapshot) !== JSON.stringify(run.input.snapshot)) throw new VoiceError('The saved context changed.', 'validation');
       const body: VoiceHTTPTextProposalTurnRequest = { contract_version: '0.2.0', context_version: created.context_version, input_mode: 'text_proposal', utterance };
       this.emit({ kind: 'starting' });
+      if (!this.isCurrent(run)) return;
       const turn = await this.request<VoiceHTTPTurnResponse>('POST', `${root}/${encodeURIComponent(created.session_id)}/turns`, 'VoiceHTTPTurnResponse', body);
       if (turn.session_id !== created.session_id || turn.context_version !== created.context_version || turn.context_fingerprint !== created.context_fingerprint || !this.validRunRef(turn.production_context_ref, run.ref) || turn.read_only !== true || turn.synthetic !== true) return invalid();
       run.turn = turn;

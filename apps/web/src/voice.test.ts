@@ -128,6 +128,21 @@ describe('unverified saved-context text proposal', () => {
     expect(rejected.turns).toHaveLength(1);
     expect(rejected.controller.state.proposal).toBeUndefined();
   });
+  it('does not POST a text turn when a starting listener cancels the proposal', async () => {
+    const h = harness(); await selected(h);
+    let stopping: Promise<void> | undefined;
+    const unsubscribe = h.controller.subscribe(view => {
+      if (view.kind === 'starting' && !stopping) stopping = h.controller.cancel();
+    });
+    await h.controller.proposeText('move r-C one hour');
+    await stopping;
+    unsubscribe();
+    expect(h.turns).toHaveLength(0);
+    expect(h.controller.state.proposal).toBeUndefined();
+    expect(h.controller.state.kind).toBe('cancelled');
+    expect(h.creates).toBe(1);
+    expect(h.closes).toBe(1);
+  });
   it('owns confirmation once before deferred identity resumes, without competing cleanup', async () => {
     const h = harness(); await selected(h); await h.controller.proposeText('move r-C one hour');
     const gate = deferred<SessionResponse>(); h.gateIdentity(gate.promise);

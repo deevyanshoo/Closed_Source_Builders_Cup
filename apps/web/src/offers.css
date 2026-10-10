@@ -70,3 +70,16 @@
 .report-downloads{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}
 .report-downloads .secondary-button{width:auto;margin:0;min-height:24px}
 .report-downloads small{color:#555;font-size:11px;flex-basis:100%}
+.offers-scenario{margin:24px 28px 0;padding:18px 20px;border:1px solid #111;background:#fbfbf8}
+.offers-scenario h3{font-size:14px;text-transform:uppercase;margin:0 0 4px}
+.offers-scenario h4{font-size:13px;text-transform:uppercase;margin:18px 0 6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.offers-scenario-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.offers-scenario-form .secondary-button{width:auto;min-height:24px}
+.offers-scenario-result{font-size:13px;line-height:1.5;margin-top:16px}
+.offers-scenario-result ul{margin:6px 0;padding-left:18px}
+.offers-scenario-result q{overflow-wrap:anywhere}
+.offers-scenario-result summary{cursor:pointer;font-weight:700;min-height:24px}
+.offers-schedule{min-width:520px}
+.offers-scenario-compare{border-top:1px solid #bbb;margin-top:12px}
+@media(max-width:1000px){.offers-scenario-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.offers-scenario{margin:18px 16px 0;padding:14px}.offers-scenario-grid{grid-template-columns:1fr}.offers-schedule{min-width:0}}

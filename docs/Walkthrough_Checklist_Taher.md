@@ -51,6 +51,21 @@ Everything is synthetic. If anything shows live data, a real supplier, or a real
   - Amounts keep exact decimal text, for example `"250"` tonne, not `250.0`.
 - [ ] Reload the page.
   - Expected: the correction is gone. Saves stay in the tab only.
+- [ ] Open sample Q01. In **Decision date and payment timing**, enter:
+  - decision date 2026-10-10 and bill of lading date 2026-11-06
+  - compare with Q03, rate `8`
+  - then Run scenario.
+  - Expected: "Open: valid until 2026-10-31, 21 days left".
+  - 705937.5 USD on 2026-10-10 and 1647187.5 USD on 2026-11-06.
+  - "Payment moves 98.1 days later on average" and 50595.41 USD.
+- [ ] Change the rate to `8%` and run.
+  - Expected: "Could not run the scenario".
+- [ ] Set the rate back to `8`, the decision date to 2026-11-02, and run.
+  - Expected: "Expired: valid until 2026-10-31" and a list under "Leaves the comparison after the decision date moves".
+- [ ] Download synthetic JSON.
+  - Expected: it has a `scenario` block.
+- [ ] Clear the rate and run.
+  - Expected: "Enter an annual rate to value this. No rate is assumed."
 
 ## 3. Dispatch (`/dispatch`)
 

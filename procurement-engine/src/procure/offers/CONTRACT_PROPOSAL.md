@@ -78,6 +78,14 @@ SupplierOffer {
   normalized: {
     as_of, reporting_currency, origin_country_code, expiry: valid | expired | unknown,
     min_order: {kg}, capacity: {kg},
+    payment_terms: {status: parsed | partial | inconsistent | unrecognised | not_stated | unavailable, text,
+                    instalments: [{percent: decimal text | null, percent_basis: stated | single_term | not_stated,
+                                   instrument: telegraphic_transfer | letter_of_credit | cash_against_documents |
+                                               open_account | not_stated,
+                                   anchor: order | shipment | bill_of_lading | documents | invoice | delivery |
+                                           arrival | not_stated,
+                                   days: int | null, timing: on | on_or_before, clause}],
+                    unrecognised: string[], evidence: [{locator, quote}], reasons: string[], source}
     items: [{quantity: {kg}, pricing: {per_kg: Money, reporting: {currency, status, per_kg: Money | null,
              fx: {base, quote, rate, rate_date, source, retrieved_at, status} | null}}}]
   }

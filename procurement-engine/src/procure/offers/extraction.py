@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from ..documents import Document
 from . import countries, extract_gemini, extract_rules
 from . import normalize as nz
+from .terms import parse_payment_terms
 from .evidence import HIDDEN_FLAGS, FieldResult, resolve_field
 
 FIELD_KINDS = {
@@ -120,7 +121,7 @@ def _normalized(fields: dict, items: list[dict], as_of: dt.date, reporting_curre
            "expiry": nz.expiry_status(value(fields["valid_until"]), as_of),
            "min_order": nz.normalize_quantity(value(fields["min_order"])) if value(fields["min_order"]) else None,
            "capacity": nz.normalize_quantity(value(fields["capacity"])) if value(fields["capacity"]) else None,
-           "items": []}
+           "payment_terms": parse_payment_terms(fields["payment_terms"].to_dict()), "items": []}
     for item in items:
         q, p = value(item["quantity"]), value(item["pricing"])
         out["items"].append({

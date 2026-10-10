@@ -21,6 +21,21 @@ OUT = ROOT.parent / "apps" / "web" / "src" / "offers-fixtures.json"
 FIXTURES = ROOT / "tests" / "fixtures" / "offers"
 
 
+# Scenario inputs computed here by procure.offers.scenario, so the web adapter's mirror can be checked against them.
+_EVENTS = {"shipment": "2026-11-05", "bill_of_lading": "2026-11-06", "documents": "2026-11-12",
+           "invoice": "2026-11-06", "delivery": "2026-12-10", "arrival": "2026-12-08"}
+SCENARIO_EXAMPLES = [
+    {"offer_id": "fixture-q01", "decision_date": "2026-10-10", "dates": _EVENTS, "rate_percent": "8",
+     "alternative_offer_id": "fixture-q03"},
+    {"offer_id": "fixture-q04", "decision_date": "2026-10-26", "dates": _EVENTS, "rate_percent": "7.25",
+     "alternative_offer_id": "fixture-q02"},
+    {"offer_id": "fixture-q10", "decision_date": "2026-10-10", "dates": {**_EVENTS, "documents": None},
+     "rate_percent": None, "alternative_offer_id": "fixture-q09"},
+    {"offer_id": "fixture-q17", "decision_date": "2026-10-20", "dates": _EVENTS, "rate_percent": "8",
+     "alternative_offer_id": None},
+]
+
+
 def _slim(field: dict) -> dict:
     keep = ("name", "kind", "status", "value", "critical", "source", "reasons")
     out = {k: field.get(k) for k in keep}
@@ -65,12 +80,22 @@ def main() -> int:
             "blocking_reasons": offer["blocking_reasons"],
             "segments": [{k: s[k] for k in ("locator", "text", "flags")} for s in segments],
         })
+    from procure.offers.scenario import offer_scenario
+
+    examples = []
+    for example in SCENARIO_EXAMPLES:
+        target = next(o for o in offers if o["offer_id"] == example["offer_id"])
+        examples.append({"inputs": example, "result": offer_scenario(
+            target, offers, as_of=as_of, decision_date=dt.date.fromisoformat(example["decision_date"]),
+            dates=example["dates"], rate_percent=example["rate_percent"],
+            alternative_offer_id=example["alternative_offer_id"])})
     revision = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
                               text=True).stdout.strip()
     data = {"synthetic": True, "source": "local_fixture_adapter", "generated_from_revision": revision,
             "as_of": manifest["as_of"], "extractor": "rules",
             "notice": "Synthetic quotes processed by the Python rules pipeline. Not live data and not from the gateway.",
-            "materials": list(materials_config()["materials"]), "offers": offers}
+            "materials": list(materials_config()["materials"]), "offers": offers,
+            "scenario_examples": examples}
     OUT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     print(f"Wrote {len(offers)} offers to {OUT} ({OUT.stat().st_size // 1024} KiB)")
     return 0

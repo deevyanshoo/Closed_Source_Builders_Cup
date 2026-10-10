@@ -127,6 +127,47 @@ Accessibility:
 - Tap targets are at least 24 by 24 px.
 - It was checked in headless Chrome at 1440, 768 and 390 px.
 
+## Expiry and payment scenario
+
+`terms.py` turns the extracted payment terms into instalments in `normalized.payment_terms`:
+- **Each instalment:** share of the price, instrument (TT, LC, CAD, open account), the event it is tied to
+  (order, shipment, bill of lading, documents, invoice, delivery, arrival), days after it, and whether it is due
+  on or by that date.
+- **Evidence:** the field's locators, so each instalment points to its page line or cell.
+- **Unclear text:** an event the text does not name is `not_stated`. A clause it cannot read is kept under
+  `unrecognised` and gets no share.
+- **The one inference:** a single term with no percentage covers the whole price (`percent_basis: single_term`).
+
+`scenario.py` answers two questions for one offer, with user-entered dates:
+- **Validity:** a quote is open through its valid-until date. Expired offers stay listed but leave the comparison
+  set. A missing date is `not_stated`, also excluded, and never treated as open.
+- **Cash timing:** it places each instalment on its event date and gives the amount-weighted payment day. It
+  compares that with another quote's terms on the same order value and dates. The value of paying later needs an
+  annual rate from the user; none is assumed. Simple interest, actual days over 365, rounded half-even to 0.01.
+  Amounts are quantity times unit price in the quote currency: no FX, tax or freight, and none when a unit
+  conversion would not be exact.
+
+`/offers` shows this in the "Decision date and payment timing" panel, through the local adapter
+(`apps/web/src/offers-scenario.ts`). The JSON and CSV downloads include the last scenario run.
+`offers-scenario.test.ts` replays the examples the export script computes with `scenario.py`, so the two
+implementations stay identical. There is no service route for the scenario yet.
+
+Payment terms on the held-out quotes, recorded as they came out and not tuned. The parser and its tests use only
+training wordings and hand-written strings. Its event list includes delivery and arrival, which only held-out quotes
+use, and the held-out wordings were visible while writing it. Treat these results as optimistic:
+
+| Quote | Text | Result |
+|---|---|---|
+| Q06, Q17 | LC at sight | parsed: 100% LC on documents |
+| Q07, Q15 | 30% TT advance, 70% against BL copy | parsed: 30% TT on order, 70% on bill of lading |
+| Q08 | Net 45 days | parsed: open account, 45 days, event not stated |
+| Q14 | Net 30 days from delivery | parsed: open account, delivery + 30 days |
+| Q16 | Net 30 days after arrival | parsed: open account, arrival + 30 days |
+| Q18 | LC 30 days | parsed: LC, 30 days, event not stated |
+
+On the training quotes, Q10's "final invoice after quotational period" stays unrecognised, so Q10 is `partial` at
+90%.
+
 ## Known limits
 
 - **Settlement currency.** No synthetic quote states one, so it is `missing` on all 18 and blocks save until a

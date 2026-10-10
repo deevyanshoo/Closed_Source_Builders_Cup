@@ -24,6 +24,7 @@ from ..settings import materials_config
 from . import countries
 from . import normalize as nz
 from .evidence import CRITICAL_FIELDS, base_name
+from .terms import parse_payment_terms
 
 TRANSITIONS: dict[str, tuple[set[str], str]] = {
     "correct": ({"extracted", "needs_review", "corrected"}, "corrected"),
@@ -234,7 +235,8 @@ def compute_normalized(payload: dict, today: dt.date, rate_lookup=None) -> dict:
     out = {"as_of": today.isoformat(), "reporting_currency": reporting,
            "origin_country_code": countries.code_for(usable(fields["origin_country"])),
            "expiry": nz.expiry_status(usable(fields["valid_until"]), today),
-           "min_order": quantity(fields["min_order"]), "capacity": quantity(fields["capacity"]), "items": []}
+           "min_order": quantity(fields["min_order"]), "capacity": quantity(fields["capacity"]),
+           "payment_terms": parse_payment_terms(fields["payment_terms"]), "items": []}
     for item in payload["items"]:
         price = usable(item["pricing"])
         out["items"].append({

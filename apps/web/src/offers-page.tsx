@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
 import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
@@ -8,6 +8,8 @@ import { bindOfferExtraction, createQuoteService, loadQuoteSession, QuoteService
 import type { QuoteSession, ServiceField, ServiceOffer, ServiceOfferSummary, Sourcing } from './offers-service';
 import { EVENTS } from './offers-scenario';
 import type { EventName, ScenarioInputs, ScenarioResult, Validity } from './offers-scenario';
+import { getQuoteShipmentBridge, handoffUrl, stageHandoff, validBridgeCandidate } from './quote-shipment-bridge';
+import type { BridgeCandidate } from './quote-shipment-bridge';
 import './offers.css';
 
 type View = { kind: 'empty' } | { kind: 'loading'; label: string } | { kind: 'error'; message: string } | { kind: 'offer' };
@@ -387,19 +389,19 @@ function FixtureOffersPage() {
   </main>;
 }
 
-const sessionKey = (s: QuoteSession) => `${s.principal_id}\u0000${s.workspace_id}\u0000${s.role}\u0000${s.identity_mode}`;
+const sessionKey = (s: QuoteSession) => JSON.stringify([s.principal_id, s.workspace_id, s.role, s.identity_mode]);
 const safeMessage = (error: unknown) => error instanceof QuoteServiceError ? error.message : 'The local quote workspace is unavailable.';
 const fieldRows = (offer: ServiceOffer): [string, ServiceField][] => [
   ...Object.entries(offer.fields), ...offer.items.flatMap((item, i) => Object.entries(item).map(([name, field]) => [`items[${i}].${name}`, field] as [string, ServiceField])),
 ];
 const currencyPrice = (value: { amount: string; currency: string } | null | undefined) => value ? `${value.amount} ${value.currency}` : 'unknown';
 
-export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit, onSave, canEdit, busy }: {
+export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit, onSave, onBridge, canEdit, busy }: {
   offer: ServiceOffer; sourcing: Sourcing | null; selected: string | null; onSelect: (name: string) => void;
-  onEdit: (name: string, value: unknown) => void; onSave: () => void; canEdit: boolean; busy: boolean;
+  onEdit: (name: string, value: unknown) => void; onSave: () => void; onBridge?: (candidate: BridgeCandidate) => void; canEdit: boolean; busy: boolean;
 }) {
   const supplier = offer.fields.supplier_name?.value;
-  const matching = (offer.status === 'saved' || offer.status === 'used_in_plan') ? sourcing?.candidates.filter(c => c.offer_id === offer.offer_id &&
+  const matching = offer.synthetic && sourcing?.synthetic && (offer.status === 'saved' || offer.status === 'used_in_plan') ? sourcing?.candidates.filter(c => c.offer_id === offer.offer_id &&
     c.offer_version === offer.version && c.document_id === offer.document.document_id &&
     c.item_index >= 0 && c.item_index < offer.items.length) ?? [] : [];
   return <section className="offers-workspace" aria-label="Local quote service offer">
@@ -424,7 +426,9 @@ export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit
       {matching.length ? <ul>{matching.map((c, i) => <li key={i}><strong>{c.material ?? 'Material unknown'}</strong> · {c.quantity?.kg ?? 'unknown'} kg · {c.price?.type === 'index_linked'
         ? <>Index-linked; premium {currencyPrice(c.price?.premium_per_kg)} per kg; final price unknown</>
         : <>Quoted {currencyPrice(c.price?.per_kg)} per kg</>}. {c.landed_price?.per_kg ? <>Incoterm quote basis {currencyPrice(c.landed_price.per_kg)} per kg; duties and destination charges may remain excluded.</> : 'Comparable landed price unknown.'}
-        {c.payment_terms?.source === 'user' && <small> Payment terms are a reviewer assertion.</small>}</li>)}</ul> : <p>No saved sourcing candidate for this offer. Blocking or excluded reasons stay authoritative in the service.</p>}
+        {c.payment_terms?.source === 'user' && <small> Payment terms are a reviewer assertion.</small>}
+        {onBridge && validBridgeCandidate(c) && <button type="button" className="secondary-button" disabled={busy}
+          onClick={() => onBridge(c)}>Check host-configured shipment context for this candidate</button>}</li>)}</ul> : <p>No saved sourcing candidate for this offer. Blocking or excluded reasons stay authoritative in the service.</p>}
       {(sourcing?.excluded ?? []).filter(c => c.offer_id === offer.offer_id && c.offer_version === offer.version &&
         (c.item_index === null || c.item_index >= 0 && c.item_index < offer.items.length)).map((c, i) => <p key={i}>Excluded: {c.reason}</p>)}
     </section>
@@ -434,6 +438,7 @@ export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit
 }
 
 function ServiceOffersPage() {
+  const navigate = useNavigate();
   const [session, setSession] = useState<QuoteSession | null>(null);
   const [offers, setOffers] = useState<ServiceOfferSummary[]>([]);
   const [offer, setOffer] = useState<ServiceOffer | null>(null);
@@ -475,7 +480,7 @@ function ServiceOffersPage() {
     document.addEventListener('visibilitychange', onVisible);
     return () => { document.removeEventListener('visibilitychange', onVisible); generation.current += 1; request.current?.abort(); };
   }, []);
-  async function withService(operation: (api: ReturnType<typeof createQuoteService>, isCurrent: () => boolean) => Promise<void>) {
+  async function withService(operation: (api: ReturnType<typeof createQuoteService>, isCurrent: () => boolean, captured: QuoteSession, signal: AbortSignal) => Promise<void>) {
     const captured = sessionRef.current;
     if (!captured) { setMessage('Refresh the local session before continuing.'); return; }
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
@@ -484,7 +489,7 @@ function ServiceOffersPage() {
       const fresh = await loadQuoteSession(controller.signal);
       if (mine !== generation.current || sessionKey(fresh) !== sessionKey(captured)) throw new QuoteServiceError('identity_changed', 'The session changed. Refresh the workspace.');
       const api = createQuoteService(captured, () => mine === generation.current && sessionRef.current === captured, fetch, controller.signal);
-      await operation(api, () => mine === generation.current && !controller.signal.aborted && sessionRef.current === captured);
+      await operation(api, () => mine === generation.current && !controller.signal.aborted && sessionRef.current === captured, captured, controller.signal);
     } catch (error) {
       if (mine === generation.current) { const text = safeMessage(error); invalidate(); setMessage(text); try { const fresh = await loadQuoteSession(); if (generation.current === mine + 1) { sessionRef.current = fresh; setSession(fresh); } } catch { /* explicit retry */ } }
     } finally { if (mine === generation.current) setBusy(false); }
@@ -528,6 +533,22 @@ function ServiceOffersPage() {
       setMessage(kind === 'save' ? 'Offer saved in the local service.' : 'Reviewer correction saved and revalidated by the service.');
     });
   }
+  async function bridge(candidate: BridgeCandidate) {
+    const current = offer;
+    if (!current || !sourcing || (current.status !== 'saved' && current.status !== 'used_in_plan') ||
+        candidate.offer_id !== current.offer_id || candidate.offer_version !== current.version ||
+        candidate.document_id !== current.document.document_id || candidate.item_index >= current.items.length ||
+        !sourcing.candidates.some(c => c.candidate_id === candidate.candidate_id && c.offer_id === candidate.offer_id &&
+          c.offer_version === candidate.offer_version && c.item_index === candidate.item_index && c.document_id === candidate.document_id)) return;
+    await withService(async (_api, isCurrent, captured, signal) => {
+      const response = await getQuoteShipmentBridge(captured, candidate, isCurrent, signal);
+      const fresh = await loadQuoteSession(signal);
+      if (!isCurrent() || sessionKey(fresh) !== sessionKey(captured)) throw new QuoteServiceError('identity_changed', 'The session changed. Refresh the workspace.');
+      const handoff = stageHandoff(response, captured);
+      if (!isCurrent()) throw new QuoteServiceError('identity_changed', 'The session changed. Refresh the workspace.');
+      navigate(handoffUrl(handoff.triple), { state: handoff });
+    });
+  }
   return <main className="shell offers-shell"><header className="masthead workspace-masthead"><div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
     <div className="masthead-meta">Local quote service · development only</div><WorkspaceNav /></header>
     <section className="recovery-intro"><p className="eyebrow">Quote intelligence · local service</p><h1>Review supplier quotes</h1>
@@ -539,7 +560,7 @@ function ServiceOffersPage() {
       <div><label className="field"><input type="checkbox" checked={syntheticConfirmed} onChange={e => setSyntheticConfirmed(e.target.checked)} /> I confirm this is synthetic test material.</label>
       <label className="field"><span className="field-label">Upload synthetic PDF, XLSX or CSV</span><input type="file" accept=".pdf,.xlsx,.csv" disabled={!syntheticConfirmed || !session || session.role !== 'editor' || busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} /></label></div></div>
     <div className="offers-actions"><h3>Workspace offers</h3>{offers.length ? <ul>{offers.map(o => <li key={o.offer_id}><button className="text-button" type="button" onClick={() => void open(o.offer_id)} disabled={busy}>{o.supplier_name ?? 'Supplier unknown'} · {o.filename} · {o.status} · version {o.version}</button></li>)}</ul> : <p>No offers loaded.</p>}</div>
-    {offer && <ServiceOfferReview offer={offer} sourcing={sourcing} selected={selected} onSelect={setSelected} onEdit={(name, value) => void mutate('correct', name, value)} onSave={() => void mutate('save')} canEdit={session?.role === 'editor'} busy={busy} />}
+    {offer && <ServiceOfferReview offer={offer} sourcing={sourcing} selected={selected} onSelect={setSelected} onEdit={(name, value) => void mutate('correct', name, value)} onSave={() => void mutate('save')} onBridge={candidate => void bridge(candidate)} canEdit={session?.role === 'editor'} busy={busy} />}
     <footer><span>Service mode · local development</span><span>No supplier messages, orders or purchases</span></footer></main>;
 }
 

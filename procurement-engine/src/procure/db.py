@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import stat
 import threading
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -33,6 +38,76 @@ except Exception:  # pragma: no cover
 _LOCK = threading.RLock()
 _CONN: Any = None
 _CONN_PATH: Path | None = None
+_OFFERS_ONLY_STRICT = False
+_CONCRETE_PATH_TYPE = type(Path())
+
+
+class OffersBindingUnavailable(RuntimeError):
+    """A dedicated offers process has no live app-owned database binding."""
+
+
+@dataclass(eq=False)
+class OfferConnection:
+    path: Path
+    connection: Any
+    closed: bool = False
+
+
+_OFFERS_BOUND: ContextVar[OfferConnection | None] = ContextVar("offers_connection", default=None)
+
+
+def enable_offers_only_strict() -> None:
+    global _OFFERS_ONLY_STRICT
+    with _LOCK:
+        _OFFERS_ONLY_STRICT = True
+
+
+def open_offers_connection(path: Path, *, data_dir: Path) -> OfferConnection:
+    if not _OFFERS_ONLY_STRICT or ENGINE != "duckdb":
+        raise OffersBindingUnavailable("offers binding unavailable")
+    if (type(path) is not _CONCRETE_PATH_TYPE
+            or type(data_dir) is not _CONCRETE_PATH_TYPE or not path.is_absolute()
+            or not data_dir.is_absolute() or ".." in path.parts or ".." in data_dir.parts
+            or path != data_dir / "offers-only.duckdb"):
+        raise OffersBindingUnavailable("offers binding unavailable")
+    for ancestor in (*reversed(data_dir.parents), data_dir):
+        try:
+            mode = ancestor.lstat().st_mode
+        except OSError:
+            raise OffersBindingUnavailable("offers binding unavailable") from None
+        if not stat.S_ISDIR(mode):
+            raise OffersBindingUnavailable("offers binding unavailable")
+    info = data_dir.stat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise OffersBindingUnavailable("offers binding unavailable")
+    try:
+        file_mode = path.lstat().st_mode
+    except FileNotFoundError:
+        file_mode = None
+    if file_mode is not None and not stat.S_ISREG(file_mode):
+        raise OffersBindingUnavailable("offers binding unavailable")
+    with _LOCK:
+        return OfferConnection(path, duckdb.connect(str(path)))
+
+
+@contextmanager
+def bind_offers_connection(handle: OfferConnection):
+    if not _OFFERS_ONLY_STRICT or type(handle) is not OfferConnection or handle.closed:
+        raise OffersBindingUnavailable("offers binding unavailable")
+    token = _OFFERS_BOUND.set(handle)
+    try:
+        yield handle
+    finally:
+        _OFFERS_BOUND.reset(token)
+
+
+def close_offers_connection(handle: OfferConnection) -> None:
+    if type(handle) is not OfferConnection:
+        raise OffersBindingUnavailable("offers binding unavailable")
+    with _LOCK:
+        if not handle.closed:
+            handle.closed = True
+            handle.connection.close()
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS prices_monthly (
@@ -71,6 +146,11 @@ def new_id() -> str:
 
 def _connect() -> Any:
     global _CONN, _CONN_PATH
+    if _OFFERS_ONLY_STRICT:
+        handle = _OFFERS_BOUND.get()
+        if type(handle) is not OfferConnection or handle.closed:
+            raise OffersBindingUnavailable("offers binding unavailable")
+        return handle.connection
     path = get_settings().db_path
     if _CONN is not None and _CONN_PATH == path:
         return _CONN

@@ -28,6 +28,7 @@ const stateVersion = "0.2.0"
 type stateConfig struct {
 	ShipmentContextsPath, ShipmentPythonPath, ShipmentSourcePath            string
 	VoicePythonPath, VoiceSourcePath                                        string
+	QuoteLocalKeyFile, QuoteLocalUpstream                                   string
 	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
 	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string
 	Verifier                                                                machineVerifier
@@ -141,6 +142,7 @@ func newLocalStateServer(cfg stateConfig) *stateServer {
 		s.db = nil
 	}
 	s.shipment = initShipmentHTTP(cfg)
+	s.quote = initQuoteHTTP(cfg)
 	s.voice = initVoiceHTTP(cfg)
 	if s.voice != nil {
 		s.voice.production = s

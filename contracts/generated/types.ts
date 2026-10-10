@@ -782,3 +782,334 @@ export interface ShipmentRecoveryResponse {
   context: ShipmentRecoveryContext;
   outcome_json: string;
 }
+
+export interface QuoteResponseContext {
+  principal_id: string;
+  workspace_id: string;
+  role: "editor" | "viewer";
+  identity_mode: "development";
+}
+
+export interface QuoteMoney {
+  amount: string;
+  currency: string;
+}
+
+export interface QuoteQuantity {
+  amount: string;
+  unit: string;
+  period?: string;
+}
+
+export interface QuoteFixedPrice {
+  type: "fixed";
+  unit_price: QuoteMoney;
+  per_unit: string;
+}
+
+export interface QuoteIndexPrice {
+  type: "index_linked";
+  index: string;
+  averaging_period: string;
+  premium: QuoteMoney;
+  per_unit: string;
+  fx_basis?: string;
+  fx_terms?: string;
+  fx_conversion?: string;
+  quotational_period?: string;
+}
+
+export type QuoteFieldValue = string | number | QuoteQuantity | QuoteFixedPrice | QuoteIndexPrice | QuoteIncoterm | (QuoteShipment)[];
+
+export interface QuoteIncoterm {
+  code: string;
+  place: string | null;
+}
+
+export interface QuoteShipment {
+  quantity: QuoteQuantity;
+  window: string;
+}
+
+export interface QuoteEvidence {
+  document_id: string;
+  locator: string;
+  quote: string;
+  text_sha256: string;
+  segment_text?: string;
+}
+
+export interface QuoteFieldCandidate {
+  value: QuoteFieldValue | null;
+  verified: boolean;
+  problems: (string)[];
+  evidence: (QuoteEvidence)[];
+}
+
+export interface QuoteField {
+  name: string;
+  kind: string;
+  status: string;
+  value: QuoteFieldValue | null;
+  critical: boolean;
+  source: string;
+  reasons: (string)[];
+  evidence: (QuoteEvidence)[];
+  candidates: (QuoteFieldCandidate)[];
+  evidence_status?: string;
+  corrected_by?: string | null;
+}
+
+export interface QuoteFields {
+  supplier_name?: QuoteField;
+  origin_country?: QuoteField;
+  incoterm?: QuoteField;
+  settlement_currency?: QuoteField;
+  payment_terms?: QuoteField;
+  valid_until?: QuoteField;
+  lead_time_days?: QuoteField;
+  min_order?: QuoteField;
+  capacity?: QuoteField;
+  shipments?: QuoteField;
+}
+
+export interface QuoteItem {
+  material?: QuoteField;
+  description?: QuoteField;
+  grade?: QuoteField;
+  quantity?: QuoteField;
+  pricing?: QuoteField;
+}
+
+export interface QuoteDocument {
+  document_id: string;
+  filename: string;
+  media_type: string;
+  byte_size: number;
+}
+
+export interface QuoteBlockingReason {
+  code: string;
+  field: string;
+  message: string;
+}
+
+export interface QuoteReviewFlag {
+  flag: string;
+  locator: string | null;
+  text: string;
+}
+
+export interface QuoteOffer {
+  offer_id: string;
+  version: number;
+  status: string;
+  synthetic: boolean;
+  extraction_id: string;
+  document: QuoteDocument;
+  extractor?: string;
+  fields: QuoteFields;
+  items: (QuoteItem)[];
+  blocking_reasons: (QuoteBlockingReason)[];
+  review_flags: (QuoteReviewFlag)[];
+  allowed_actions: (string)[];
+  normalized: QuoteNormalized;
+}
+
+export interface QuoteSegment {
+  locator: string;
+  text: string;
+  flags: (string)[];
+  text_sha256: string;
+}
+
+export interface QuoteUpload {
+  offer: QuoteOffer;
+  extraction_id: string;
+  deduplicated?: boolean;
+}
+
+export interface QuoteExtraction {
+  extraction_id: string;
+  segments: (QuoteSegment)[];
+  extraction: QuoteExtractionDetail;
+}
+
+export interface QuoteSourcingMoney {
+  amount: string;
+  currency: string;
+}
+
+export interface QuoteSourcingPrice {
+  type: "fixed" | "index_linked";
+  per_kg?: QuoteSourcingMoney | null;
+  premium_per_kg?: QuoteSourcingMoney | null;
+  index?: string;
+  averaging_period?: string;
+  unit_price?: QuoteMoney;
+  per_unit?: string;
+}
+
+export interface QuoteLandedPrice {
+  status: string;
+  per_kg: QuoteSourcingMoney | null;
+}
+
+export interface QuoteSourcingCandidate {
+  candidate_id: string;
+  offer_id: string;
+  offer_version: number;
+  offer_status?: string;
+  item_index: number;
+  synthetic?: boolean;
+  document_id: string;
+  material: string;
+  quantity: QuoteSourcingQuantity;
+  price: QuoteSourcingPrice;
+  landed_price: QuoteLandedPrice;
+  evidence?: (QuoteSourcingEvidence)[];
+  field_sources?: QuoteFieldSources;
+  payment_terms?: QuotePaymentTerms;
+}
+
+export interface QuoteSourcing {
+  as_of: string;
+  synthetic: boolean;
+  candidates: (QuoteSourcingCandidate)[];
+  excluded: (QuoteSourcingExclusion)[];
+}
+
+export interface QuoteSourcingExclusion {
+  offer_id: string;
+  offer_version: number;
+  item_index: number | null;
+  reason: string;
+  detail?: string | null;
+}
+
+export interface QuoteUploadRequest {
+  filename: string;
+  content_base64: string;
+  mode: "rules";
+  synthetic: true;
+}
+
+export interface QuoteCorrectionRequest {
+  field: string;
+  value: QuoteFieldValue | null;
+  expected_version: number;
+}
+
+export interface QuoteSaveRequest {
+  expected_version: number;
+}
+
+export interface QuoteOfferSummary {
+  offer_id: string;
+  version: number;
+  status: string;
+  synthetic: boolean;
+  filename: string;
+  supplier_name: string | null;
+  materials: (string)[];
+  blocking_reasons: number;
+  updated_at: string;
+}
+
+export interface QuoteOffersResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  offers: (QuoteOfferSummary)[];
+}
+
+export interface QuoteOfferResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  offer: QuoteOffer;
+}
+
+export interface QuoteUploadResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  upload: QuoteUpload;
+}
+
+export interface QuoteExtractionResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  extraction: QuoteExtraction;
+}
+
+export interface QuoteSourcingResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  sourcing: QuoteSourcing;
+}
+
+export interface QuoteNormalizedBranch {
+  status?: string;
+}
+
+export interface QuoteNormalizedItem {
+  quantity?: QuoteNormalizedBranch | null;
+  pricing?: QuoteNormalizedBranch | null;
+}
+
+export interface QuoteNormalized {
+  as_of: string;
+  items: (QuoteNormalizedItem)[];
+  capacity?: QuoteNormalizedBranch | null;
+  expiry?: string | null;
+  min_order?: QuoteNormalizedBranch | null;
+  origin_country_code?: string | null;
+  payment_terms?: QuoteNormalizedBranch | null;
+  reporting_currency?: string | null;
+}
+
+export interface QuoteExtractionDetail {
+  document: QuoteDocument;
+  as_of: string;
+  extractor: string;
+  synthetic: boolean;
+  normalized?: QuoteNormalized;
+  fields?: QuoteFields;
+  items?: (QuoteItem)[];
+  review_flags?: (QuoteReviewFlag)[];
+}
+
+export interface QuoteSourcingQuantity {
+  amount: string;
+  unit: string;
+  kg: string;
+}
+
+export interface QuoteSourcingEvidence {
+  field: string;
+  locator: string;
+  text_sha256: string;
+  document_id: string;
+}
+
+export interface QuoteFieldSource {
+  status: string;
+  source: string;
+}
+
+export interface QuoteFieldSources {
+  supplier_name?: QuoteFieldSource;
+  origin_country?: QuoteFieldSource;
+  incoterm?: QuoteFieldSource;
+  settlement_currency?: QuoteFieldSource;
+  payment_terms?: QuoteFieldSource;
+  valid_until?: QuoteFieldSource;
+  lead_time_days?: QuoteFieldSource;
+  min_order?: QuoteFieldSource;
+  capacity?: QuoteFieldSource;
+  shipments?: QuoteFieldSource;
+}
+
+export interface QuotePaymentTerms {
+  source?: string;
+  status?: string;
+  text?: string | null;
+}

@@ -4,6 +4,8 @@ import { NavLink } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
 import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
+import { EVENTS } from './offers-scenario';
+import type { EventName, ScenarioInputs, ScenarioResult, Validity } from './offers-scenario';
 import './offers.css';
 
 type View = { kind: 'empty' } | { kind: 'loading'; label: string } | { kind: 'error'; message: string } | { kind: 'offer' };
@@ -108,6 +110,98 @@ export function FieldStatus({ field }: { field: Field }) {
     {field.source === 'user' && <small>reviewer entry</small>}</>;
 }
 
+export type ScenarioState = { kind: 'empty' } | { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'result'; result: ScenarioResult };
+const EVENT_LABELS: Record<EventName, string> = {
+  shipment: 'Shipment date', bill_of_lading: 'Bill of lading date', documents: 'Documents presented', invoice: 'Invoice date',
+  delivery: 'Delivery date', arrival: 'Arrival date',
+};
+const words = (s: string) => s.replaceAll('_', ' ');
+const moneyLabel = (m: { amount: string | null; currency: string | null } | null) => (m?.amount ? `${m.amount} ${m.currency}` : null);
+
+export function ScenarioForm({ offer, offers, defaultDate, busy, onRun }: { offer: Offer; offers: Offer[]; defaultDate: string; busy: boolean; onRun: (inputs: ScenarioInputs) => void }) {
+  const [decision, setDecision] = useState(defaultDate);
+  const [dates, setDates] = useState<Record<EventName, string>>(Object.fromEntries(EVENTS.map(e => [e, ''])) as Record<EventName, string>);
+  const [alternative, setAlternative] = useState('');
+  const [rate, setRate] = useState('');
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    onRun({ decision_date: decision.trim(), dates: Object.fromEntries(EVENTS.map(e => [e, dates[e].trim() || null])),
+      rate_percent: rate.trim() || null, alternative_offer_id: alternative || null });
+  }
+  return <form className="offers-scenario-form" onSubmit={submit} aria-label="Decision date and payment timing scenario">
+    <div className="offers-scenario-grid">
+      <label className="field"><span className="field-label">Decision date</span><input type="date" required value={decision} onChange={e => setDecision(e.target.value)} /></label>
+      {EVENTS.map(e => <label className="field" key={e}><span className="field-label">{EVENT_LABELS[e]}</span>
+        <input type="date" value={dates[e]} onChange={ev => setDates({ ...dates, [e]: ev.target.value })} /></label>)}
+      <label className="field offers-wide"><span className="field-label">Compare with the payment terms of</span>
+        <select value={alternative} onChange={e => setAlternative(e.target.value)}>
+          <option value="">No comparison</option>
+          {offers.filter(o => o.offer_id !== offer.offer_id).map(o => <option key={o.offer_id} value={o.offer_id}>{o.fixture_id} · {formatValue('text', o.fields.payment_terms.value)}</option>)}
+        </select></label>
+      <label className="field"><span className="field-label">Annual rate (%, optional)</span><input inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} /></label>
+    </div>
+    <p className="field-hint">Event dates are your assumptions; leave a date empty if it is unknown. The order is placed on the decision date. No rate is assumed: without one, no cost of timing is shown.</p>
+    <button className="secondary-button" type="submit" disabled={busy}>Run scenario</button>
+  </form>;
+}
+
+function validityText(v: Validity) {
+  switch (v.state) {
+    case 'valid': return `Open: valid until ${v.valid_until}, ${v.days_left} ${v.days_left === 1 ? 'day' : 'days'} left.`;
+    case 'expired': return `Expired: valid until ${v.valid_until}. The offer stays listed but is excluded from comparison.`;
+    case 'not_stated': return 'Validity not stated in the document. It is not treated as open, so the offer is excluded from comparison.';
+    default: return 'Validity is unresolved (conflict or unverified), so the offer is excluded from comparison.';
+  }
+}
+
+export function ScenarioView({ state, offers }: { state: ScenarioState; offers: Offer[] }) {
+  const label = (id: string) => offers.find(o => o.offer_id === id)?.fixture_id ?? id;
+  if (state.kind === 'empty') return <div className="empty-state offers-scenario-empty"><h3>No scenario yet</h3><p>Enter a decision date and any known event dates, then run the scenario. Nothing is saved or sent.</p></div>;
+  if (state.kind === 'loading') return <div className="empty-state" aria-busy="true"><h3>Working out the scenario</h3><p>Checking validity and placing each payment on its event date.</p></div>;
+  if (state.kind === 'error') return <div className="notice notice-error" role="alert"><strong>Could not run the scenario</strong><p>{state.message}</p></div>;
+  const r = state.result, terms = r.payment_terms, c = r.terms_comparison;
+  const change = c?.weighted_days_change ? Number(c.weighted_days_change) : 0;
+  return <div className="offers-scenario-result" role="region" aria-label="Scenario result">
+    <h4>On the decision date, {r.decision_date}</h4>
+    <p>{validityText(r.validity.decision)}</p>
+    <p className="field-hint">On {r.as_of}: {validityText(r.validity.as_of)}</p>
+    <p>In comparison: {r.comparison.as_of.included.length} quotes on {r.as_of}, {r.comparison.decision.included.length} on {r.decision_date}.</p>
+    {r.comparison.newly_expired.length > 0 && <><p><strong>Leaves the comparison after the decision date moves:</strong></p>
+      <ul>{r.comparison.newly_expired.map(e => <li key={e.offer_id}>{label(e.offer_id)}, valid until {e.valid_until}</li>)}</ul></>}
+    <details><summary>Excluded on {r.decision_date} ({r.comparison.decision.excluded.length})</summary>
+      <ul>{r.comparison.decision.excluded.map(e => <li key={e.offer_id}>{label(e.offer_id)}: {words(e.reason)}{e.valid_until ? ` (valid until ${e.valid_until})` : ''}</li>)}</ul></details>
+
+    <h4>Payment terms <span className="offers-chip" data-status={terms.status === 'parsed' ? 'extracted' : 'unverified'}><span className="sr-only">Payment terms status: </span>{words(terms.status)}</span></h4>
+    {terms.text ? <p className="offers-evidence">{terms.evidence.map(e => <code key={e.locator}>{e.locator}</code>)}{terms.source === 'user' && <small>reviewer entry</small>} <q>{terms.text}</q></p>
+      : <p className="inline-empty">{terms.reasons.includes('revalidation_required') ? 'Payment terms were corrected in this tab and need service revalidation before they can be read.' : 'Not stated in the document.'}</p>}
+    {terms.unrecognised.length > 0 && <p className="offers-reason">Not understood, so given no share or date: {terms.unrecognised.map(t => <q key={t}>{t}</q>)}</p>}
+    <p>{r.amount.amount ? `Order value: ${r.amount.amount} ${r.amount.currency} (quantity times unit price, quote currency).` : `Order value not available: ${words(r.amount.reason ?? 'unknown')}. Shares are shown as percentages only.`}</p>
+    {r.schedule.lines.length > 0 && <div className="table-scroll"><table className="offers-table offers-schedule">
+      <caption>Payment schedule</caption>
+      <thead><tr><th>Share</th><th>Instrument</th><th>When</th><th>Date</th><th>Amount</th></tr></thead>
+      <tbody>{r.schedule.lines.map((l, i) => <tr key={i}>
+        <td>{l.percent ? `${l.percent}%` : 'Not stated'}{l.percent_basis === 'single_term' && <small>single term, whole price</small>}</td>
+        <td>{words(l.instrument)}</td>
+        <td>{l.anchor === 'not_stated' ? 'event not stated' : `${words(l.timing)} ${words(l.anchor)} + ${l.days ?? 0} days`}</td>
+        <td>{l.due_date ? <>{l.due_date}<small>day {l.days_from_decision}</small></> : <span className="offers-reason">{words(l.reason ?? 'unknown').replace(':', ': ')}</span>}</td>
+        <td>{moneyLabel(l.amount) ?? 'Not available'}</td>
+      </tr>)}</tbody>
+    </table></div>}
+    <p>{r.schedule.complete ? `Amount-weighted payment day: ${r.schedule.weighted_days} days after the decision date.` : `Schedule incomplete: ${r.schedule.missing.map(m => words(m).replace(':', ': ')).join(', ')}.`}</p>
+
+    {c && r.alternative && <div className="offers-scenario-compare">
+      <h4>Compared with the payment terms of {label(r.alternative.offer_id)}</h4>
+      <p><q>{r.alternative.payment_terms.text ?? 'not stated'}</q>, placed on the same order value and event dates.</p>
+      {c.reason === 'schedule_incomplete' ? <p>Not compared: one of the schedules is incomplete.</p> : <>
+        <p>Payment moves {Math.abs(change)} days {change > 0 ? 'later' : change < 0 ? 'earlier' : '(no change)'} on average.</p>
+        {c.value_of_later_payment ? <p>At {c.rate_percent}% a year, simple interest over {c.day_count} days, that timing is worth <strong>{c.value_of_later_payment.amount} {c.value_of_later_payment.currency}</strong> to the buyer (negative means it costs the buyer). Rounded half-even to 0.01.</p>
+          : <p>{c.reason === 'no_rate_entered' ? 'Enter an annual rate to value this. No rate is assumed.' : `Not valued: ${words(c.reason ?? '')}.`}</p>}
+      </>}
+    </div>}
+    <details open><summary>Assumptions</summary><ul>{r.assumptions.map(a => <li key={a}>{a}</li>)}</ul></details>
+  </div>;
+}
+
 export function OffersPage() {
   const adapter = useMemo(() => createFixtureAdapter(), []);
   const [view, setView] = useState<View>({ kind: 'empty' });
@@ -119,8 +213,12 @@ export function OffersPage() {
   const serial = useRef(0);
   const age = dataAge(fixtureInfo.asOf, new Date());
   const samples = useMemo(() => adapter.list(), [adapter]);
+  const [scenario, setScenario] = useState<ScenarioState>({ kind: 'empty' });
+  const scenarioSerial = useRef(0);
 
   function show(next: Offer) {
+    scenarioSerial.current += 1;
+    setScenario({ kind: 'empty' });
     setOffer(next);
     setView({ kind: 'offer' });
   }
@@ -162,6 +260,18 @@ export function OffersPage() {
       setMessage({ text: error instanceof Error ? error.message : 'The change failed.', reasons: err?.reasons, stale: !current });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runScenario(inputs: ScenarioInputs) {
+    if (!offer) return;
+    const mine = ++scenarioSerial.current;
+    setScenario({ kind: 'loading' });
+    try {
+      const result = await adapter.scenario(offer.offer_id, inputs);
+      if (mine === scenarioSerial.current) setScenario({ kind: 'result', result });
+    } catch (error) {
+      if (mine === scenarioSerial.current) setScenario({ kind: 'error', message: error instanceof Error ? error.message : 'The scenario could not be computed.' });
     }
   }
 
@@ -252,11 +362,18 @@ export function OffersPage() {
         </aside>
       </div>
 
+      <section className="offers-scenario" aria-labelledby="offers-scenario-title">
+        <h3 id="offers-scenario-title">Decision date and payment timing</h3>
+        <p className="field-hint">What changes if the decision moves past this quote's validity, and how its payment terms place cash compared with another quote's. Synthetic, computed in this tab, nothing saved.</p>
+        <ScenarioForm key={offer.offer_id} offer={offer} offers={samples} defaultDate={new Date().toISOString().slice(0, 10)} busy={scenario.kind === 'loading'} onRun={runScenario} />
+        <ScenarioView state={scenario} offers={samples} />
+      </section>
+
       <div className="offers-actions">
         <button className="primary-button" type="button" disabled={busy || !['extracted', 'needs_review', 'corrected'].includes(offer.status)}
           onClick={() => run(() => adapter.save(offer.offer_id, offer.version), 'Offer saved in this browser tab.')}>
           Save offer <span>→</span></button>
-        <ReportDownloads label={`offer ${offer.offer_id} version ${offer.version}`} build={() => offerReport(offer, new Date())} />
+        <ReportDownloads label={`offer ${offer.offer_id} version ${offer.version}`} build={() => offerReport(offer, new Date(), scenario.kind === 'result' ? scenario.result : null)} />
         <p className="limit-note">Saving here is local to the fixture adapter. This preview checks the current UTC date, but cannot replace service normalization, source checks, or audit. Corrected economic values cannot be saved here until authoritative revalidation. Nothing is sent to a supplier.</p>
       </div>
     </section>}

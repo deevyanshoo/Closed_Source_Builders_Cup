@@ -8,6 +8,8 @@
 import raw from './offers-fixtures.json?raw';
 import { REPORT_NOTICE, toCsv } from './report';
 import type { Report } from './report';
+import { EVENTS, offerScenario, ScenarioInputError } from './offers-scenario';
+import type { ScenarioInputs, ScenarioResult } from './offers-scenario';
 
 export type FieldStatus = 'extracted' | 'missing' | 'conflict' | 'unverified' | 'corrected';
 export type OfferStatus = 'extracted' | 'needs_review' | 'corrected' | 'saved' | 'used_in_plan' | 'rfq_drafted' | 'rejected' | 'expired';
@@ -173,6 +175,7 @@ export function createFixtureAdapter(clock: () => Date = () => new Date()) {
       if (name === 'settlement_currency' || name === 'incoterm')
         normalizedItems?.forEach(item => { item.pricing = null; });
       if (name === 'valid_until') offer.normalized.expiry = null;
+      if (name === 'payment_terms') offer.normalized.payment_terms = null;
       if (name === 'origin_country') offer.normalized.origin_country_code = null;
       if (name === 'min_order') offer.normalized.min_order = null;
       if (name === 'capacity') offer.normalized.capacity = null;
@@ -194,6 +197,16 @@ export function createFixtureAdapter(clock: () => Date = () => new Date()) {
       offer.status = 'saved';
       offer.blocking_reasons = [];
       return structuredClone(offer);
+    },
+    /** Expiry and payment-timing scenario, computed by the mirror of procure.offers.scenario. Nothing is saved. */
+    async scenario(id: string, inputs: ScenarioInputs): Promise<ScenarioResult> {
+      const offer = fresh(id);
+      try {
+        return offerScenario(structuredClone(offer), [...offers.values()].map(o => structuredClone(o)), { ...inputs, as_of: utcDay(clock) });
+      } catch (error) {
+        if (error instanceof ScenarioInputError) throw new OffersError(error.message, 'invalid_value');
+        throw error;
+      }
     },
   };
 }
@@ -220,7 +233,7 @@ export function dataAge(asOf: string, now: Date): { days: number; old: boolean }
 }
 
 /** A reviewed offer with its evidence as downloadable JSON and CSV. Values keep their exact decimal strings. */
-export function offerReport(offer: Offer, generatedAt: Date): Report {
+export function offerReport(offer: Offer, generatedAt: Date, scenario: ScenarioResult | null = null): Report {
   const fields = fieldEntries(offer).map(([name, field]) => ({
     name, kind: field.kind, status: field.status, critical: field.critical, source: field.source, value: field.value,
     display: formatValue(field.kind, field.value), reasons: field.reasons,
@@ -234,6 +247,7 @@ export function offerReport(offer: Offer, generatedAt: Date): Report {
       document: offer.document },
     fields, blocking_reasons: offer.blocking_reasons, review_flags: offer.review_flags,
     revalidation_required: offer.revalidation_required ?? [],
+    scenario,
   };
   const rows: (string | null)[][] = [
     ['notice', null, null, null, null, null, REPORT_NOTICE],
@@ -247,9 +261,36 @@ export function offerReport(offer: Offer, generatedAt: Date): Report {
   }
   for (const r of offer.blocking_reasons) rows.push(['blocking_reason', r.field, r.code, null, null, null, r.message]);
   for (const r of offer.review_flags) rows.push(['review_flag', null, r.flag, null, null, r.locator, r.text]);
+  if (scenario) rows.push(...scenarioRows(scenario));
   return {
     basename: `synthetic-offer-${offer.offer_id}-v${offer.version}`,
     json: JSON.stringify(json, null, 2),
     csv: toCsv(['record_type', 'name', 'status', 'value', 'source', 'locator', 'detail', 'synthetic'], rows.map(r => [...r, 'true'])),
   };
+}
+
+const moneyText = (m: { amount: string | null; currency: string | null } | null) => (m?.amount ? `${m.amount} ${m.currency}` : null);
+
+/** CSV rows for a scenario: validity, comparison exclusions, payment instalments, the terms comparison and assumptions. */
+function scenarioRows(s: ScenarioResult): (string | null)[][] {
+  const v = s.validity.decision;
+  const rows: (string | null)[][] = [
+    ['scenario', null, v.state, `decision ${s.decision_date}`, 'user input', null,
+      `as of ${s.as_of}; rate ${s.rate_percent ?? 'not entered'}; events ${EVENTS.map(e => `${e} ${s.event_dates[e] ?? 'not entered'}`).join(', ')}`],
+    ...s.comparison.decision.excluded.map(e => ['comparison_excluded', e.offer_id, e.reason, e.valid_until, null, null, null]),
+    ['payment_terms', null, s.payment_terms.status, s.payment_terms.text, s.payment_terms.source,
+      s.payment_terms.evidence.map(e => e.locator).join('; ') || null, s.payment_terms.reasons.join('; ') || null],
+    ...s.payment_terms.unrecognised.map(text => ['payment_unrecognised', null, 'unrecognised', null, null, null, text]),
+    ['offer_amount', null, s.amount.reason ?? 'computed', moneyText(s.amount), 'quantity x unit price', null, null],
+  ];
+  s.schedule.lines.forEach((l, i) => rows.push(['payment_instalment', String(i + 1), l.reason ?? 'scheduled', moneyText(l.amount),
+    s.payment_terms.source === 'user' ? 'reviewer entry' : 'document', s.payment_terms.evidence.map(e => e.locator).join('; ') || null,
+    `${l.percent ?? 'not stated'}% ${l.instrument.replaceAll('_', ' ')}, ${l.timing.replaceAll('_', ' ')} ${l.anchor.replaceAll('_', ' ')} + ${l.days ?? 'not stated'} days, due ${l.due_date ?? 'unknown'}`]));
+  if (s.terms_comparison && s.alternative) {
+    const c = s.terms_comparison;
+    rows.push(['terms_comparison', s.alternative.offer_id, c.reason ?? 'computed', moneyText(c.value_of_later_payment), 'user input', null,
+      `weighted payment days change ${c.weighted_days_change ?? 'not available'}; rate ${c.rate_percent ?? 'not entered'}; day count ${c.day_count}; rounded ${c.rounding.replaceAll('_', ' ')}`]);
+  }
+  for (const a of s.assumptions) rows.push(['scenario_assumption', null, null, null, null, null, a]);
+  return rows;
 }

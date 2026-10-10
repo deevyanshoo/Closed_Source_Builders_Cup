@@ -126,6 +126,26 @@ describe('decision date and payment timing panel', () => {
 });
 
 describe('service quote mode', () => {
+  it('offers an explicit read-only shipment check for exact saved and used-in-plan candidates, including viewers', () => {
+    const document_id = `sha256:${'a'.repeat(64)}`;
+    const offer = { offer_id: 'synthetic_10', version: 3, status: 'saved', synthetic: true, extraction_id: 'ext-10',
+      document: { document_id, filename: 'SYN-Q10.pdf', media_type: 'application/pdf', byte_size: 100 },
+      fields: {}, items: [{}], blocking_reasons: [], review_flags: [], normalized: {}, allowed_actions: [], segments: [] } as any;
+    const candidate = { candidate_id: 'synthetic_10@v3#item0', offer_id: offer.offer_id, offer_version: 3,
+      document_id, item_index: 0, material: 'copper', quantity: { kg: '250000' },
+      price: { type: 'index_linked', premium_per_kg: { amount: '0.095', currency: 'USD' } },
+      landed_price: { status: 'index_linked_final_price_unknown', per_kg: null } };
+    const render = (status: string, changed = candidate) => renderToStaticMarkup(<ServiceOfferReview offer={{ ...offer, status }}
+      sourcing={{ as_of: '2026-10-10', synthetic: true, excluded: [], candidates: [changed] } as any}
+      selected={null} onSelect={() => {}} onEdit={() => {}} onSave={() => {}} onBridge={() => {}} canEdit={false} busy={false} />);
+    for (const status of ['saved', 'used_in_plan']) {
+      expect(render(status)).toContain('Check host-configured shipment context for this candidate');
+      expect(render(status)).toContain('final price unknown');
+    }
+    expect(render('extracted')).not.toContain('Check host-configured shipment context');
+    expect(render('saved', { ...candidate, offer_version: 2 })).not.toContain('Check host-configured shipment context');
+    expect(render('saved', { ...candidate, candidate_id: 'wrong' })).not.toContain('Check host-configured shipment context');
+  });
   it('keeps fixture and service controls separate and labels service as local unavailable until selected', () => {
     const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/offers']}><OffersPage /></MemoryRouter>);
     expect(html).toContain('Synthetic fixtures');

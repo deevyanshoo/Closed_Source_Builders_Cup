@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SessionResponse, ShipmentRecoveryContext } from '../../../contracts/generated/types';
-import { isCurrentShipmentRun, ShipmentOutcomeView } from './shipment-recovery-page';
+import { isCurrentShipmentRun, refreshShipmentOnForeground, ShipmentOutcomeView, runShipmentComparison, subscribeShipmentForeground } from './shipment-recovery-page';
 import type { ShipmentViewOutcome } from './shipment-recovery';
 
 const context: ShipmentRecoveryContext = {
@@ -28,11 +28,65 @@ describe('shipment demo presentation and current-run guard', () => {
   });
 
   it('discards a result when generation, session, context or abort state changes', () => {
-    const run = { generation: 3, session, contextId: context.context_id, revision: 1, aborted: false };
-    expect(isCurrentShipmentRun(run, 3, session, context, false)).toBe(true);
-    expect(isCurrentShipmentRun(run, 4, session, context, false)).toBe(false);
-    expect(isCurrentShipmentRun(run, 3, { ...session, workspace_id: 'other' }, context, false)).toBe(false);
-    expect(isCurrentShipmentRun(run, 3, session, { ...context, revision: 2 }, false)).toBe(false);
-    expect(isCurrentShipmentRun(run, 3, session, context, true)).toBe(false);
+    const run = { generation: 3, session, contextId: context.context_id, revision: 1,
+      requestSha256: context.request_sha256, routeKey: 'route-1', aborted: false };
+    expect(isCurrentShipmentRun(run, 3, session, context, false, 'route-1')).toBe(true);
+    expect(isCurrentShipmentRun(run, 3, { ...session, identity_mode: undefined }, context, false, 'route-1')).toBe(true);
+    expect(isCurrentShipmentRun(run, 4, session, context, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, { ...session, workspace_id: 'other' }, context, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, { ...session, principal_id: 'other' }, context, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, { ...session, role: 'editor' }, context, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, { ...session, identity_mode: 'private_machine' }, context, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, session, { ...context, revision: 2 }, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, session, { ...context, request_sha256: 'c'.repeat(64) }, false, 'route-1')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, session, context, false, 'route-2')).toBe(false);
+    expect(isCurrentShipmentRun(run, 3, session, context, true, 'route-1')).toBe(false);
+  });
+
+  it('does not send a comparison when the run is invalidated while preflight identity is pending', async () => {
+    for (const invalidate of ['cancel', 'route', 'selection'] as const) {
+      let resolveIdentity!: (value: SessionResponse) => void;
+      const identity = new Promise<SessionResponse>(resolve => { resolveIdentity = resolve; });
+      let current = true;
+      let sends = 0;
+      const run = { generation: 3, session, contextId: context.context_id, revision: 1,
+        requestSha256: context.request_sha256, routeKey: 'route-1', aborted: false };
+      const pending = runShipmentComparison({
+        run, context, signal: new AbortController().signal, isCurrent: () => current,
+        fetchIdentity: () => identity,
+        compare: async () => { sends++; return { status: 'evaluated' }; },
+      });
+      // Simulate an abort-insensitive transport: the fetch promise still resolves.
+      current = false;
+      resolveIdentity(session);
+      expect(await pending, invalidate).toBeNull();
+      expect(sends, invalidate).toBe(0);
+    }
+  });
+
+  it('clears synchronously before foreground reload and removes its visibility listener', () => {
+    let visibilityState: DocumentVisibilityState = 'hidden';
+    let listener: EventListener | undefined;
+    let removed = false;
+    const documentLike = {
+      get visibilityState() { return visibilityState; },
+      addEventListener: (_type: string, callback: EventListenerOrEventListenerObject) => { listener = callback as EventListener; },
+      removeEventListener: (_type: string, callback: EventListenerOrEventListenerObject) => { removed = callback === listener; listener = undefined; },
+    } as unknown as Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
+    const events: string[] = [];
+    const cleanup = subscribeShipmentForeground(documentLike, () => refreshShipmentOnForeground(
+      () => { events.push('clear-session-context-result-provenance-handoff'); },
+      () => { events.push('reload-identity-and-catalog'); },
+    ));
+    listener?.(new Event('visibilitychange'));
+    expect(events).toEqual([]);
+    visibilityState = 'visible';
+    listener?.(new Event('visibilitychange'));
+    expect(events).toEqual(['clear-session-context-result-provenance-handoff', 'reload-identity-and-catalog']);
+    cleanup();
+    expect(removed).toBe(true);
+    visibilityState = 'hidden';
+    listener?.(new Event('visibilitychange'));
+    expect(events).toHaveLength(2);
   });
 });

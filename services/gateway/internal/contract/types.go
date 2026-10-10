@@ -534,11 +534,20 @@ type VoiceHTTPCall struct {
   Arguments VoiceHTTPCallArguments `json:"arguments"`
 }
 
-type VoiceHTTPTurnRequest struct {
+type VoiceHTTPTypedTurnRequest struct {
   ContractVersion string `json:"contract_version"`
   ContextVersion string `json:"context_version"`
   Call VoiceHTTPCall `json:"call"`
 }
+
+type VoiceHTTPTextProposalTurnRequest struct {
+  ContractVersion string `json:"contract_version"`
+  ContextVersion string `json:"context_version"`
+  InputMode string `json:"input_mode"`
+  Utterance string `json:"utterance"`
+}
+
+type VoiceHTTPTurnRequest = json.RawMessage
 
 type VoiceHTTPSessionResponse struct {
   ProductionContextRef *ProductionContextRef `json:"production_context_ref,omitempty"`
@@ -637,9 +646,24 @@ type VoiceHTTPUnavailableOutcome struct {
   Reason string `json:"reason"`
 }
 
+type VoiceHTTPProposalOnlyOutcome struct {
+  Status string `json:"status"`
+  ToolName string `json:"tool_name"`
+  ReadOnly bool `json:"read_only"`
+  Synthetic bool `json:"synthetic"`
+  InterpretationVerified bool `json:"interpretation_verified"`
+  Ownership VoiceHTTPToolOwnership `json:"ownership"`
+  Call VoiceHTTPCall `json:"call"`
+}
+
 type VoiceHTTPOutcome = json.RawMessage
 
 type VoiceHTTPExecutionError struct {
+  Code string `json:"code"`
+  Message string `json:"message"`
+}
+
+type VoiceHTTPTextProposalError struct {
   Code string `json:"code"`
   Message string `json:"message"`
 }
@@ -679,7 +703,7 @@ type VoiceHTTPFailedResult struct {
   Synthetic bool `json:"synthetic"`
   TurnId string `json:"turn_id"`
   State string `json:"state"`
-  Error VoiceHTTPExecutionError `json:"error"`
+  Error json.RawMessage `json:"error"`
 }
 
 type VoiceHTTPResultResponse = json.RawMessage

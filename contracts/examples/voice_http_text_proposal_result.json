@@ -1,0 +1,43 @@
+{
+  "contract_version": "0.2.0",
+  "session_id": "ssssssssssssssssssssssssssssssss",
+  "context_version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "context_fingerprint": "88a456e61be26b78dbe3c65784e9fe9b0744b8d7819cefd71a9d7e0a838f4042",
+  "production_context_ref": {
+    "context_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "workspace_id": "W",
+    "revision": 1
+  },
+  "read_only": true,
+  "synthetic": true,
+  "turn_id": "1",
+  "state": "ready",
+  "outcome": {
+    "status": "proposal_only",
+    "tool_name": "compare_receipt_recovery",
+    "read_only": true,
+    "synthetic": true,
+    "interpretation_verified": false,
+    "ownership": {
+      "session_id": "ssssssssssssssssssssssssssssssss",
+      "turn_id": "1"
+    },
+    "call": {
+      "name": "compare_receipt_recovery",
+      "arguments": {
+        "arrival_replacements": [
+          {
+            "receipt_id": "r-C",
+            "expected_arrival_at": "2026-10-10T09:00:00Z",
+            "arrival_at": "2026-10-10T10:00:00Z"
+          }
+        ],
+        "assignments": [
+          { "order_id": "O-A", "period_id": "P2" },
+          { "order_id": "O-B", "period_id": "P2" },
+          { "order_id": "O-U", "period_id": "P1" }
+        ]
+      }
+    }
+  }
+}

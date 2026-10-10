@@ -1,0 +1,6 @@
+{
+  "contract_version": "0.2.0",
+  "context_version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+  "input_mode": "text_proposal",
+  "utterance": "Move receipt r-C to 10:00 UTC; assign O-A and O-B to P2 and O-U to P1."
+}

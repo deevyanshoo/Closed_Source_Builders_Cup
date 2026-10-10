@@ -13,9 +13,17 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"closedsource/gateway/internal/contract"
 )
 
 type voiceExecutorFunc func(context.Context, []byte) ([]byte, error)
+
+type voiceTextSourceFunc func(context.Context, string, []byte) ([]byte, error)
+
+func (fn voiceTextSourceFunc) Propose(ctx context.Context, utterance string, projection []byte) ([]byte, error) {
+	return fn(ctx, utterance, projection)
+}
 
 func (fn voiceExecutorFunc) Execute(ctx context.Context, request []byte) ([]byte, error) {
 	return fn(ctx, request)
@@ -97,6 +105,400 @@ func voiceTurnBody(t *testing.T, version string) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+func TestVoiceHTTPTextProposalInlineRejectsBothModes(t *testing.T) {
+	for _, proposalMode := range []bool{false, true} {
+		t.Run(map[bool]string{false: "default", true: "proposal"}[proposalMode], func(t *testing.T) {
+			var calls atomic.Int32
+			executor := voiceExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+				calls.Add(1)
+				return nil, errors.New("executor must not run for text")
+			})
+			var a *voiceHTTPAdapter
+			var err error
+			if proposalMode {
+				a, err = newVoiceHTTPAdapterWithProposal(executor, nil, nil, time.Now)
+			} else {
+				a, err = newVoiceHTTPAdapter(executor, time.Now)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = a.Shutdown(nil) })
+			p := principal{ID: "p", Workspace: "W", Role: "viewer"}
+			created := voiceCreated(t, a, p)
+			var request map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_text_proposal_turn.json"), &request); err != nil {
+				t.Fatal(err)
+			}
+			request["context_version"] = created["context_version"]
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+created["session_id"].(string)+"/turns", body)
+			if w.Code != http.StatusServiceUnavailable || calls.Load() != 0 {
+				t.Fatalf("text inline status=%d executor calls=%d", w.Code, calls.Load())
+			}
+			request["call"] = map[string]any{}
+			mixed, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w = voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+created["session_id"].(string)+"/turns", mixed)
+			if w.Code != 422 || calls.Load() != 0 {
+				t.Fatalf("mixed text/typed status=%d executor calls=%d", w.Code, calls.Load())
+			}
+		})
+	}
+}
+
+func TestVoiceHTTPTextProposalSavedPublishesWithoutExecutorInBothModes(t *testing.T) {
+	for _, proposalMode := range []bool{false, true} {
+		t.Run(map[bool]string{false: "default", true: "proposal"}[proposalMode], func(t *testing.T) {
+			var executorCalls atomic.Int32
+			executor := voiceExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+				executorCalls.Add(1)
+				return nil, errors.New("unexpected execution")
+			})
+			var a *voiceHTTPAdapter
+			var err error
+			if proposalMode {
+				a, err = newVoiceHTTPAdapterWithProposal(executor, nil, nil, time.Now)
+			} else {
+				a, err = newVoiceHTTPAdapter(executor, time.Now)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = a.Shutdown(nil) })
+			p := principal{ID: "p", Workspace: "W", Role: "viewer"}
+			created := voiceCreated(t, a, p)
+			id := created["session_id"].(string)
+			ref := contract.ProductionContextRef{ContextId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", WorkspaceId: "W", Revision: 1}
+			a.mu.Lock()
+			s := a.sessions[id]
+			s.productionRef = &ref
+			snapshot := append([]byte(nil), s.snapshot...)
+			a.mu.Unlock()
+			a.textGuard = func(ctx context.Context, actor principal, supplied contract.ProductionContextRef) (*textSavedGuard, int) {
+				if actor.ID != p.ID || actor.Workspace != p.Workspace || supplied != ref {
+					return nil, 404
+				}
+				return &textSavedGuard{snapshot: append([]byte(nil), snapshot...), ctx: ctx, closeFn: func() error { return nil }}, 0
+			}
+			var sourceCalls atomic.Int32
+			var typed map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_recovery_turn.json"), &typed); err != nil {
+				t.Fatal(err)
+			}
+			callBytes, err := json.Marshal(typed["call"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			callValue, parsed := voiceParse(callBytes, 0)
+			if !parsed || !voiceValidName(callValue, "VoiceHTTPCall") {
+				t.Fatal("typed fixture call is invalid for the proposal contract")
+			}
+			probe := map[string]any{"status": "proposal_only", "tool_name": "compare_receipt_recovery", "read_only": true,
+				"synthetic": true, "interpretation_verified": false,
+				"ownership": map[string]any{"session_id": id, "turn_id": "1"}, "call": callValue}
+			if !voiceValidName(probe, "VoiceHTTPProposalOnlyOutcome") {
+				t.Fatal("proposal outcome contract rejects canonical typed fixture")
+			}
+			// The source returns the typed fixture's call, not its transport envelope.
+			a.textSource = voiceTextSourceFunc(func(_ context.Context, utterance string, projection []byte) ([]byte, error) {
+				sourceCalls.Add(1)
+				if utterance == "" || !bytes.Contains(projection, []byte(`"receipt_id":"r-C"`)) || bytes.Contains(projection, []byte("workspace_id")) {
+					t.Logf("fake source rejected projection: utterance=%q projection=%s", utterance, projection)
+					return nil, errors.New("source received wrong owned projection")
+				}
+				return callBytes, nil
+			})
+			var request map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_text_proposal_turn.json"), &request); err != nil {
+				t.Fatal(err)
+			}
+			request["context_version"] = created["context_version"]
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+id+"/turns", body)
+			if accepted.Code != 202 {
+				t.Fatalf("text accepted status=%d body=%s", accepted.Code, accepted.Body.String())
+			}
+			turnID := voiceConnectedJSON(t, accepted.Body.Bytes())["turn_id"].(string)
+			deadline := time.Now().Add(time.Second)
+			for {
+				result := voiceDirect(t, a, p, http.MethodGet, voicePath+"/"+id+"/turns/"+turnID+"/result", nil)
+				if result.Code != 200 {
+					t.Fatalf("result status=%d body=%s", result.Code, result.Body.String())
+				}
+				value := voiceConnectedJSON(t, result.Body.Bytes())
+				if value["state"] == "ready" {
+					outcome := value["outcome"].(map[string]any)
+					if outcome["status"] != "proposal_only" || outcome["interpretation_verified"] != false || outcome["call"].(map[string]any)["name"] != "compare_receipt_recovery" {
+						t.Fatalf("wrong proposal outcome %#v", outcome)
+					}
+					break
+				}
+				if value["state"] == "failed" || time.Now().After(deadline) {
+					t.Fatalf("proposal did not become ready (source=%d executor=%d): %#v", sourceCalls.Load(), executorCalls.Load(), value)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if sourceCalls.Load() != 1 || executorCalls.Load() != 0 {
+				t.Fatalf("source=%d executor=%d", sourceCalls.Load(), executorCalls.Load())
+			}
+			// A missing source has its own fixed failure and cannot fall through to
+			// the configured typed executor, including in the legacy/default mode.
+			a.textSource = nil
+			failed := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+id+"/turns", body)
+			if failed.Code != 202 {
+				t.Fatalf("nil-source turn status=%d body=%s", failed.Code, failed.Body.String())
+			}
+			failedTurn := voiceConnectedJSON(t, failed.Body.Bytes())["turn_id"].(string)
+			deadline = time.Now().Add(time.Second)
+			for {
+				result := voiceDirect(t, a, p, http.MethodGet, voicePath+"/"+id+"/turns/"+failedTurn+"/result", nil)
+				if result.Code != 200 {
+					t.Fatalf("nil-source result status=%d body=%s", result.Code, result.Body.String())
+				}
+				value := voiceConnectedJSON(t, result.Body.Bytes())
+				if value["state"] == "failed" {
+					errValue := value["error"].(map[string]any)
+					if errValue["code"] != "text_proposal_unavailable" || errValue["message"] != "Text proposal unavailable. Use the typed comparison form." {
+						t.Fatalf("wrong text failure: %#v", value)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("nil-source did not fail: %#v", value)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if executorCalls.Load() != 0 || sourceCalls.Load() != 1 {
+				t.Fatalf("nil-source activated callback: source=%d executor=%d", sourceCalls.Load(), executorCalls.Load())
+			}
+		})
+	}
+}
+func TestVoiceHTTPTextProposalRejectsLateSavedDriftAndCancellation(t *testing.T) {
+	for _, mode := range []string{"same-revision-snapshot", "revision", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			var executorCalls atomic.Int32
+			a := voiceTestAdapter(t, voiceExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+				executorCalls.Add(1)
+				return nil, errors.New("text must not execute")
+			}))
+			p := principal{ID: "p", Workspace: "W", Role: "viewer"}
+			created := voiceCreated(t, a, p)
+			id := created["session_id"].(string)
+			ref := contract.ProductionContextRef{ContextId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", WorkspaceId: "W", Revision: 1}
+			a.mu.Lock()
+			s := a.sessions[id]
+			s.productionRef = &ref
+			snapshot := append([]byte(nil), s.snapshot...)
+			a.mu.Unlock()
+			var changed atomic.Bool
+			a.textGuard = func(ctx context.Context, _ principal, _ contract.ProductionContextRef) (*textSavedGuard, int) {
+				if changed.Load() && mode == "revision" {
+					return nil, 409
+				}
+				current := snapshot
+				if changed.Load() && mode == "same-revision-snapshot" {
+					current = bytes.Replace(snapshot, []byte(`"arrival_at":"2026-10-10T09:00:00Z"`), []byte(`"arrival_at":"2026-10-10T08:00:00Z"`), 1)
+				}
+				return &textSavedGuard{snapshot: append([]byte(nil), current...), ctx: ctx, closeFn: func() error { return nil }}, 0
+			}
+			var typed map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_recovery_turn.json"), &typed); err != nil {
+				t.Fatal(err)
+			}
+			callBytes, err := json.Marshal(typed["call"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			started := make(chan struct{})
+			release := make(chan struct{})
+			a.textSource = voiceTextSourceFunc(func(context.Context, string, []byte) ([]byte, error) {
+				close(started)
+				<-release // Deliberately noncooperative; it must retain the bounded worker slot.
+				return callBytes, nil
+			})
+			var request map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_text_proposal_turn.json"), &request); err != nil {
+				t.Fatal(err)
+			}
+			request["context_version"] = created["context_version"]
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+id+"/turns", body)
+			if accepted.Code != 202 {
+				t.Fatalf("text turn status=%d body=%s", accepted.Code, accepted.Body.String())
+			}
+			turnID := voiceConnectedJSON(t, accepted.Body.Bytes())["turn_id"].(string)
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				close(release)
+				t.Fatal("fake source did not start")
+			}
+			a.mu.Lock()
+			active := a.active
+			a.mu.Unlock()
+			if active != 1 {
+				close(release)
+				t.Fatalf("blocked source released worker slot: %d", active)
+			}
+			if mode == "cancel" {
+				cancelled := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+id+"/turns/"+turnID+"/cancel", nil)
+				if cancelled.Code != 200 {
+					close(release)
+					t.Fatalf("cancel status=%d body=%s", cancelled.Code, cancelled.Body.String())
+				}
+			} else {
+				changed.Store(true)
+			}
+			close(release)
+			deadline := time.Now().Add(time.Second)
+			for {
+				result := voiceDirect(t, a, p, http.MethodGet, voicePath+"/"+id+"/turns/"+turnID+"/result", nil)
+				if (mode == "cancel" && result.Code == 404) || (mode != "cancel" && result.Code == 409) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("late result not refused: status=%d body=%s", result.Code, result.Body.String())
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if executorCalls.Load() != 0 {
+				t.Fatalf("executor called %d times", executorCalls.Load())
+			}
+		})
+	}
+}
+
+func TestVoiceHTTPTextProposalDeadlineAtFinalGuard(t *testing.T) {
+	for _, mode := range []string{"acquire", "close"} {
+		t.Run(mode, func(t *testing.T) {
+			var executorCalls atomic.Int32
+			a := voiceTestAdapter(t, voiceExecutorFunc(func(context.Context, []byte) ([]byte, error) {
+				executorCalls.Add(1)
+				return nil, errors.New("text must not execute")
+			}))
+			a.proposalTimeout = 300 * time.Millisecond
+			p := principal{ID: "p", Workspace: "W", Role: "viewer"}
+			created := voiceCreated(t, a, p)
+			id := created["session_id"].(string)
+			ref := contract.ProductionContextRef{ContextId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", WorkspaceId: "W", Revision: 1}
+			a.mu.Lock()
+			s := a.sessions[id]
+			s.productionRef = &ref
+			snapshot := append([]byte(nil), s.snapshot...)
+			a.mu.Unlock()
+			var reads atomic.Int32
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			openGate := func() { releaseOnce.Do(func() { close(release) }) }
+			t.Cleanup(openGate)
+			a.textGuard = func(ctx context.Context, _ principal, _ contract.ProductionContextRef) (*textSavedGuard, int) {
+				index := reads.Add(1)
+				if index == 4 && mode == "acquire" {
+					close(entered)
+					<-release // Intentionally ignores cancellation until the test releases it.
+				}
+				guard := &textSavedGuard{snapshot: append([]byte(nil), snapshot...), ctx: ctx, closeFn: func() error { return nil }}
+				if index == 4 && mode == "close" {
+					guard.closeFn = func() error {
+						close(entered)
+						<-release // No publication until this close returns.
+						return nil
+					}
+				}
+				return guard, 0
+			}
+			var typed map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_recovery_turn.json"), &typed); err != nil {
+				t.Fatal(err)
+			}
+			callBytes, err := json.Marshal(typed["call"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceContext := make(chan context.Context, 1)
+			a.textSource = voiceTextSourceFunc(func(ctx context.Context, _ string, _ []byte) ([]byte, error) {
+				sourceContext <- ctx
+				return callBytes, nil
+			})
+			var request map[string]any
+			if err := json.Unmarshal(voiceFixture(t, "voice_http_text_proposal_turn.json"), &request); err != nil {
+				t.Fatal(err)
+			}
+			request["context_version"] = created["context_version"]
+			body, err := json.Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted := voiceDirect(t, a, p, http.MethodPost, voicePath+"/"+id+"/turns", body)
+			if accepted.Code != 202 {
+				t.Fatalf("text turn status=%d body=%s", accepted.Code, accepted.Body.String())
+			}
+			turnID := voiceConnectedJSON(t, accepted.Body.Bytes())["turn_id"].(string)
+			var timed context.Context
+			select {
+			case timed = <-sourceContext:
+			case <-time.After(time.Second):
+				t.Fatal("fake source did not receive timed context")
+			}
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("final guard did not reach gate")
+			}
+			a.mu.Lock()
+			activeWhileBlocked := a.active
+			a.mu.Unlock()
+			if activeWhileBlocked != 1 {
+				t.Fatalf("blocked final guard released worker slot: %d", activeWhileBlocked)
+			}
+			pending := voiceDirect(t, a, p, http.MethodGet, voicePath+"/"+id+"/turns/"+turnID+"/result", nil)
+			if pending.Code != 200 || voiceConnectedJSON(t, pending.Body.Bytes())["state"] != "pending" {
+				t.Fatalf("ready leaked before final guard returned: %d %s", pending.Code, pending.Body.String())
+			}
+			select {
+			case <-timed.Done(): // The actual proposal deadline is the test's release signal.
+			case <-time.After(2 * time.Second):
+				t.Fatal("proposal deadline did not expire")
+			}
+			openGate()
+			deadline := time.Now().Add(time.Second)
+			for {
+				result := voiceDirect(t, a, p, http.MethodGet, voicePath+"/"+id+"/turns/"+turnID+"/result", nil)
+				if result.Code != 200 {
+					t.Fatalf("result status=%d body=%s", result.Code, result.Body.String())
+				}
+				value := voiceConnectedJSON(t, result.Body.Bytes())
+				if value["state"] == "failed" {
+					if value["outcome"] != nil || value["error"].(map[string]any)["code"] != "text_proposal_unavailable" {
+						t.Fatalf("deadline failure was not fixed and empty: %#v", value)
+					}
+					break
+				}
+				if value["state"] == "ready" || time.Now().After(deadline) {
+					t.Fatalf("expired proposal became ready or remained pending: %#v", value)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if executorCalls.Load() != 0 || reads.Load() < 4 {
+				t.Fatalf("executor=%d guard reads=%d", executorCalls.Load(), reads.Load())
+			}
+		})
+	}
 }
 func TestVoiceHTTPStrictCreateAndOwnership(t *testing.T) {
 	a := voiceTestAdapter(t, voiceExecutorFunc(func(context.Context, []byte) ([]byte, error) { return nil, nil }))

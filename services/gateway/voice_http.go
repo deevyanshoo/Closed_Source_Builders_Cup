@@ -67,7 +67,31 @@ type voiceRecord struct {
 	accepted, turnAccepted                                      bool
 	stale                                                       bool
 	proposalPublishing                                          bool
+	textTurn                                                    bool
 }
+
+// textSavedGuard is a narrow read-only seam for in-process saved-context tests.
+// Production still uses guardProduction; neither implementation holds a guard
+// across source work or an HTTP write.
+type textSavedGuard struct {
+	snapshot   []byte
+	ctx        context.Context
+	closeFn    func() error
+	rollbackFn func()
+}
+
+func (g *textSavedGuard) close() error {
+	if g != nil && g.closeFn != nil {
+		return g.closeFn()
+	}
+	return nil
+}
+func (g *textSavedGuard) rollback() {
+	if g != nil && g.rollbackFn != nil {
+		g.rollbackFn()
+	}
+}
+
 type voiceHTTPAdapter struct {
 	mu              sync.Mutex
 	now             func() time.Time
@@ -84,9 +108,41 @@ type voiceHTTPAdapter struct {
 	proposalMapper  voice.ProposalMapper
 	proposalTimeout time.Duration
 	proposalMode    bool
+	textSource      voice.CanonicalTextProposalSource
+	textGuard       func(context.Context, principal, contract.ProductionContextRef) (*textSavedGuard, int)
 	closed          bool
 	done            chan struct{}
 	workers         sync.WaitGroup
+}
+
+func (a *voiceHTTPAdapter) readTextGuard(ctx context.Context, p principal, ref contract.ProductionContextRef) (*textSavedGuard, int) {
+	if a.textGuard != nil {
+		return a.textGuard(ctx, p, ref)
+	}
+	if a.production == nil {
+		return nil, 503
+	}
+	guard, snapshot, code := a.production.guardProduction(ctx, p, ref)
+	if code != 0 {
+		return nil, code
+	}
+	return &textSavedGuard{snapshot: snapshot, ctx: guard.ctx, closeFn: guard.close, rollbackFn: guard.rollback}, 0
+}
+
+func voiceTextSnapshotMatches(g *textSavedGuard, s *voiceRecord) bool {
+	if g == nil || s == nil || (g.ctx != nil && g.ctx.Err() != nil) {
+		return false
+	}
+	value, ok := voiceParse(g.snapshot, 0)
+	if !ok || !voiceValidName(value, "ProductionSnapshot") {
+		return false
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil || string(canonical) != string(s.snapshot) {
+		return false
+	}
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:]) == s.fingerprint
 }
 
 func newVoiceHTTPAdapter(executor voice.Executor, now func() time.Time) (*voiceHTTPAdapter, error) {
@@ -446,28 +502,38 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		return
 	}
 	request := value.(map[string]any)
+	isText := request["input_mode"] == "text_proposal"
 	turnCount := voiceArrayCount(value)
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	ref, expected := a.savedRef(owner, id)
-	if a.proposalMode && ref == nil && expected != nil {
+	if (isText || a.proposalMode) && ref == nil && expected != nil {
 		voiceErr(w, 503, "production_context_unavailable", "Saved production context required")
 		return
 	}
 	var guard *productionGuard
+	var textGuard *textSavedGuard
 	fail := func(status int, code, message string) {
 		if guard != nil {
 			guard.rollback()
 			guard = nil
 		}
+		if textGuard != nil {
+			textGuard.rollback()
+			textGuard = nil
+		}
 		voiceErr(w, status, code, message)
 	}
 	if ref != nil {
-		if a.production == nil {
+		if !isText && a.production == nil {
 			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
 			return
 		}
 		var code int
-		guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		if isText {
+			textGuard, code = a.readTextGuard(r.Context(), p, *ref)
+		} else {
+			guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		}
 		if code != 0 {
 			if code == 404 || code == 409 {
 				a.staleRecord(owner, id, expected)
@@ -480,6 +546,9 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		defer func() {
 			if guard != nil {
 				guard.rollback()
+			}
+			if textGuard != nil {
+				textGuard.rollback()
 			}
 		}()
 	}
@@ -496,6 +565,12 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 	if s == nil || !s.accepted || (ref != nil && (s != expected || s.productionRef == nil || *s.productionRef != *ref)) {
 		a.mu.Unlock()
 		fail(404, "voice_session_unavailable", "Voice session unavailable")
+		return
+	}
+	if isText && !voiceTextSnapshotMatches(textGuard, s) {
+		a.mu.Unlock()
+		a.staleRecord(owner, id, expected)
+		fail(409, "production_context_stale", "Production context revision changed")
 		return
 	}
 	if turnCount+s.arrayCount > 4096 {
@@ -522,14 +597,18 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		a.mu.Unlock()
 		return
 	}
-	call, err := json.Marshal(request["call"])
-	if err != nil || len(call) > voiceTurnLimit {
-		a.mu.Unlock()
-		fail(422, "invalid_request", "Invalid voice call")
-		return
+	var call []byte
+	var err error
+	if !isText {
+		call, err = json.Marshal(request["call"])
+		if err != nil || len(call) > voiceTurnLimit {
+			a.mu.Unlock()
+			fail(422, "invalid_request", "Invalid voice call")
+			return
+		}
 	}
 	var arguments []byte
-	if a.proposalMode {
+	if a.proposalMode && !isText {
 		arguments, err = json.Marshal(request["call"].(map[string]any)["arguments"])
 		if err != nil || len(arguments) == 0 || len(arguments) > voice.ProposalCallLimit {
 			a.mu.Unlock()
@@ -553,8 +632,20 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		fail(422, "invalid_request", "Invalid voice snapshot")
 		return
 	}
+	var textInput *voice.TextProposalInput
+	if isText {
+		textInput, err = voice.PrepareTextProposal(capture, request["utterance"].(string))
+		if err != nil {
+			_ = a.manager.Cancel(owner, lease)
+			a.active--
+			a.mu.Unlock()
+			fail(422, "invalid_request", "Invalid text proposal request")
+			return
+		}
+	}
 	s.lease = lease
 	s.state = "pending"
+	s.textTurn = isText
 	s.turnAccepted = ref == nil
 	s.proposalPublishing = false
 	s.outcome = nil
@@ -587,6 +678,26 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		expected.turnAccepted = true
 		a.mu.Unlock()
 	}
+	if textGuard != nil {
+		if err := textGuard.close(); err != nil {
+			textGuard = nil
+			_ = a.manager.Cancel(owner, lease)
+			a.releaseBeforeAcceptance(owner, id, lease)
+			a.staleRecord(owner, id, expected)
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		textGuard = nil
+		a.mu.Lock()
+		if current := a.currentLocked(owner, id); current != expected || current.lease != lease || a.closed || r.Context().Err() != nil {
+			a.mu.Unlock()
+			_ = a.manager.Cancel(owner, lease)
+			a.releaseBeforeAcceptance(owner, id, lease)
+			return
+		}
+		expected.turnAccepted = true
+		a.mu.Unlock()
+	}
 	if r.Context().Err() != nil {
 		_ = a.manager.Cancel(owner, lease)
 		a.releaseBeforeAcceptance(owner, id, lease)
@@ -601,7 +712,9 @@ func (a *voiceHTTPAdapter) turn(w http.ResponseWriter, r *http.Request, p princi
 		a.releaseBeforeAcceptance(owner, id, lease)
 		return
 	}
-	if a.proposalMode {
+	if isText {
+		go a.runTextProposal(owner, id, lease, capture, textInput, request["utterance"].(string), p, ref, expected)
+	} else if a.proposalMode {
 		go a.runProposal(owner, id, lease, capture, arguments, p, ref, expected)
 	} else {
 		go a.run(owner, id, lease, capture, call)
@@ -616,6 +729,7 @@ func (a *voiceHTTPAdapter) releaseBeforeAcceptance(owner voice.Owner, id string,
 	if s := a.currentLocked(owner, id); s != nil && s.lease == lease {
 		s.lease = nil
 		s.state = ""
+		s.textTurn = false
 		s.turnAccepted = false
 		s.proposalPublishing = false
 		s.outcome = nil
@@ -759,6 +873,128 @@ func (a *voiceHTTPAdapter) runProposal(owner voice.Owner, id string, lease *voic
 	}
 	a.mu.Unlock()
 }
+
+func (a *voiceHTTPAdapter) textProposalGuard(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) (*textSavedGuard, error) {
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	current := s == expected && s != nil && s.lease == lease && s.textTurn && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease)
+	a.mu.Unlock()
+	if !current || ctx.Err() != nil {
+		return nil, voice.ErrUnavailable
+	}
+	if ref == nil {
+		return nil, voice.ErrExecution
+	}
+	guard, code := a.readTextGuard(ctx, p, *ref)
+	if code == 404 || code == 409 {
+		a.staleRecord(owner, id, expected)
+		return nil, voice.ErrUnavailable
+	}
+	if code != 0 || guard == nil {
+		return nil, voice.ErrExecution
+	}
+	if ctx.Err() != nil || (guard.ctx != nil && guard.ctx.Err() != nil) {
+		guard.rollback()
+		return nil, voice.ErrUnavailable
+	}
+	if !voiceTextSnapshotMatches(guard, expected) {
+		guard.rollback()
+		a.staleRecord(owner, id, expected)
+		return nil, voice.ErrUnavailable
+	}
+	return guard, nil
+}
+
+func (a *voiceHTTPAdapter) textProposalCurrent(ctx context.Context, p principal, owner voice.Owner, id string, lease *voice.Lease, ref *contract.ProductionContextRef, expected *voiceRecord) error {
+	guard, err := a.textProposalGuard(ctx, p, owner, id, lease, ref, expected)
+	if err != nil {
+		return err
+	}
+	if err := guard.close(); err != nil {
+		return voice.ErrExecution
+	}
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	current := s == expected && s != nil && s.lease == lease && s.textTurn && s.turnAccepted && !s.stale && !a.closed && a.manager.IsCurrent(owner, lease) && ctx.Err() == nil
+	a.mu.Unlock()
+	if !current {
+		return voice.ErrUnavailable
+	}
+	return nil
+}
+
+func (a *voiceHTTPAdapter) runTextProposal(owner voice.Owner, id string, lease *voice.Lease, capture *voice.RecoveryContext, input *voice.TextProposalInput, utterance string, p principal, ref *contract.ProductionContextRef, expected *voiceRecord) {
+	defer a.workers.Done()
+	defer func() { a.mu.Lock(); a.active--; a.mu.Unlock() }()
+	ctx, cancel := context.WithTimeout(lease.Context(), a.proposalTimeout)
+	defer cancel()
+	err := a.textProposalCurrent(ctx, p, owner, id, lease, ref, expected)
+	var call []byte
+	if err == nil {
+		call, err = voice.ProposeCanonicalText(ctx, a.textSource, input, utterance)
+	}
+	if err == nil {
+		err = a.textProposalCurrent(ctx, p, owner, id, lease, ref, expected)
+	}
+	var outcome []byte
+	if err == nil {
+		value, ok := voiceParse(call, 0)
+		if !ok || !voiceValidName(value, "VoiceHTTPCall") {
+			err = voice.ErrProposalInvalid
+		} else {
+			candidate := map[string]any{"status": "proposal_only", "tool_name": "compare_receipt_recovery", "read_only": true,
+				"synthetic": true, "interpretation_verified": false,
+				"ownership": map[string]any{"session_id": id, "turn_id": lease.TurnID()}, "call": value}
+			if !voiceValidName(candidate, "VoiceHTTPProposalOnlyOutcome") {
+				err = voice.ErrProposalInvalid
+			} else {
+				outcome, err = json.Marshal(candidate)
+				if len(outcome) > voiceOutcomeLimit {
+					err = voice.ErrProposalInvalid
+				}
+			}
+		}
+	}
+	var publicationGuard *textSavedGuard
+	if err == nil {
+		publicationGuard, err = a.textProposalGuard(ctx, p, owner, id, lease, ref, expected)
+	}
+	a.mu.Lock()
+	s := a.currentLocked(owner, id)
+	if s == nil || s != expected || s.lease != lease || a.closed || !a.manager.IsCurrent(owner, lease) || s.state != "pending" {
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
+		return
+	}
+	if err != nil || ctx.Err() != nil || lease.Context().Err() != nil || (publicationGuard != nil && publicationGuard.ctx != nil && publicationGuard.ctx.Err() != nil) {
+		s.outcome = nil
+		s.state = "failed"
+		s.last = a.clock.Load().(time.Time)
+		a.mu.Unlock()
+		if publicationGuard != nil {
+			publicationGuard.rollback()
+		}
+		return
+	}
+	s.outcome = append([]byte(nil), outcome...)
+	s.state = "ready"
+	s.last = a.clock.Load().(time.Time)
+	s.proposalPublishing = true
+	a.mu.Unlock()
+	closeErr := publicationGuard.close()
+	a.mu.Lock()
+	if current := a.currentLocked(owner, id); current == s && s.lease == lease && s.proposalPublishing {
+		if closeErr != nil || ctx.Err() != nil || lease.Context().Err() != nil || a.closed || !a.manager.IsCurrent(owner, lease) {
+			s.outcome = nil
+			s.state = "failed"
+			s.last = a.clock.Load().(time.Time)
+		}
+		s.proposalPublishing = false
+	}
+	a.mu.Unlock()
+}
 func (a *voiceHTTPAdapter) acceptOutputLocked(s *voiceRecord, output voice.Output) {
 	if s.lease == nil || output.TurnID != s.lease.TurnID() || len(output.Payload) > voiceOutcomeLimit {
 		s.state = "failed"
@@ -824,21 +1060,33 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 	}
 	owner := voice.Owner{PrincipalID: p.ID, WorkspaceID: p.Workspace}
 	ref, expected := a.savedRef(owner, id)
+	a.mu.Lock()
+	textMode := expected != nil && expected.textTurn
+	a.mu.Unlock()
 	var guard *productionGuard
+	var textGuard *textSavedGuard
 	fail := func(status int, code, message string) {
 		if guard != nil {
 			guard.rollback()
 			guard = nil
 		}
+		if textGuard != nil {
+			textGuard.rollback()
+			textGuard = nil
+		}
 		voiceErr(w, status, code, message)
 	}
 	if ref != nil {
-		if a.production == nil {
+		if !textMode && a.production == nil {
 			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
 			return
 		}
 		var code int
-		guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		if textMode {
+			textGuard, code = a.readTextGuard(r.Context(), p, *ref)
+		} else {
+			guard, _, code = a.production.guardProduction(r.Context(), p, *ref)
+		}
 		if code != 0 {
 			if code == 404 || code == 409 {
 				a.staleRecord(owner, id, expected)
@@ -851,6 +1099,9 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		defer func() {
 			if guard != nil {
 				guard.rollback()
+			}
+			if textGuard != nil {
+				textGuard.rollback()
 			}
 		}()
 	}
@@ -875,7 +1126,13 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		fail(404, "voice_session_unavailable", "Voice session unavailable")
 		return
 	}
-	if !a.proposalMode {
+	if textMode && !voiceTextSnapshotMatches(textGuard, s) {
+		a.mu.Unlock()
+		a.staleRecord(owner, id, expected)
+		fail(409, "production_context_stale", "Production context revision changed")
+		return
+	}
+	if !a.proposalMode && !s.textTurn {
 		output, ready, dequeueErr := a.manager.Dequeue(owner, id)
 		if dequeueErr != nil {
 			delete(a.sessions, id)
@@ -891,7 +1148,7 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 	}
 	s.last = now
 	publicState := s.state
-	if a.proposalMode && s.proposalPublishing {
+	if s.proposalPublishing {
 		publicState = "pending"
 	}
 	response := map[string]any{"contract_version": stateVersion, "session_id": id, "context_version": s.version, "context_fingerprint": s.fingerprint, "read_only": true, "synthetic": true, "turn_id": turnID, "state": publicState}
@@ -902,7 +1159,11 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 		response["outcome"] = append(json.RawMessage(nil), s.outcome...)
 	}
 	if publicState == "failed" {
-		response["error"] = map[string]string{"code": "execution_unavailable", "message": "Local voice execution unavailable"}
+		if s.textTurn {
+			response["error"] = map[string]string{"code": "text_proposal_unavailable", "message": "Text proposal unavailable. Use the typed comparison form."}
+		} else {
+			response["error"] = map[string]string{"code": "execution_unavailable", "message": "Local voice execution unavailable"}
+		}
 	}
 	a.mu.Unlock()
 	if guard != nil {
@@ -913,6 +1174,15 @@ func (a *voiceHTTPAdapter) result(w http.ResponseWriter, r *http.Request, p prin
 			return
 		}
 		guard = nil
+	}
+	if textGuard != nil {
+		if err := textGuard.close(); err != nil {
+			textGuard = nil
+			a.staleRecord(owner, id, expected)
+			voiceErr(w, 503, "production_context_unavailable", "Production context storage unavailable")
+			return
+		}
+		textGuard = nil
 	}
 	if r.Context().Err() != nil {
 		return

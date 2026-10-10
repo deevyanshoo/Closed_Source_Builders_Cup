@@ -51,6 +51,7 @@ type identityFile struct {
 type stateServer struct {
 	shipment      *shipmentAdapter
 	voice         *voiceHTTPAdapter
+	quote         *quoteAdapter
 	cfg           stateConfig
 	db            *pgx.ConnConfig
 	identities    []identity
@@ -155,6 +156,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		machine = p
 		r = r.WithContext(context.WithValue(r.Context(), machinePrincipalKey{}, p))
+	}
+	if quoteRouteCandidate(r.URL.Path) {
+		s.quoteHTTPRoute(w, r)
+		return
 	}
 	if shipmentRouteCandidate(r.URL.Path) {
 		s.shipmentHTTPRoute(w, r)

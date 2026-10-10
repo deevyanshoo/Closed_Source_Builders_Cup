@@ -49,17 +49,18 @@ type identityFile struct {
 	Identities []identity `json:"identities"`
 }
 type stateServer struct {
-	shipment      *shipmentAdapter
-	voice         *voiceHTTPAdapter
-	quote         *quoteAdapter
-	cfg           stateConfig
-	db            *pgx.ConnConfig
-	identities    []identity
-	identityReady bool
-	legacy        http.Handler
-	auth          Authenticator
-	outbound      *http.Client
-	assets        http.Handler
+	shipment         *shipmentAdapter
+	voice            *voiceHTTPAdapter
+	quote            *quoteAdapter
+	cfg              stateConfig
+	db               *pgx.ConnConfig
+	identities       []identity
+	identityReady    bool
+	legacy           http.Handler
+	auth             Authenticator
+	outbound         *http.Client
+	assets           http.Handler
+	quoteShipmentNow func() time.Time // test clock; nil uses the current server UTC time
 }
 
 func newStateHandler(cfg stateConfig) http.Handler {
@@ -159,6 +160,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if quoteRouteCandidate(r.URL.Path) {
 		s.quoteHTTPRoute(w, r)
+		return
+	}
+	if quoteShipmentRouteCandidate(r.URL.Path) {
+		s.quoteShipmentHTTPRoute(w, r)
 		return
 	}
 	if shipmentRouteCandidate(r.URL.Path) {

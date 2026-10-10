@@ -1113,3 +1113,42 @@ export interface QuotePaymentTerms {
   status?: string;
   text?: string | null;
 }
+
+export interface QuoteShipmentBridgeCandidate {
+  candidate_id: string;
+  offer_id: string;
+  offer_version: number;
+  item_index: number;
+  document_id: string;
+}
+
+export interface QuoteShipmentBridgeShipmentContext {
+  context_id: string;
+  revision: number;
+  request_sha256: string;
+  plan_version: string;
+}
+
+export interface QuoteShipmentBridgeEvidenceRef {
+  field: string;
+  locator: string;
+  text_sha256: string;
+  document_id: string;
+}
+
+export interface QuoteShipmentBridge {
+  candidate: QuoteShipmentBridgeCandidate;
+  shipment_context: QuoteShipmentBridgeShipmentContext;
+  host_binding: "host_configured_synthetic";
+  source_authenticity: "not_verified";
+  context_as_of: string;
+  source_as_of: string;
+  source_checked_at: string;
+  evidence_refs: (QuoteShipmentBridgeEvidenceRef)[];
+}
+
+export interface QuoteShipmentBridgeResponse {
+  contract_version: "0.2.0";
+  context: QuoteResponseContext;
+  bridge: QuoteShipmentBridge;
+}

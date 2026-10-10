@@ -14,9 +14,27 @@ const date = (value: string) => value.replace('T', ' ').replace('Z', ' UTC').rep
 const text = (value: string) => value.replaceAll('_', ' ');
 const busy = new Set(['checking', 'closing', 'creating', 'created', 'starting', 'pending']);
 
+export function VoiceProposalPanel({ view, onConfirm }: { view: VoiceView; onConfirm: () => void }) {
+  if (view.kind !== 'proposed' || !view.proposal) {
+    return view.message === 'Text proposal unavailable. Use the typed comparison form.' ? <p role="alert">{view.message}</p> : null;
+  }
+  const changes = view.proposal.call.arguments.arrival_replacements;
+  const assignments = view.proposal.call.arguments.assignments;
+  return <section className="notice" aria-label="Unverified text interpretation">
+    <h2>Unverified interpretation</h2>
+    <p>This is a proposed reading of your text for a synthetic saved context. Review every input below. No comparison has run.</p>
+    <h3>Changed receipt arrivals</h3>
+    {changes.length ? <ul>{changes.map(change => <li key={change.receipt_id}>{change.receipt_id}: {change.expected_arrival_at} → {change.arrival_at} UTC</li>)}</ul> : <p>No receipt arrival changes proposed.</p>}
+    <h3>Complete order assignments</h3>
+    <ul>{assignments.map(item => <li key={item.order_id}>{item.order_id} → {item.period_id}</li>)}</ul>
+    <button type="button" className="primary-button" onClick={onConfirm}>Compare these exact changes</button>
+  </section>;
+}
+
 export function VoicePage() {
   const controllerRef = useRef<VoiceController | null>(null);
   const [view, setView] = useState<VoiceView>({ kind: 'checking', example: 'recovery', arrivals: {}, assignments: {}, source: 'inline', contexts: [], hasMore: false, snapshotText: '' });
+  const [utterance, setUtterance] = useState('');
   useEffect(() => {
     const controller = new VoiceController();
     controllerRef.current = controller;
@@ -33,7 +51,7 @@ export function VoicePage() {
   return <div className="shell voice-shell">
     <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SCENARIOS</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link></header>
     <main>
-      <div className="recovery-intro"><p className="eyebrow">LOCAL · TYPED · SYNTHETIC</p><h1>Try a receipt scenario.</h1><p>Supply a complete synthetic production snapshot, move receipt arrivals and assign every order to a period. The local comparison checks three schedules. Speech is unavailable; no plan is applied.</p></div>
+      <div className="recovery-intro"><p className="eyebrow">LOCAL · SYNTHETIC</p><h1>Try a receipt scenario.</h1><p>Supply a complete synthetic production snapshot, move receipt arrivals and assign every order to a period. The local comparison checks three schedules. Saved contexts also allow an opt-in unverified text interpretation before a deliberate comparison. Speech is unavailable; no plan is applied.</p></div>
       <section className="recovery-session" aria-label="Local session">
         {view.kind === 'checking' && <p role="status">Checking the current identity before showing a result…</p>}
         {view.kind === 'signed_out' && <div className="notice notice-error" role="alert"><strong>Local session unavailable</strong><p>{view.message || 'An authenticated local session is required.'}</p><button type="button" className="text-button" onClick={() => void controller?.refreshIdentity()}>Check session again</button></div>}
@@ -55,6 +73,12 @@ export function VoicePage() {
           </div>
         </div>}
       </section>}
+      {view.identity && view.source === 'saved' && view.selected && <section className="recovery-form voice-form" aria-label="Text proposal for saved context">
+        <h2>Propose inputs from text</h2>
+        <p>This optional interpretation uses the selected synthetic saved context. Review the exact proposed inputs before choosing a comparison.</p>
+        <label className="field"><span className="field-label">Text request</span><textarea value={utterance} onChange={event => setUtterance(event.target.value)} rows={3} maxLength={4096} aria-label="Text proposal request" /></label>
+        <button type="button" className="secondary-button" disabled={!utterance.trim() || busy.has(view.kind)} onClick={() => void controller?.proposeText(utterance)}>Show proposed changes</button>
+      </section>}
       {base && view.identity && <form className="recovery-form voice-form" aria-label="Typed synthetic scenario" onSubmit={submit}>
         <div className="recovery-form-head"><div><h2>Snapshot and inputs</h2><p>Snapshot {base.snapshot.snapshot_id} · version {base.snapshot.plan_version} · as of {date(base.snapshot.as_of)}. {view.source === 'saved' ? `Stored synthetic input, revision ${view.selected?.revision}. Initial arrivals and baseline assignments are unchanged.` : 'All values below are caller supplied.'}</p></div>{view.source === 'inline' && <label className="field"><span className="field-label">Synthetic example</span><select value={view.example} onChange={event => controller?.selectExample(event.target.value as VoiceExample)}>{Object.entries(labels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>}</div>
         <div className="recovery-input-grid">
@@ -75,6 +99,7 @@ export function VoicePage() {
         {view.kind === 'clarification' && view.outcome?.status === 'clarification_required' && <div className="notice notice-error" role="alert"><strong>Complete the arguments</strong><p>{text(view.outcome.reason)} · {view.outcome.missing_fields.join(', ')}</p></div>}
         {view.kind === 'rejected' && view.outcome?.status === 'rejected' && <div className="notice notice-error" role="alert"><strong>Comparison rejected</strong><p>{text(view.outcome.reason)}</p></div>}
         {view.kind === 'compared' && view.comparison && <Comparison value={view.comparison} noop={noop} />}
+        <VoiceProposalPanel view={view} onConfirm={() => void controller?.confirmProposal()} />
       </div>
     </main>
     <footer>Closed Source / typed synthetic scenario <span>Speech unavailable · no plan applied · no supplier contacted.</span></footer>

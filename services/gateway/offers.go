@@ -1,7 +1,6 @@
 package main
 
-// The quote adapter is intentionally test-injected. No runtime configuration
-// installs it until the tenant-scoped Python service and key lifecycle are reviewed.
+// The quote adapter is nil unless explicitly configured for the local connector.
 import (
 	"bytes"
 	"crypto/hmac"
@@ -33,9 +32,10 @@ const (
 )
 
 type quoteAdapter struct {
-	upstream string // a literal loopback origin; populated only by tests in this increment
+	upstream string // a literal loopback origin
 	key      []byte
 	client   *http.Client
+	seal     *quoteKeySeal // nil only for manually injected fake adapters
 }
 
 type quoteRoute struct {
@@ -436,7 +436,7 @@ func quoteSignedHeaders(method, path, query string, body []byte, p principal, ke
 }
 
 func quoteAdapterReady(a *quoteAdapter) bool {
-	if a == nil || len(a.key) < 32 || !localOrigin(a.upstream) || a.client == nil {
+	if a == nil || len(a.key) < 32 || !localOrigin(a.upstream) || a.client == nil || (a.seal != nil && !a.seal.valid()) {
 		return false
 	}
 	return true
@@ -536,6 +536,10 @@ func (s *stateServer) quoteHTTPRoute(w http.ResponseWriter, r *http.Request) {
 			quoteError(w, 422, "invalid_request", "Invalid quote request")
 			return
 		}
+	}
+	if !quoteAdapterReady(s.quote) {
+		quoteError(w, 503, "service_unavailable", "Quote workspace unavailable")
+		return
 	}
 	assertion, signature, e := quoteSignedHeaders(r.Method, route.path, query, body, p, s.quote.key, key)
 	if e != nil {

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -131,6 +132,249 @@ func quoteOK(w http.ResponseWriter, workspace string, data string, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, `{"workspace_id":"`+workspace+`","data":`+data+`}`)
+}
+
+func quoteGeneratedKey(t *testing.T) (string, []byte) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "quote.key")
+	if err := os.WriteFile(path, key, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path, key
+}
+
+func TestQuoteLocalConnectorDefaultAndPrivateClosed(t *testing.T) {
+	cfg, rest, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, nil)
+	if err != nil || len(rest) != 0 || initQuoteHTTP(cfg) != nil || newLocalStateServer(cfg).quote != nil {
+		t.Fatalf("default connector activated: rest=%v err=%v", rest, err)
+	}
+	keyPath, _ := quoteGeneratedKey(t)
+	complete, _, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"})
+	if err != nil || newLocalStateServer(complete).quote == nil {
+		t.Fatalf("explicit complete local flags did not configure connector: %v", err)
+	}
+	for _, args := range [][]string{
+		{"-quote-local-key-file", keyPath},
+		{"-quote-local-upstream", "http://127.0.0.1:8016"},
+		{"-quote-local-key-file", keyPath, "-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"},
+	} {
+		if _, _, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, args); err == nil {
+			t.Fatalf("unsafe flags accepted: %v", args)
+		}
+	}
+	if _, _, err := withQuoteLocalFlags(stateConfig{Mode: "private_machine"}, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"}); err == nil {
+		t.Fatal("private connector flags accepted")
+	}
+}
+
+func TestQuoteLocalConnectorRejectsRemoteAndRedirect(t *testing.T) {
+	keyPath, _ := quoteGeneratedKey(t)
+	for _, origin := range []string{"http://localhost:8016", "http://192.0.2.1:8016", "https://127.0.0.1:8016", "http://127.0.0.1", "http://127.0.0.1:abc", "http://127.0.0.1:0", "http://127.0.0.1:65536", "http://user@127.0.0.1:8016", "http://127.0.0.1:8016/x", "http://127.0.0.1:8016?q=1", "http://127.0.0.1:8016#x"} {
+		if _, _, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", origin}); err == nil {
+			t.Fatalf("remote or malformed origin accepted: %s", origin)
+		}
+	}
+	if _, _, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"}); err != nil {
+		t.Fatal(err)
+	}
+	seal, _, err := readQuoteKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := initQuoteHTTP(stateConfig{Mode: "local", QuoteLocalKeyFile: keyPath, QuoteLocalUpstream: "http://127.0.0.1:8016"})
+	if runtime == nil || runtime.client.Transport.(*quoteSealedTransport).next.(*http.Transport).Proxy != nil {
+		t.Fatal("runtime connector permits a proxy")
+	}
+	var calls atomic.Int32
+	client := newQuoteLocalClient("http://127.0.0.1:8016", seal, quoteTransport(func(*http.Request) (*http.Response, error) {
+		calls.Add(1)
+		r := httptest.NewRecorder()
+		r.Header().Set("Location", "http://192.0.2.1/steal")
+		r.WriteHeader(302)
+		return r.Result(), nil
+	}))
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:8016/offers", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != 302 || calls.Load() != 1 {
+		t.Fatalf("redirect followed: response=%v err=%v calls=%d", res, err, calls.Load())
+	}
+	_ = res.Body.Close()
+}
+
+func TestQuoteLocalConnectorKeyDrift(t *testing.T) {
+	keyPath, _ := quoteGeneratedKey(t)
+	cfg, _, err := withQuoteLocalFlags(stateConfig{Mode: "local"}, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := initQuoteHTTP(cfg)
+	if !quoteAdapterReady(a) {
+		t.Fatal("valid generated key unavailable")
+	}
+	if err := os.Chmod(keyPath, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if quoteAdapterReady(a) {
+		t.Fatal("chmod drift accepted")
+	}
+	if err := os.Chmod(keyPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{'x'}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if quoteAdapterReady(a) {
+		t.Fatal("in-place key drift accepted")
+	}
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{'y'}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if quoteAdapterReady(a) {
+		t.Fatal("inode replacement accepted")
+	}
+	for _, size := range []int{31, 4097} {
+		bad := filepath.Join(t.TempDir(), "bad.key")
+		if err := os.WriteFile(bad, bytes.Repeat([]byte{'x'}, size), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if seal, _, err := readQuoteKey(bad); err == nil || seal != nil {
+			t.Fatalf("key length %d accepted", size)
+		}
+	}
+	symlink := filepath.Join(t.TempDir(), "key-link")
+	if err := os.Symlink(keyPath, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if seal, _, err := readQuoteKey(symlink); err == nil || seal != nil {
+		t.Fatal("symlink key accepted")
+	}
+	hardlink := filepath.Join(t.TempDir(), "key-hardlink")
+	if err := os.Link(keyPath, hardlink); err != nil {
+		t.Fatal(err)
+	}
+	if seal, _, err := readQuoteKey(keyPath); err == nil || seal != nil {
+		t.Fatal("multiply linked key accepted")
+	}
+}
+
+func TestQuoteLocalConnectorRejectsNoWriterFIFO(t *testing.T) {
+	checkPromptRefusal := func(path string, refused func() bool) {
+		t.Helper()
+		result := make(chan bool, 1)
+		go func() { result <- refused() }()
+		select {
+		case ok := <-result:
+			if !ok {
+				t.Fatal("nonregular key accepted")
+			}
+		case <-time.After(time.Second):
+			// A cleanup-only FIFO endpoint releases a blocked pre-fix reader.
+			fd, err := syscall.Open(path, syscall.O_RDWR|syscall.O_NONBLOCK, 0)
+			if err != nil {
+				t.Fatalf("blocked key reader could not be released: %v", err)
+			}
+			defer syscall.Close(fd)
+			select {
+			case <-result:
+			case <-time.After(time.Second):
+				t.Fatal("blocked key reader did not settle after FIFO release")
+			}
+			t.Fatal("no-writer FIFO blocked key refusal for one second")
+		}
+	}
+
+	initialFIFO := filepath.Join(t.TempDir(), "initial-key.fifo")
+	if err := syscall.Mkfifo(initialFIFO, 0600); err != nil {
+		t.Fatal(err)
+	}
+	checkPromptRefusal(initialFIFO, func() bool {
+		seal, _, err := readQuoteKey(initialFIFO)
+		return seal == nil && err != nil
+	})
+
+	keyPath, _ := quoteGeneratedKey(t)
+	adapter := initQuoteHTTP(stateConfig{Mode: "local", QuoteLocalKeyFile: keyPath, QuoteLocalUpstream: "http://127.0.0.1:8016"})
+	if !quoteAdapterReady(adapter) {
+		t.Fatal("generated regular key was unavailable before replacement")
+	}
+	if err := os.Remove(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(keyPath, 0600); err != nil {
+		t.Fatal(err)
+	}
+	checkPromptRefusal(keyPath, func() bool { return !quoteAdapterReady(adapter) })
+}
+
+func TestQuoteLocalConnectorSignedWorkspaceRoutes(t *testing.T) {
+	keyPath, key := quoteGeneratedKey(t)
+	s, _ := quoteFixture(t, func(http.ResponseWriter, *http.Request) {})
+	cfg, _, err := withQuoteLocalFlags(s.cfg, []string{"-quote-local-key-file", keyPath, "-quote-local-upstream", "http://127.0.0.1:8016"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg = cfg
+	s.quote = initQuoteHTTP(cfg)
+	if !quoteAdapterReady(s.quote) {
+		t.Fatal("runtime connector unavailable")
+	}
+	var calls atomic.Int32
+	s.quote.client = newQuoteLocalClient(cfg.QuoteLocalUpstream, s.quote.seal, quoteTransport(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		quoteWire(t, r, key, "w-a", "alice", "")
+		w := httptest.NewRecorder()
+		quoteOK(w, "w-a", `{"offers":[]}`, 200)
+		return w.Result(), nil
+	}))
+	got := quoteCall(s, http.MethodGet, "/v2/offers", "editor-token", "", "")
+	if got.Code != 200 || calls.Load() != 1 {
+		t.Fatalf("signed local read status=%d calls=%d body=%s", got.Code, calls.Load(), got.Body.String())
+	}
+	viewer := quoteCall(s, http.MethodPost, "/v2/offers/abc123/save", "viewer-token", "operation-0001", `{"expected_version":1}`)
+	if viewer.Code != 403 || calls.Load() != 1 {
+		t.Fatalf("viewer mutation status=%d calls=%d", viewer.Code, calls.Load())
+	}
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{'z'}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := quoteCall(s, http.MethodGet, "/v2/offers", "editor-token", "", "")
+	if blocked.Code != 503 || calls.Load() != 1 {
+		t.Fatalf("drifted signed hop status=%d calls=%d", blocked.Code, calls.Load())
+	}
+	bridgeKeyPath, bridgeKey := quoteGeneratedKey(t)
+	bridge, _ := bridgeFixture(t, func(*http.Request) (string, int) { t.Fatal("old fake transport used"); return "", 503 })
+	bridgeCfg, _, err := withQuoteLocalFlags(bridge.cfg, []string{"-quote-local-key-file", bridgeKeyPath, "-quote-local-upstream", "http://127.0.0.1:8016"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.cfg, bridge.quote = bridgeCfg, initQuoteHTTP(bridgeCfg)
+	var bridgeCalls atomic.Int32
+	bridge.quote.client = newQuoteLocalClient(bridgeCfg.QuoteLocalUpstream, bridge.quote.seal, quoteTransport(func(r *http.Request) (*http.Response, error) {
+		bridgeCalls.Add(1)
+		quoteWire(t, r, bridgeKey, "w-a", "alice", "")
+		w := httptest.NewRecorder()
+		quoteOK(w, "w-a", bridgeSource(bridgeCandidate()), 200)
+		return w.Result(), nil
+	}))
+	if got := quoteCall(bridge, http.MethodGet, bridgePath(), "editor-token", "", ""); got.Code != 200 || bridgeCalls.Load() != 1 {
+		t.Fatalf("signed D3 read status=%d calls=%d", got.Code, bridgeCalls.Load())
+	}
+	if err := os.WriteFile(bridgeKeyPath, bytes.Repeat([]byte{'z'}, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := quoteCall(bridge, http.MethodGet, bridgePath(), "editor-token", "", ""); got.Code != 503 || bridgeCalls.Load() != 1 {
+		t.Fatalf("drifted D3 hop status=%d calls=%d", got.Code, bridgeCalls.Load())
+	}
 }
 
 func TestQuoteAdapterSignedRoutesAndRoles(t *testing.T) {

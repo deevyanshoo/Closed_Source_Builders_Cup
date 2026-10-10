@@ -75,9 +75,17 @@ def test_every_entry_has_a_cited_source_or_an_unverified_reason():
             assert entry["unverified_reason"] is None, code
         else:
             assert entry["unverified_reason"] and entry["unverified_reason"].strip(), code
-    assert {c for c, e in REGISTRY["entries"].items() if e["verified"]} == {"INNSA", "INMAA", "INPRT", "CLVAP", "BRTUB"}
+    assert {c for c, e in REGISTRY["entries"].items() if e["verified"]} == {"INNSA", "INMAA", "INPRT", "CLVAP", "BRTUB",
+                                                                             "CNSGH"}
     assert REGISTRY["entries"]["INMAA"]["source_url"] == UNLOCODE_MIRROR
-    assert "airport" in REGISTRY["entries"]["CNSHA"]["unverified_reason"]
+
+
+def test_shanghai_seaport_uses_cn_sgh_not_the_airport_code():
+    found = resolve(REGISTRY, "CNSGH")
+    assert (found["status"], found["name"], found["lat"], found["lon"]) == ("ok", "Shanghai", "31.2333", "121.4833")
+    assert found["verified"] is True and found["source_url"] == UNLOCODE_MIRROR
+    assert "CN SGH" in found["source"] and "3114N 12129E" in found["source"]
+    assert resolve(REGISTRY, "CNSHA")["reason"] == "not_in_registry"
 
 
 @pytest.mark.parametrize("change", [
@@ -197,7 +205,7 @@ def test_gaps_make_a_rule_undecided():
     ("INMUN", "open_meteo_inmun.json", 200, "malformed_payload", "location_mismatch"),
     ("CLVAP", "open_meteo_clvap_malformed.json", 200, "malformed_payload", "missing_hourly"),
     ("BRTUB", "open_meteo_error.json", 400, "provider_failure", "http_400"),
-    ("CNSHA", "open_meteo_error.json", 429, "rate_limited", "http_429"),
+    ("CNSGH", "open_meteo_error.json", 429, "rate_limited", "http_429"),
 ])
 def test_failures_are_explicit(code, name, status, state, reason):
     a = om(code, name, status=status)

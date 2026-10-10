@@ -170,7 +170,7 @@ def test_stale_and_no_change_states():
     same = copy.deepcopy(SAMPLES["innsa-hold-new-eta"]["record"])
     same.update(event_id="rpl-same", eta=None, type="departed", shipment_id="SHP-SYN-005",
                 occurred_at="2026-09-24T00:00:00Z", observed_at="2026-10-08T06:00:00Z",
-                facility={"kind": "port", "code": "CNSHA"})
+                facility={"kind": "port", "code": "CNSGH"})
     nothing = run(event=same)
     assert (nothing["status"], nothing["reasons"]) == ("empty", ["no_changes"])
 

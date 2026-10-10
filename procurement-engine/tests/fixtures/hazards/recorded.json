@@ -12,7 +12,7 @@
     {"provider": "open-meteo", "location": "INPRT", "http_status": 200, "retrieved_at": "2026-10-07T00:00:00Z", "file": "open_meteo_inprt.json", "case": "gale forecast retrieved too long ago"},
     {"provider": "open-meteo", "location": "CLVAP", "http_status": 200, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_clvap_malformed.json", "case": "malformed body"},
     {"provider": "open-meteo", "location": "BRTUB", "http_status": 400, "retrieved_at": "2026-10-08T09:00:00Z", "file": "open_meteo_error.json", "case": "provider error"},
-    {"provider": "open-meteo", "location": "CNSHA", "http_status": 429, "retrieved_at": "2026-10-08T09:00:00Z", "file": null, "case": "rate limited"},
+    {"provider": "open-meteo", "location": "CNSGH", "http_status": 429, "retrieved_at": "2026-10-08T09:00:00Z", "file": null, "case": "rate limited"},
     {"provider": "gdacs", "location": null, "http_status": 200, "retrieved_at": "2026-10-08T08:00:00Z", "file": "gdacs_events.json", "case": "event list"}
   ]
 }

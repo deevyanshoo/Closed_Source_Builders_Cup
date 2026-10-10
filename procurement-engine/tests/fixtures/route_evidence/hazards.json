@@ -24,7 +24,7 @@
 
     {"synthetic": true, "evidence_id": "rev-haz-003", "kind": "weather_hazard",
      "summary": "Synthetic heavy rain advisory at Shanghai",
-     "facility": {"kind": "port", "code": "CNSHA", "name": "Shanghai (synthetic)"},
+     "facility": {"kind": "port", "code": "CNSGH", "name": "Shanghai (synthetic)"},
      "source": {"provider_id": "synthetic-weather-service", "kind": "weather_service", "reference": "SYN-WX-288"},
      "retrieved_at": "2026-09-28T00:00:00Z",
      "observed_period": {"start": "2026-09-28T00:00:00Z", "end": "2026-09-30T00:00:00Z"},
@@ -60,7 +60,7 @@
 
     {"synthetic": true, "evidence_id": "rev-lane-007", "kind": "route_hazard",
      "summary": "Synthetic congestion advisory on the Shanghai to Mundra lane",
-     "lane": {"origin": "CNSHA", "destination": "INMUN", "mode": "ocean"},
+     "lane": {"origin": "CNSGH", "destination": "INMUN", "mode": "ocean"},
      "source": {"provider_id": "synthetic-hazard-feed", "kind": "hazard_feed", "reference": "SYN-HF-044"},
      "retrieved_at": "2026-10-06T12:00:00Z",
      "observed_period": {"start": "2026-10-06T00:00:00Z", "end": null},

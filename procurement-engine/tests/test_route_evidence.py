@@ -61,7 +61,7 @@ def test_confirmed_status_needs_an_operating_source(result):
 def test_expiry_states(result):
     assert item(result, "rev-haz-003")["expiry"] == "expired"
     assert item(result, "rev-lane-007")["expiry"] == "no_stated_expiry"
-    assert item(result, "rev-lane-007")["location_keys"] == ["CNSHA", "INMUN"]
+    assert item(result, "rev-lane-007")["location_keys"] == ["CNSGH", "INMUN"]
 
 
 @pytest.mark.parametrize("changes,reason", [
@@ -99,7 +99,7 @@ def test_as_of_must_carry_a_time_zone():
 
 
 def test_evidence_for_locations_separates_confirmed_exposure_and_expired(result):
-    found = evidence_for_locations(result, ["INNSA", "INMAA", "CNSHA"])
+    found = evidence_for_locations(result, ["INNSA", "INMAA", "CNSGH"])
     assert [e["evidence_id"] for e in found["confirmed"]] == ["rev-port-002"]
     assert [e["evidence_id"] for e in found["exposure"]] == ["rev-haz-001", "rev-lane-007"]
     assert [e["evidence_id"] for e in found["expired"]] == ["rev-haz-003"]

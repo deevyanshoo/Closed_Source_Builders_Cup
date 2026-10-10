@@ -12,7 +12,7 @@ resolves facility and port codes to coordinates. Nothing here makes a network re
 
 | File | What it holds |
 |---|---|
-| `config/locations_v2.json` | Registry `locations-v2`: code, kind, name, lat, lon, `verified`, source, `source_url`, `checked_on` and, when unverified, `unverified_reason`. On 2026-10-10, five ports were checked: INNSA against the JNPA location page, and INMAA, INPRT, CLVAP and BRTUB against UN/LOCODE 2025-1. Three stay unverified with reasons: INMUN, AEJEA, and CNSHA (CN SHA is an airport in UN/LOCODE). An entry with neither a cited source nor a reason is refused. A code that is not listed, including synthetic plant codes, is `unsupported_location`; coordinates are never guessed |
+| `config/locations_v2.json` | Registry `locations-v2`: code, kind, name, lat, lon, `verified`, source, `source_url`, `checked_on` and, when unverified, `unverified_reason`. On 2026-10-10, six ports were checked: INNSA against the JNPA location page, and INMAA, INPRT, CLVAP, BRTUB and CNSGH against UN/LOCODE 2025-1. Shanghai uses CN SGH (functions 12345, 3114N 12129E), because CN SHA is Hongqiao airport. Two stay unverified with reasons: INMUN and AEJEA. An entry with neither a cited source nor a reason is refused. A code that is not listed, including synthetic plant codes, is `unsupported_location`; coordinates are never guessed |
 | `config/hazard_sources_v1.json` | Thresholds `hazard-thresholds-v1`, as exact decimal strings. Open-Meteo: hourly wind of 62 km/h or more (Beaufort 8), gusts of 89 km/h or more (Beaufort 10), or 64.5 mm or more of rain in a rolling 24 hours (the IMD "heavy rainfall" lower bound), all within 72 hours after the cutoff. GDACS: an Orange or Red alert within 300 km |
 
 ## States
@@ -58,6 +58,6 @@ The terms and attribution notes below were written without visiting the provider
 | Proposed budget | One request per supported location per refresh. 8 registry locations, 4 refreshes a day, so at most 32 a day, kept to a single bounded check first | One request per refresh, covering all locations. At most 4 a day |
 
 Before a live run:
-1. **Resolve the unverified ports.** Find a citable source for INMUN, AEJEA and CNSHA, or drop them. CNSHA also needs the right seaport code.
+1. **Resolve the unverified ports.** Find a citable source for INMUN and AEJEA, or drop them.
 2. **Get approval.** Confirm the terms and the request budget.
 3. **Run a bounded check.** Record it with the date, revision and request count, in a separate file from the tests.

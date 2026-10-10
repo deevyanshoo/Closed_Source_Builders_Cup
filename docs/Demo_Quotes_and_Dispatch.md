@@ -45,7 +45,7 @@ If time is short, drop the 2:22 rejection and the 2:30 export: the script then r
 - **Live providers:** the Open-Meteo, GDACS, Nager.Date, GDELT and RSS adapters exist but have only ever run on hand-written payloads.
 - **Gateway and saves:** neither page is connected to the gateway, and saves in `/offers` stay in the browser tab.
 - **Recovery link:** it does not preselect the shipment yet.
-- **Coordinates:** the location registry's coordinates are hand-entered and unverified.
+- **Coordinates:** six registry ports were checked against UN/LOCODE 2025-1 or the port authority on 2026-10-10 (Shanghai is CNSGH, not the airport code CNSHA). Mundra and Jebel Ali are still hand-entered and unverified. All points are port areas, not berths.
 - **Holidays:** India has no approved real holiday source.
 - **Extraction accuracy:** the figures are on synthetic quotes only (`procurement-engine/evaluation/offers/README.md`).
 - **News and policy notices:** the snapshots (#63, #64) have no page yet.

@@ -73,7 +73,7 @@
 
     {"synthetic": true, "event_id": "evt-005-dep", "shipment_id": "SHP-SYN-005", "type": "departure",
      "occurred_at": "2026-09-25T00:00:00Z", "observed_at": "2026-10-07T08:00:00Z",
-     "facility": {"kind": "port", "code": "CNSHA", "name": "Shanghai (synthetic)"},
+     "facility": {"kind": "port", "code": "CNSGH", "name": "Shanghai (synthetic)"},
      "source": {"provider_id": "synthetic-carrier-feed", "kind": "carrier_feed", "reference": "SYN-BL-0005"},
      "evidence": [{"evidence_id": "ev-005-dep", "kind": "carrier_status", "locator": "synthetic://feed/SYN-BL-0005/2",
                    "content_sha256": "a1f0000000000000000000000000000000000000000000000000000000000007",
@@ -81,7 +81,7 @@
 
     {"synthetic": true, "event_id": "evt-005-eta", "shipment_id": "SHP-SYN-005", "type": "eta_changed",
      "occurred_at": "2026-10-01T00:00:00Z", "observed_at": "2026-10-01T01:00:00Z", "eta": "2026-10-06T00:00:00Z",
-     "lane": {"origin": "CNSHA", "destination": "INMUN", "mode": "ocean"},
+     "lane": {"origin": "CNSGH", "destination": "INMUN", "mode": "ocean"},
      "source": {"provider_id": "synthetic-carrier-feed", "kind": "carrier_feed", "reference": "SYN-BL-0005"},
      "evidence": [{"evidence_id": "ev-005-eta", "kind": "carrier_status", "locator": "synthetic://feed/SYN-BL-0005/5",
                    "content_sha256": "a1f0000000000000000000000000000000000000000000000000000000000008",

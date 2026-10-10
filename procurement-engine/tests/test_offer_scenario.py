@@ -139,6 +139,30 @@ def test_days_after_the_event_are_added():
     assert (line["due_date"], line["days_from_decision"], line["amount"]) == ("2027-02-04", 117, None)
 
 
+def test_nonzero_before_shipment_deadline_and_cash_value_are_hand_calculated():
+    decision = dt.date(2026, 10, 10)
+    event_dates = {**DATES, "shipment": "2026-11-30"}
+    amount = {"amount": "36500", "currency": "USD"}
+    before = cash_timing(parse_payment_terms(text_field("payment_terms", "100% TT 30 days before shipment")),
+                         amount=amount, dates=event_dates, decision_date=decision)
+    after = cash_timing(parse_payment_terms(text_field("payment_terms", "100% TT 30 days after shipment")),
+                        amount=amount, dates=event_dates, decision_date=decision)
+    assert (before["lines"][0]["due_date"], before["lines"][0]["days_from_decision"],
+            before["weighted_days"]) == ("2026-10-31", 21, "21")
+    assert (after["lines"][0]["due_date"], after["weighted_days"]) == ("2026-12-30", "81")
+    assert compare_terms(before, after, amount=amount, rate_percent="10") == {
+        "weighted_days_change": "60", "value_of_later_payment": {"amount": "600.00", "currency": "USD"},
+        "rate_percent": "10", "day_count": 365, "rounding": "half_even_0.01", "reason": None}
+
+
+def test_before_shipment_without_event_date_is_incomplete():
+    terms = parse_payment_terms(text_field("payment_terms", "100% TT 30 days prior to loading"))
+    result = cash_timing(terms, amount=None, dates={**DATES, "shipment": None},
+                         decision_date=dt.date(2026, 10, 10))
+    assert result["lines"][0]["due_date"] is None
+    assert result["complete"] is False and result["missing"] == ["date_not_entered:shipment"]
+
+
 def test_missing_event_dates_and_unstated_events_leave_the_schedule_incomplete():
     terms = parse_payment_terms(text_field("payment_terms", "Net 45 days"))
     result = cash_timing(terms, amount=None, dates=DATES, decision_date=AS_OF)

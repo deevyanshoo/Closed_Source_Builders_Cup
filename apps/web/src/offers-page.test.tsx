@@ -105,6 +105,20 @@ describe('decision date and payment timing panel', () => {
     expect(renderToStaticMarkup(<ScenarioView state={{ kind: 'result', result: noRate }} offers={offers} />)).toContain('Enter an annual rate to value this.');
   });
 
+  it('shows a before-shipment deadline beside its computed date without reversing the direction', async () => {
+    const result = await adapter.scenario('fixture-q01', { decision_date: '2026-10-10', dates: { ...dates, shipment: '2026-11-30' }, rate_percent: null, alternative_offer_id: null });
+    result.schedule.lines[0] = { ...result.schedule.lines[0], anchor: 'shipment', timing: 'on_or_before', days: 30,
+      due_date: '2026-10-31', days_from_decision: 21, clause: '100% TT 30 days before shipment' };
+    const html = renderToStaticMarkup(<ScenarioView state={{ kind: 'result', result }} offers={offers} />);
+    expect(html).toContain('by 30 days before shipment');
+    expect(html).toContain('2026-10-31');
+    expect(html).not.toContain('shipment + 30 days');
+    result.schedule.lines[0] = { ...result.schedule.lines[0], days: 0, due_date: '2026-11-30', days_from_decision: 51 };
+    const zeroDay = renderToStaticMarkup(<ScenarioView state={{ kind: 'result', result }} offers={offers} />);
+    expect(zeroDay).toContain('on or before shipment');
+    expect(zeroDay).toContain('2026-11-30');
+  });
+
   it('says a missing validity is not stated and is not treated as open', async () => {
     const result = await adapter.scenario('fixture-q17', { decision_date: '2026-10-10', dates, rate_percent: null, alternative_offer_id: null });
     expect(renderToStaticMarkup(<ScenarioView state={{ kind: 'result', result }} offers={offers} />)).toContain('Validity not stated in the document');

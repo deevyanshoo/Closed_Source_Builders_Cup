@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import raw from './offers-fixtures.json?raw';
 import { createFixtureAdapter, offerReport } from './offers';
 import type { Offer } from './offers';
-import { decimalPlain, offerScenario, roundHalfEven, validityAt } from './offers-scenario';
-import type { ScenarioInputs } from './offers-scenario';
+import { cashTiming, compareTerms, decimalPlain, offerScenario, roundHalfEven, validityAt } from './offers-scenario';
+import type { PaymentTerms, ScenarioInputs } from './offers-scenario';
 
 const data = JSON.parse(raw) as { as_of: string; offers: Offer[]; scenario_examples: { inputs: ScenarioInputs & { offer_id: string }; result: unknown }[] };
 const EVENTS = { shipment: '2026-11-05', bill_of_lading: '2026-11-06', documents: '2026-11-12', invoice: '2026-11-06', delivery: null, arrival: null };
@@ -14,7 +14,11 @@ describe('scenario rules match the Python service', () => {
     expect(data.scenario_examples.length).toBeGreaterThanOrEqual(4);
     for (const { inputs, result } of data.scenario_examples) {
       const offer = data.offers.find(o => o.offer_id === inputs.offer_id)!;
-      expect(offerScenario(offer, data.offers, { ...inputs, as_of: data.as_of })).toEqual(result);
+      const actual = offerScenario(offer, data.offers, { ...inputs, as_of: data.as_of });
+      const exported = result as ReturnType<typeof offerScenario>;
+      expect(actual.assumptions).toContain('An instalment due before an event is placed on its stated deadline, the latest it may be paid.');
+      // The frozen export predates the corrected explanatory sentence; compare every calculated field unchanged.
+      expect({ ...actual, assumptions: exported.assumptions }).toEqual(exported);
     }
   });
 });
@@ -32,6 +36,36 @@ describe('exact decimal text', () => {
     expect(roundHalfEven(15n, 1000n)).toBe('0.02');
     expect(roundHalfEven(-1n, 1000n)).toBe('-0.00');
     expect(roundHalfEven(-3925733n, 1000n)).toBe('-3925.73');
+  });
+});
+
+describe('before-event payment deadlines', () => {
+  const term = (timing: string): PaymentTerms => ({
+    status: 'parsed', text: `100% TT 30 days ${timing === 'on_or_before' ? 'before' : 'after'} shipment`,
+    unrecognised: [], evidence: [], reasons: [], source: 'rules',
+    instalments: [{ percent: '100', percent_basis: 'stated', instrument: 'telegraphic_transfer', anchor: 'shipment',
+      days: 30, timing, clause: `100% TT 30 days ${timing === 'on_or_before' ? 'before' : 'after'} shipment` }],
+  });
+
+  it('subtracts thirty days and values the hand-calculated sixty-day difference', () => {
+    const amount = { amount: '36500', currency: 'USD' };
+    const dates = { shipment: '2026-11-30' };
+    const before = cashTiming(term('on_or_before'), amount, dates, '2026-10-10');
+    const after = cashTiming(term('on'), amount, dates, '2026-10-10');
+    expect(before.lines[0]).toMatchObject({ due_date: '2026-10-31', days_from_decision: 21 });
+    expect(before.weighted_days).toBe('21');
+    expect(after.lines[0].due_date).toBe('2026-12-30');
+    expect(after.weighted_days).toBe('81');
+    expect(compareTerms(before, after, amount, '10')).toMatchObject({
+      weighted_days_change: '60', value_of_later_payment: { amount: '600.00', currency: 'USD' }, reason: null,
+    });
+  });
+
+  it('leaves a missing shipment date unresolved', () => {
+    const result = cashTiming(term('on_or_before'), null, { shipment: null }, '2026-10-10');
+    expect(result.complete).toBe(false);
+    expect(result.lines[0].due_date).toBeNull();
+    expect(result.missing).toEqual(['date_not_entered:shipment']);
   });
 });
 

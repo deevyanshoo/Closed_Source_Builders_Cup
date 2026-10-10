@@ -43,7 +43,7 @@ export const ASSUMPTIONS = [
   'A quote is open through its valid-until date. A missing date is not stated and is never treated as open.',
   'The order is placed on the decision date, so advance payments fall on it.',
   'Shipment, bill of lading, documents, invoice, delivery and arrival dates are user inputs, not forecasts.',
-  "An instalment due before an event is placed on that event's date, the latest it may be paid.",
+  'An instalment due before an event is placed on its stated deadline, the latest it may be paid.',
   'Amounts are quantity times unit price in the quote currency, with no FX conversion, tax or freight added.',
   'The value of paying later uses the annual rate you enter, simple interest on actual days over 365, rounded half-even to 0.01. No rate is assumed.',
 ];
@@ -162,7 +162,7 @@ export function cashTiming(terms: PaymentTerms, amount: Money | null, dates: Sce
     let due: number | null = null, reason: string | null = null;
     if (inst.anchor === 'not_stated') reason = 'anchor_not_stated';
     else if (events[inst.anchor] === null || events[inst.anchor] === undefined) reason = `date_not_entered:${inst.anchor}`;
-    else due = events[inst.anchor]! + (inst.days ?? 0);
+    else due = events[inst.anchor]! + (inst.timing === 'on_or_before' ? -(inst.days ?? 0) : (inst.days ?? 0));
     if (inst.percent === null) reason ??= 'percent_not_stated';
     const share = amount && inst.percent !== null
       ? { amount: plain(div(mul(q(amount.amount), q(inst.percent)), { n: 100n, d: 1n }))!, currency: amount.currency } : null;

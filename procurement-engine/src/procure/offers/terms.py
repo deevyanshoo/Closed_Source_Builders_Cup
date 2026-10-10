@@ -1,7 +1,7 @@
 """Payment terms: turn the extracted payment_terms text into instalments, or say why not.
 
 Each instalment states its share of the price (`percent`), the payment instrument, the event it is tied to
-(`anchor`), the days after that event and whether it is due on or by that date. Anything the text does not state stays
+(`anchor`), the stated number of days and whether it is due on or by that event-relative date. Anything the text does not state stays
 "not_stated"; a clause that cannot be read is kept verbatim under `unrecognised` and gets no share of the price.
 The only inference is that a single term with no percentage covers the whole price (`percent_basis: single_term`).
 The result keeps the field's evidence locators, so every instalment points back to its page line or cell.
@@ -45,10 +45,10 @@ def _clause(text: str) -> dict | None:
         anchor, timing = "shipment", "on_or_before"
     elif _ADVANCE.search(text):
         anchor = "order"
-    elif _SIGHT.search(text) or instrument == "cash_against_documents":
-        anchor = "documents"
     elif m := _AFTER.search(text):
         anchor = _EVENTS[re.sub(r"\s+", " ", m.group(1).lower())]
+    elif _SIGHT.search(text) or instrument == "cash_against_documents":
+        anchor = "documents"
     if not (percent or days or anchor != "not_stated" or instrument != "not_stated"):
         return None
     return {"percent": percent.group(1) if percent else None, "percent_basis": "stated" if percent else "not_stated",

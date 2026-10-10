@@ -233,3 +233,89 @@ pdfplumber==0.11.10
 
 Both are MIT licensed (pdfplumber also pulls in `pypdfium2`, Apache-2.0/BSD-3-Clause). `fpdf2` is only used to
 generate test fixtures and is not needed in the service.
+
+## 9. Sourcing candidates (proposed, not wired)
+
+`sourcing.py` turns accepted, unexpired offers into per-item sourcing candidates. `store.sourcing_candidates(today=)` builds them
+from every stored offer. It is read-only: no status, version or audit change. Nothing in `decision.py`, the gateway or
+`contracts/` reads it yet. This is the shape I propose you consume, for example to fill `PlanningRequest.supplier_offer_ids`
+and the cash and validity constraints in the planning engine.
+
+```text
+SourcingCandidates {
+  contract: "offers-sourcing-candidates/proposed-0.1", as_of: date, synthetic: bool
+  candidates: [SourcingCandidate]                  # sorted by material, offer_id, item_index
+  excluded: [{offer_id, offer_version, item_index: int | null, reason, detail}]
+  notes: string[]
+}
+SourcingCandidate {
+  candidate_id: "<offer_id>@v<version>#item<i>"    # changes when the offer version changes
+  offer_id, offer_version, offer_status: saved | used_in_plan, item_index, synthetic, document_id
+  supplier: {name, origin_country, origin_country_code}
+  material: catalogue key, description, grade
+  quantity: {amount: decimal, unit: tonne | kg | lb, kg: decimal}
+  min_order_kg: decimal | null, capacity: {kg, period} | null, lead_time_days: int | null
+  incoterm: {code, place}, settlement_currency: ISO 4217 | null
+  price: {type: fixed, unit_price: Money, per_unit, per_kg: Money}
+       | {type: index_linked, index, averaging_period, premium_per_kg: Money}
+  landed_price: {
+    status: incoterm_price_only | incoterm_unknown | index_linked_final_price_unknown
+    basis: quoted_price_on_incoterm, incoterm, place
+    includes: string[], not_included: string[]     # Incoterms 2020 cost split, for example CIF excludes import duty
+    per_kg: Money | null                           # quote currency; null for index-linked prices
+    reporting: {currency, status: ok | not_needed | unavailable, per_kg: Money | null,
+                fx: {base, quote, rate, rate_date, source} | null}
+  }
+  validity: {state: valid, valid_until: date, days_left: int, evidence: [{locator, quote}]}
+  payment_terms: normalized.payment_terms (section 2): instalments with share, instrument, event, days
+  evidence: [{field, locator, text_sha256, document_id}]   # every verified field of the offer and this item
+  field_sources: {<field>: {status: extracted | corrected, source: rules | gemini | user}}
+}
+```
+
+Rules:
+- **Accepted:** status `saved` or `used_in_plan`. Other statuses are excluded as `not_accepted`, with the status in
+  `detail`.
+- **Validity:** an offer past its valid-until date on `as_of` is excluded as `expired`. A missing date is excluded as
+  `validity_not_stated`; an unresolved one as `validity_unavailable`. Save already blocks both, so they only appear
+  for older stored offers.
+- **Items:** each needs a verified material, a normalised quantity and a normalised price. Otherwise it is excluded
+  as `item_incomplete`, with what is missing.
+- **Landed price:** this is the quoted price on its Incoterm, not a full landed cost. Duty, port and inland costs
+  are listed under `not_included` and never estimated here. The reporting-currency price keeps the FX rate, its
+  date and its source. When no dated rate exists it is `unavailable`, not filled.
+
+Example (real output for synthetic Q01 after a reviewer confirmed USD and saved it; trimmed):
+
+```json
+{"contract": "offers-sourcing-candidates/proposed-0.1", "as_of": "2026-10-07", "synthetic": true,
+ "candidates": [{"candidate_id": "17ac3e84318e@v3#item0", "offer_id": "17ac3e84318e", "offer_version": 3,
+   "offer_status": "saved", "item_index": 0, "synthetic": true,
+   "supplier": {"name": "Atacama Red Metals SpA [SYNTHETIC]", "origin_country": "Chile", "origin_country_code": "CL"},
+   "material": "copper", "quantity": {"amount": "250", "unit": "tonne", "kg": "250000"},
+   "min_order_kg": "25000", "capacity": {"kg": "500000", "period": "month"}, "lead_time_days": 45,
+   "incoterm": {"code": "CIF", "place": "Nhava Sheva, India"}, "settlement_currency": "USD",
+   "price": {"type": "fixed", "unit_price": {"amount": "9412.50", "currency": "USD"}, "per_unit": "tonne",
+             "per_kg": {"amount": "9.4125", "currency": "USD"}},
+   "landed_price": {"status": "incoterm_price_only", "basis": "quoted_price_on_incoterm", "incoterm": "CIF",
+     "includes": ["export_clearance", "main_freight", "insurance"],
+     "not_included": ["import_duty_and_taxes", "destination_port_charges", "inland_freight_to_plant"],
+     "per_kg": {"amount": "9.4125", "currency": "USD"},
+     "reporting": {"currency": "USD", "status": "not_needed", "per_kg": {"amount": "9.4125", "currency": "USD"}, "fx": null}},
+   "validity": {"state": "valid", "valid_until": "2026-10-31", "days_left": 24,
+                "evidence": [{"locator": "p1:l16", "quote": "31 October 2026"}]},
+   "payment_terms": {"status": "parsed", "instalments": [{"percent": "30", "instrument": "telegraphic_transfer",
+                     "anchor": "order", "days": 0, "timing": "on"}, "..."]},
+   "evidence": [{"field": "supplier_name", "locator": "p1:l2", "text_sha256": "a27d49df...",
+                 "document_id": "sha256:5032b401..."}, "..."],
+   "field_sources": {"settlement_currency": {"status": "corrected", "source": "user"}}}],
+ "excluded": [{"offer_id": "276155a8572c", "offer_version": 1, "item_index": null, "reason": "not_accepted",
+               "detail": "status needs_review"}]}
+```
+
+Questions for you:
+1. **Accepted statuses.** Should `rfq_drafted` offers count as accepted? They are excluded for now.
+2. **Grain.** Is one candidate per offer item the grain your `PlanningRequest` wants, or one per offer?
+3. **Full landed cost.** The `not_included` costs need your inputs (duty by HS line, port charges, inland freight).
+   Should the planner add them to `landed_price.per_kg`, or should this model take them as explicit assumptions?
+4. **Route.** I can add `GET /offers/sourcing-candidates?as_of=` to `offers/http.py` if you want to proxy it.

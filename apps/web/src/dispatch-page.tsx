@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   createDispatchFixtureAdapter, dispatchReport, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness,
   hazardStateLabel, humanize, replayReason, statusLabel,
@@ -10,21 +10,11 @@ import type {
 } from './dispatch';
 import { ReportDownloads } from './report-downloads';
 import './dispatch.css';
+import { WorkspaceHeader } from './workspace-nav';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
 
 
-// Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
-const WORKSPACE_PAGES: [string, string][] = [
-  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
-  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
-];
-
-function WorkspaceNav() {
-  return <nav className="workspace-nav" aria-label="Workspace pages">
-    {WORKSPACE_PAGES.map(([to, label]) => <NavLink key={to} className="recovery-back" to={to} end>{label}</NavLink>)}
-  </nav>;
-}
 
 export function StateNotice({ kind, message, title }: { kind: 'loading' | 'empty' | 'error' | 'stale'; message?: string; title?: string }) {
   if (kind === 'loading') return <p className="dispatch-state" aria-busy="true">Loading dispatch data…</p>;
@@ -380,11 +370,7 @@ export function DispatchPage() {
   const hours = Math.floor(age.ageSeconds / 3600);
 
   return <main className="shell dispatch-shell">
-    <header className="masthead workspace-masthead">
-      <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
-      <WorkspaceNav />
-    </header>
+    <WorkspaceHeader section="DISPATCH" status="Synthetic · local adapter" />
     <section className="recovery-intro">
       <p className="eyebrow">Dispatch workspace · issue 5</p>
       <h1>Shipments, milestones and route evidence</h1>

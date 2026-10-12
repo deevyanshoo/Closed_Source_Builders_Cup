@@ -319,3 +319,97 @@ Questions for you:
 3. **Full landed cost.** The `not_included` costs need your inputs (duty by HS line, port charges, inland freight).
    Should the planner add them to `landed_price.per_kg`, or should this model take them as explicit assumptions?
 4. **Route.** I can add `GET /offers/sourcing-candidates?as_of=` to `offers/http.py` if you want to proxy it.
+
+## 10. Voice read tools for offers (proposed for #81, not built)
+
+Two read-only tools a voice or text turn could call to answer questions about quotes. Nothing is built yet; this is the
+shape for review. The shipment tools and the shared rules are in `procurement-engine/src/procure/dispatch/CONTRACT_PROPOSAL.md`
+("Voice read tools").
+
+### How they fit what exists
+
+They follow `compare_receipt_recovery` (`procure/agents/voice_tools.py`, `services/gateway/internal/voice`):
+- **Declaration:** each tool has a standalone JSON declaration with `additionalProperties: false`. The model supplies only the arguments below.
+- **Host context:** the host supplies the trusted context: `workspace_id`, `principal_id`, `session_id`, `turn_id` and `as_of`. No argument can override it.
+- **Execution:** the gateway runs a fixed Python module with bounded input and output, as it does for the recovery tool.
+- **Outcome envelope:** the same as today's:
+  `{tool_name, read_only: true, ownership: {session_id, turn_id}, status, reason?, missing_fields?, result?}`.
+
+Status values:
+
+| `status` | Meaning |
+|---|---|
+| `answered` | `result` holds the read model answer |
+| `not_found` | The offer is unknown or belongs to another workspace (one status for both, like the gateway's uniform 404) |
+| `clarification_required` | A required argument is missing; `missing_fields` names it |
+| `rejected` | `reason`: `invalid_arguments`, `unknown_tool` or `invalid_context` |
+| `unavailable` | `reason`: `store_unavailable` or `binding_unavailable`; no answer is made up |
+
+With the #87 text proposals, a request such as "is the Atacama quote still valid" would become a proposed canonical
+call to one of these tools. The gateway validates it against the declaration before anything runs. Whether a
+read-only call still needs the explicit browser confirmation that comparisons use is question 2 in the dispatch
+proposal's "Voice read tools" section.
+
+### `get_offer_summary`
+
+Arguments: `{"offer_id": string}`. The string is 1 to 128 characters of `[A-Za-z0-9_-]`, and no other keys are allowed.
+
+Result, built from the lifecycle view (`store.get_offer`) on the host `as_of` date:
+
+```text
+{
+  offer_id, offer_version: int, offer_status: extracted | needs_review | corrected | saved | used_in_plan | rfq_drafted | rejected | expired
+  synthetic: bool, as_of: date, document_id
+  supplier_name: {value: string | null, status}             # status is the field status; null is never filled in
+  incoterm: {value: {code, place} | null, status}
+  settlement_currency: {value: ISO 4217 | null, status}
+  items: [{index, material: {value, status},
+           quantity: {value: {amount: decimal, unit, kg: decimal} | null, status},
+           price: {value: {type: fixed, unit_price: Money, per_unit, per_kg: Money}
+                        | {type: index_linked, index, averaging_period, premium_per_kg: Money} | null, status}}]
+  validity: {state: valid | expired | not_stated | unavailable, valid_until: date | null, days_left: int | null}
+  payment_terms: {status, instalments: [{percent: decimal | null, instrument, anchor, days, timing}]}
+  blocking_reasons: [{code, field}]
+  evidence: [{field, locator, text_sha256, document_id}]
+}
+```
+
+### `list_valid_offers`
+
+Arguments: `{"material"?: catalogue key, "limit"?: integer 1 to 20}`. Default limit 10.
+
+Result, built from `sourcing.sourcing_candidates` (section 9) on the host `as_of` date:
+
+```text
+{
+  as_of: date, synthetic: bool, material: string | null, truncated: bool
+  candidates: [{candidate_id, offer_id, offer_version, item_index, supplier_name, material,
+                quantity: {amount, unit, kg},
+                landed_price: {status, incoterm, place, per_kg: Money | null, not_included: string[],
+                               reporting: {currency, status, per_kg: Money | null, fx: {rate, rate_date, source} | null}},
+                validity: {state: valid, valid_until, days_left},
+                payment_terms: {status, instalments: [...]},
+                evidence: [{field, locator, text_sha256, document_id}]}]
+  excluded_counts: {expired: int, not_accepted: int, validity_not_stated: int, validity_unavailable: int, item_incomplete: int}
+}
+```
+
+An unknown `material` is `rejected` with `invalid_arguments`. An empty list is `answered` with `candidates: []`, never a
+guess.
+
+### Rules for both tools
+
+- **No document text reaches the model.** Results carry structured values, statuses, locators and hashes, but never quote, segment or review-flag text. A quote's words can only appear in the browser's evidence view.
+- **Money and units:** amounts are exact decimal strings with their currency, and quantities keep their unit and kilograms.
+- **No conversion:** results add no FX conversion, landed cost or rate that the read model does not already hold.
+- **Missing values:** these keep their status (`missing`, `conflict`, `unverified`), and the value stays `null`.
+- **Expiry:** an expired offer is reported as expired by `get_offer_summary` and never appears in `list_valid_offers`.
+
+### Planned offline tests (with the adapters, after review)
+
+Each tool gets offline tests for:
+- an unknown or foreign offer (`not_found`)
+- an expired offer, an offer whose validity is not stated, and an unverified settlement currency
+- an index-linked price, and an unavailable FX rate
+- a request with extra keys or a bad id (`rejected`)
+- a check that no result contains document quote text

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionResponse } from '../../../contracts/generated/types';
 import { VoiceController, voiceMatches, voiceExample } from './voice';
+import type { VoiceView } from './voice';
 import resultRaw from '../../../contracts/examples/voice_http_recovery_result.json?raw';
 import precisionRaw from '../../../contracts/examples/voice_http_recovery_precision_result.json?raw';
 import proposalRaw from '../../../contracts/examples/voice_http_text_proposal_result.json?raw';
@@ -365,6 +366,25 @@ describe('typed voice lifecycle ownership', () => {
   it('accepts the authoritative nested ready result shapes without consuming depth on schema references', () => {
     expect(voiceMatches(JSON.parse(resultRaw), 'VoiceHTTPResultResponse')).toBe(true);
     expect(voiceMatches(JSON.parse(precisionRaw), 'VoiceHTTPResultResponse')).toBe(true);
+  });
+  it('sends the default "Receipt arrives late" change on the first run after load (#78)', async () => {
+    let startBody: { call: { arguments: { arrival_replacements: unknown[] } } } | undefined;
+    const transport: typeof fetch = async (input, init) => {
+      const path = String(input);
+      if (path === '/v2/voice/sessions' && init?.method === 'POST') return json(created(), 201);
+      if (path.endsWith('/turns') && init?.method === 'POST') { startBody = JSON.parse(String(init.body)); return json({ contract_version: '0.2.0', error: { code: 'voice_unavailable', message: 'offline' } }, 503); }
+      if (init?.method === 'DELETE') return json({ contract_version: '0.2.0', session_id: id, read_only: true, synthetic: true, status: 'closed' });
+      throw new Error(`unexpected ${path}`);
+    };
+    const controller = new VoiceController({ transport, loadSession: async () => identity });
+    let view: VoiceView | undefined;
+    controller.subscribe(next => { view = next; });
+    await controller.refreshIdentity();
+    expect(view?.example).toBe('recovery');
+    expect(view?.arrivals['r-C']).toBe('2026-10-10T10:00:00Z');
+    await controller.run();
+    expect(startBody?.call.arguments.arrival_replacements).toEqual(voiceExample('recovery', 'W').scenario.arrival_replacements);
+    expect(startBody?.call.arguments.arrival_replacements).toEqual([{ receipt_id: 'r-C', expected_arrival_at: '2026-10-10T09:00:00Z', arrival_at: '2026-10-10T10:00:00Z' }]);
   });
   it('preserves the authoritative unchanged unsupported stale receipt expectation', async () => {
     let startBody: Record<string, unknown> | undefined;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
 import { ReportDownloads } from './report-downloads';
 import type { BlockingReason, Field, Offer } from './offers';
@@ -11,6 +11,7 @@ import type { EventName, ScenarioInputs, ScenarioResult, Validity } from './offe
 import { getQuoteShipmentBridge, handoffUrl, stageHandoff, validBridgeCandidate } from './quote-shipment-bridge';
 import type { BridgeCandidate } from './quote-shipment-bridge';
 import './offers.css';
+import { WorkspaceHeader } from './workspace-nav';
 
 type View = { kind: 'empty' } | { kind: 'loading'; label: string } | { kind: 'error'; message: string } | { kind: 'offer' };
 const statusLabel = (s: string) => s.replaceAll('_', ' ');
@@ -29,17 +30,6 @@ function Quote({ text, quote }: { text: string; quote: string }) {
 }
 
 
-// Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
-const WORKSPACE_PAGES: [string, string][] = [
-  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
-  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
-];
-
-function WorkspaceNav() {
-  return <nav className="workspace-nav" aria-label="Workspace pages">
-    {WORKSPACE_PAGES.map(([to, label]) => <NavLink key={to} className="recovery-back" to={to} end>{label}</NavLink>)}
-  </nav>;
-}
 
 export function Editor({ field, onSubmit, onCancel, busy, service = false }: { field: Pick<Field, 'name' | 'kind' | 'value'>; onSubmit: (value: unknown) => void; onCancel: () => void; busy: boolean; service?: boolean }) {
   const v = (field.value ?? {}) as Record<string, any>;
@@ -286,11 +276,7 @@ function FixtureOffersPage() {
   const evidenceLocators = new Set(selected && offer ? fieldEntries(offer).find(([n]) => n === selected)?.[1].evidence.map(e => e.locator) : []);
 
   return <main className="shell offers-shell">
-    <header className="masthead workspace-masthead">
-      <div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
-      <WorkspaceNav />
-    </header>
+    <WorkspaceHeader section="OFFERS" status="Synthetic · local adapter" />
 
     <section className="recovery-intro">
       <p className="eyebrow">Quote intelligence · issue 3</p>
@@ -549,8 +535,7 @@ function ServiceOffersPage() {
       navigate(handoffUrl(handoff.triple), { state: handoff });
     });
   }
-  return <main className="shell offers-shell"><header className="masthead workspace-masthead"><div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
-    <div className="masthead-meta">Local quote service · development only</div><WorkspaceNav /></header>
+  return <main className="shell offers-shell"><WorkspaceHeader section="OFFERS" status="Synthetic · local quote service · development only" />
     <section className="recovery-intro"><p className="eyebrow">Quote intelligence · local service</p><h1>Review supplier quotes</h1>
       <p>Service values, evidence and blocking reasons are shown as returned. Reviewer entries are separate from document evidence.</p></section>
     <div className="offers-adapter" role="note"><strong>LOCAL DEVELOPMENT SERVICE · GATEWAY ROUTE MAY BE DISABLED</strong>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import type { SessionResponse, ShipmentRecoveryContext } from '../../../contracts/generated/types';
 import { fetchSession } from './state';
 import { compareShipmentContext, listShipmentContexts, ShipmentRecoveryError } from './shipment-recovery';
@@ -8,6 +8,7 @@ import { claimHandoff, parseHandoff, selectHandoffContext } from './quote-shipme
 import type { QuoteShipmentHandoff } from './quote-shipment-bridge';
 import { normalizeQuoteSession } from './offers-service';
 import './shipment-recovery.css';
+import { WorkspaceHeader, sessionStatus } from './workspace-nav';
 
 type Run = { generation: number; session: SessionResponse; contextId: string; revision: number; requestSha256: string; routeKey: string; aborted: boolean };
 type View = { kind: 'checking' | 'loading_contexts' | 'empty' | 'ready' | 'comparing' | 'session_error' | 'unavailable' | 'error'; message?: string };
@@ -196,7 +197,7 @@ export function ShipmentRecoveryPage() {
   }
   function cancel() { invalidate(); setView({ kind: selectedRef.current ? 'ready' : 'empty' }); }
   return <div className="shell shipment-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SHIPMENT RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/recovery">Receipt comparison</Link><Link className="recovery-back" to="/dispatch">Synthetic dispatch workspace</Link></header>
+    <WorkspaceHeader section="SHIPMENT RECOVERY" status={sessionStatus(session)} />
     <main>
       <div className="shipment-intro"><p className="eyebrow">LOCAL · SYNTHETIC · HOST CONFIGURED · EPHEMERAL</p><h1>Shipment recovery evidence.</h1><p>Compare complete host-configured shipment contexts through the local read-only gateway. Source authenticity not verified. No plan is applied or saved.</p></div>
       <section className="shipment-session" aria-label="Current local session">

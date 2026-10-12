@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import { Comparison } from './recovery-page';
 import { VoiceController } from './voice';
 import type { VoiceExample, VoiceView } from './voice';
 import './voice.css';
+import { WorkspaceHeader, sessionStatus } from './workspace-nav';
 
 const labels: Record<VoiceExample, string> = {
   recovery: 'Receipt arrives late', recovery_noop: 'No changes',
@@ -49,7 +49,7 @@ export function VoicePage() {
   const submit = (event: FormEvent) => { event.preventDefault(); void controller?.run(); };
   const noop = view.comparison ? view.comparison.receipt_changes.length === 0 && view.comparison.disruption_changed_order_ids.length === 0 && view.comparison.recovery_changed_order_ids.length === 0 : false;
   return <div className="shell voice-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SCENARIOS</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link></header>
+    <WorkspaceHeader section="SCENARIOS" status={sessionStatus(view.identity)} />
     <main>
       <div className="recovery-intro"><p className="eyebrow">LOCAL · SYNTHETIC</p><h1>Try a receipt scenario.</h1><p>Supply a complete synthetic production snapshot, move receipt arrivals and assign every order to a period. The local comparison checks three schedules. Saved contexts also allow an opt-in unverified text interpretation before a deliberate comparison. Speech is unavailable; no plan is applied.</p></div>
       <section className="recovery-session" aria-label="Local session">

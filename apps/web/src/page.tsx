@@ -4,6 +4,7 @@ import type { ActionApproval, ActionReceipt, AuditEvent, ExecuteActionRequest, M
 import { ApiError, createPlanningRequest, draftFromRequest, fetchMaterials, fetchPlan, formatDecimal, initialDraft, responseState, validateDraft } from './planning';
 import type { PlanningDraft } from './planning';
 import { actionArguments, confirmAction, executeAction, executionFor, fetchSession, getPlan, listPlans, loadHistory, planVersion, revisePlan, savePlan, StateError } from './state';
+import { WorkspaceHeader } from './workspace-nav';
 
 type CatalogState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'loaded'; response: MaterialsResponse };
 type ResultState = { kind: 'none' | 'loading' } | { kind: 'error'; message: string } | { kind: 'response'; response: PlanResponse };
@@ -258,14 +259,7 @@ export function PlanningPage() {
   const identityCopy = sessionPresentation(session, sessionError);
 
   return <div className="shell">
-    <header className="masthead">
-      <div className="brand">CLOSED <span>SOURCE</span><sup> / PLANNING</sup></div>
-      <a className="recovery-back" href="/recovery">Synthetic recovery comparison</a>
-      <a className="recovery-back" href="/shipment-recovery">Shipment recovery evidence</a>
-      <a className="recovery-back" href="/dispatch">Synthetic dispatch workspace</a>
-      <a className="recovery-back" href="/scenarios">Typed scenarios</a>
-      <div className="masthead-meta"><span className="red-dot" aria-hidden="true">●</span> {identityCopy.masthead}</div>
-    </header>
+    <WorkspaceHeader section="PLANNING" status={identityCopy.masthead} />
     <main>
       <section className="intro" aria-labelledby="page-title">
         <div className="eyebrow">01 / SOURCING DECISION WORKSPACE</div>

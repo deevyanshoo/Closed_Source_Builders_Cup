@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link } from 'react-router-dom';
 import type { ProductionScheduleScreen, RecoveryComparisonRequest, ReceiptRecoveryComparison, SessionResponse } from '../../../contracts/generated/types';
 import { fetchSession } from './state';
 import { buildComparisonRequest, createExample, requestComparison, RecoveryError } from './recovery';
 import type { ComparisonResult, RecoveryExample } from './recovery';
+import { WorkspaceHeader, sessionStatus } from './workspace-nav';
 
 type ViewState = { kind: 'idle' | 'loading' } | { kind: 'error'; message: string; source: 'validation' | 'service' } | { kind: 'result'; value: ComparisonResult; noop: boolean };
 const utcLabel = (value: string) => value.replace('T', ' ').replace('Z', ' UTC').replace('+00:00', ' UTC');
@@ -159,7 +159,7 @@ export function RecoveryPage() {
   }
 
   return <div className="shell recovery-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/scenarios">Typed scenarios</Link></header>
+    <WorkspaceHeader section="RECOVERY" status={sessionStatus(session)} />
     <main>
       <div className="recovery-intro"><p className="eyebrow">SYNTHETIC RECEIPT RECOVERY</p><h1>Compare the change.</h1><p>Move a supplied receipt arrival, then assign each order to a production period. Compare the original, disrupted, and supplied recovery schedules. This view makes no operational change.</p></div>
       <section className="recovery-session" aria-label="Session">

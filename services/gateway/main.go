@@ -55,6 +55,10 @@ func main() {
 	if err != nil {
 		log.Fatal("invalid local quote configuration")
 	}
+	cfg, remaining, err = withDispatchLocalFlags(cfg, remaining)
+	if err != nil {
+		log.Fatal("invalid local dispatch configuration")
+	}
 	cfg, err = withVoiceLocalFlags(cfg, remaining)
 	if err != nil {
 		log.Fatal("invalid local voice configuration")

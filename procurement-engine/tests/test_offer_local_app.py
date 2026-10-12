@@ -15,6 +15,39 @@ from pathlib import Path
 import sys
 import time
 
+import pytest
+
+# Modules the offers-only app must never import. The fresh-import test hides any copy another test file already
+# loaded, so its own import check stays meaningful when the whole suite runs in one process.
+_DENIED_MODULES = ("procure.service_app", "procure.api", "procure.service_cache", "google.genai", "google.generativeai")
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_state():
+    """Give every test here a clean process state and put it back afterwards (#98).
+
+    These tests switch the process-wide offers-only strict mode on, open connections and import product modules.
+    Without this fixture that state leaks into later tests and other files. Test-only: runtime code is unchanged.
+    """
+    from procure import db, settings
+
+    environment = dict(os.environ)
+    modules = dict(sys.modules)
+    strict = db._OFFERS_ONLY_STRICT
+    db.close()
+    settings.reset_caches()
+    try:
+        yield
+    finally:
+        db._OFFERS_ONLY_STRICT = strict
+        db.close()
+        os.environ.clear()
+        os.environ.update(environment)
+        for name in [name for name in sys.modules if name not in modules]:
+            del sys.modules[name]
+        sys.modules.update(modules)
+        settings.reset_caches()
+
 
 def _paths(tmp_path: Path):
     data = tmp_path / "data"
@@ -164,8 +197,9 @@ def test_offers_only_fresh_import_denies_normal_service(tmp_path, monkeypatch):
     from procure import settings
 
     data, config, db_path, key_file, _ = _paths(tmp_path)
-    denied = ("procure.service_app", "procure.api", "procure.service_cache",
-              "google.genai", "google.generativeai")
+    denied = _DENIED_MODULES
+    for name in [n for n in sys.modules if any(n == d or n.startswith(d + ".") for d in denied)]:
+        monkeypatch.delitem(sys.modules, name)  # restored after the test
     assert all(name not in sys.modules for name in denied)
 
     class DenyNormal(importlib.abc.MetaPathFinder):

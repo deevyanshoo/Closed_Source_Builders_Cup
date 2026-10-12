@@ -10,6 +10,7 @@ import type {
 } from './dispatch';
 import { ReportDownloads } from './report-downloads';
 import './dispatch.css';
+import { createDispatchServiceAdapter } from './dispatch-service';
 
 type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; value: T };
 
@@ -336,8 +337,26 @@ export function HazardPanel({ hazards }: { hazards: HazardResponse }) {
   </section>;
 }
 
+export type DispatchMode = 'fixture' | 'service';
+
+/** Which source the page reads, with the switch inside the labelled banner. The fixture adapter is the default. */
+export function DispatchSourceBanner({ mode, onMode }: { mode: DispatchMode; onMode: (mode: DispatchMode) => void }) {
+  return <div className="dispatch-adapter" role="note">
+    {mode === 'fixture'
+      ? <><strong>SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY</strong>
+        <span>{dispatchFixtureInfo.notice} Cutoff {formatInstant(dispatchFixtureInfo.asOf)}, exported at revision {dispatchFixtureInfo.revision}. Read only.</span></>
+      : <><strong>SYNTHETIC DATA · LOCAL DISPATCH SERVICE · THROUGH THE GATEWAY</strong>
+        <span>The same synthetic read models, served by the local Python service through the gateway session, at the cutoff {formatInstant(dispatchFixtureInfo.asOf)}. Read only; development only.</span></>}
+    <span className="dispatch-mode" role="group" aria-label="Dispatch data source">
+      <button className="secondary-button" type="button" aria-pressed={mode === 'fixture'} onClick={() => onMode('fixture')}>Synthetic fixtures</button>
+      <button className="secondary-button" type="button" aria-pressed={mode === 'service'} onClick={() => onMode('service')}>Local dispatch service</button>
+    </span>
+  </div>;
+}
+
 export function DispatchPage() {
-  const adapter = useMemo(() => createDispatchFixtureAdapter(), []);
+  const [mode, setMode] = useState<DispatchMode>('fixture');
+  const adapter = useMemo<DispatchAdapter>(() => mode === 'service' ? createDispatchServiceAdapter() : createDispatchFixtureAdapter(), [mode]);
   const [list, setList] = useState<Load<ListResponse>>({ kind: 'loading' });
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Load<{ timeline: TimelineResponse; evidence: EvidenceResponse }> | null>(null);
@@ -347,6 +366,8 @@ export function DispatchPage() {
   const age = freshness(dispatchFixtureInfo.asOf, new Date());
 
   useEffect(() => {
+    serial.current += 1;
+    setList({ kind: 'loading' }); setSelected(null); setDetail(null); setAffected(null); setHazards(null);
     adapter.listShipments()
       .then(value => { setList({ kind: 'ready', value }); if ((value.status === 'ok' || value.status === 'stale') && value.shipments[0]) select(value.shipments[0].shipment_id); })
       .catch(error => setList({ kind: 'error', message: error instanceof Error ? error.message : 'Shipments unavailable.' }));
@@ -382,7 +403,7 @@ export function DispatchPage() {
   return <main className="shell dispatch-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
+      <div className="masthead-meta">{mode === 'fixture' ? 'Synthetic · local adapter' : 'Synthetic · local dispatch service · development only'}<span className="red-dot" aria-hidden="true">●</span></div>
       <WorkspaceNav />
     </header>
     <section className="recovery-intro">
@@ -390,10 +411,7 @@ export function DispatchPage() {
       <h1>Shipments, milestones and route evidence</h1>
       <p>Status comes from evidence: delayed and on time compare with the plan baseline, at risk needs current route evidence, and unknown means neither is available. Nearby hazards are exposure, not confirmed delays.</p>
     </section>
-    <div className="dispatch-adapter" role="note">
-      <strong>SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY</strong>
-      <span>{dispatchFixtureInfo.notice} Cutoff {formatInstant(dispatchFixtureInfo.asOf)}, exported at revision {dispatchFixtureInfo.revision}. Read only.</span>
-    </div>
+    <DispatchSourceBanner mode={mode} onMode={setMode} />
     {(age.stale || (list.kind === 'ready' && list.value.status === 'stale')) &&
       <StateNotice kind="stale" message={`Data cutoff is ${hours} hours old. Statuses describe that cutoff, not now.`} />}
 

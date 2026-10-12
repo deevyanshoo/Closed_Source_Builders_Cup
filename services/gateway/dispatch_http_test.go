@@ -145,6 +145,21 @@ func TestDispatchRoutesRefuseBeforeCallingUpstream(t *testing.T) {
 	}
 }
 
+func TestDispatchRefusalsKeepTheLabelledServiceBody(t *testing.T) {
+	refusal := `{"status":"error","reasons":["event_after_as_of"],"synthetic":true,"sample":{"sample_id":"eta-after-cutoff","synthetic":true}}`
+	s, _ := dispatchFixture(t, func(*http.Request) (int, string, string) { return 400, "application/json", refusal })
+	got := dispatchGet(s, http.MethodGet, "/v2/workspaces/w-a/dispatch/replay?sample=eta-after-cutoff", "editor-token")
+	var body struct {
+		ContractVersion string          `json:"contract_version"`
+		Error           map[string]any  `json:"error"`
+		Data            json.RawMessage `json:"data"`
+	}
+	if got.Code != 422 || json.Unmarshal(got.Body.Bytes(), &body) != nil || body.ContractVersion != "0.2.0" ||
+		body.Error["code"] != "invalid_request" || string(body.Data) != refusal {
+		t.Fatalf("refusal %d %s", got.Code, got.Body.String())
+	}
+}
+
 func TestDispatchRoutesRejectUnlabelledOrInvalidUpstreamAnswers(t *testing.T) {
 	for _, c := range []struct {
 		name                  string

@@ -140,7 +140,7 @@ func dispatchQuery(raw string, route dispatchRoute) (string, bool) {
 	return values.Encode(), true
 }
 
-func dispatchUpstreamError(w http.ResponseWriter, status int, body map[string]any) {
+func dispatchUpstreamError(w http.ResponseWriter, status int, body map[string]any, raw json.RawMessage) {
 	reasons := []string{}
 	if list, ok := body["reasons"].([]any); ok {
 		for _, item := range list {
@@ -154,7 +154,16 @@ func dispatchUpstreamError(w http.ResponseWriter, status int, body map[string]an
 	case 404:
 		quoteError(w, 404, "not_found", strings.TrimSuffix("Dispatch resource not found: "+detail, ": "))
 	case 400, 422:
-		quoteError(w, 422, "invalid_request", strings.TrimSuffix("Invalid dispatch request: "+detail, ": "))
+		// The service's own labelled refusal (for example a replay event after the cutoff) is kept under data,
+		// so the page can show it; the gateway's error envelope stays the same as every other route's.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(422)
+		_ = json.NewEncoder(w).Encode(struct {
+			ContractVersion string          `json:"contract_version"`
+			Error           map[string]any  `json:"error"`
+			Data            json.RawMessage `json:"data"`
+		}{stateVersion, map[string]any{"code": "invalid_request",
+			"message": strings.TrimSuffix("Invalid dispatch request: "+detail, ": ")}, raw})
 	case 503:
 		quoteError(w, 503, "service_unavailable", "Synthetic dispatch data unavailable")
 	default:
@@ -236,7 +245,7 @@ func (s *stateServer) dispatchHTTPRoute(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if res.StatusCode != http.StatusOK {
-		dispatchUpstreamError(w, res.StatusCode, body)
+		dispatchUpstreamError(w, res.StatusCode, body, json.RawMessage(raw))
 		return
 	}
 	out, err := json.Marshal(struct {

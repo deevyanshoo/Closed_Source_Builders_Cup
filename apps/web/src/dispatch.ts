@@ -145,7 +145,7 @@ export const dispatchFixtureInfo = {
   asOf: data.as_of, revision: data.generated_from_revision, notice: data.notice, files: data.files, hazardNotice: data.hazard_notice ?? null,
 };
 
-function readable<T extends { status: ReadStatus; reasons: string[] }>(value: T): T {
+export function readable<T extends { status: ReadStatus; reasons: string[] }>(value: T): T {
   if (!value || !['ok', 'empty', 'stale'].includes(value.status) || !Array.isArray(value.reasons)
       || !value.reasons.every(reason => typeof reason === 'string')) {
     throw new DispatchError('Dispatch data is unavailable at this cutoff.', 'unavailable');
@@ -153,7 +153,16 @@ function readable<T extends { status: ReadStatus; reasons: string[] }>(value: T)
   return structuredClone(value);
 }
 
-export type DispatchAdapter = ReturnType<typeof createDispatchFixtureAdapter>;
+export type DispatchAdapter = Omit<ReturnType<typeof createDispatchFixtureAdapter>, 'source'> & {
+  source: 'local_fixture_adapter' | 'local_dispatch_service';
+};
+
+/** What a shipment with no located facilities shows: no route evidence and no hazard assessments, never a guess. */
+export const emptyRouteEvidence = (asOf: string | null): EvidenceResponse =>
+  ({ status: 'empty', reasons: [], as_of: asOf, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] });
+export const emptyHazards = (asOf: string | null): HazardResponse =>
+  ({ status: 'empty', reasons: ['no_assessments'], as_of: asOf, thresholds_version: null, location_keys: [], assessments: [],
+    evidence: emptyRouteEvidence(asOf), note: 'Exposure only, not confirmed.' });
 
 export function createDispatchFixtureAdapter() {
   return {
@@ -176,7 +185,7 @@ export function createDispatchFixtureAdapter() {
     async routeEvidence(shipmentId: string): Promise<EvidenceResponse> {
       const found = data.route_evidence[shipmentId];
       if (found) return readable(found);
-      return { status: 'empty', reasons: [], as_of: data.as_of, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] };
+      return emptyRouteEvidence(data.as_of);
     },
     async replaySamples(): Promise<ReplaySamplesResponse> {
       return structuredClone({ notice: data.replay.notice, samples: data.replay.samples });
@@ -189,9 +198,7 @@ export function createDispatchFixtureAdapter() {
     async hazards(shipmentId: string): Promise<HazardResponse> {
       const found = data.hazards?.[shipmentId];
       if (found) return readable(found);
-      return { status: 'empty', reasons: ['no_assessments'], as_of: data.as_of, thresholds_version: null, location_keys: [], assessments: [],
-        evidence: { status: 'empty', reasons: [], as_of: data.as_of, location_keys: [], confirmed: [], exposure: [], expired: [], outside_period: [] },
-        note: 'Exposure only, not confirmed.' };
+      return emptyHazards(data.as_of);
     },
   };
 }

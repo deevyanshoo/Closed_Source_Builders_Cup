@@ -20,8 +20,10 @@ on main at 497b53e on 2026-10-12, which includes #73, #74 and #83 to #92.
 6. `/dispatch` will show **Old data: Data cutoff is N hours old. Statuses describe that cutoff, not now.** The
    synthetic shipments have a fixed cutoff of 2026-10-08 12:00 UTC, and the notice appears once the cutoff is more
    than a day old. N is the hours since the cutoff (91 on 2026-10-12 around 07:00 UTC), so it is larger on recording
-   day. It means every status describes what was known at the cutoff, not today. Do not change the fixture dates;
-   say "statuses describe the cutoff, not now".
+   day. It means every status describes what was known at the cutoff, not today. Do not edit the fixture files. Either
+   say "statuses describe the cutoff, not now", or re-export at the recording day's cutoff as described in
+   [Run_The_Demo.md](Run_The_Demo.md) ("On recording day"); then the expected dates below move by the same days and
+   SHP-SYN-002's lead time may differ.
 
 ## Script
 

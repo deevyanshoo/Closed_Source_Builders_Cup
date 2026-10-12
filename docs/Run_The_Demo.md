@@ -155,6 +155,29 @@ Press Ctrl+C in tabs 2, 3 and 4, then:
 | `Port 5318 is already in use` | An earlier web server is still running | Stop it, or use the one that is running |
 | Pages say "Local session unavailable" | The gateway is not running, or the web server was started without `GATEWAY_DEV_TOKEN_FILE` | Start tab 3, restart tab 4 with the token file |
 
+## On recording day: move the dispatch cutoff
+
+The synthetic shipments have a fixed cutoff of 2026-10-08 12:00 UTC, so `/dispatch` shows "Old data: Data cutoff is
+N hours old". To record without it, re-export the dispatch fixture at the recording day's cutoff (replace the date,
+keep `T12:00:00Z`):
+
+```sh
+cd procurement-engine && .venv/bin/python scripts/export_dispatch_fixtures_for_web.py --as-of 2026-10-14T12:00:00Z
+```
+
+| What | Effect |
+|---|---|
+| Times | Every synthetic time moves by the same whole number of days: milestones, plan snapshot, route evidence, replay events, recorded hazard responses and the synthetic holiday table |
+| Unchanged | Statuses, signals, replay outcomes (including "CMP-COPPER shortfall 0 → 3000 kg"), hazard states, values and distances |
+| Lead times | Weekends do not move, so working-day lead times can change unless the new date is a Thursday, like 2026-10-08. The script prints each change; for example 2026-10-12 makes SHP-SYN-002 "3 working days" instead of 2 |
+| Old data notice | Absent until the new cutoff is more than a day old |
+| Refused | A time other than 12:00:00Z, or a date that moves the holiday table out of its years; the prior fixture is kept |
+| Content-hash ids | Ids derived from content hashes change because the content changed; they are identifiers, not results |
+
+This rewrites `apps/web/src/dispatch-fixtures.json`. Do not commit it. The shipment hero launcher (stack A) refuses a
+checkout with changes, so use stack B or plain `npm run dev` after re-exporting. Restore the committed fixture with
+`git checkout -- apps/web/src/dispatch-fixtures.json`.
+
 ## Pages
 
 The six header links are Planning, Supplier offers, Synthetic dispatch workspace, Shipment recovery evidence,
@@ -183,5 +206,5 @@ list after you select one; the digest is the SHA-256 of the context's request an
 | source_limit_expired | `a3861a76` | Deliberate edge case: its source event is excluded as past its limit | "Eligible scenarios · 0", "Excluded events · 1", "No numerical comparison ran" |
 
 Two more notes on the pages:
-- **`/dispatch` old-data notice:** from 2026-10-09 12:00 UTC on, `/dispatch` shows "Old data: Data cutoff is N hours old. Statuses describe that cutoff, not now." The fixture cutoff is 2026-10-08 12:00 UTC, so N grows every hour. It means the statuses describe what was known at the cutoff, not today.
+- **`/dispatch` old-data notice:** from 2026-10-09 12:00 UTC on, `/dispatch` shows "Old data: Data cutoff is N hours old. Statuses describe that cutoff, not now." The fixture cutoff is 2026-10-08 12:00 UTC, so N grows every hour. It means the statuses describe what was known at the cutoff, not today. To avoid it on recording day, see "On recording day: move the dispatch cutoff" above.
 - **Text proposal on `/scenarios`:** choose **Saved context**, **Load complete inline example into editor**, **Save new context**, select it, type a request and click **Show proposed changes**. The result is "Text proposal unavailable. Use the typed comparison form.", because no proposal source is connected yet.

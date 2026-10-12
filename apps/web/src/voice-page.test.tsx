@@ -21,6 +21,12 @@ describe('text proposal presentation', () => {
     expect(html).not.toContain('feasible');
     expect(html).not.toContain('confidence');
   });
+  it('labels the proposal as offline rule-based, not Gemini (#96)', () => {
+    const html = renderToStaticMarkup(<VoiceProposalPanel view={base} onConfirm={() => {}} />);
+    expect(html).toContain('Offline rule-based proposal, not Gemini');
+    const refused = renderToStaticMarkup(<VoiceProposalPanel view={{ ...base, kind: 'failed', proposal: undefined, message: 'Text proposal unavailable. Use the typed comparison form.' }} onConfirm={() => {}} />);
+    expect(refused).toContain('Offline rule-based proposals understand, for example');
+  });
   it('does not render a proposal after fixed refusal', () => {
     const html = renderToStaticMarkup(<VoiceProposalPanel view={{ ...base, kind: 'failed', proposal: undefined, message: 'Text proposal unavailable. Use the typed comparison form.' }} onConfirm={() => {}} />);
     expect(html).not.toContain('Compare these exact changes');

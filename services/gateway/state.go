@@ -28,6 +28,7 @@ const stateVersion = "0.2.0"
 type stateConfig struct {
 	ShipmentContextsPath, ShipmentPythonPath, ShipmentSourcePath            string
 	VoicePythonPath, VoiceSourcePath                                        string
+	VoiceOfflineTextProposals                                               bool
 	QuoteLocalKeyFile, QuoteLocalUpstream                                   string
 	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
 	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string

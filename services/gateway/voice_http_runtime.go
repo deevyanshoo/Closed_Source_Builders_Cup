@@ -33,6 +33,14 @@ func initVoiceHTTP(cfg stateConfig) *voiceHTTPAdapter {
 	if err != nil {
 		return nil
 	}
+	if cfg.VoiceOfflineTextProposals {
+		// Default off. The offline rule-based source from #96; no model or network call.
+		source, err := voice.NewLocalPythonTextProposalSource(voice.LocalPythonConfig{PythonPath: cfg.VoicePythonPath, SourcePath: cfg.VoiceSourcePath})
+		if err != nil {
+			return nil
+		}
+		adapter.textSource = source
+	}
 	return adapter
 }
 func withVoiceLocalFlags(cfg stateConfig, args []string) (stateConfig, error) {
@@ -60,9 +68,17 @@ func withVoiceLocalFlags(cfg stateConfig, args []string) (stateConfig, error) {
 			cfg.VoicePythonPath = value
 		case "-voice-local-source":
 			cfg.VoiceSourcePath = value
+		case "-voice-offline-text-proposals":
+			if value != "on" {
+				return cfg, errors.New("invalid voice local flag")
+			}
+			cfg.VoiceOfflineTextProposals = true
 		default:
 			return cfg, errors.New("unknown gateway flag")
 		}
+	}
+	if cfg.VoiceOfflineTextProposals && (cfg.VoicePythonPath == "" || cfg.VoiceSourcePath == "") {
+		return cfg, errors.New("unsafe local voice configuration")
 	}
 	if cfg.VoicePythonPath != "" || cfg.VoiceSourcePath != "" {
 		if cfg.Mode == "private_machine" || cfg.VoicePythonPath == "" || cfg.VoiceSourcePath == "" || !filepath.IsAbs(cfg.VoicePythonPath) || !filepath.IsAbs(cfg.VoiceSourcePath) || strings.ContainsRune(cfg.VoicePythonPath, 0) || strings.ContainsRune(cfg.VoiceSourcePath, 0) {

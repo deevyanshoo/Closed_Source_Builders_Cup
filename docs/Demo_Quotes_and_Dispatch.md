@@ -43,9 +43,15 @@ on main at 497b53e on 2026-10-12, which includes #73, #74 and #83 to #92.
 | 2:18 | Click **ETA update observed after the cutoff** | "Event rejected": "Rejected: the event happened, was observed or had evidence retrieved after the data cutoff, so it was not known then." | "Nothing after the cutoff leaks into the view." |
 | 2:26 | Scroll up to **Export** and click **Download synthetic JSON** | The browser saves `synthetic-dispatch-<selected shipment>.json` | "The dispatch view exports with its status, timeline, evidence and hazards." |
 | 2:32 | Click **View recovery options** | Opens `/shipment-recovery`, "Shipment recovery evidence." | "Recovery options live on the shipment recovery page. Dispatch links to it and never computes them." |
-| 2:40 | End | | |
+| 2:36 | Pick the context whose line reads **digest b0a1633f…** (precision_delayed) and click **Compare selected context** | "INDEPENDENT SHIPMENT COMPARISONS", "Eligible scenarios · 1", "production result compared" | "A delayed synthetic receipt, compared against a supplied recovery." |
+| 2:45 | End | | |
 
-If time is short, drop the 2:18 rejection and the 2:26 export: the script then runs about 2:25. Run the 0:28
+If time is short, drop the 2:18 rejection and the 2:26 export: the script then runs about 2:30.
+
+The 2:36 step needs a stack with shipment recovery, either one in [Run_The_Demo.md](Run_The_Demo.md); with plain
+`npm run dev` the page shows "Shipment comparison unavailable". The context list order changes on every start, so pick
+by digest. The other three contexts are deliberate edge cases (unsupported quantity, nothing eligible, expired
+source); see "Shipment recovery contexts" in Run_The_Demo.md. Do not use them for the main take. Run the 0:28
 scenario before the 0:44 correction: a corrected currency clears the price check in the browser, and the scenario
 then shows "Order value not available".
 

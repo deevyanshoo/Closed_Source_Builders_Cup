@@ -165,9 +165,22 @@ Synthetic recovery comparison and Typed scenarios.
 | `/planning` | Computes a buying schedule for one material from stored prices and forecasts | Values from `contracts/examples/request.json`: buyer `synthetic-buyer`, IN, copper, kg, 50000, stock 20000, monthly 15000, need by month 3, lead time 1, USD, INR, INR, medium | Fill the fields, click **Compute recommendation** | "TEMPORARY PREVIEW · NOT SAVED", **SPLIT BUY** "Buy 40% now, 40% in 1 month and 20% in 2 months", a purchase schedule, a policy comparison, and the warning "Inventory feasibility is not verified". Prices depend on the local price store | B |
 | `/offers` | Checks a supplier quote against its source lines | `procurement-engine/tests/fixtures/offers/train/SYN-Q01_atacama_copper_cif.pdf` | **Upload a quote**, pick the file. Click the **incoterm** field name. In **Decision date and payment timing**, set decision date 2026-10-10, bill of lading date 2026-11-06, compare with Q03, rate 8, **Run scenario** | "Atacama Red Metals SpA [SYNTHETIC]", **NEEDS REVIEW**, "settlement currency: missing". Line `p1:l11` highlighted. Schedule 705937.5 USD on 2026-10-10 and 1647187.5 USD on 2026-11-06, "Payment moves 98.1 days later on average", 50595.41 USD | A, B |
 | `/dispatch` | Shipment statuses from evidence, hazard exposure and a delay replay | Built-in synthetic shipments | Click **SHP-SYN-002**, then **Port hold at INNSA with a new ETA** | SHP-SYN-002 **On hold**, "2 working days", route evidence "confirmed: restricted". After the replay: arrival 2026-10-12 02:30 UTC → 2026-10-16 02:30 UTC and "CMP-COPPER shortfall 0 → 3000 kg (new shortage)" | A, B |
-| `/shipment-recovery` | Runs host-configured shipment recovery comparisons | The four contexts in `scripts/demo/shipment_recovery_catalog.json` | Pick the first context, click **Compare selected context** | "INDEPENDENT SHIPMENT COMPARISONS", "Eligible scenarios · 1", production result compared. The other contexts show "Eligible scenarios · 0", "Excluded events · 1" and "Numerical comparison unsupported: invalid_quantity" | A, B |
+| `/shipment-recovery` | Runs host-configured shipment recovery comparisons | The four contexts in `scripts/demo/shipment_recovery_catalog.json`; start with **precision_delayed** | Open the context list and pick the one whose line below the list reads **digest b0a1633f…** (see the table below; the list order changes on every start). Click **Compare selected context** | "INDEPENDENT SHIPMENT COMPARISONS", "Eligible scenarios · 1", "production result compared", then "Receipt scenario and supplied recovery", "Propagation projection and limitations" and "Complete numerical result" | A, B |
 | `/recovery` | Compares original, disrupted and recovery production schedules | Example "Stock delay" | Click **Compare schedules** | "THREE SCHEDULES, ONE SET OF INPUTS" with material, capacity and due-date checks for each schedule | B |
 | `/scenarios` | The same comparison through the typed voice session route | Example "Receipt arrives late" | First switch the example to "No changes" and back to "Receipt arrives late", then **Run local comparison** | The three-schedule comparison. Without the switch, the first load sends no late arrival (reported on #4) | B |
+
+### Shipment recovery contexts
+
+The launcher's catalog has four synthetic contexts, labelled in `scripts/run_shipment_hero_demo.py` (`LABELS`). Their
+ids are new on every start and the list is sorted by id, so the position changes. Pick by the digest shown under the
+list after you select one; the digest is the SHA-256 of the context's request and stays the same.
+
+| Label | Digest starts | Role | What Compare shows |
+|---|---|---|---|
+| precision_delayed | `b0a1633f` | The demo case: run it first | "Eligible scenarios · 1", "production result compared" |
+| numerical_unsupported | `068ce745` | Deliberate edge case: a quantity the numerical model refuses | "Eligible scenarios · 1", "Numerical comparison unsupported: invalid_quantity" |
+| no_eligible_empty | `9bf6a7ef` | Deliberate edge case: nothing eligible to compare | "Eligible scenarios · 0", "Excluded events · 0", "No numerical comparison ran" |
+| source_limit_expired | `a3861a76` | Deliberate edge case: its source event is excluded as past its limit | "Eligible scenarios · 0", "Excluded events · 1", "No numerical comparison ran" |
 
 Two more notes on the pages:
 - **`/dispatch` old-data notice:** from 2026-10-09 12:00 UTC on, `/dispatch` shows "Old data: Data cutoff is N hours old. Statuses describe that cutoff, not now." The fixture cutoff is 2026-10-08 12:00 UTC, so N grows every hour. It means the statuses describe what was known at the cutoff, not today.

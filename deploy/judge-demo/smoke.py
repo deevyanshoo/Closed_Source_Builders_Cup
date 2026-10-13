@@ -298,15 +298,20 @@ def run(base: str, receipt: dict) -> None:
     receipt["checks"]["three_real_gemini_results"] = True
 
     late = offers["late-copper"]
-    require(late["fields"].get("settlement_currency", {}).get("status") == "missing",
-            "late_review", "settlement_not_missing")
+    settlement = late["fields"].get("settlement_currency", {})
+    require(settlement.get("status") in {"missing", "unverified"}
+            and settlement.get("value") is None,
+            "late_review", "unstated_settlement_was_accepted")
     late_reasons = late.get("blocking_reasons")
     require(isinstance(late_reasons, list), "late_review", "blocking_reasons_missing")
     for reason in late_reasons:
-        if not isinstance(reason, dict) or reason.get("code") != "field_missing" or reason.get("field") != "settlement_currency":
+        if not isinstance(reason, dict) or reason.get("code") != "field_" + settlement["status"] or reason.get("field") != "settlement_currency":
             code = reason.get("code") if isinstance(reason, dict) else "invalid_reason"
             raise AcceptanceError("late_review", code if isinstance(code, str) else "invalid_reason")
     require(len(late_reasons) == 1, "late_review", "settlement_blocker_missing")
+    denied(client, "unreviewed_save_blocked", "/api/demo/offers/" + late["offer_id"] + "/save",
+           {"expected_version": late["version"], "idempotency_key": key()}, csrf, 409, "save_blocked")
+    receipt["checks"]["unreviewed_save_blocked"] = True
     changed = client.json("late_correction", "/api/demo/offers/" + late["offer_id"] + "/correct",
                           body={"field": "settlement_currency", "value": "USD",
                                 "expected_version": late["version"], "idempotency_key": key()}, csrf=csrf)

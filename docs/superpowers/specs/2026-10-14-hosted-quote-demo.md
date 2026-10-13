@@ -1,0 +1,35 @@
+# Hosted quote-to-plan demo: execution specification
+
+User explicitly approved execution of the delivered submission plan using Antigravity and parallel agents. Scope: hosted browser access, live Gemini extraction, quote correction/acceptance, deterministic feasible plan and export. No repository visibility change, final contest submission, supplier send or purchase.
+
+## Architecture
+New isolated `procure.demo` FastAPI app serves existing React SPA at `/demo` and same-origin `/api/demo` endpoints. Reuse existing documents, Gemini structured extraction, evidence checks, Decimal normalization and lifecycle rules. Preserve private-machine Go/Python gateway unchanged. Runtime Vertex ADC on existing `closed-source-builder-261007` project. One Cloud Run instance; ephemeral per-session state, short-lived cookies, bounded provider calls, immutable extraction caching. No forecast/private data in deployment. Reuse cloud build to avoid Mac disk pressure.
+
+## API contract
+- GET `/api/demo/session`: `{session_id,csrf_token,expires_at,synthetic:true,persistence:"ephemeral",offers:OfferView[],provider:{model,available}}`; issues/reuses opaque random cookie.
+- GET `/api/demo/fixtures`: `{fixtures:[{id,name,filename,description,download_url}],synthetic:true}`.
+- GET `/api/demo/fixtures/{fixture_id}`: download allowlisted synthetic bytes only.
+- POST `/api/demo/extract`: `{fixture_id,mode:"gemini"|"rules",idempotency_key}` OR `{filename,document_base64,mode,idempotency_key}` for exact allowlisted hashes. Returns `{offer:OfferView,provider:extractor_detail,replayed:boolean,served_from_cache:boolean}`. Live mode fails visibly on fallback; cached real Gemini response explicitly labelled.
+- GET `/api/demo/offers`: `{offers:OfferView[]}` session-owned only.
+- POST `/api/demo/offers/{offer_id}/correct`: `{field,value,expected_version,idempotency_key}` returns `{offer,replayed}` after typed validation/server normalization; reviewer provenance, no invented document evidence.
+- POST `/api/demo/offers/{offer_id}/save`: `{expected_version,idempotency_key}` returns `{offer,replayed}`. Missing/conflicting/expired critical terms block.
+- POST `/api/demo/plan`: `{offer_ids:string[],expected_versions:Record<string,number>,material:string,quantity_kg:string,current_stock_kg:string,need_by:string,decision_date:string,reporting_currency:string,budget:string,additional_cost_per_kg:string,delay_days_by_offer?:Record<string,number>}` returns PlanView. Exact versions, accepted offers, owner checks.
+- GET `/api/demo/export`: JSON report of own offers/last plan with synthetic/provenance labels; attachment.
+- POST `/api/demo/reset`: clears this session only. GET `/-/health`: minimal readiness/revision, no credentials.
+
+OfferView preserves extraction shape `{offer_id,version,status,synthetic:true,document,extractor,extractor_detail,as_of,fields,items,review_flags,normalized,blocking_reasons}`. FieldResult keys remain status/value/source/evidence/reasons. Corrections and acceptance invalidate last plan. Money decimal strings.
+
+PlanView: `{plan_id,synthetic:true,decision_date,need_by,material,quantity_kg,current_stock_kg,required_purchase_kg,reporting_currency,assumptions:{additional_cost_per_kg,fx_source,...},alternatives:[{offer_id,supplier,feasible,reasons:string[],arrival_date,unit_price_per_kg:string|null,total_cost:string|null,quantity_kg:string}],selected_offer_id:string|null,total_cost:string|null,explanation:string,forecast_action:"ABSTAIN",customer_savings:null,offer_versions:Record<string,number>}`. Compare SINGLE-OFFER alternatives, not global optimizer. Enforce lead/arrival, MOQ, available quantity/capacity, expiry, budget, fixed price, explicit dated currency rates; unknown constraints return reasons. Opening stock reduces purchase need. User additional costs synthetic assumptions, not invented tariffs/freight. Lowest-cost among feasible evaluated options only; deterministic ties. No feasible option -> null selection.
+
+## Module interfaces and ownership
+Quote/planner worker owns `procure.demo.quote_service`, `planner`, `errors`, `procurement-engine/demo_fixtures/` and tests `test_demo_quotes.py`, `test_demo_planner.py`:
+`list_fixtures()->list[dict]`; `fixture_bytes(fixture_id)->tuple[str,bytes]`; `match_fixture(filename,data)->str`; `extract_fixture(fixture_id,*,mode,as_of:date)->dict`; `new_offer(payload,*,offer_id,today:date)->dict`; `correct_offer(view,*,field,value,today:date)->dict`; `save_offer(view,*,today:date)->dict`; `build_plan(offers:list[dict],request:dict,*,today:date)->dict`; `DemoError(code,message,status_code=422)`. Live payload needs extractor gemini and detail.call real. Use existing extraction/lifecycle/normalization. Normalize via explicit synthetic FxRate lookup, never live FX/network in tests.
+Host worker owns `procure.demo.app`, `sessions`, `__init__`, `test_demo_app.py`, `test_demo_sessions.py`: `create_app(*,web_dir:Path|None=None,secure_cookies=True,clock=None)->FastAPI`, exported app. Consume above wrappers; own offer IDs/session scopes/idempotency/cache. Late import wrappers while parallel modules incomplete. Provider/extraction on bounded thread worker, no event-loop blocking.
+Frontend worker owns `apps/web/src/demo-page.tsx`, `demo-api.ts`, `demo.css`, `demo*.test.ts`, and `/demo` lazy route addition in main.tsx only. Consume above API; no existing developer/service token.
+Root owns Docker/runtime requirements, cloud/provider mutations, integration, main doc/setup and reviews.
+
+## Hosted security and resource bounds
+Random HttpOnly Secure SameSite=Lax cookie; 1-hour TTL; bounded sessions; session-specific CSRF token required on mutations, strict same-origin Origin/Referer validation, explicit localhost test mode only. Ownership precedes version/mutation; stale/foreign IDs refused. Idempotency keys bound to payload/action/session, conflicting replay rejected. Body and upload size limit; exact synthetic fixture hashes; no arbitrary filesystem/URL access; safe JSON numeric validation. Public errors redact provider exception/key/token/path. Cache immutable evidence extraction by fixture hash/mode/date; mutable offers never shared. Public assets/session load without private-machine bearer. Reset invalidates stale requests. No previous auth boundary weakened. Display ephemeral restart/cached response/synthetic assumptions honestly.
+
+## Acceptance tests
+Fresh HTTPS browser loads app and creates own session; actual Vertex Gemini extraction returns evidence fields. Missing settlement blocks save until reviewer corrects and server re-normalizes. Accepted quote enters plan with correct versions; cheap late supplier infeasible, on-time supplier selected; insufficient budget null. Second session cannot access first offers; CSRF/origin/stale/retry conflicts rejected. Export includes evidence/corrections/assumptions/provenance. Root verifies actual deployed flow/screens and live provider receipt separately from tests/mocks. Rule extraction remains explicitly separate. No savings/live logistics/full production or voice claim.

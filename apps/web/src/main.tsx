@@ -10,6 +10,7 @@ import './style.css';
 // Loaded on demand so the synthetic fixture data is not part of the main bundle.
 const OffersPage = lazy(() => import('./offers-page').then(m => ({ default: m.OffersPage })));
 const DispatchPage = lazy(() => import('./dispatch-page').then(m => ({ default: m.DispatchPage })));
+const DemoPage = lazy(() => import('./demo-page').then(m => ({ default: m.DemoPage })));
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -21,6 +22,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/offers" element={<Suspense fallback={<p className="notice">Loading offers…</p>}><OffersPage /></Suspense>} />
         <Route path="/scenarios" element={<VoicePage />} />
         <Route path="/dispatch" element={<Suspense fallback={<p className="notice">Loading dispatch…</p>}><DispatchPage /></Suspense>} />
+        <Route path="/demo" element={<Suspense fallback={<p className="notice">Opening demo…</p>}><DemoPage /></Suspense>} />
         <Route path="*" element={<Navigate to="/planning" replace />} />
       </Routes>
     </BrowserRouter>

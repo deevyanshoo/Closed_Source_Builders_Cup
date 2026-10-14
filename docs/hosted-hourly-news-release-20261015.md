@@ -17,7 +17,7 @@ Text and Gemini Live answers use natural business wording and clean supplier lab
 - Allowlisted source package: 306 runtime files, 2,955,114 bytes; manifest SHA256 `2ce6c31b5d86d5f866da9783329c691a6c4149e1454f62340d0504c4834bf8c2`.
 - Worker: `closed-source-news-refresh`, asia-south1; same immutable image, one task, one CPU, 512 MiB, 120 seconds, zero retries, no automatic Gemini calls.
 - Scheduler: `closed-source-news-hourly`, us-central1; `0 * * * *` UTC, hourly at :30 IST; one OAuth target, zero retries.
-- Storage: private Standard us-central1 bucket `closed-source-builder-261007-news-snapshots`; seven-day lifecycle, public access prevention and uniform access. Added storage grants are bucket-scoped creator/viewer for the worker and viewer for the app; the observed job-level scheduler grant is roles/run.invoker. No project-wide roles were added.
+- Storage: private Standard us-central1 bucket `closed-source-builder-261007-news-snapshots`; seven-day lifecycle, public access prevention and uniform access. Added storage grants are bucket-scoped creator/viewer for the worker and viewer for the app; the observed job-level scheduler grant is roles/run.invoker.
 
 ## Observed correction and verification
 

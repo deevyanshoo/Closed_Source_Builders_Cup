@@ -24,6 +24,17 @@ class Live:
                             {'source_id': 'ecb_fx', 'state': 'fresh', 'last_checked_at': stamp}],
                 'items': [], 'fx': [{'base': 'EUR', 'quote': 'USD', 'rate': '1.2', 'retrieved_at': stamp}], 'limitations': []}
 
+
+def test_cli_duplicate_is_successful_noop_but_news_outage_is_failure(monkeypatch, capsys):
+    from procure.demo import news_refresh
+    monkeypatch.setenv('NEWS_SNAPSHOT_BUCKET', 'private-news')
+    monkeypatch.setattr(news_refresh, 'GcsSnapshotStore', lambda bucket: Store())
+    for status, expected in [('partial', 0), ('fresh', 0), ('news_unavailable', 1)]:
+        monkeypatch.setattr(news_refresh, 'refresh_portfolio', lambda **kwargs:
+            {'slot': NOW.isoformat(), 'collection': {'status': status, 'published': False}})
+        assert news_refresh.main() == expected
+        assert '"published": false' in capsys.readouterr().out
+
 def test_ten_profiles_and_first_writer_wins():
     store, live = Store(), Live()
     result = refresh_portfolio(live=live, store=store, clock=lambda: NOW)

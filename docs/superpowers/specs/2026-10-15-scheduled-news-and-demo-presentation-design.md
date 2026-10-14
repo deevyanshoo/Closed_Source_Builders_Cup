@@ -1,5 +1,9 @@
 # Scheduled news and natural demo presentation
 
+## Observed provider-region correction — 2026-10-15
+
+Live diagnostic execution `closed-source-news-refresh-vp4ms` returned Google News HTTP 503 and timeouts in us-central1. The same company queries through the existing asia-south1 portal returned three fresh feeds, 80 headlines and 46 relevant Solara observations. Place the collector in asia-south1 with the portal; keep the single Scheduler job and private Standard bucket in us-central1. Update only the target job URI and matching job-scoped invocation grant. Use the existing dedicated worker/scheduler identities. The 120-second/one-task/zero-retry/no-automated-Gemini bounds remain. This regional choice requires the approved active unupgraded trial-credits mode; it is not a claim of zero metered usage. Cross-region metadata traffic and Mumbai worker usage may consume credits. No paid-account upgrade is authorized. Retain the US job disabled until Mumbai acceptance succeeds, then remove the unused US job after preserving its configuration and receipts.
+
 Date: 2026-10-15
 Status: Approved by the user on 2026-10-15 for implementation, testing and deployment using parallel agents in Antigravity, subject to the additional free-tier-only constraint below.
 

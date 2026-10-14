@@ -183,7 +183,9 @@ def main():
     result = refresh_portfolio(live=NewsService(), store=GcsSnapshotStore(bucket),
                                clock=lambda: datetime.now(timezone.utc))
     print(json.dumps({'slot': result['slot'], 'collection': result['collection']}))
-    return 0 if result['collection']['published'] else 1
+    # A create-only precondition loser is a healthy idempotent execution.
+    # Storage transport failures still raise; a news outage remains a failure.
+    return 0 if result['collection']['published'] or result['collection']['status'] in ('fresh', 'partial') else 1
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { CompanyOverview, NewsWorkspace } from './demo-company-news';
+import { OperatorPanel } from './demo-operator';
 import './demo.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -207,7 +208,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [companyError, setCompanyError] = useState('');
   const [newsError, setNewsError] = useState('');
   const [newsBusy, setNewsBusy] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news'>('company');
+  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'operator'>('company');
+  const [operatorRevision, setOperatorRevision] = useState(0);
   const [fixtureId, setFixtureId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<'gemini' | 'rules'>('gemini');
@@ -229,12 +231,23 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const coveredMaterial = !company || company.quote_coverage.materials.some(material => material.toLowerCase() === inputs.material.trim().toLowerCase());
   const companyOptions = companies.length ? companies : company ? [company] : [];
 
-  function restoreSession(session: DemoSession, epoch: number) {
+  function restoreSession(session: DemoSession, epoch: number, resetOperator = true) {
     const buyer = canonicalBuyerState(session);
+    if (resetOperator) setOperatorRevision(value => value + 1);
     dispatch({ type: 'session', session, epoch });
     setSelected(buyer.selected); setInputs(buyer.inputs);
     setDelayOfferId(buyer.delayControls.offerId);
     setDelayDays(buyer.delayControls.days);
+  }
+  function restoreOperatorSession(session: DemoSession) {
+    actionRef.current += 1;
+    restoreSession(session, epochRef.current, false);
+  }
+  function clearUnknownOperatorSession() {
+    epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
+    dispatch({ type: 'company-start' });
+    setSelected([]); setInputs(defaultInputs()); setFile(null); setDelayOfferId(''); setDelayDays('0');
+    setBusy(''); setError('The reviewed action may have changed the server workspace, but the current session could not be confirmed. Refresh session before continuing.');
   }
 
   useEffect(() => {
@@ -393,13 +406,14 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     });
   }
 
-  return <div className="demo-page"><header className="demo-masthead"><a className="demo-brand" href="/demo">CLOSED<span>SOURCE</span><sup> / DEMO</sup></a><span>QUOTE → FEASIBLE PLAN</span></header><main>
-    <section className="demo-hero"><div><p className="demo-kicker">A working procurement walkthrough</p><h1>From supplier quote<br /><em>to buying decision.</em></h1></div><p>Review a source-backed quote, correct what the document leaves unclear, then compare which supplier can actually deliver within your limits.</p></section>
-    <div className="demo-boundary"><strong>Synthetic documents</strong><span>Quotes and buyer inputs are for this demonstration. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
-    {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · temporary and isolated workspace · context v{state.session?.context_version ?? 'unknown'}</p></div>
+  return <div className="demo-page"><header className="demo-masthead"><a className="demo-brand" href="/demo">CLOSED<span>SOURCE</span><sup> / DEMO</sup></a><span>COMPANY → NEWS → REVIEWED ACTIONS</span></header><main>
+    <section className="demo-hero"><div><p className="demo-kicker">Company and supply risk workspace</p><h1>Supply risks.<br /><em>Reviewed actions.</em></h1></div><p>Turn supply risks into reviewed actions. Switch between fictional companies, inspect dated public news, review supplier quotes where sample coverage exists, and ask the operator to prepare changes for your approval.</p></section>
+    <div className="demo-boundary"><strong>Demo boundaries</strong><span>Company profiles, quotes and buyer inputs are synthetic; news is observed public data. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
+    {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · changes kept separately for this visit</p></div>
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
-      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button></div>
-      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} />}
+      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button><button type="button" className={workspaceTab === 'operator' ? 'active' : ''} aria-pressed={workspaceTab === 'operator'} onClick={() => setWorkspaceTab('operator')}>Operator</button></div>
+      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : state.session && state.session.context_version !== undefined ?
+        <OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}:${state.epoch}:${operatorRevision}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} onSession={restoreOperatorSession} onUnknown={clearUnknownOperatorSession} /> : null}
     </section>}
     {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button></div>}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>

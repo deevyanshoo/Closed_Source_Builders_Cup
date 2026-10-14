@@ -60,7 +60,7 @@ _PROFILES = [
         [('Atacama Red Metals SpA [SYNTHETIC]', 'Chile', 'USD', ['copper'], 45),
          ('Swift Copper Trading Ltd [SYNTHETIC]', 'India', 'USD', ['copper', 'polymer'], 14),
          ('Europa Copper SA [SYNTHETIC]', 'Germany', 'EUR', ['copper'], 10)],
-        [('copper', '10000', '2026-11-10', 'open'), ('polymer', '3750', '2026-11-20', 'planned')],
+        [('copper', '10000', '2026-11-05', 'open'), ('polymer', '3750', '2026-11-20', 'planned')],
         [('Valparaiso, Chile', 'Pune, India', ['Pacific Ocean', 'Mumbai'], ['copper'], 'import', 'USD'),
          ('Hamburg, Germany', 'Chennai, India', ['Suez Canal'], ['copper'], 'import', 'EUR')],
         description='Fictional cable maker with an illustrative copper procurement workflow.',

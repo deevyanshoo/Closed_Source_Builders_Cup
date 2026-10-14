@@ -86,4 +86,22 @@ describe('hosted demo API', () => {
     for (const [, options] of calls.slice(2)) expect(JSON.parse(options.body as string)).toMatchObject({ expected_context_version: 7 });
     expect(JSON.parse(calls[7][1].body as string)).toMatchObject({ material: 'cotton', quantity_kg: '1000', expected_context_version: 7 });
   });
+
+  it('sends exact operator proposal and voice wire arguments with CSRF, context, and unique keys', async () => {
+    const send = vi.fn(async () => json({ status: 'completed' }));
+    let sequence = 0;
+    const api = createDemoApi(send, () => `key-${++sequence}`);
+    await api.operator();
+    await api.operatorTurn('csrf', 'Inspect current exposure', 4);
+    await api.confirmOperator('csrf', 'proposal-1', 4);
+    await api.transcribeVoice('csrf', 'YWJj', 'audio/webm', 48000, 4);
+    await api.speakVoice('csrf', 'Verified answer', 4);
+    const calls = send.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([path]) => path)).toEqual(['/api/demo/operator', '/api/demo/operator', '/api/demo/operator/confirm', '/api/demo/voice/transcribe', '/api/demo/voice/speak']);
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ message: 'Inspect current exposure', expected_context_version: 4, idempotency_key: 'key-1' });
+    expect(JSON.parse(calls[2][1].body as string)).toEqual({ proposal_id: 'proposal-1', reviewed: true, expected_context_version: 4, idempotency_key: 'key-2' });
+    expect(JSON.parse(calls[3][1].body as string)).toEqual({ audio_base64: 'YWJj', mime_type: 'audio/webm', sample_rate_hertz: 48000, expected_context_version: 4, idempotency_key: 'key-3' });
+    expect(JSON.parse(calls[4][1].body as string)).toEqual({ text: 'Verified answer', expected_context_version: 4, idempotency_key: 'key-4' });
+    for (const [, options] of calls.slice(1)) expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'csrf' });
+  });
 });

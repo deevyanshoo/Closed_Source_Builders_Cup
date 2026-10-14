@@ -28,6 +28,11 @@ class Session:
     recovery: dict | None = None
     rfq: dict | None = None
     news: dict | None = None
+    watch_items: list = field(default_factory=list)
+    pending_proposal: dict | None = None
+    operator_turns: int = 0
+    operator_generation: int = 0
+    voice_calls: int = 0
     company_id: str = DEFAULT_COMPANY_ID
     context_version: int = 1
     workspaces: dict = field(default_factory=dict)
@@ -43,7 +48,7 @@ class Session:
         self.workspaces[self.company_id] = {
             'offers': self.offers, 'last_plan': self.last_plan,
             'plan_request': self.plan_request, 'recovery': self.recovery,
-            'rfq': self.rfq,
+            'rfq': self.rfq, 'watch_items': self.watch_items,
         }
         restored = self.workspaces.pop(company_id, None) or {}
         self.offers = restored.get('offers', {})
@@ -51,6 +56,8 @@ class Session:
         self.plan_request = restored.get('plan_request')
         self.recovery = restored.get('recovery')
         self.rfq = restored.get('rfq')
+        self.watch_items = restored.get('watch_items', [])
+        self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
         self.company_id = company_id
@@ -102,5 +109,10 @@ class SessionStore:
             session.recovery = None
             session.rfq = None
             session.news = None
+            session.watch_items.clear()
+            session.pending_proposal = None
+            session.operator_turns = 0
+            session.operator_generation = 0
+            session.voice_calls = 0
             session.workspaces.clear()
             self._sessions.pop(session.session_id, None)

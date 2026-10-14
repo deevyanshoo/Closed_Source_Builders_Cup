@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from collections import OrderedDict
 from copy import deepcopy
+from datetime import datetime, timedelta
 import hashlib
 import json
 import math
@@ -25,6 +26,7 @@ from .company import DEFAULT_COMPANY_ID, get_company, list_companies
 COOKIE = 'demo_session'
 MAX_BODY = 750_000
 MAX_UPLOAD = 500_000
+MAX_SPEECH_OUTPUT = 750_000
 MAX_REQUESTS = 240
 MAX_OFFERS = 24
 MAX_IDEMPOTENCY = 120
@@ -51,7 +53,7 @@ class BodyLimit:
             if message['type'] == 'http.disconnect':
                 return
             body.extend(message.get('body', b''))
-            limit = MAX_BODY if scope['path'] == '/api/demo/extract' else 16_384
+            limit = MAX_BODY if scope['path'] in ('/api/demo/extract', '/api/demo/voice/transcribe') else 16_384
             if len(body) > limit:
                 return await failure('body_too_large', 'Request is too large.', 413)(scope, receive, send)
             if not message.get('more_body', False):
@@ -67,7 +69,7 @@ class BodyLimit:
 
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
-               news_service=None) -> FastAPI:
+               news_service=None, operator_provider=None, voice_service=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock)
     app.state.sessions = store
@@ -77,6 +79,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     process_calls = 0
     pending_cache = set()
     news_lock = threading.RLock()
+    operator_injected = operator_provider is not None
+    voice_injected = voice_service is not None
+    operator_lock = threading.RLock()
+    operator_workers = threading.BoundedSemaphore(2)
+    operator_process_calls = 0
+    voice_lock = threading.RLock()
+    voice_workers = threading.BoundedSemaphore(2)
+    voice_process_calls = 0
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(SessionError)
@@ -97,7 +107,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         return response
 
     def session(request):
@@ -178,6 +188,41 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 news_service = NewsService(clock=store.now)
             return news_service
 
+    def operator_adapter():
+        nonlocal operator_provider
+        with operator_lock:
+            if operator_provider is None:
+                from .operator import VertexOperatorProvider
+                operator_provider = VertexOperatorProvider()
+            return operator_provider
+
+    def voice_adapter():
+        nonlocal voice_service
+        with voice_lock:
+            if voice_service is None:
+                from .voice import VoiceService
+                voice_service = VoiceService()
+            return voice_service
+
+    def operator_snapshot(value):
+        return {'company_id': value.company_id, 'context_version': value.context_version,
+                'company': get_company(value.company_id), 'news': deepcopy(value.news),
+                'offers': deepcopy(list(value.offers.values())),
+                'plan': deepcopy(active_plan(value)), 'baseline_plan': deepcopy(value.last_plan),
+                'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
+                'watch_items': deepcopy(value.watch_items)}
+
+    def snapshot_marker(snapshot):
+        # Bind asynchronous work and proposals to authoritative state, including observed evidence.
+        fields = {key: snapshot[key] for key in ('company_id', 'context_version', 'news',
+                  'offers', 'plan', 'baseline_plan', 'plan_request', 'recovery', 'watch_items')}
+        return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
+                                         default=str).encode()).hexdigest()
+
+    def public_proposal(proposal):
+        return {key: deepcopy(proposal[key]) for key in ('proposal_id', 'kind', 'summary',
+                'parameters', 'plan_id', 'offer_versions', 'context_version', 'expires_at')}
+
     def news_view(value, payload, company_id, version):
         if not isinstance(payload, dict):
             raise SessionError('news_unavailable', 'News is unavailable right now.', 503)
@@ -240,6 +285,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         value.plan_request = None
         value.recovery = None
         value.rfq = None
+        value.pending_proposal = None
 
     def active_plan(value):
         return value.recovery['scenario'] if value.recovery is not None else value.last_plan
@@ -352,6 +398,345 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             with value.lock:
                 failed(value, key)
             raise
+
+    @app.get('/api/demo/operator')
+    async def operator_overview(request: Request):
+        from .operator import ROLES, attention
+        value = session(request)
+        with value.lock:
+            adapter = operator_adapter()
+            available = bool(getattr(adapter, 'available', True))
+            return {'company_id': value.company_id, 'context_version': value.context_version,
+                    'available': available, 'agents': deepcopy(list(ROLES)),
+                    'watch_items': deepcopy(value.watch_items),
+                    'attention': attention(get_company(value.company_id)),
+                    'limitations': ['Company inventory and plans are synthetic.',
+                                    'Public news is observed metadata, not a confirmed delay or forecast.',
+                                    'No supplier message or order can be sent.']}
+
+    @app.post('/api/demo/operator')
+    async def operator_turn(request: Request):
+        nonlocal operator_process_calls
+        from .operator import (DEFAULT_MODEL, OperatorUnavailable, OperatorValidationError,
+                               run_turn)
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('message', 'expected_context_version', 'idempotency_key'))
+        message = data['message']
+        if not isinstance(message, str) or not message.strip() or len(message) > 1200:
+            raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'operator_turn')
+            if replay is not None:
+                if (value.idempotency[key].get('operator_generation') != value.operator_generation or
+                        value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value))):
+                    raise SessionError('stale_context', 'Workspace changed since this operator turn.', 409)
+                replay.pop('replayed', None)
+                return replay
+            previous_generation = value.idempotency[key].get('operator_generation')
+            if previous_generation is not None and previous_generation != value.operator_generation:
+                failed(value, key)
+                raise SessionError('stale_context', 'A newer operator turn superseded this request.', 409)
+            snapshot = operator_snapshot(value)
+            marker = snapshot_marker(snapshot)
+            adapter = operator_adapter()
+            model = getattr(adapter, 'model', None) or os.getenv('GEMINI_OPERATOR_MODEL', DEFAULT_MODEL)
+            if not bool(getattr(adapter, 'available', True)):
+                value.operator_generation += 1
+                value.idempotency[key]['operator_generation'] = value.operator_generation
+                value.pending_proposal = None
+                result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                          'context_version': value.context_version, 'status': 'unavailable',
+                          'assistant_text': 'The Vertex operator is unavailable; no action was taken.',
+                          'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = marker
+                return result
+            if value.operator_turns >= 6:
+                failed(value, key)
+                raise SessionError('operator_limit', 'Operator turn limit reached for this session.', 429)
+            if not operator_workers.acquire(blocking=False):
+                failed(value, key)
+                raise SessionError('operator_busy', 'Operator is busy. Try again shortly.', 429)
+            with operator_lock:
+                if operator_process_calls + 3 > 60:
+                    operator_workers.release()
+                    failed(value, key)
+                    raise SessionError('operator_limit', 'Operator process call limit reached.', 429)
+                operator_process_calls += 3  # Reserve the full three-call turn, including failures.
+            value.operator_turns += 1
+            value.operator_generation += 1
+            generation = value.operator_generation
+            value.idempotency[key]['operator_generation'] = generation
+            value.pending_proposal = None
+        try:
+            try:
+                outcome = await run_in_threadpool(run_turn, snapshot, message, adapter,
+                                                  model=model,
+                                                  provider_call='mocked' if operator_injected else 'real')
+            except (OperatorUnavailable, OperatorValidationError):
+                outcome = {'status': 'unavailable',
+                           'assistant_text': 'The operator could not verify this response; no action was taken.',
+                           'agent_steps': [], 'evidence_ids': [], 'candidate': None}
+            with value.lock:
+                active(value)
+                if value.operator_generation != generation:
+                    raise SessionError('stale_context', 'A newer operator turn superseded this request.', 409)
+                if snapshot_marker(operator_snapshot(value)) != marker:
+                    raise SessionError('stale_context', 'Workspace changed during the operator turn.', 409)
+                proposal = None
+                candidate = outcome['candidate']
+                if candidate is not None:
+                    kind = candidate['kind']
+                    parameters = deepcopy(candidate['parameters'])
+                    plan = active_plan(value)
+                    if kind == 'recovery':
+                        from .recovery import compare
+                        baseline = value.last_plan
+                        selected = current_offers(value, baseline, baseline['offer_versions'],
+                                                  today=store.now().date())
+                        preview = compare(baseline, value.plan_request, selected,
+                                          parameters['delay_days_by_offer'], today=store.now().date())
+                        parameters['preview'] = {'outcome': preview['outcome'],
+                                                 'cost_delta': preview['cost_delta'],
+                                                 'selected_offer_id': preview['scenario']['selected_offer_id'],
+                                                 'total_cost': preview['scenario']['total_cost'],
+                                                 'reporting_currency': preview['scenario']['reporting_currency']}
+                    elif kind == 'rfq':
+                        from .rfq import build_draft
+                        selected = current_offers(value, plan, plan['offer_versions'],
+                                                  today=store.now().date())
+                        chosen = next((o for o in selected if o['offer_id'] == plan['selected_offer_id']), None)
+                        if chosen is None:
+                            raise SessionError('draft_unavailable', 'Selected quote is unavailable.', 409)
+                        build_draft(deepcopy(plan), deepcopy(chosen),
+                                    all_offers=deepcopy(selected), created_at=store.now())
+                    bound_plan = value.last_plan if kind == 'recovery' else plan
+                    proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': kind,
+                                'summary': outcome['assistant_text'], 'parameters': parameters,
+                                'plan_id': bound_plan['plan_id'] if bound_plan else None,
+                                'offer_versions': deepcopy(bound_plan['offer_versions']) if bound_plan else {},
+                                'context_version': value.context_version,
+                                'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                                '_marker': marker, '_company_id': value.company_id,
+                                '_session_id': value.session_id}
+                    value.pending_proposal = proposal
+                result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                          'context_version': value.context_version, 'status': outcome['status'],
+                          'assistant_text': outcome['assistant_text'],
+                          'agent_steps': deepcopy(outcome['agent_steps']),
+                          'evidence_ids': deepcopy(outcome['evidence_ids']),
+                          'proposal': public_proposal(proposal) if proposal else None,
+                          'read_only': True}
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = marker
+                return result
+        except Exception:
+            with value.lock:
+                failed(value, key)
+            raise
+        finally:
+            operator_workers.release()
+
+    @app.post('/api/demo/operator/confirm')
+    async def operator_confirm(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('proposal_id', 'reviewed', 'expected_context_version', 'idempotency_key'))
+        if data['reviewed'] is not True:
+            raise SessionError('review_required', 'Review the exact proposal before applying it.', 422)
+        if not isinstance(data['proposal_id'], str) or not data['proposal_id']:
+            raise SessionError('invalid_proposal', 'A proposal ID is required.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'operator_confirm')
+            if replay is not None:
+                if value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_proposal', 'Workspace changed since this proposal was applied.', 409)
+                replay.pop('replayed', None)
+                kind, result = replay.get('kind'), replay.get('result', {})
+                current = (kind == 'watch' and any(w['watch_id'] == result.get('watch_id') for w in value.watch_items)
+                           or kind == 'recovery' and value.recovery is not None and value.recovery.get('comparison_id') == result.get('comparison_id')
+                           or kind == 'rfq' and value.rfq is not None and value.rfq.get('draft_id') == result.get('draft_id'))
+                if not current:
+                    raise SessionError('stale_proposal', 'Applied result is no longer current.', 409)
+                return replay
+            proposal = value.pending_proposal
+            if (proposal is None or proposal['proposal_id'] != data['proposal_id']
+                    or proposal['_session_id'] != value.session_id
+                    or proposal['_company_id'] != value.company_id):
+                failed(value, key)
+                raise SessionError('proposal_not_found', 'Proposal is not current in this workspace.', 404)
+            if (proposal['context_version'] != value.context_version
+                    or store.now() >= datetime.fromisoformat(proposal['expires_at'])
+                    or proposal['_marker'] != snapshot_marker(operator_snapshot(value))):
+                value.pending_proposal = None
+                failed(value, key)
+                raise SessionError('stale_proposal', 'Proposal expired or workspace evidence changed.', 409)
+            try:
+                kind = proposal['kind']
+                if kind == 'watch':
+                    material_id = proposal['parameters']['material_id']
+                    if material_id not in {m['material_id'] for m in get_company(value.company_id)['materials']}:
+                        raise SessionError('stale_proposal', 'Material is no longer current.', 409)
+                    existing = next((w for w in value.watch_items if w['material_id'] == material_id), None)
+                    result = deepcopy(existing) if existing else {
+                        'watch_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'material_id': material_id, 'evidence_ids': deepcopy(proposal['parameters']['evidence_ids']),
+                        'created_at': store.now().isoformat(), 'synthetic': True}
+                    if existing is None:
+                        value.watch_items.append(deepcopy(result))
+                elif kind == 'recovery':
+                    from .recovery import compare
+                    baseline = value.last_plan
+                    if baseline is None or proposal['plan_id'] != baseline.get('plan_id'):
+                        raise SessionError('stale_plan', 'Baseline plan changed.', 409)
+                    selected = current_offers(value, baseline, proposal['offer_versions'],
+                                              today=store.now().date())
+                    result = compare(baseline, value.plan_request, selected,
+                                     proposal['parameters']['delay_days_by_offer'],
+                                     today=store.now().date())
+                    result['comparison_id'] = secrets.token_urlsafe(18)
+                    result['scenario']['plan_id'] = secrets.token_urlsafe(18)
+                    value.recovery = deepcopy(result)
+                    value.rfq = None
+                else:
+                    from .rfq import build_draft
+                    plan = active_plan(value)
+                    if plan is None or proposal['plan_id'] != plan.get('plan_id'):
+                        raise SessionError('stale_plan', 'Active plan changed.', 409)
+                    selected = current_offers(value, plan, proposal['offer_versions'],
+                                              today=store.now().date())
+                    chosen = next((o for o in selected if o['offer_id'] == plan.get('selected_offer_id')), None)
+                    if chosen is None or plan.get('required_purchase_kg') == '0':
+                        raise SessionError('draft_unavailable', 'Current plan has no purchase to draft.', 409)
+                    result = build_draft(deepcopy(plan), deepcopy(chosen),
+                                         all_offers=deepcopy(selected), created_at=store.now())
+                    result['draft_id'] = secrets.token_urlsafe(18)
+                    value.rfq = deepcopy(result)
+                value.pending_proposal = None
+                response = {'status': 'applied', 'company_id': value.company_id,
+                            'context_version': value.context_version, 'kind': kind,
+                            'result': deepcopy(result), 'session': view(value)}
+                complete(value, key, response)
+                value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                return response
+            except Exception:
+                failed(value, key)
+                raise
+
+    async def voice_call(request, operation):
+        nonlocal voice_process_calls
+        value = mutate(request)
+        data = await body(request)
+        if operation == 'transcribe':
+            shape(data, ('audio_base64', 'mime_type', 'sample_rate_hertz',
+                         'expected_context_version', 'idempotency_key'))
+            mime = data['mime_type']
+            rate = data['sample_rate_hertz']
+            if mime not in ('audio/webm', 'audio/wav') or type(rate) is not int or not 8000 <= rate <= 48000:
+                raise SessionError('invalid_audio', 'Use supported WebM or WAV audio and a valid sample rate.', 422)
+            encoded = data['audio_base64']
+            if not isinstance(encoded, str):
+                raise SessionError('invalid_audio', 'Audio must be base64 encoded.', 422)
+            try:
+                audio = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                raise SessionError('invalid_audio', 'Audio must be base64 encoded.', 422) from None
+            if not 1 <= len(audio) <= MAX_UPLOAD or (
+                    mime == 'audio/wav' and not audio.startswith(b'RIFF') or
+                    mime == 'audio/webm' and not audio.startswith(b'\x1a\x45\xdf\xa3')):
+                raise SessionError('invalid_audio', 'Use a bounded recording with the selected audio header.', 422)
+        else:
+            shape(data, ('text', 'expected_context_version', 'idempotency_key'))
+            spoken_text = data['text']
+            if not isinstance(spoken_text, str) or not spoken_text.strip() or len(spoken_text) > 1200:
+                raise SessionError('invalid_text', 'Speech text must be at most 1200 characters.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, f'voice_{operation}')
+            if replay is not None:
+                if operation == 'speak':
+                    # Generated audio is transient and is never retained in session idempotency state.
+                    raise SessionError('voice_replay_unavailable', 'Speech was already generated; request a new turn.', 409)
+                replay.pop('replayed', None)
+                return replay
+            if value.voice_calls >= 8:
+                failed(value, key)
+                raise SessionError('voice_limit', 'Speech call limit reached for this session.', 429)
+            if not voice_workers.acquire(blocking=False):
+                failed(value, key)
+                raise SessionError('voice_busy', 'Speech service is busy. Try again shortly.', 429)
+            with voice_lock:
+                if voice_process_calls >= 40:
+                    voice_workers.release()
+                    failed(value, key)
+                    raise SessionError('voice_limit', 'Speech process call limit reached.', 429)
+                voice_process_calls += 1
+            value.voice_calls += 1
+            company_id, context_version = value.company_id, value.context_version
+        try:
+            adapter = voice_adapter()
+            try:
+                if operation == 'transcribe':
+                    output = await run_in_threadpool(adapter.transcribe, audio, mime, rate)
+                else:
+                    output = await run_in_threadpool(adapter.speak, spoken_text)
+            except Exception:
+                raise SessionError('voice_unavailable', 'Google speech service did not complete this request.', 503) from None
+            if not isinstance(output, dict):
+                raise SessionError('voice_unavailable', 'Speech service returned an invalid response.', 503)
+            if operation == 'transcribe':
+                transcript = output.get('transcript')
+                if not isinstance(transcript, str) or not transcript.strip() or len(transcript) > 1200:
+                    raise SessionError('voice_unavailable', 'Speech service returned no usable transcript.', 503)
+                result = {'transcript': transcript, 'provider': output.get('provider'),
+                          'model': output.get('model'),
+                          'call': 'mocked' if voice_injected else output.get('call'),
+                          'company_id': company_id, 'context_version': context_version}
+            else:
+                encoded_output = output.get('audio_base64')
+                try:
+                    spoken_audio = base64.b64decode(encoded_output, validate=True)
+                except (ValueError, TypeError):
+                    raise SessionError('voice_unavailable', 'Speech service returned invalid audio.', 503) from None
+                if (not 1 <= len(spoken_audio) <= MAX_SPEECH_OUTPUT or output.get('mime_type') != 'audio/mpeg'
+                        or not (spoken_audio.startswith(b'ID3') or spoken_audio[:1] == b'\xff')):
+                    raise SessionError('voice_unavailable', 'Speech service returned invalid MP3 audio.', 503)
+                result = {'audio_base64': encoded_output, 'mime_type': 'audio/mpeg',
+                          'provider': output.get('provider'),
+                          'call': 'mocked' if voice_injected else output.get('call'),
+                          'company_id': company_id, 'context_version': context_version}
+            if (not isinstance(result['provider'], str) or not result['provider']
+                    or result['call'] not in ('real', 'mocked')
+                    or (not voice_injected and result['call'] != 'real')
+                    or (operation == 'transcribe' and
+                        (not isinstance(result['model'], str) or not result['model']))):
+                raise SessionError('voice_unavailable', 'Speech provider receipt was not verified.', 503)
+            with value.lock:
+                active(value)
+                if value.company_id != company_id or value.context_version != context_version:
+                    raise SessionError('stale_context', 'Company changed during speech processing.', 409)
+                if operation == 'speak':
+                    complete(value, key, {'voice_completed': True, 'company_id': company_id,
+                                          'context_version': context_version})
+                    return result
+                return complete(value, key, result)
+        except Exception:
+            with value.lock:
+                failed(value, key)
+            raise
+        finally:
+            voice_workers.release()
+
+    @app.post('/api/demo/voice/transcribe')
+    async def transcribe(request: Request):
+        return await voice_call(request, 'transcribe')
+
+    @app.post('/api/demo/voice/speak')
+    async def speak(request: Request):
+        return await voice_call(request, 'speak')
 
     @app.get('/api/demo/fixtures')
     async def fixtures():
@@ -521,6 +906,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             value.plan_request = deepcopy(plan_data)
             value.recovery = None
             value.rfq = None
+            value.pending_proposal = None
             return result
 
     @app.post('/api/demo/recovery')
@@ -553,6 +939,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 result = complete(value, key, comparison)
                 value.recovery = deepcopy(result)
                 value.rfq = None
+                value.pending_proposal = None
                 return result
             except Exception:
                 failed(value, key)
@@ -590,6 +977,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 draft['draft_id'] = secrets.token_urlsafe(18)
                 result = complete(value, key, draft)
                 value.rfq = deepcopy(result)
+                value.pending_proposal = None
                 return result
             except Exception:
                 failed(value, key)

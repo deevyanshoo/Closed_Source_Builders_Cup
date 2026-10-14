@@ -34,6 +34,12 @@ export type SourceState = { source_id: string; name: string; state: string; last
 export type NewsItem = { item_id: string; title: string; url: string; publisher: string | null; provider: string; published_at: string | null; first_seen_at: string | null; retrieved_at: string; source_tier: string; source_reliability: string; reliability_reason: string; category: string; matched_materials: string[]; matched_routes: string[]; matched_currencies: string[]; relevance_reason: string; implication: string; implication_confidence: string; next_steps: string[]; synthetic: false };
 export type FxObservation = { base: string; quote: string; rate: string; observation_date: string; provider: string; retrieved_at: string; informational: true };
 export type NewsView = { company_id: string; context_version: number; checked_at: string; cache_state: string; sources: SourceState[]; items: NewsItem[]; fx: FxObservation[]; limitations: string[] };
+export type OperatorOverview = { company_id: string; context_version: number; available: boolean; agents: { name: string; role: string }[]; watch_items: unknown[]; attention: unknown[]; limitations: string[] };
+export type OperatorProposal = { proposal_id: string; kind: 'watch' | 'recovery' | 'rfq'; summary: string; parameters: Record<string, unknown>; plan_id: string | null; offer_versions: Record<string, number>; context_version: number; expires_at: string };
+export type OperatorTurn = { turn_id: string; company_id: string; context_version: number; status: 'completed' | 'proposal' | 'needs_clarification' | 'unavailable'; assistant_text: string; agent_steps: { agent: string; role: string; status: string; model: string; provider_call: string; tool: string; summary: string }[]; evidence_ids: string[]; proposal: OperatorProposal | null; read_only: true };
+export type OperatorApplied = { status: 'applied'; company_id: string; context_version: number; kind: OperatorProposal['kind']; result: unknown; session: DemoSession };
+export type VoiceTranscript = { transcript: string; provider: string; model: string; call: 'real'; company_id: string; context_version: number };
+export type VoiceSpeech = { audio_base64: string; mime_type: 'audio/mpeg'; provider: 'google_cloud_tts'; call: 'real'; company_id: string; context_version: number };
 
 export class DemoApiError extends Error {
   constructor(message: string, readonly status = 0, readonly code = 'unavailable') { super(message); this.name = 'DemoApiError'; }
@@ -93,6 +99,12 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
     company: (csrf: string, companyId: string, contextVersion: number) => mutate<DemoSession>('/company', { company_id: companyId }, csrf, contextVersion),
     news: () => request<NewsView>('/news'),
     refreshNews: (csrf: string, contextVersion: number) => mutate<NewsView>('/news/refresh', {}, csrf, contextVersion),
+    operator: () => request<OperatorOverview>('/operator'),
+    operatorTurn: (csrf: string, message: string, contextVersion: number) => mutate<OperatorTurn>('/operator', { message }, csrf, contextVersion),
+    confirmOperator: (csrf: string, proposalId: string, contextVersion: number) => mutate<OperatorApplied>('/operator/confirm', { proposal_id: proposalId, reviewed: true }, csrf, contextVersion),
+    transcribeVoice: (csrf: string, audioBase64: string, mimeType: 'audio/webm' | 'audio/wav', sampleRateHertz: number, contextVersion: number) =>
+      mutate<VoiceTranscript>('/voice/transcribe', { audio_base64: audioBase64, mime_type: mimeType, sample_rate_hertz: sampleRateHertz }, csrf, contextVersion),
+    speakVoice: (csrf: string, value: string, contextVersion: number) => mutate<VoiceSpeech>('/voice/speak', { text: value }, csrf, contextVersion),
     fixtures: async (): Promise<DemoFixture[]> => (await request<{ fixtures: DemoFixture[] }>('/fixtures')).fixtures,
     extract: (csrf: string, source: { fixture_id: string; mode: 'gemini' | 'rules' }, contextVersion?: number) => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', source, csrf, contextVersion),
     upload: async (csrf: string, file: File, mode: 'gemini' | 'rules', contextVersion?: number) => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', { filename: file.name, document_base64: await encode(file), mode }, csrf, contextVersion),

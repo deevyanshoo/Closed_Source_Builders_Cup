@@ -78,6 +78,17 @@ describe('demo response state', () => {
     expect(html).toMatch(/disabled=""[^>]*>Run comparison/);
     expect(html).toContain('News workspace');
   });
+  it('exposes the scoped operator tab beside company and news without removing procurement results', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    expect(html).toContain('Company overview');
+    expect(html).toContain('News workspace');
+    expect(html).toContain('Operator');
+    expect(html).toContain('current reviewed comparison');
+    expect(html).toContain('Turn supply risks into reviewed actions');
+    expect(html).toContain('Fictional company profile · changes kept separately for this visit');
+    expect(html).not.toContain('context v1');
+  });
   it('adds a second supplier delay without losing the first and can remove all delays', () => {
     expect(delayRequest({ q1: 20 }, 'q2', '10')).toEqual({ q1: 20, q2: 10 });
     expect(delayRequest({ q1: 20, q2: 10 }, 'q2', '0')).toEqual({ q1: 20, q2: 0 });
@@ -248,7 +259,8 @@ describe('demo response state', () => {
 
   it('renders honest demo limits and disabled planning before an accepted quote', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
-    expect(html).toContain('Synthetic documents');
+    expect(html).toContain('Company profiles, quotes and buyer inputs are synthetic');
+    expect(html).toContain('news is observed public data');
     expect(html).toContain('temporary session');
     expect(html).toContain('Run comparison');
     expect(html).toMatch(/disabled=""[^>]*>Run comparison|disabled=""[^>]*>[^<]*Run comparison/);

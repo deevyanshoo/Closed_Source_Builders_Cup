@@ -515,8 +515,10 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                         'simulate_email parameters MUST contain exactly subject, body and recipient_label; '
                         'copy explicitly supplied subject/body, otherwise draft brief text without invented '
                         'numbers. recipient_label MUST be an exact current supplier name including the '
-                        'synthetic suffix. Never use view for an email. For other intents omit parameters '
-                        'or use {}. Classify and select the material; evidence_ids must be [] because '
+                        'synthetic suffix. Never use view for an email. For compare/load_quotes parameters '
+                        'MUST be {} (or omitted); the server selects owned current-material quotes. '
+                        'For other intents omit parameters or use {}. Classify and select the material; '
+                        'evidence_ids must be [] because '
                         'specialists receive the exact material-matched citation list later.'),
         'evidence': ('JSON only. Required keys: material_id, evidence_ids, assessment, implication, '
                      'confidence_reason, next_steps. Optional answer for an actual user question. '
@@ -704,8 +706,32 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                     'material_id': material_id, 'values': deepcopy(parameters['values'])}}
                 answer = f'Prepared reviewed buyer fields for {material_id}; no plan was run.'
             elif intent == 'compare':
-                if parameters or not re.search(r'\bcompar(?:e|ison)\b', message, re.IGNORECASE):
+                if not re.search(r'\bcompar(?:e|ison)\b', message, re.IGNORECASE):
                     raise OperatorValidationError('Invalid comparison request.')
+                if parameters:
+                    from .quote_service import company_for_offer
+                    scenarios = [row for row in snapshot['company']['quote_coverage']['scenarios']
+                                 if row['material_id'] == material_id]
+                    if set(parameters) != {'offer_ids'} or len(scenarios) != 1:
+                        raise OperatorValidationError('Invalid comparison request.')
+                    fixture_ids = set(scenarios[0]['fixture_ids'])
+                    canonical = [offer for offer in snapshot.get('offers', [])
+                                 if offer.get('fixture_id') in fixture_ids and
+                                 offer.get('status') == 'saved' and
+                                 company_for_offer(offer) == snapshot['company_id']]
+                    if any(type(offer.get('version')) is not int or offer['version'] <= 0 or
+                           not any((item.get('material') or {}).get('value') == material_id and
+                                   (item.get('material') or {}).get('status') in {'extracted', 'corrected'}
+                                   for item in offer.get('items', [])) for offer in canonical):
+                        raise OperatorValidationError('Invalid comparison request.')
+                    eligible = [offer['offer_id'] for offer in canonical]
+                    selected = parameters['offer_ids']
+                    if (not isinstance(selected, list) or not selected or
+                            any(not isinstance(offer_id, str) for offer_id in selected) or
+                            len(set(selected)) != len(selected) or
+                            len(eligible) != len(set(eligible)) or
+                            set(selected) != set(eligible)):
+                        raise OperatorValidationError('Invalid comparison request.')
                 utility = {'kind': 'compare', 'parameters': {'material_id': material_id}}
                 answer = f'Compare current reviewed quotes for {material_id}.'
             else:

@@ -5,7 +5,8 @@ import pytest
 
 from procure.demo.company import get_company
 from procure.demo.operator import OperatorValidationError, run_turn
-from procure.demo.quote_service import extract_fixture, new_offer
+from procure.demo.quote_service import (correct_offer, extract_fixture, fixture_review_values,
+                                       new_offer, save_offer)
 
 
 def snapshot(company_id='solara-cables'):
@@ -131,6 +132,61 @@ def test_read_only_utilities_and_simulated_email_are_bounded():
     with pytest.raises(OperatorValidationError):
         turn(value, 'Draft a simulated email for copper', SmartProvider('simulate_email', 'copper',
              parameters={'subject': 'Hi', 'body': 'Please send it.', 'recipient_label': 'foreign supplier'}))
+
+
+def _saved_compare_snapshot(company_id='solara-cables'):
+    value = snapshot(company_id)
+    for fixture_id in value['company']['quote_coverage']['scenarios'][0]['fixture_ids']:
+        offer = new_offer(extract_fixture(fixture_id, mode='rules', as_of=date(2026, 10, 14)),
+                          offer_id='offer-' + fixture_id, today=date(2026, 10, 14))
+        offer['fixture_id'] = fixture_id
+        for field, reviewed in fixture_review_values(fixture_id).items():
+            offer = correct_offer(offer, field=field, value=reviewed, today=date(2026, 10, 14))
+        value['offers'].append(save_offer(offer, today=date(2026, 10, 14)))
+    return value
+
+
+def test_compare_accepts_only_exact_current_saved_owned_fixture_ids_and_keeps_legacy_empty_args():
+    value = _saved_compare_snapshot()
+    ids = [offer['offer_id'] for offer in value['offers']]
+    provider = SmartProvider('compare', 'copper', parameters={'offer_ids': list(reversed(ids))})
+    result = turn(value, 'Compare copper quotes', provider)
+    assert result['utility'] == {'kind': 'compare', 'parameters': {'material_id': 'copper'}}
+    assert result['candidate'] is None
+    assert any('compare/load_quotes parameters MUST be {}' in prompt for role, prompt in provider.prompts
+               if role == 'coordinator')
+    for parameters in ({}, None):
+        assert turn(value, 'Compare copper quotes', SmartProvider('compare', 'copper',
+                    parameters=parameters))['utility'] == result['utility']
+
+    foreign_material = value['company']['quote_coverage']['scenarios'][1]['fixture_ids'][0]
+    foreign = new_offer(extract_fixture(foreign_material, mode='rules', as_of=date(2026, 10, 14)),
+                        offer_id='foreign-material', today=date(2026, 10, 14))
+    foreign['fixture_id'] = foreign_material
+    for field, reviewed in fixture_review_values(foreign_material).items():
+        foreign = correct_offer(foreign, field=field, value=reviewed, today=date(2026, 10, 14))
+    value['offers'].append(save_offer(foreign, today=date(2026, 10, 14)))
+    foreign_owner = _saved_compare_snapshot('loomworks')['offers'][0]
+    value['offers'].append(foreign_owner)
+    invalid = [ids[:2], [ids[0], ids[0], ids[1]],
+               [ids[0], ids[1], foreign['offer_id']],
+               [ids[0], ids[1], foreign_owner['offer_id']]]
+    for offered_ids in invalid:
+        with pytest.raises(OperatorValidationError):
+            turn(value, 'Compare copper quotes', SmartProvider('compare', 'copper',
+                 parameters={'offer_ids': offered_ids}))
+    with pytest.raises(OperatorValidationError):
+        turn(value, 'Compare copper quotes', SmartProvider('compare', 'copper',
+             parameters={'offer_ids': ids, 'view': 'procurement'}))
+    value['offers'][0]['status'] = 'corrected'
+    with pytest.raises(OperatorValidationError):
+        turn(value, 'Compare copper quotes', SmartProvider('compare', 'copper',
+             parameters={'offer_ids': ids}))
+    value['offers'][0]['status'] = 'saved'
+    value['offers'][0]['version'] = 0
+    with pytest.raises(OperatorValidationError):
+        turn(value, 'Compare copper quotes', SmartProvider('compare', 'copper',
+             parameters={'offer_ids': ids}))
 
 
 def test_untrusted_news_cannot_supply_numerical_answer_or_action():
@@ -287,3 +343,16 @@ def test_combined_news_explanation_keeps_evidence_analysis_with_a_stock_lookup()
                       evidence_ids=('news-copper',)))
     assert 'AI interpretation (conditional): Check the stated profile.' in result['assistant_text']
     assert 'Read the requested canonical company facts.' not in result['assistant_text']
+
+
+def test_compare_id_subset_cannot_hide_an_invalid_saved_quote_in_canonical_selection():
+    for invalid in ('version', 'material'):
+        value = _saved_compare_snapshot()
+        if invalid == 'version':
+            value['offers'][0]['version'] = 0
+        else:
+            value['offers'][0]['items'][0]['material']['value'] = 'polymer'
+        subset = [offer['offer_id'] for offer in value['offers'][1:]]
+        with pytest.raises(OperatorValidationError):
+            turn(value, 'Compare reviewed copper quotes.',
+                 SmartProvider('compare', 'copper', parameters={'offer_ids': subset}))

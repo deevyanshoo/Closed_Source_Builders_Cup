@@ -468,6 +468,38 @@ def _canonical_read_template(snapshot, message, material_id):
                      if row['material_id'] == material_id), None)
     if material and (material_id.casefold() in folded or material['name'].casefold() in folded):
         prefix = 'material.' + material_id
+        shortest_request = (re.search(r'\b(?:shortest|fastest|minimum|quickest)\b', folded)
+                            and re.search(r'\b(?:lead(?:[ -]time)?|supplier)\b', folded))
+        cover_request = re.search(
+            r'\b(?:stock[ -]*cover(?:age)?|days? of (?:stock )?cover(?:age)?|coverage)\b',
+            folded)
+        if shortest_request or cover_request:
+            analytics = next(row for row in inventory_analytics(snapshot)['materials']
+                             if row['material_id'] == material_id)
+            parts = []
+            if shortest_request:
+                shortest = analytics['shortest_supplier_lead_days']
+                if shortest is None:
+                    parts.append('No listed supplier lead time is available for {{' + prefix + '.name}}.')
+                else:
+                    fastest = [supplier for supplier in snapshot['company']['suppliers']
+                               if material_id in supplier.get('materials', [])
+                               and type(supplier.get('lead_time_days')) is int
+                               and supplier.get('lead_time_days') == shortest]
+                    names = ['{{supplier.' + supplier['supplier_id'] + '.name}}'
+                             for supplier in fastest]
+                    listed_by = (' and '.join(names) if len(names) < 3
+                                 else ', '.join(names[:-1]) + ', and ' + names[-1])
+                    parts.append('The shortest listed supplier lead time for {{' + prefix +
+                                 '.name}} is {{' + prefix +
+                                 '.shortest_supplier_lead_days}} days, offered by ' + listed_by + '.')
+            if cover_request:
+                if analytics['stock_cover_days'] is None:
+                    parts.append('Stock cover in days is unavailable for {{' + prefix + '.name}}.')
+                else:
+                    parts.append('{{' + prefix + '.name}} stock cover is {{' + prefix +
+                                 '.stock_cover_days}} days.')
+            return ' '.join(parts)
         field = ('monthly_requirement' if re.search(r'\bmonthly\b', folded) else
                  'consumption_per_day' if re.search(r'\bdaily\b|per day', folded) else
                  'stock' if re.search(r'how much.*\bstock\b|\bstock\b.*how much', folded) else None)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createDemoApi } from './demo-api';
+import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
 
 const api = createDemoApi();
@@ -22,10 +22,14 @@ export async function restoreLiveSession(read: () => Promise<DemoSession>, captu
 export function acceptsLiveTurn(value: unknown, captured: LiveScope, current: LiveScope): value is OperatorTurn {
   if (!value || typeof value !== 'object') return false;
   const turn = value as Partial<OperatorTurn>;
-  return sameLiveScope(captured, current) && turn.company_id === captured.companyId && turn.context_version === captured.contextVersion && turn.read_only === true &&
+  const utility = !turn.proposal && !!turn.session && turn.session.session_id === captured.sessionId &&
+    turn.session.company?.company_id === captured.companyId && turn.session.context_version === captured.contextVersion &&
+    !!turn.action_result && typeof turn.action_result.tool === 'string' && typeof turn.action_result.summary === 'string';
+  return sameLiveScope(captured, current) && turn.company_id === captured.companyId && turn.context_version === captured.contextVersion && typeof turn.read_only === 'boolean' &&
     typeof turn.turn_id === 'string' && typeof turn.assistant_text === 'string' && Array.isArray(turn.agent_steps) && Array.isArray(turn.evidence_ids) &&
     ['completed', 'proposal', 'needs_clarification', 'unavailable'].includes(turn.status ?? '') &&
-    (!turn.proposal || turn.proposal.context_version === captured.contextVersion);
+    (turn.read_only ? turn.proposal ? turn.proposal.context_version === captured.contextVersion && !turn.session && !turn.action_result :
+      turn.session || turn.action_result ? utility : true : utility);
 }
 export function pcm16Base64(samples: Float32Array, sourceRate: number): string {
   const length = Math.floor(samples.length * 16000 / sourceRate);
@@ -62,7 +66,7 @@ export function releaseLiveVoice(current: ActiveVoice): void {
   current.socket.close();
 }
 
-export function LiveVoice({ scope, csrf, disabled, onTurn, onSession, onUnknown }: { scope: LiveScope; csrf: string; disabled: boolean; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void }) {
+export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown }: { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void }) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'listening' | 'muted'>('idle');
   const [error, setError] = useState('');
   const [captions, setCaptions] = useState<{ direction: string; text: string }[]>([]);
@@ -100,9 +104,11 @@ export function LiveVoice({ scope, csrf, disabled, onTurn, onSession, onUnknown 
     let output: AudioContext | null = null;
     let socket: WebSocket | null = null;
     try {
+      const synchronized = beforeStart ? await beforeStart() : null;
+      if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
       const canonical = await api.session();
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
-      if (!matchesLiveSession(canonical, captured, csrf)) {
+      if (!matchesLiveSession(canonical, captured, synchronized?.csrf_token ?? csrf)) {
         onSession(canonical);
         setError('The demo session changed or expired. The current workspace has been restored; review it, then start voice again.');
         setStatus('idle');
@@ -134,7 +140,7 @@ export function LiveVoice({ scope, csrf, disabled, onTurn, onSession, onUnknown 
           current.socket.send(JSON.stringify({ type: 'audio', data: pcm16Base64(new Float32Array(chunk), input!.sampleRate) }));
         }
       };
-      socket.onopen = () => { if (active.current === current) socket!.send(JSON.stringify({ type: 'start', csrf_token: csrf, expected_context_version: captured.contextVersion })); };
+      socket.onopen = () => { if (active.current === current) socket!.send(JSON.stringify({ type: 'start', csrf_token: canonical.csrf_token, expected_context_version: captured.contextVersion })); };
       socket.onmessage = event => {
         if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
         let data: Record<string, unknown>;
@@ -169,7 +175,8 @@ export function LiveVoice({ scope, csrf, disabled, onTurn, onSession, onUnknown 
         if (!stream) {
           if (cause instanceof Error && cause.name === 'NotAllowedError') setError('Microphone access was denied. Allow microphone access for this site, then try again.');
           else if (cause instanceof Error && cause.name === 'NotFoundError') setError('No microphone was found. Connect one, then try again.');
-          else if (cause instanceof Error && cause.name === 'DemoApiError') { onUnknown(); setError('The demo session could not be checked. Refresh the session, then start voice again.'); }
+          else if (cause instanceof DemoApiError && (cause.code === 'session_expired' || [401, 403, 410].includes(cause.status))) { onUnknown(); setError('The demo session could not be checked. Refresh the session, then start voice again.'); }
+          else if (cause instanceof DemoApiError) setError(cause.message);
           else setError('The microphone or demo session could not be opened. Check your device and connection, then try again.');
         } else setError('The microphone audio connection could not start. Try again.');
       }

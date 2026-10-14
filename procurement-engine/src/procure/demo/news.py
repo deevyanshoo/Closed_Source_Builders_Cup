@@ -26,8 +26,31 @@ TTL_SECONDS = 900
 MAX_BYTES = 350_000
 MAX_ITEMS_PER_SOURCE = 30
 MAX_ITEMS = 80
+MAX_COMPANY_ITEMS = 60
 TIMEOUT = (2, 8)
 REFRESH_DEADLINE_SECONDS = 10
+GOOGLE_NEWS_HOST = 'news.google.com'
+SECTOR_TERMS = {
+    'electrical cable manufacturing': ('cable', 'electrical wire'),
+    'flexible packaging': ('packaging', 'plastic film'),
+    'textile production': ('textile', 'fabric', 'garment'),
+    'food processing': ('food processing', 'food production', 'grain'),
+    'pharmaceutical manufacturing': ('pharmaceutical', 'medicine', 'drug manufacturing'),
+    'automotive components': ('automotive', 'auto parts', 'vehicle production'),
+    'battery assembly': ('battery', 'energy storage'),
+    'electronics assembly': ('electronics', 'semiconductor', 'circuit board'),
+    'petrochemical blending': ('petrochemical', 'refinery', 'chemical plant'),
+    'construction materials': ('construction', 'cement', 'concrete'),
+}
+OPERATIONS = {
+    'supply': ('supply', 'shortage', 'scarcity', 'import', 'export', 'production', 'output', 'factory', 'plant', 'inventory'),
+    'pricing': ('price', 'cost', 'tariff', 'duty', 'inflation'),
+    'logistics': ('shipping', 'port', 'freight', 'cargo', 'route', 'transit', 'delay', 'disruption'),
+    'demand': ('demand', 'orders', 'sales', 'market'),
+}
+AMBIGUOUS_MATERIAL_TERMS = {'oil', 'gas', 'cell', 'glass', 'packaging', 'chemical', 'polymer', 'film', 'sand', 'steel', 'resin', 'grain', 'fibre', 'electronics', 'battery', 'aluminium', 'inks'}
+FINANCIAL_ONLY_TERMS = ('shares', 'share price', 'stock price', 'stock gets', 'buy rating',
+                        'sell rating', 'target price', 'fair value', 'dividend', 'earnings')
 SOURCES = (
     ('eia', 'U.S. Energy Information Administration', 'https://www.eia.gov/rss/todayinenergy.xml'),
     ('ecb', 'European Central Bank', 'https://www.ecb.europa.eu/rss/press.html'),
@@ -38,6 +61,16 @@ SOURCES = (
 
 class _RateLimited(ValueError):
     """A fixed public provider declined the bounded request."""
+
+
+def _unavailable_reason(error):
+    if isinstance(error, (requests.Timeout, TimeoutError)):
+        return 'Provider request timed out.'
+    if isinstance(error, requests.ConnectionError):
+        return 'Provider connection failed.'
+    if isinstance(error, ValueError) and str(error) == 'Response too large':
+        return 'Provider response exceeded the size limit.'
+    return 'Source could not be read or validated.'
 
 
 def _now(clock):
@@ -133,11 +166,13 @@ def _rss(payload, provider, retrieved_at):
             for child in node:
                 if _local_name(child.tag) == 'link':
                     link = child.attrib.get('href', '')
-        item = _metadata(_child_text(node, 'title'), link, provider,
-                         'U.S. Energy Information Administration' if provider == 'EIA' else 'European Central Bank',
+        publisher = ('U.S. Energy Information Administration' if provider == 'EIA' else
+                     'European Central Bank' if provider == 'ECB' else _child_text(node, 'source') or 'Google News discovery')
+        item = _metadata(_child_text(node, 'title'), link, provider, publisher,
                          _iso(_child_text(node, 'pubdate') or _child_text(node, 'published') or _child_text(node, 'updated')),
-                         retrieved_at, retrieved_at, 'primary',
-                         'Official publisher feed; the headline is evidence of a publication, not an exposure outcome.')
+                         retrieved_at, retrieved_at, 'discovery' if provider == 'Google News RSS' else 'primary',
+                         ('Google News RSS discovered publisher metadata; the underlying claim is unverified.'
+                          if provider == 'Google News RSS' else 'Official publisher feed; the headline is evidence of a publication, not an exposure outcome.'))
         if item:
             out.append(item)
         if len(out) >= MAX_ITEMS_PER_SOURCE:
@@ -214,8 +249,12 @@ def _default_transport(url, *, timeout, max_bytes):
 def _matches(text, company):
     lowered = text.casefold()
     materials = []
+    sector_terms = {term for aliases in SECTOR_TERMS.values() for term in aliases}
     for material in company.get('materials', []):
-        words = [material.get('name', '')] + list(material.get('keywords', []))
+        words = [material.get('name', '')] + [word for word in material.get('keywords', [])
+                                                 if word.casefold() not in AMBIGUOUS_MATERIAL_TERMS
+                                                 and word.casefold() not in sector_terms
+                                                 and word.casefold() != 'api']
         if any(word and re.search(r'(?<!\w)' + re.escape(word.casefold()) + r'(?!\w)', lowered) for word in words):
             materials.append(material['material_id'])
     routes = []
@@ -230,16 +269,76 @@ def _matches(text, company):
 
 def _company_item(raw, company):
     item = dict(raw)
+    item.pop('_discovery_source_id', None)
     materials, routes, currencies = _matches(item['title'], company)
+    if currencies and not any(_term_in(item['title'].casefold(), term) for term in
+                              ('exchange', 'currency', 'forex', 'fx', 'dollar', 'rate', 'devaluation')):
+        currencies = []
+    financial_only = any(_term_in(item['title'].casefold(), term) for term in FINANCIAL_ONLY_TERMS)
+    if financial_only:
+        materials = []
+        routes = []
+        currencies = []
     item['matched_materials'], item['matched_routes'], item['matched_currencies'] = materials, routes, currencies
-    item['category'] = 'material' if materials else 'route' if routes else 'currency' if currencies else 'general'
+    title = item['title'].casefold()
+    sector = company.get('sector', '').casefold()
+    sector_match = not financial_only and any(_term_in(title, term) for term in SECTOR_TERMS.get(sector, ()))
+    operations = [name for name, terms in OPERATIONS.items() if any(_term_in(title, term) for term in terms)]
+    # A geographic mention alone does not establish a route disruption.
+    route_match = bool(routes and 'logistics' in operations)
+    item['matched_operations'] = operations if materials or route_match or sector_match else []
+    item['relevance_kind'] = ('direct_material' if materials else 'route' if route_match else
+                              'sector' if sector_match and operations else 'currency' if currencies else 'unmatched')
+    item['relevance_score'] = {'direct_material': 0.9, 'route': 0.72, 'sector': 0.62,
+                               'currency': 0.45, 'unmatched': 0.0}[item['relevance_kind']]
+    if not route_match:
+        routes = []
+        item['matched_routes'] = []
+    item['category'] = 'material' if materials else 'route' if route_match else 'sector' if item['relevance_kind'] == 'sector' else 'currency' if currencies else 'general'
     refs = materials + routes + currencies
-    item['relevance_reason'] = ('Headline terms match recorded company exposure: ' + ', '.join(refs)) if refs else 'No recorded material, route, or currency term matches this headline.'
+    item['relevance_reason'] = (('Headline names a recorded material: ' + ', '.join(materials)) if materials else
+                                ('Headline names a recorded route and a logistics term: ' + ', '.join(routes)) if route_match else
+                                ('Headline connects the company sector to operations: ' + ', '.join(operations)) if item['relevance_kind'] == 'sector' else
+                                ('Headline names a recorded currency: ' + ', '.join(currencies)) if currencies else
+                                'No recorded material, operational sector, route disruption, or currency match.')
     item['implication'] = ('This publication may affect the matched exposure; check the original source and current supplier or route facts before changing a plan.'
-                           if refs else 'No company-specific operational implication established from this headline.')
-    item['implication_confidence'] = 'conditional' if refs else 'none'
-    item['next_steps'] = ['Read the original source', 'Check current supplier, route, and price evidence'] if refs else ['Read the original source if relevant']
+                           if item['relevance_kind'] != 'unmatched' else 'No company-specific operational implication established from this headline.')
+    item['implication_confidence'] = 'conditional' if item['relevance_kind'] != 'unmatched' else 'none'
+    item['next_steps'] = ['Read the original source', 'Check current supplier, route, and price evidence'] if item['relevance_kind'] != 'unmatched' else ['Read the original source if relevant']
     return item
+
+
+def _term_in(text, term):
+    return bool(term and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text))
+
+
+def _google_queries(company):
+    """At most three bounded queries from server-owned fictional exposure metadata."""
+    if not company.get('company_id'):
+        return []
+    from .company import get_company
+    company = get_company(company['company_id'])
+    if not company or not company.get('sector'):
+        return []
+    terms = []
+    for material in company.get('materials', [])[:20]:
+        name = re.sub(r'[^a-zA-Z0-9 -]', '', str(material.get('name', ''))).strip().lower()[:55]
+        keywords = [re.sub(r'[^a-zA-Z0-9 -]', '', str(x)).strip().lower()[:40]
+                    for x in material.get('keywords', [])[:4]]
+        distinctive = next((x for x in keywords if len(x) >= 4 and x not in AMBIGUOUS_MATERIAL_TERMS), name)
+        if distinctive and distinctive not in terms:
+            terms.append(distinctive)
+    sector = re.sub(r'[^a-zA-Z0-9 -]', '', str(company['sector'])).strip().lower()[:60]
+    queries = []
+    for group in (terms[:2], terms[2:6]):
+        if group:
+            queries.append('(' + ' OR '.join('"' + x + '"' for x in group) + ') (supply OR shortage OR price OR production)')
+    aliases = SECTOR_TERMS.get(sector, ())
+    if aliases:
+        queries.append('(' + ' OR '.join('"' + x + '"' for x in aliases[:2]) + ') (supply chain OR production OR shipping)')
+    return [urlunsplit(('https', GOOGLE_NEWS_HOST, '/rss/search',
+                       urlencode({'q': q[:220], 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'}), ''))
+            for q in queries[:3]]
 
 
 class NewsService:
@@ -253,8 +352,30 @@ class NewsService:
         self._refreshing = False
         self._snapshot = None
         self._seen = OrderedDict()
+        self._company_cache = OrderedDict()
+        self._company_refreshing = set()
 
     def get(self, company: dict, force: bool = False) -> dict:
+        view = self._get_global(company, force)
+        if self.offline:
+            return view
+        urls = _google_queries(company)
+        if not urls:
+            return view
+        extra = self._company_news(company, urls)
+        view['checked_at'] = max(view['checked_at'], extra['checked_at'])
+        view['sources'].extend(extra['sources'])
+        view['items'] = sorted({item['url']: item for item in view['items'] + extra['items']}.values(),
+                               key=lambda item: item['published_at'] or item['first_seen_at'] or '', reverse=True)[:MAX_ITEMS]
+        if extra['cache_state'] == 'stale':
+            view['cache_state'] = 'stale'
+        elif view['cache_state'] == 'stale':
+            pass
+        elif extra['items']:
+            view['cache_state'] = 'fresh' if extra['cache_state'] == 'fresh' else 'cached'
+        return view
+
+    def _get_global(self, company: dict, force: bool = False) -> dict:
         now = _now(self.clock)
         if self.offline:
             snapshot = {'checked_at': now.isoformat(), 'sources': [
@@ -315,6 +436,117 @@ class NewsService:
                 self._refreshing = False
                 self._lock.notify_all()
 
+    def _company_news(self, company, urls):
+        key = (company['company_id'], hashlib.sha256('\n'.join(urls).encode()).hexdigest())
+        with self._lock:
+            deadline = time.monotonic() + REFRESH_DEADLINE_SECONDS
+            while key in self._company_refreshing:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    old = self._company_cache.get(key)
+                    if old:
+                        return {'cache_state': 'stale', 'checked_at': old['checked_at'],
+                                'sources': [{**source, 'state': 'stale' if source['state'] in ('fresh', 'cached') else source['state'],
+                                             'reason': 'Refresh still in progress; showing previously observed metadata.'}
+                                            for source in old['sources']],
+                                'items': [_company_item(item, company) for item in old['items']]}
+                    stamp = _now(self.clock).isoformat()
+                    return {'cache_state': 'unavailable', 'checked_at': stamp,
+                            'sources': [{'source_id': f'google_news_{index}',
+                                         'name': 'Google News RSS discovery', 'state': 'unavailable',
+                                         'last_checked_at': stamp, 'reason': 'Refresh is still in progress.'}
+                                        for index in range(1, len(urls) + 1)], 'items': []}
+                self._lock.wait(timeout=remaining)
+            now = _now(self.clock)
+            old = self._company_cache.get(key)
+            if old and (now - old['time']).total_seconds() < TTL_SECONDS:
+                return {'cache_state': 'cached' if old['cache_state'] == 'fresh' else old['cache_state'],
+                        'checked_at': old['checked_at'],
+                        'sources': [{**source, 'state': 'cached' if source['state'] == 'fresh' else source['state']}
+                                    for source in old['sources']],
+                        'items': [_company_item(item, company) for item in old['items']]}
+            self._company_refreshing.add(key)
+        try:
+            return self._refresh_company_news(company, urls)
+        finally:
+            with self._lock:
+                self._company_refreshing.discard(key)
+                self._lock.notify_all()
+
+    def _refresh_company_news(self, company, urls):
+        now = _now(self.clock)
+        key = (company['company_id'], hashlib.sha256('\n'.join(urls).encode()).hexdigest())
+        with self._lock:
+            old = self._company_cache.get(key)
+            if old and (now - old['time']).total_seconds() < TTL_SECONDS:
+                return {'cache_state': 'cached' if old['cache_state'] == 'fresh' else old['cache_state'],
+                        'checked_at': old['checked_at'],
+                        'sources': [{**source, 'state': 'cached' if source['state'] == 'fresh' else source['state']}
+                                    for source in old['sources']],
+                        'items': [_company_item(item, company) for item in old['items']]}
+        stamp = now.isoformat()
+        sources, items = [], []
+        pool = ThreadPoolExecutor(max_workers=min(3, len(urls)), thread_name_prefix='demo-company-news')
+        try:
+            futures = [pool.submit(self.transport, url, timeout=TIMEOUT, max_bytes=MAX_BYTES) for url in urls]
+            done, _ = wait(futures, timeout=REFRESH_DEADLINE_SECONDS)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        for index, future in enumerate(futures, 1):
+            sid = f'google_news_{index}'
+            try:
+                if future not in done:
+                    raise TimeoutError('Refresh deadline exceeded')
+                payload = future.result()
+                if not isinstance(payload, bytes) or len(payload) > MAX_BYTES:
+                    raise ValueError('Invalid response size')
+                found = _rss(payload, 'Google News RSS', stamp)
+                for item in found:
+                    item['_discovery_source_id'] = sid
+                items.extend(found)
+                sources.append({'source_id': sid, 'name': 'Google News RSS discovery',
+                                'state': 'fresh' if found else 'empty', 'last_checked_at': stamp,
+                                'reason': 'Public headline metadata received.' if found else 'No valid items in source response.'})
+            except _RateLimited:
+                sources.append({'source_id': sid, 'name': 'Google News RSS discovery',
+                                'state': 'unavailable', 'last_checked_at': stamp,
+                                'reason': 'Provider rate limit reached.'})
+            except (requests.RequestException, ValueError, TypeError, ET.ParseError, TimeoutError) as error:
+                sources.append({'source_id': sid, 'name': 'Google News RSS discovery',
+                                'state': 'unavailable', 'last_checked_at': stamp,
+                                'reason': _unavailable_reason(error)})
+        unique = {item['url']: item for item in items}
+        with self._lock:
+            for item in unique.values():
+                first = self._seen.setdefault(item['url'], item['first_seen_at'])
+                item['first_seen_at'] = first
+                self._seen.move_to_end(item['url'])
+            while len(self._seen) > 1024:
+                self._seen.popitem(last=False)
+            if old:
+                old_sources = {source['source_id']: source for source in old['sources']}
+                for source in sources:
+                    if source['state'] != 'unavailable' or source['source_id'] not in old_sources:
+                        continue
+                    prior = old_sources[source['source_id']]
+                    if prior['state'] not in ('fresh', 'cached', 'stale'):
+                        continue
+                    unique.update((item['url'], item) for item in old['items']
+                                  if item.get('_discovery_source_id') == source['source_id'])
+                    source['state'] = 'stale'
+                    source['last_checked_at'] = prior['last_checked_at']
+                    source['reason'] += ' Showing previously observed metadata.'
+            ordered = sorted(unique.values(), key=lambda item: item['published_at'] or item['first_seen_at'] or '', reverse=True)[:MAX_COMPANY_ITEMS]
+            state = ('stale' if any(source['state'] == 'stale' for source in sources) else
+                     'fresh' if ordered else 'unavailable' if all(source['state'] == 'unavailable' for source in sources) else 'empty')
+            self._company_cache[key] = {'time': now, 'checked_at': stamp, 'cache_state': state,
+                                        'sources': sources, 'items': ordered}
+            self._company_cache.move_to_end(key)
+            while len(self._company_cache) > 12:
+                self._company_cache.popitem(last=False)
+        return {'cache_state': state, 'checked_at': stamp, 'sources': sources,
+                'items': [_company_item(item, company) for item in ordered]}
+
     def _refresh(self, now):
         stamp = now.isoformat()
         sources, items, fx = [], [], []
@@ -348,9 +580,9 @@ class NewsService:
             except _RateLimited:
                 sources.append({'source_id': source_id, 'name': name, 'state': 'unavailable',
                                 'last_checked_at': stamp, 'reason': 'Provider rate limit reached.'})
-            except (requests.RequestException, ValueError, TypeError, ET.ParseError, TimeoutError, json.JSONDecodeError):
+            except (requests.RequestException, ValueError, TypeError, ET.ParseError, TimeoutError, json.JSONDecodeError) as error:
                 sources.append({'source_id': source_id, 'name': name, 'state': 'unavailable',
-                                'last_checked_at': stamp, 'reason': 'Source could not be read or validated.'})
+                                'last_checked_at': stamp, 'reason': _unavailable_reason(error)})
         unique = {}
         for item in items:
             if item['url'] not in unique:
@@ -366,7 +598,8 @@ class NewsService:
 
     def _view(self, snapshot, company):
         limitations = ['Headlines and discovery links are metadata, not verified claims or forecasts.',
-                       'Company exposure matches are conditional; FX reference rates are informational, not executable offers.']
+                       'Company exposure matches are conditional; FX reference rates are informational, not executable offers.',
+                       'Relevance score is a fixed title-term heuristic, not a calibrated probability or verified company impact.']
         if snapshot.get('time'):
             limitations.append('Refresh cannot fetch providers again until ' +
                                (snapshot['time'] + timedelta(seconds=TTL_SECONDS)).isoformat() + '.')

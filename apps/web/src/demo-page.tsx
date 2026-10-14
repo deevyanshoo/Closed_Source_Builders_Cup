@@ -1,8 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
-import { CompanyOverview, NewsWorkspace } from './demo-company-news';
+import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import { CompanyOverview, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import { OperatorPanel } from './demo-operator';
 import './demo.css';
 
@@ -29,12 +29,15 @@ export function applyDemoResult(state: DemoState, action: DemoAction): DemoState
   }
   if (action.epoch !== state.epoch) return state;
   if (action.type === 'session') {
-    const request = action.session.plan_request ?? action.session.recovery?.baseline_request ?? null;
+    const computed = action.session.plan_request ?? action.session.recovery?.baseline_request ?? null;
+    const draft = action.session.buyer_draft;
+    const request = computed && (!draft || sameBuyerFields(draft, computed)) &&
+      (!action.session.selected_material_id || action.session.selected_material_id === computed.material) ? computed : null;
     const recovery = request ? action.session.recovery ?? null : null;
     const plan = request ? recovery?.scenario ?? action.session.plan ?? null : null;
     const sameContext = state.session?.session_id === action.session.session_id && state.session?.company?.company_id === action.session.company?.company_id && state.session?.context_version === action.session.context_version;
     return { ...state, session: action.session, offers: action.session.offers, news: sameContext ? state.news : null, dirty: false,
-      plan, planRequest: request, recovery, rfq: state.dirty ? null : action.session.rfq ?? null, reviewed: false,
+      plan, planRequest: request, recovery, rfq: state.dirty || !plan ? null : action.session.rfq ?? null, reviewed: false,
       focusedId: action.session.offers.some(o => o.offer_id === state.focusedId) ? state.focusedId : action.session.offers.at(-1)?.offer_id ?? null };
   }
   if (action.type === 'offer') {
@@ -68,7 +71,13 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const defaultInputs = () => ({ material: '', quantity: '', current_stock: '0', quantity_unit: 'kg', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_unit: '0' });
-const genericInputs = (request: PlanRequest) => ({ material: request.material, quantity: request.quantity ?? request.quantity_kg ?? '', current_stock: request.current_stock ?? request.current_stock_kg ?? '0', quantity_unit: request.quantity_unit ?? 'kg', need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_unit: request.additional_cost_per_unit ?? request.additional_cost_per_kg ?? '0' });
+const genericInputs = (request: PlanRequest | BuyerDraft) => ({ material: request.material, quantity: request.quantity ?? ('quantity_kg' in request ? request.quantity_kg : undefined) ?? '', current_stock: request.current_stock ?? ('current_stock_kg' in request ? request.current_stock_kg : undefined) ?? '0', quantity_unit: request.quantity_unit ?? 'kg', need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_unit: request.additional_cost_per_unit ?? ('additional_cost_per_kg' in request ? request.additional_cost_per_kg : undefined) ?? '0' });
+const sameBuyerFields = (a: PlanRequest | BuyerDraft, b: PlanRequest | BuyerDraft) => JSON.stringify(genericInputs(a)) === JSON.stringify(genericInputs(b));
+export function needsBuyerDraftSync(session: DemoSession, inputs: BuyerDraft, dirty: boolean): boolean {
+  if (dirty || (session.selected_material_id && session.selected_material_id !== inputs.material)) return true;
+  const canonical = session.buyer_draft ?? session.plan_request ?? session.recovery?.baseline_request;
+  return !canonical || !sameBuyerFields(canonical, inputs);
+}
 export function companyScenarios(company: CompanyProfile) {
   if (company.quote_coverage.scenarios?.length) return company.quote_coverage.scenarios;
   return company.buyer_defaults ? [{ material_id: company.buyer_defaults.material, fixture_ids: company.quote_coverage.fixture_ids, buyer_defaults: company.buyer_defaults }] : [];
@@ -98,12 +107,15 @@ export const planUnit = (plan: PlanView) => plan.quantity_unit ?? 'kg';
 export function canonicalBuyerState(session: DemoSession, preferredMaterial?: string) {
   const serverRequest = session.plan_request ?? session.recovery?.baseline_request ?? null;
   const primaryMaterial = session.company?.buyer_defaults?.material ?? (session.company ? companyScenarios(session.company)[0]?.material_id : undefined);
-  const materialId = serverRequest?.material ?? (session.company && preferredMaterial && companyScenarios(session.company).some(item => item.material_id === preferredMaterial) ? preferredMaterial : primaryMaterial) ?? '';
-  const request = serverRequest ?? (session.company ? companyScenarios(session.company).find(item => item.material_id === materialId)?.buyer_defaults ?? null : null);
-  const delayControls = session.recovery ? delayControlsForRecovery(session.recovery) : session.plan && request ? delayControlsForPlan(session.plan, request) : { offerId: '', days: '0' };
+  const validMaterial = (value: string | null | undefined) => !!value && (!session.company || companyScenarios(session.company).some(item => item.material_id === value));
+  const materialId = [session.buyer_draft?.material, session.selected_material_id, serverRequest?.material, preferredMaterial, primaryMaterial].find(validMaterial) ?? '';
+  const request = session.buyer_draft ?? (serverRequest?.material === materialId ? serverRequest : null) ?? (session.company ? companyScenarios(session.company).find(item => item.material_id === materialId)?.buyer_defaults ?? null : null);
+  const computedSelection = serverRequest?.material === materialId ? serverRequest : null;
+  const computedCurrent = !!serverRequest && serverRequest.material === materialId && (!session.buyer_draft || sameBuyerFields(session.buyer_draft, serverRequest));
+  const delayControls = computedCurrent && session.recovery ? delayControlsForRecovery(session.recovery) : computedCurrent && session.plan && serverRequest ? delayControlsForPlan(session.plan, serverRequest) : { offerId: '', days: '0' };
   return {
     materialId,
-    selected: request?.offer_ids.filter(id => offersForMaterial(session.offers, [], session.company, materialId).some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
+    selected: computedSelection?.offer_ids.filter(id => offersForMaterial(session.offers, [], session.company, materialId).some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
     inputs: request ? genericInputs(request) : defaultInputs(),
     delayControls,
   };
@@ -251,7 +263,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [companyError, setCompanyError] = useState('');
   const [newsError, setNewsError] = useState('');
   const [newsBusy, setNewsBusy] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news'>('company');
+  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'outbox'>('company');
+  const [highlightFields, setHighlightFields] = useState<string[]>([]);
   const [operatorOpen, setOperatorOpen] = useState(false);
   const operatorDockRef = useRef<HTMLElement | null>(null);
   const operatorToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -268,6 +281,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const epochRef = useRef(initialState.epoch);
   const actionRef = useRef(0);
   const newsRequestRef = useRef(0);
+  const draftSaveRef = useRef<{ epoch: number; promise: Promise<DemoSession> } | null>(null);
   const newsAutoRecoveryUsedRef = useRef(false);
   const selectedMaterialRef = useRef(selectedMaterialId);
   const materialScopeRef = useRef(initialState.session ? `${initialState.session.session_id}:${initialState.session.company?.company_id ?? ''}:${initialState.session.context_version ?? ''}` : '');
@@ -304,16 +318,40 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     setDelayOfferId(buyer.delayControls.offerId);
     setDelayDays(buyer.delayControls.days);
   }
-  function restoreOperatorSession(session: DemoSession) {
+  function restoreOperatorSession(session: DemoSession, action?: OperatorTurn['action_result']) {
     const changed = workspaceChanged(state.session, session);
     actionRef.current += 1;
     restoreSession(session, epochRef.current);
+    setHighlightFields(action?.fields_changed ?? []);
     if (changed) {
       // The operator remounts on a session change, so its local voice notice
       // would disappear. Keep recovery guidance in the persistent page.
       setOperatorOpen(false);
       setError('The session expired or changed. The current workspace was restored. Review the company and buyer inputs, then start conversation again.');
     }
+  }
+  async function beforeOperatorTurn(): Promise<DemoSession> {
+    const current = state.session;
+    if (!current || !current.company || current.context_version === undefined) throw new DemoApiError('Open a company session before asking the operator.');
+    if (!needsBuyerDraftSync(current, inputs, state.dirty)) return current;
+    const epoch = epochRef.current;
+    if (draftSaveRef.current?.epoch === epoch) return draftSaveRef.current.promise;
+    const buyer_draft: BuyerDraft = { ...inputs };
+    const promise = api.buyerDraft(current.csrf_token, buyer_draft, current.context_version).then(session => {
+      if (epoch !== epochRef.current) throw new DemoApiError('Buyer inputs changed while the draft was saving. Ask again with the current inputs.');
+      if (workspaceChanged(current, session)) {
+        restoreOperatorSession(session);
+        throw new DemoApiError('The workspace changed while buyer inputs were saving. Review the restored session and ask again.');
+      }
+      restoreSession(session, epoch);
+      return session;
+    }).finally(() => { if (draftSaveRef.current?.epoch === epoch) draftSaveRef.current = null; });
+    draftSaveRef.current = { epoch, promise };
+    return promise;
+  }
+  function navigateOperator(view: NonNullable<NonNullable<OperatorTurn['action_result']>['view']>) {
+    if (view === 'news' || view === 'company' || view === 'outbox') setWorkspaceTab(view);
+    if (view === 'procurement') document.getElementById('demo-procurement')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function clearUnknownOperatorSession() {
     epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
@@ -526,8 +564,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · changes kept separately for this visit</p></div>
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
       <div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget. Select this material's quotes below.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div>
-      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button></div>
-      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} />}
+      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button><button type="button" className={workspaceTab === 'outbox' ? 'active' : ''} aria-pressed={workspaceTab === 'outbox'} onClick={() => setWorkspaceTab('outbox')}>Simulated outbox</button></div>
+      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : <OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} />}
     </section>}
     {error && <div className="demo-error" role="alert"><strong>Workspace update.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), (session, epoch) => { newsAutoRecoveryUsedRef.current = false; restoreSession(session, epoch); })}>Refresh session</button></div>}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
@@ -541,11 +579,11 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     </section>
     {visibleOffers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes for selected material">{visibleOffers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === offer?.offer_id ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
     {offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} company={company} fixtures={supportedFixtures} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
-    <section className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
+    <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
       <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !currentDefaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(currentDefaults ?? sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? currentDefaults ? 'Dated synthetic buyer assumptions for the selected material. Edit any input below; quantities use its listed unit.' : 'No buyer defaults or runnable quote scenario are available for this material.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
-      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={selectedMaterialId} onChange={e => selectMaterial(e.target.value)}>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
+      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label className={highlightFields.includes('material') ? 'demo-agent-filled' : ''}><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={selectedMaterialId} onChange={e => selectMaterial(e.target.value)}>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name} className={highlightFields.includes(name) ? 'demo-agent-filled' : ''}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; setHighlightFields([]); invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
@@ -564,5 +602,5 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {state.rfq && <div className="demo-draft"><p><strong>Draft for {state.rfq.supplier}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{state.rfq.text}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
     </section>
     <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
-  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} onSession={restoreOperatorSession} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
+  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

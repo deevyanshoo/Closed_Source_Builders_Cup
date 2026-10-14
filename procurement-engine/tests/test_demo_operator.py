@@ -407,7 +407,9 @@ def test_vertex_sdk_receives_strict_top_object_schema_for_each_role_and_rejects_
         assert schema['type'] == 'object'
         assert schema['additionalProperties'] is False
         assert set(schema['required']) == set(expected)
-        assert set(schema['properties']) == set(expected)
+        assert set(schema['properties']) == set(expected) | (
+            {'parameters'} if role == 'coordinator' else
+            {'answer'} if role == 'evidence' else set())
         assert schema['properties']['evidence_ids']['maxItems'] == (0 if role == 'coordinator' else 1)
         assert schema['properties']['evidence_ids']['items']['maxLength'] <= 128
         if role != 'coordinator':

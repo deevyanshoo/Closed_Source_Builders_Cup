@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
@@ -45,6 +45,26 @@ describe('demo response state', () => {
     expect(html).toContain('Naphtha · barrel');
     expect(html).toContain('naphtha.csv');
     expect(html).not.toContain('synthetic.pdf');
+  });
+  it('restores the server buyer draft over an old comparison and shows server-confirmed simulated messages', () => {
+    const draft = { material: 'naphtha', quantity: '410', current_stock: '40', quantity_unit: 'barrel', need_by: '2026-10-30', decision_date: '2026-10-14', reporting_currency: 'EUR', budget: '12000', additional_cost_per_unit: '3' };
+    const canonical = { ...companySession, company: multiCompany, buyer_draft: draft, selected_material_id: 'naphtha', plan: null, plan_request: null, rfq: null, simulated_outbox: [{ message_id: 'm1', company_id: 'solara-cables', material_id: 'naphtha', recipient_label: 'Supplier desk', subject: 'Review availability', body: 'Please review 410 barrels.', status: 'simulated_sent' as const, simulated: true as const, external_delivery: false as const, created_at: '2026-10-14T10:00:00Z' }] };
+    expect(canonicalBuyerState(canonical).inputs).toMatchObject({ material: 'naphtha', quantity: '410', budget: '12000' });
+    expect(canonicalBuyerState(canonical).materialId).toBe('naphtha');
+    const stalePlan = applyDemoResult(initialDemoState, { type: 'session', session: { ...canonical, plan: selectedPlan, plan_request: request, rfq }, epoch: 0 });
+    expect(stalePlan.plan).toBeNull();
+    expect(stalePlan.rfq).toBeNull();
+    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 })} />);
+    expect(html).toContain('Simulated outbox');
+    expect(html).toContain('>Simulated outbox</button>');
+  });
+  it('syncs initially displayed defaults before agent turns but preserves a current computed comparison', () => {
+    const defaults = materialInputs(multiCompany, 'naphtha')!;
+    const fresh = { ...companySession, company: multiCompany, plan: null, plan_request: null, buyer_draft: null, selected_material_id: null };
+    expect(needsBuyerDraftSync(fresh, defaults, false)).toBe(true);
+    const computed = { ...companySession, buyer_draft: null };
+    expect(needsBuyerDraftSync(computed, canonicalBuyerState(computed).inputs, false)).toBe(false);
+    expect(needsBuyerDraftSync(computed, { ...canonicalBuyerState(computed).inputs, quantity: '1500' }, true)).toBe(true);
   });
 
   it('invalidates a pending material comparison without losing other saved offers', () => {

@@ -35,8 +35,9 @@ MAX_OFFERS = 48
 MAX_IDEMPOTENCY = 2400
 MAX_SESSION_CALLS = 36
 MAX_SESSION_FAILURES = 6
-MAX_OPERATOR_TURNS = 12
+MAX_OPERATOR_TURNS = 36
 MAX_PROCESS_CALLS = 60
+MAX_OPERATOR_PROCESS_CALLS_PER_HOUR = 90
 MAX_CACHE = 64
 
 
@@ -89,6 +90,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     operator_lock = threading.RLock()
     operator_workers = threading.BoundedSemaphore(2)
     operator_process_calls = 0
+    operator_call_times = []
     voice_lock = threading.RLock()
     voice_workers = threading.BoundedSemaphore(2)
     voice_process_calls = 0
@@ -214,12 +216,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'offers': deepcopy(list(value.offers.values())),
                 'plan': deepcopy(active_plan(value)), 'baseline_plan': deepcopy(value.last_plan),
                 'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
-                'watch_items': deepcopy(value.watch_items)}
+                'watch_items': deepcopy(value.watch_items), 'buyer_draft': deepcopy(value.buyer_draft),
+                'selected_material_id': value.selected_material_id,
+                'simulated_outbox': deepcopy(value.simulated_outbox)}
 
     def snapshot_marker(snapshot):
         # Bind asynchronous work and proposals to authoritative state, including observed evidence.
         fields = {key: snapshot[key] for key in ('company_id', 'context_version', 'news',
-                  'offers', 'plan', 'baseline_plan', 'plan_request', 'recovery', 'watch_items')}
+                  'offers', 'plan', 'baseline_plan', 'plan_request', 'recovery', 'watch_items',
+                  'buyer_draft', 'selected_material_id', 'simulated_outbox')}
         return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
                                          default=str).encode()).hexdigest()
 
@@ -306,6 +311,256 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 raise SessionError('stale_plan', 'A reviewed quote is no longer current.', 409)
         return selected
 
+    def canonical_buyer(value, draft):
+        from .agent_tools import ToolValidationError, validate_buyer_draft
+        try:
+            return validate_buyer_draft(get_company(value.company_id), draft)
+        except ToolValidationError as exc:
+            raise SessionError('invalid_buyer_draft', str(exc), 422) from None
+
+    def current_buyer(value, material_id):
+        from .agent_tools import BUYER_FIELDS
+        company = get_company(value.company_id)
+        if value.buyer_draft and value.buyer_draft.get('material') == material_id:
+            return canonical_buyer(value, value.buyer_draft)
+        if value.plan_request and value.plan_request.get('material') == material_id:
+            source = value.plan_request
+            aliases = {'quantity': 'quantity_kg', 'current_stock': 'current_stock_kg',
+                       'additional_cost_per_unit': 'additional_cost_per_kg'}
+            unit = next((m['quantity_unit'] for m in company['materials']
+                         if m['material_id'] == material_id), None)
+            candidate = {field: source.get(field, source.get(aliases.get(field)))
+                         for field in BUYER_FIELDS}
+            candidate['quantity_unit'] = candidate['quantity_unit'] or unit
+            return canonical_buyer(value, candidate)
+        scenario = next((row for row in company['quote_coverage']['scenarios']
+                         if row['material_id'] == material_id), None)
+        if scenario is None:
+            raise SessionError('quote_unavailable', 'Material is outside this workspace.', 422)
+        return canonical_buyer(value, {field: scenario['buyer_defaults'][field]
+                                       for field in BUYER_FIELDS})
+
+    def set_buyer(value, draft):
+        canonical = canonical_buyer(value, draft)
+        material_id = canonical['material']
+        changed = canonical != current_buyer(value, material_id) or (
+            value.selected_material_id is not None and value.selected_material_id != material_id) or (
+            value.buyer_draft is not None and value.buyer_draft.get('material') != material_id) or (
+            value.plan_request is not None and value.plan_request.get('material') != material_id)
+        previous_marker = snapshot_marker(operator_snapshot(value)) if not changed else None
+        if changed:
+            clear_derived(value)
+        value.buyer_draft = deepcopy(canonical)
+        value.selected_material_id = material_id
+        if not changed:
+            current_marker = snapshot_marker(operator_snapshot(value))
+            if value.pending_proposal and value.pending_proposal.get('_marker') == previous_marker:
+                value.pending_proposal['_marker'] = current_marker
+            for entry in value.idempotency.values():
+                if entry.get('state_marker') == previous_marker:
+                    entry['state_marker'] = current_marker
+        return changed
+
+    def scenario(value, material_id):
+        company = get_company(value.company_id)
+        row = next((item for item in company['quote_coverage']['scenarios']
+                    if item['material_id'] == material_id), None)
+        if row is None:
+            raise SessionError('quote_unavailable', 'No reviewed quotes for this material.', 422)
+        return row
+
+    def staged_quotes(value, material_id):
+        from .quote_service import extract_fixture, new_offer, company_for_offer
+        row = scenario(value, material_id)
+        existing = {offer.get('fixture_id'): offer for offer in value.offers.values()
+                    if offer.get('fixture_id') in row['fixture_ids']}
+        missing = [fixture_id for fixture_id in row['fixture_ids'] if fixture_id not in existing]
+        if len(value.offers) + len(missing) > MAX_OFFERS:
+            raise SessionError('offer_limit', 'Session offer limit reached.', 429)
+        fresh = []
+        for fixture_id in missing:
+            payload = extract_fixture(fixture_id, mode='rules', as_of=store.now().date())
+            offer = new_offer(payload, offer_id=secrets.token_urlsafe(18), today=store.now().date())
+            if company_for_offer(offer) != value.company_id:
+                raise SessionError('quote_unavailable', 'Fixture is outside this workspace.', 422)
+            offer['fixture_id'] = fixture_id
+            offer['served_from_cache'] = False
+            fresh.append(offer)
+        # Commit only after every immutable source has passed parsing and ownership checks.
+        set_buyer(value, current_buyer(value, material_id))
+        if fresh:
+            clear_derived(value)
+            for offer in fresh:
+                value.offers[offer['offer_id']] = offer
+        return [deepcopy(existing[fixture_id]) if fixture_id in existing else
+                deepcopy(next(offer for offer in fresh if offer['fixture_id'] == fixture_id))
+                for fixture_id in row['fixture_ids']]
+
+    def compare_quotes(value, material_id):
+        from .planner import build_plan
+        from .quote_service import company_for_offer
+        from .agent_tools import validate_buyer_draft
+        row = scenario(value, material_id)
+        selected = [deepcopy(offer) for offer in value.offers.values()
+                    if offer.get('status') == 'saved' and offer.get('fixture_id') in row['fixture_ids']
+                    and company_for_offer(offer) == value.company_id]
+        if not selected:
+            raise SessionError('quotes_unavailable', 'Review and save this material’s quotes first.', 409)
+        draft = current_buyer(value, material_id)
+        request = {**draft, 'offer_ids': [offer['offer_id'] for offer in selected],
+                   'expected_versions': {offer['offer_id']: offer['version'] for offer in selected}}
+        plan = build_plan(selected, request, today=store.now().date())
+        plan['plan_id'] = secrets.token_urlsafe(18)
+        set_buyer(value, draft)
+        value.plan_request = deepcopy(request)
+        value.last_plan = deepcopy(plan)
+        value.recovery = None
+        value.rfq = None
+        value.pending_proposal = None
+        return plan
+
+    def execute_utility(value, utility, message):
+        from .agent_tools import ToolValidationError, prepare_form
+        if not isinstance(utility, dict) or set(utility) != {'kind', 'parameters'} or not isinstance(utility['parameters'], dict):
+            raise SessionError('invalid_utility', 'Unsupported workspace action.', 422)
+        kind, parameters = utility['kind'], utility['parameters']
+        if kind == 'navigate':
+            shape(parameters, ('view',))
+            if parameters['view'] not in ('company', 'news', 'procurement', 'outbox'):
+                raise SessionError('invalid_utility', 'Unknown workspace view.', 422)
+            return {'tool': kind, 'summary': f"Open {parameters['view']} view.", 'view': parameters['view']}, True
+        shape(parameters, ('material_id', 'values') if kind == 'fill_form' else ('material_id',))
+        material_id = parameters['material_id']
+        scenario(value, material_id)
+        if kind == 'fill_form':
+            try:
+                draft = prepare_form(get_company(value.company_id), material_id, parameters['values'], message)
+            except ToolValidationError as exc:
+                raise SessionError('invalid_utility', str(exc), 422) from None
+            changed = set_buyer(value, draft)
+            return {'tool': kind, 'summary': f'Buyer form prepared for {material_id}.',
+                    'fields_changed': list(parameters['values']) if changed else []}, True
+        if kind == 'load_quotes':
+            before = len(value.offers)
+            offers = staged_quotes(value, material_id)
+            return {'tool': kind, 'summary': f'{len(offers)} synthetic quotes are ready for review.',
+                    'fields_changed': ['offers'] if len(value.offers) != before else []}, True
+        if kind == 'compare':
+            plan = compare_quotes(value, material_id)
+            return {'tool': kind, 'summary': f"Compared {len(plan['offer_versions'])} reviewed quotes for {material_id}.",
+                    'fields_changed': ['plan']}, True
+        raise SessionError('invalid_utility', 'Unsupported workspace action.', 422)
+
+    def validate_simulated_email(value, parameters):
+        shape(parameters, ('material_id', 'recipient_label', 'subject', 'body'))
+        material_id = parameters['material_id']
+        scenario(value, material_id)
+        suppliers = {supplier['name'] for supplier in get_company(value.company_id)['suppliers']
+                     if material_id in supplier.get('materials', [])}
+        if parameters['recipient_label'] not in suppliers:
+            raise SessionError('invalid_recipient', 'Select a supplier in this material workspace.', 422)
+        for field, limit in (('subject', 120), ('body', 1000)):
+            raw = parameters[field]
+            if not isinstance(raw, str) or not raw.strip() or len(raw) > limit or re.search(r'\b[^\s@]+@[^\s@]+\.[^\s@]+\b', raw):
+                raise SessionError('invalid_message', 'Use a short simulated message without an email address.', 422)
+
+    def reviewed_quote_preview(value, parameters):
+        from .quote_service import fixture_review_values, company_for_offer
+        shape(parameters, ('material_id',), ('offer_ids',))
+        row = scenario(value, parameters['material_id'])
+        ids = parameters.get('offer_ids')
+        if ids is None:
+            ids = [offer['offer_id'] for offer in value.offers.values()
+                   if offer.get('fixture_id') in row['fixture_ids'] and offer.get('status') != 'saved'
+                   and company_for_offer(offer) == value.company_id]
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 3 or
+                any(not isinstance(offer_id, str) for offer_id in ids) or len(set(ids)) != len(ids)):
+            raise SessionError('invalid_offers', 'Select one to three owned quotes.', 422)
+        previews = []
+        for offer_id in ids:
+            offer = owned(value, offer_id)
+            fixture_id = offer.get('fixture_id')
+            if (fixture_id not in row['fixture_ids'] or
+                    company_for_offer(offer) != value.company_id or
+                    offer.get('status') in ('saved', 'corrected')):
+                raise SessionError('invalid_offers', 'Select unmodified synthetic quote drafts for review.', 422)
+            previews.append({'offer_id': offer_id, 'fixture_id': fixture_id,
+                             'source_filename': offer.get('document', {}).get('filename'),
+                             'expected_version': offer['version'],
+                             'review_values': fixture_review_values(fixture_id)})
+        return {'material_id': parameters['material_id'], 'offer_ids': ids,
+                'preview': previews}
+
+    def apply_reviewed_quotes(value, parameters):
+        from .quote_service import correct_offer, save_offer
+        preview = reviewed_quote_preview(value, {key: parameters[key] for key in ('material_id', 'offer_ids')})
+        expected = {item['offer_id']: item for item in parameters['preview']}
+        if len(expected) != len(parameters['preview']) or set(expected) != set(parameters['offer_ids']):
+            raise SessionError('stale_proposal', 'Reviewed quote selection changed.', 409)
+        staged = {}
+        for item in preview['preview']:
+            original = expected[item['offer_id']]
+            if item != original:
+                raise SessionError('stale_proposal', 'Reviewed quote source or version changed.', 409)
+            offer = deepcopy(owned(value, item['offer_id']))
+            for field, field_value in item['review_values'].items():
+                offer = correct_offer(offer, field=field, value=field_value, today=store.now().date())
+            staged[item['offer_id']] = save_offer(offer, today=store.now().date())
+        for offer_id, offer in staged.items():
+            value.offers[offer_id] = offer
+        clear_derived(value)
+        value.selected_material_id = parameters['material_id']
+        return {'material_id': parameters['material_id'],
+                'offers': deepcopy(list(staged.values())), 'status': 'reviewed_saved'}
+
+    def simulated_email_parameters(value, args):
+        shape(args, ('material_id',), ('recipient_label', 'subject', 'body'))
+        material_id = args['material_id']
+        scenario(value, material_id)
+        company = get_company(value.company_id)
+        suppliers = [supplier['name'] for supplier in company['suppliers']
+                     if material_id in supplier.get('materials', [])]
+        if not suppliers:
+            raise SessionError('invalid_recipient', 'No supplier is listed for this material.', 422)
+        draft = current_buyer(value, material_id)
+        parameters = {'material_id': material_id,
+                      'recipient_label': suppliers[0],
+                      'subject': f'Synthetic request for {material_id}',
+                      'body': (f'This is a fictional follow-up for {material_id}. '
+                               f'Our draft requirement is {draft["quantity"]} {draft["quantity_unit"]} '
+                               f'by {draft["need_by"]}. Please review the terms in this simulated workspace.')}
+        selected_offer_id = (active_plan(value) or {}).get('selected_offer_id')
+        if selected_offer_id in value.offers:
+            selected_name = (value.offers[selected_offer_id].get('fields', {}).get('supplier_name') or {}).get('value')
+            if selected_name in suppliers:
+                parameters['recipient_label'] = selected_name
+        parameters.update({key: args[key] for key in ('recipient_label', 'subject', 'body') if key in args})
+        validate_simulated_email(value, parameters)
+        return parameters
+
+    @app.post('/api/demo/buyer-draft')
+    async def buyer_draft(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('buyer_draft', 'expected_context_version', 'idempotency_key'))
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'buyer_draft')
+            if replay is not None:
+                if value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_context', 'Workspace changed since this form update.', 409)
+                replay.pop('replayed', None)
+                return replay
+            try:
+                set_buyer(value, data['buyer_draft'])
+                result = view(value)
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                return result
+            except Exception:
+                failed(value, key)
+                raise
+
     def view(value):
         with value.lock:
             return {'session_id': value.session_id, 'csrf_token': value.csrf_token,
@@ -314,6 +569,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     'provider': provider(), 'plan': deepcopy(active_plan(value)),
                     'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
                     'rfq': deepcopy(value.rfq), 'company': get_company(value.company_id),
+                    'company_id': value.company_id,
+                    'buyer_draft': deepcopy(value.buyer_draft),
+                    'selected_material_id': value.selected_material_id,
+                    'simulated_outbox': deepcopy(value.simulated_outbox),
                     'context_version': value.context_version}
 
     def session_response(value):
@@ -462,16 +721,18 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 return result
             if value.operator_turns >= MAX_OPERATOR_TURNS:
                 failed(value, key)
-                raise SessionError('operator_limit', 'Operator turn limit reached for this session.', 429)
+                raise SessionError('operator_limit', 'This session reached 36 operator turns. Start a new session to continue.', 429)
             if not operator_workers.acquire(blocking=False):
                 failed(value, key)
                 raise SessionError('operator_busy', 'Operator is busy. Try again shortly.', 429)
             with operator_lock:
-                if operator_process_calls + 3 > 60:
+                cutoff = store.now() - timedelta(hours=1)
+                operator_call_times[:] = [time for time in operator_call_times if time > cutoff]
+                if len(operator_call_times) + 3 > MAX_OPERATOR_PROCESS_CALLS_PER_HOUR:
                     operator_workers.release()
                     failed(value, key)
-                    raise SessionError('operator_limit', 'Operator process call limit reached.', 429)
-                operator_process_calls += 3  # Reserve the full three-call turn, including failures.
+                    raise SessionError('operator_limit', 'Operator call limit reached. Capacity resets within one hour.', 429)
+                operator_call_times.extend([store.now()] * 3)
             value.operator_turns += 1
             value.operator_generation += 1
             generation = value.operator_generation
@@ -493,7 +754,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if snapshot_marker(operator_snapshot(value)) != marker:
                     raise SessionError('stale_context', 'Workspace changed during the operator turn.', 409)
                 proposal = None
-                candidate = outcome['candidate']
+                utility = outcome.get('utility')
+                action_result = None
+                changed = False
+                if utility is not None:
+                    action_result, changed = execute_utility(value, utility, message)
+                candidate = outcome.get('candidate')
                 if candidate is not None:
                     kind = candidate['kind']
                     parameters = deepcopy(candidate['parameters'])
@@ -519,6 +785,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                             raise SessionError('draft_unavailable', 'Selected quote is unavailable.', 409)
                         build_draft(deepcopy(plan), deepcopy(chosen),
                                     all_offers=deepcopy(selected), created_at=store.now())
+                    elif kind == 'simulate_email':
+                        validate_simulated_email(value, parameters)
+                    elif kind == 'review_quotes':
+                        parameters = reviewed_quote_preview(value, parameters)
                     bound_plan = value.last_plan if kind == 'recovery' else plan
                     proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': kind,
                                 'summary': outcome['assistant_text'], 'parameters': parameters,
@@ -535,9 +805,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                           'agent_steps': deepcopy(outcome['agent_steps']),
                           'evidence_ids': deepcopy(outcome['evidence_ids']),
                           'proposal': public_proposal(proposal) if proposal else None,
-                          'read_only': True}
+                          'read_only': not changed}
+                if action_result is not None:
+                    result['action_result'] = action_result
+                    result['session'] = view(value)
+                if outcome.get('analytics') is not None:
+                    result['analytics'] = deepcopy(outcome['analytics'])
                 complete(value, key, result)
-                value.idempotency[key]['state_marker'] = marker
+                value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
                 return result
         except Exception:
             with value.lock:
@@ -572,8 +847,142 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             return await execute_operator_turn(value, {'message': message,
                 'expected_context_version': context_version, 'idempotency_key': key})
 
+        async def workspace_tools(name, args, context_version, key):
+            from .agent_tools import inventory_analytics
+            from .quote_service import company_for_offer
+            mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
+                       'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
+                       'prepare_simulated_email', 'navigate_workspace'}
+            if name not in mapping or not isinstance(args, dict):
+                raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
+            data = {'name': name, 'args': args, 'expected_context_version': context_version,
+                    'idempotency_key': key}
+            with value.lock:
+                context(value, data, explicit=True)
+                token, replay = start(value, data, 'voice_workspace_tool')
+                if replay is not None:
+                    if value.idempotency[token].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                        raise SessionError('stale_context', 'Workspace changed since this voice action.', 409)
+                    replay.pop('replayed', None)
+                    return replay
+                marker = snapshot_marker(operator_snapshot(value))
+                try:
+                    result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                              'context_version': value.context_version, 'status': 'completed',
+                              'assistant_text': '', 'agent_steps': [{'agent': 'workspace', 'role': 'deterministic',
+                                  'status': 'completed', 'model': 'none', 'provider_call': 'none',
+                                  'tool': name, 'summary': 'Validated owned workspace tool.'}],
+                              'evidence_ids': [], 'proposal': None, 'read_only': True}
+                    if name in ('read_workspace', 'analyze_inventory'):
+                        shape(args, (), ('material_id',))
+                        material_id = args.get('material_id')
+                        if material_id is not None:
+                            scenario(value, material_id)
+                        snapshot = operator_snapshot(value)
+                        analytics = inventory_analytics(snapshot)
+                        if material_id:
+                            analytics['materials'] = [item for item in analytics['materials'] if item['material_id'] == material_id]
+                            analytics['materials_by_cover'] = [item for item in analytics['materials_by_cover'] if item['material_id'] == material_id]
+                        result['analytics'] = analytics
+                        if name == 'read_workspace':
+                            offer_material = (material_id or value.selected_material_id or
+                                              (active_plan(value) or {}).get('material') or
+                                              snapshot['company']['materials'][0]['material_id'])
+                            quote_ids = scenario(value, offer_material)['fixture_ids']
+                            offers = [offer for offer in value.offers.values()
+                                      if company_for_offer(offer) == value.company_id and
+                                      offer.get('fixture_id') in quote_ids]
+                            result['workspace'] = {'company': deepcopy(snapshot['company']),
+                                'buyer_draft': deepcopy(value.buyer_draft),
+                                'selected_material_id': value.selected_material_id,
+                                'news': deepcopy(value.news), 'plan': deepcopy(active_plan(value)),
+                                'offers': [{'offer_id': offer['offer_id'], 'version': offer['version'],
+                                            'status': offer['status'], 'fixture_id': offer.get('fixture_id'),
+                                            'source_filename': offer.get('document', {}).get('filename'),
+                                            'supplier_name': (offer.get('fields', {}).get('supplier_name') or {}).get('value'),
+                                            'lead_time_days': (offer.get('fields', {}).get('lead_time_days') or {}).get('value'),
+                                            'pricing': ((offer.get('items') or [{}])[0].get('pricing', {}).get('value')
+                                                        if offer['status'] == 'saved' else None)}
+                                           for offer in offers[:MAX_OFFERS]],
+                                'simulated_outbox': [{'message_id': item['message_id'], 'material_id': item['material_id'],
+                                                      'recipient_label': item['recipient_label'], 'status': item['status']}
+                                                     for item in value.simulated_outbox]}
+                        result['assistant_text'] = 'Current fictional workspace facts are ready.'
+                    elif name == 'prepare_simulated_email':
+                        parameters = simulated_email_parameters(value, args)
+                        proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'simulate_email',
+                                    'summary': f"Review simulated message to {parameters['recipient_label']}.",
+                                    'parameters': deepcopy(parameters), 'plan_id': None,
+                                    'offer_versions': {}, 'context_version': value.context_version,
+                                    'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                                    '_marker': marker, '_company_id': value.company_id,
+                                    '_session_id': value.session_id}
+                        value.pending_proposal = proposal
+                        result['status'] = 'proposal'
+                        result['proposal'] = public_proposal(proposal)
+                        result['assistant_text'] = proposal['summary']
+                    elif name == 'review_sample_quotes':
+                        parameters = reviewed_quote_preview(value, args)
+                        proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'review_quotes',
+                                    'summary': 'Review exact synthetic quote values before saving.',
+                                    'parameters': parameters, 'plan_id': None,
+                                    'offer_versions': {item['offer_id']: item['expected_version'] for item in parameters['preview']},
+                                    'context_version': value.context_version,
+                                    'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                                    '_marker': marker, '_company_id': value.company_id,
+                                    '_session_id': value.session_id}
+                        value.pending_proposal = proposal
+                        result['status'] = 'proposal'
+                        result['proposal'] = public_proposal(proposal)
+                        result['assistant_text'] = proposal['summary']
+                    else:
+                        if name == 'fill_buyer_form':
+                            shape(args, ('material_id', 'values'))
+                            if not isinstance(args['values'], dict):
+                                raise SessionError('invalid_utility', 'Buyer values must be an object.', 422)
+                            scenario(value, args['material_id'])
+                            material = next(m for m in get_company(value.company_id)['materials']
+                                            if m['material_id'] == args['material_id'])
+                            phrases = []
+                            for field, field_value in args['values'].items():
+                                suffix = (' ' + material['quantity_unit'] if field in ('quantity', 'current_stock')
+                                          else ' ' + get_company(value.company_id)['reporting_currency']
+                                          if field == 'budget' else ' ' + get_company(value.company_id)['reporting_currency']
+                                          + ' per ' + material['quantity_unit'] if field == 'additional_cost_per_unit' else '')
+                                phrases.append(f'{field.replace("_", " ")} to {field_value}{suffix}')
+                            utility = {'kind': 'fill_form', 'parameters': args}
+                            message = '; '.join(phrases)
+                        elif name == 'load_sample_quotes':
+                            utility, message = {'kind': 'load_quotes', 'parameters': args}, ''
+                        elif name == 'compare_suppliers':
+                            utility, message = {'kind': 'compare', 'parameters': args}, ''
+                        else:
+                            utility, message = {'kind': 'navigate', 'parameters': args}, ''
+                        action_result, changed = execute_utility(value, utility, message)
+                        result['action_result'] = action_result
+                        result['read_only'] = not changed
+                        result['session'] = view(value)
+                        result['assistant_text'] = action_result['summary']
+                    complete(value, token, result)
+                    value.idempotency[token]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                    return result
+                except (SessionError, DemoError) as exc:
+                    result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                              'context_version': value.context_version,
+                              'status': 'needs_clarification' if exc.status_code < 500 else 'unavailable',
+                              'assistant_text': exc.message if exc.status_code < 500 else 'Workspace tool is unavailable right now.',
+                              'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                              'read_only': True}
+                    complete(value, token, result)
+                    value.idempotency[token]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                    return result
+                except Exception:
+                    failed(value, token)
+                    raise
+
         await run_live_voice(websocket, session=value, store=store,
-                             operate_workspace=operate, client_factory=live_client_factory)
+                             operate_workspace=operate, workspace_tools=workspace_tools,
+                             client_factory=live_client_factory)
 
     @app.post('/api/demo/operator/confirm')
     async def operator_confirm(request: Request):
@@ -594,7 +1003,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 kind, result = replay.get('kind'), replay.get('result', {})
                 current = (kind == 'watch' and any(w['watch_id'] == result.get('watch_id') for w in value.watch_items)
                            or kind == 'recovery' and value.recovery is not None and value.recovery.get('comparison_id') == result.get('comparison_id')
-                           or kind == 'rfq' and value.rfq is not None and value.rfq.get('draft_id') == result.get('draft_id'))
+                           or kind == 'rfq' and value.rfq is not None and value.rfq.get('draft_id') == result.get('draft_id')
+                           or kind == 'simulate_email' and any(item['message_id'] == result.get('message_id') for item in value.simulated_outbox)
+                           or kind == 'review_quotes' and all(value.offers.get(item['offer_id'], {}).get('version') == item['version']
+                                                                for item in result.get('offers', [])))
                 if not current:
                     raise SessionError('stale_proposal', 'Applied result is no longer current.', 409)
                 return replay
@@ -637,6 +1049,18 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     result['scenario']['plan_id'] = secrets.token_urlsafe(18)
                     value.recovery = deepcopy(result)
                     value.rfq = None
+                elif kind == 'simulate_email':
+                    parameters = proposal['parameters']
+                    validate_simulated_email(value, parameters)
+                    if len(value.simulated_outbox) >= 48:
+                        raise SessionError('outbox_limit', 'Simulated outbox is full.', 429)
+                    result = {'message_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                              **deepcopy(parameters), 'status': 'simulated_sent',
+                              'simulated': True, 'external_delivery': False,
+                              'created_at': store.now().isoformat()}
+                    value.simulated_outbox.append(deepcopy(result))
+                elif kind == 'review_quotes':
+                    result = apply_reviewed_quotes(value, proposal['parameters'])
                 else:
                     from .rfq import build_draft
                     plan = active_plan(value)
@@ -1065,6 +1489,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'plan': deepcopy(active_plan(value)),
                                  'baseline_plan': deepcopy(value.last_plan),
                                  'plan_request': deepcopy(value.plan_request),
+                                 'buyer_draft': deepcopy(value.buyer_draft),
+                                 'selected_material_id': value.selected_material_id,
+                                 'simulated_outbox': deepcopy(value.simulated_outbox),
                                  'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 

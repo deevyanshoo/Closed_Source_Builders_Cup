@@ -278,3 +278,118 @@ def test_latin1_declared_rss_feed_preserves_headline():
         return rss if 'todayinenergy' in url else transport(url, **limits)
     result = NewsService(clock=lambda: NOW, transport=fetch, offline=False).get(COMPANY)
     assert any(item['title'] == 'Crude oil café' for item in result['items'])
+
+
+def test_company_discovery_isolated_and_sector_does_not_invent_material_match():
+    from urllib.parse import parse_qs, urlsplit
+    from procure.demo.company import get_company
+    copper = get_company('solara-cables')
+    textile = get_company('loomworks')
+    calls = []
+    def fetch(url, **limits):
+        if urlsplit(url).hostname == 'news.google.com':
+            calls.append(url)
+            query = parse_qs(urlsplit(url).query)['q'][0]
+            if 'textile' in query.lower() or 'cotton' in query.lower():
+                title = 'Bangladesh garment exports face shipping delays'
+            else:
+                title = 'Copper cathode supply delays cable production'
+            return (f'<rss><channel><item><title>{title}</title><link>https://news.google.com/rss/articles/story</link><pubDate>Wed, 14 Oct 2026 09:00:00 GMT</pubDate><source url="https://example.org">Example publisher</source></item></channel></rss>').encode()
+        return transport(url, **limits)
+    service = NewsService(clock=lambda: NOW, transport=fetch, offline=False)
+    first = service.get(copper)
+    second = service.get(textile)
+    assert 1 <= len(calls) <= 6
+    assert len(set(calls)) == len(calls)
+    assert any(item['relevance_kind'] == 'direct_material' and item['matched_materials'] == ['copper'] for item in first['items'])
+    assert any(item['relevance_kind'] in ('sector', 'route') and not item['matched_materials'] for item in second['items'])
+    assert not any('copper' in item['title'].lower() and item['relevance_kind'] != 'unmatched' for item in second['items'])
+    before = len(calls)
+    assert service.get(copper)['cache_state'] == 'cached'
+    assert len(calls) == before
+
+
+def test_sector_aliases_and_financial_headlines_do_not_claim_material_supply():
+    from procure.demo.company import get_company
+    from procure.demo.news import _company_item
+    def item(title):
+        return {'title': title}
+    pharma = _company_item(item('Pharmaceutical plant expands production'), get_company('meridian-pharma'))
+    assert pharma['relevance_kind'] == 'sector' and pharma['matched_materials'] == []
+    textile = _company_item(item('Textile stock gets target price upgrade'), get_company('loomworks'))
+    assert textile['relevance_kind'] == 'unmatched' and textile['matched_materials'] == []
+    energy = _company_item(item('Crude oil demand rises'), get_company('harvest-foods'))
+    assert energy['relevance_kind'] == 'unmatched' and energy['matched_materials'] == []
+    cement = _company_item(item('Cement production rises'), get_company('stonebridge-materials'))
+    assert cement['relevance_kind'] == 'sector' and cement['matched_materials'] == []
+    deal = _company_item(item('EnergyX inks lithium deal'), get_company('terrapack'))
+    assert deal['relevance_kind'] == 'unmatched' and deal['matched_materials'] == []
+    currency = _company_item(item('USD financing backs unrelated project'), get_company('solara-cables'))
+    assert currency['relevance_kind'] == 'unmatched' and currency['matched_currencies'] == []
+
+
+def test_discovery_queries_use_canonical_server_catalogue_only():
+    from procure.demo.company import get_company
+    from procure.demo.news import _google_queries
+    hostile = get_company('solara-cables')
+    hostile['sector'] = 'secret account'
+    hostile['materials'][0]['keywords'] = ['confidential value']
+    urls = _google_queries(hostile)
+    assert urls and all('confidential' not in url and 'secret' not in url for url in urls)
+    assert _google_queries({'company_id': 'unknown', 'sector': 'copper', 'materials': []}) == []
+
+
+def test_simultaneous_company_news_reads_share_one_provider_refresh():
+    from procure.demo.company import get_company
+    company = get_company('solara-cables')
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    lock = threading.Lock()
+    google = b'<rss><channel><item><title>Copper cathode supply update</title><link>https://news.google.com/rss/articles/one</link><pubDate>Wed, 14 Oct 2026 09:00:00 GMT</pubDate></item></channel></rss>'
+    def fetch(url, **limits):
+        if 'news.google.com' in url:
+            with lock:
+                calls.append(url)
+            entered.set()
+            release.wait(timeout=2)
+            return google
+        return transport(url, **limits)
+    service = NewsService(clock=lambda: NOW, transport=fetch, offline=False)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.get, company)
+        assert entered.wait(timeout=2)
+        second = pool.submit(service.get, company)
+        time.sleep(0.05)
+        release.set()
+        assert first.result(timeout=2)['items']
+        assert second.result(timeout=2)['items']
+    assert len(calls) == 3
+
+
+def test_waiting_company_news_read_returns_unavailable_at_refresh_deadline(monkeypatch):
+    from procure.demo.company import get_company
+    monkeypatch.setattr('procure.demo.news.REFRESH_DEADLINE_SECONDS', 0.08)
+    company = get_company('solara-cables')
+    entered = threading.Event()
+    release = threading.Event()
+    def fetch(url, **limits):
+        if 'news.google.com' in url:
+            entered.set()
+            release.wait(timeout=0.5)
+            return RSS
+        return transport(url, **limits)
+    service = NewsService(clock=lambda: NOW, transport=fetch, offline=False)
+    service._get_global(company)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.get, company)
+        assert entered.wait(timeout=1)
+        started = time.monotonic()
+        try:
+            waiting = service.get(company)
+            assert time.monotonic() - started < 0.3
+            assert all(source['state'] == 'unavailable' for source in waiting['sources']
+                       if source['source_id'].startswith('google_news_'))
+        finally:
+            release.set()
+        first.result(timeout=2)

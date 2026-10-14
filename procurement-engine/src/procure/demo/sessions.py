@@ -25,6 +25,9 @@ class Session:
     idempotency: dict = field(default_factory=dict)
     last_plan: dict | None = None
     plan_request: dict | None = None
+    buyer_draft: dict | None = None
+    selected_material_id: str | None = None
+    simulated_outbox: list = field(default_factory=list)
     recovery: dict | None = None
     rfq: dict | None = None
     news: dict | None = None
@@ -52,6 +55,8 @@ class Session:
             'offers': self.offers, 'last_plan': self.last_plan,
             'plan_request': self.plan_request, 'recovery': self.recovery,
             'rfq': self.rfq, 'watch_items': self.watch_items,
+            'buyer_draft': self.buyer_draft, 'selected_material_id': self.selected_material_id,
+            'simulated_outbox': self.simulated_outbox,
         }
         restored = self.workspaces.pop(company_id, None) or {}
         self.offers = restored.get('offers', {})
@@ -60,6 +65,9 @@ class Session:
         self.recovery = restored.get('recovery')
         self.rfq = restored.get('rfq')
         self.watch_items = restored.get('watch_items', [])
+        self.buyer_draft = restored.get('buyer_draft')
+        self.selected_material_id = restored.get('selected_material_id')
+        self.simulated_outbox = restored.get('simulated_outbox', [])
         self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
@@ -109,6 +117,9 @@ class SessionStore:
             session.idempotency.clear()
             session.last_plan = None
             session.plan_request = None
+            session.buyer_draft = None
+            session.selected_material_id = None
+            session.simulated_outbox.clear()
             session.recovery = None
             session.rfq = None
             session.news = None

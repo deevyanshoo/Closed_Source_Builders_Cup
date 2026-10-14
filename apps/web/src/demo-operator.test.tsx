@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn } from './demo-api';
-import { acceptLiveOperatorRequest, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -66,6 +66,65 @@ describe('operator response boundary', () => {
     expect(cleanPreview).not.toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
     const dirtyPreview = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true} initialState={reviewed} onSession={() => {}} onUnknown={() => {}} />);
     expect(dirtyPreview).toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
+  });
+  it('accepts a same-scope server utility session and keeps dirty Q&A available while blocking stale proposal apply', () => {
+    const canonical = { session_id: 's1', csrf_token: 'csrf', expires_at: '2026-10-15T12:00:00Z', synthetic: true as const, persistence: 'ephemeral' as const, offers: [], provider: { model: 'test', available: true }, company: { company_id: 'solara-cables' }, context_version: 1 };
+    const utility: OperatorTurn = { ...turn, turn_id: 'utility', status: 'completed', proposal: null, read_only: false, assistant_text: 'I filled the draft with 410 barrels.', session: canonical as never, action_result: { tool: 'fill_form', summary: 'Buyer draft updated', fields_changed: ['quantity'] } };
+    const pending = applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1 });
+    const accepted = applyOperatorResult(pending, { type: 'turn', scope, requestId: 1, turn: utility });
+    expect(accepted.turn?.assistant_text).toContain('410 barrels');
+    expect(accepted.turns).toHaveLength(1);
+    expect(applyOperatorResult(pending, { type: 'turn', scope, requestId: 1, turn: { ...utility, session: { ...canonical, session_id: 's2' } as never } }).turn).toBeNull();
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true} initialState={{ ...initialOperatorState, scope, turn }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toMatch(/<textarea[^>]*><\/textarea>/);
+    expect(html).not.toMatch(/<textarea[^>]*disabled/);
+    expect(html).not.toMatch(/disabled=""[^>]*>Start conversation/);
+    expect(html).toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
+  });
+  it('accepts read-only navigation and no-op quote loading only with a current canonical session and action result', () => {
+    const canonical = { session_id: scope.sessionId, csrf_token: 'csrf', expires_at: '2026-10-15T00:00:00Z', synthetic: true as const, persistence: 'ephemeral' as const, offers: [], provider: { model: 'test', available: true }, company: { company_id: scope.companyId }, context_version: scope.contextVersion };
+    for (const action_result of [{ tool: 'navigate', summary: 'Open news view.', view: 'news' as const }, { tool: 'load_quotes', summary: 'Quotes already ready.', fields_changed: [] }]) {
+      const response: OperatorTurn = { ...turn, status: 'completed', proposal: null, read_only: true, session: canonical as never, action_result };
+      expect(acceptsOperatorTurn(response, scope)).toBe(true);
+      const accepted = applyOperatorResult(applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1 }), { type: 'turn', scope, requestId: 1, turn: response });
+      expect(accepted.turn).toEqual(response);
+      expect(acceptsOperatorTurn({ ...response, session: { ...canonical, session_id: 'old' } as never }, scope)).toBe(false);
+      expect(acceptsOperatorTurn({ ...response, action_result: null }, scope)).toBe(false);
+    }
+  });
+  it('shows exact review-quote IDs, versions, source fields and suggested document values before Apply', () => {
+    const original = { ...quote, fixture_id: 'fixture-copper', status: 'extracted', version: 3, fields: { ...quote.fields, lead_time_days: { name: 'lead_time_days', kind: 'quantity', status: 'extracted', value: '18', source: 'document', evidence: [], reasons: [] } } };
+    const review = { ...proposal, kind: 'review_quotes' as const, summary: 'Review quote values', parameters: { material_id: 'copper', offer_ids: ['q1'], preview: [{ offer_id: 'q1', fixture_id: 'fixture-copper', source_filename: 'reviewed.pdf', expected_version: 3, review_values: { lead_time_days: '10' } }] }, offer_versions: { q1: 3 } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: review }, reviewed: true }} offers={[original]} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Review sample quotes');
+    expect(html).toContain('Material: copper');
+    expect(html).toContain('Offer IDs: q1');
+    expect(html).toContain('Expected version 3');
+    expect(html).toContain('Original: 18');
+    expect(html).toContain('Reviewer value: 10');
+    expect(html).not.toMatch(/disabled=""[^>]*>Apply reviewed proposal/);
+    const changed = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: review }, reviewed: true }} offers={[{ ...original, version: 4 }]} onSession={() => {}} onUnknown={() => {}} />);
+    expect(changed).toContain('A quote source or version changed');
+    expect(changed).toMatch(/disabled=""[^>]*>Apply reviewed proposal/);
+  });
+  it('shows a reviewable simulated email with exact arguments and a server-confirmed outbox outcome', () => {
+    const email = { ...proposal, kind: 'simulate_email' as const, summary: 'Prepare a simulated supplier message', parameters: { material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Availability', body: 'Please confirm stock.' } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: email }, reviewed: true }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('simulate_email');
+    expect(html).toContain('Please confirm stock.');
+    expect(html).toContain('No external delivery');
+    const outcomeHtml = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, outcome: { status: 'applied', company_id: scope.companyId, context_version: 1, kind: 'simulate_email', result: { message_id: 'm1' }, session: { session_id: scope.sessionId, csrf_token: 'csrf', expires_at: '2026-10-15T00:00:00Z', synthetic: true, persistence: 'ephemeral', offers: [], provider: { model: 'test', available: true } } } }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(outcomeHtml).toContain('simulated sent record is available in the outbox');
+  });
+  it('renders server inventory analytics as a table with stated units', () => {
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, status: 'completed', proposal: null, analytics: { source: 'fictional_company_profile', as_of: '2026-10-14', materials: [{ name: 'Copper', unit: 'kg', stock: '2000', stock_cover_days: '20' }], materials_by_cover: [{ name: 'Copper', unit: 'kg', stock_cover_days: '20' }] } } }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Computed analytics');
+    expect(html.match(/<table>/g)).toHaveLength(2);
+    expect(html).toContain('Materials by cover');
+    expect(html).toContain('Fictional company profile · 2026-10-14');
+    expect(html).toContain('Copper');
+    expect(html).toContain('kg');
+    expect(html).toContain('20');
   });
 
   it('enforces actual audio limits, real sample rate, and WebM Opus support', () => {

@@ -16,6 +16,13 @@ export function acceptLiveOperatorRequest(current: { generation: number; request
   return { generation: current.generation + 1, requestId: current.requestId + 1, busy: '' };
 }
 const matches = (scope: OperatorScope, companyId: string, contextVersion: number) => scope.companyId === companyId && scope.contextVersion === contextVersion;
+export const matchesUtilitySession = (turn: OperatorTurn, scope: OperatorScope) => !turn.proposal &&
+  !!turn.session && turn.session.session_id === scope.sessionId && turn.session.company?.company_id === scope.companyId &&
+  turn.session.context_version === scope.contextVersion && !!turn.action_result && typeof turn.action_result.tool === 'string' &&
+  typeof turn.action_result.summary === 'string';
+export const acceptsOperatorTurn = (turn: OperatorTurn, scope: OperatorScope) => matches(scope, turn.company_id, turn.context_version) &&
+  (turn.read_only === true ? turn.proposal ? turn.proposal.context_version === scope.contextVersion && !turn.session && !turn.action_result :
+    turn.session || turn.action_result ? matchesUtilitySession(turn, scope) : true : matchesUtilitySession(turn, scope));
 const sourceHref = (value: string): string | null => {
   try {
     const url = new URL(value);
@@ -45,8 +52,8 @@ export function applyOperatorResult(state: OperatorState, action: OperatorAction
   if (!sameScope(state.scope, action.scope)) return state;
   if (action.type === 'start') return { ...state, requestId: action.requestId, turn: null, reviewed: false, outcome: null };
   if (action.type === 'overview') return matches(action.scope, action.overview.company_id, action.overview.context_version) ? { ...state, overview: action.overview } : state;
-  if (action.type === 'turn') return action.requestId === state.requestId && matches(action.scope, action.turn.company_id, action.turn.context_version) && action.turn.read_only === true &&
-    (!action.turn.proposal || action.turn.proposal.context_version === action.scope.contextVersion) ? { ...state, turn: action.turn, turns: [...(state.turns ?? []), action.turn], reviewed: false } : state;
+  if (action.type === 'turn') return action.requestId === state.requestId && acceptsOperatorTurn(action.turn, action.scope) ?
+    { ...state, turn: action.turn, turns: [...(state.turns ?? []), action.turn], reviewed: false } : state;
   if (action.type === 'applied') return matches(action.scope, action.outcome.company_id, action.outcome.context_version) &&
     action.outcome.session.session_id === action.scope.sessionId && action.outcome.session.company?.company_id === action.scope.companyId && action.outcome.session.context_version === action.scope.contextVersion ?
     { ...state, turn: null, reviewed: false, outcome: action.outcome } : state;
@@ -76,6 +83,27 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : '
 type MaterialLabel = { material_id: string; name: string };
 type OverviewLine = { title: string; detail: string; synthetic: boolean };
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+const detail = (value: unknown): string => value === null || value === undefined ? 'Unavailable' : typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value) ?? 'Unavailable';
+type QuotePreview = { offer_id: string; fixture_id: string; source_filename: string; expected_version: number; review_values: Record<string, unknown> };
+function quotePreviews(turn: OperatorTurn | null): { materialId: string; offerIds: string[]; rows: QuotePreview[] } | null {
+  if (turn?.proposal?.kind !== 'review_quotes') return null;
+  const args = turn.proposal.parameters;
+  if (typeof args.material_id !== 'string' || !Array.isArray(args.offer_ids) || !args.offer_ids.every(id => typeof id === 'string') || !Array.isArray(args.preview)) return null;
+  const rows = args.preview.filter(row => {
+    const item = record(row);
+    return !!item && typeof item.offer_id === 'string' && typeof item.fixture_id === 'string' && typeof item.source_filename === 'string' && typeof item.expected_version === 'number' && !!record(item.review_values);
+  }) as QuotePreview[];
+  const offerIds = args.offer_ids as string[];
+  return rows.length === args.preview.length && rows.length === offerIds.length && new Set(offerIds).size === offerIds.length &&
+    rows.every(row => offerIds.includes(row.offer_id) && turn.proposal!.offer_versions[row.offer_id] === row.expected_version) ?
+    { materialId: args.material_id, offerIds, rows } : null;
+}
+function originalQuoteField(offer: OfferView | undefined, name: string): string {
+  if (!offer) return 'Unavailable';
+  const match = /^items\[(\d+)\]\.(.+)$/.exec(name);
+  const field = match ? offer.items[Number(match[1])]?.[match[2]] : offer.fields[name];
+  return field ? detail(field.value) : 'Unavailable';
+}
 const knownMaterial = (id: unknown, materials: MaterialLabel[]) => typeof id === 'string' ? materials.find(item => item.material_id === id)?.name : undefined;
 export function formatOperatorAttention(value: unknown, materials: MaterialLabel[]): OverviewLine {
   const item = record(value);
@@ -95,8 +123,16 @@ export function formatOperatorWatch(value: unknown, materials: MaterialLabel[], 
   }
   return { title: 'Watch details unavailable', detail: '', synthetic: false };
 }
-export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialState, news = null, offers = [], plan = null, materials = [], onSession, onUnknown }: {
-  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; onSession: (session: DemoSession) => void; onUnknown: () => void;
+function OperatorAnalytics({ analytics }: { analytics: Record<string, unknown> }) {
+  return <div className="demo-operator-analytics"><h3>Computed analytics</h3>{analytics.source === 'fictional_company_profile' && typeof analytics.as_of === 'string' && <p className="demo-muted">Fictional company profile · {analytics.as_of}</p>}{Object.entries(analytics).map(([name, value]) => {
+    if (!Array.isArray(value)) return null;
+    const rows = value.filter(item => record(item)) as Record<string, unknown>[];
+    const columns = [...new Set(rows.flatMap(row => Object.keys(row)))].slice(0, 12);
+    return <div key={name} className="demo-table-wrap"><h4>{name.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())}</h4>{rows.length ? <table><thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map(column => <td key={column}>{Array.isArray(row[column]) ? (row[column] as unknown[]).map(entry => record(entry)?.name ?? detail(entry)).join(', ') || 'None listed' : detail(row[column])}</td>)}</tr>)}</tbody></table> : <p>No rows returned.</p>}</div>;
+  })}</div>;
+}
+export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialState, news = null, offers = [], plan = null, materials = [], beforeTurn, onSession, onNavigate, onUnknown }: {
+  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; beforeTurn?: () => Promise<DemoSession>; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox') => void; onUnknown: () => void;
 }) {
   const [state, dispatch] = useReducer(applyOperatorResult, initialState ?? { ...initialOperatorState, scope });
   const [message, setMessage] = useState('');
@@ -135,15 +171,18 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   async function send(event: FormEvent) {
     event.preventDefault();
     const value = message.trim();
-    if (!value || value.length > 1200 || dirty || blocked || busy || state.overview?.available === false) return;
+    if (!value || value.length > 1200 || blocked || busy || state.overview?.available === false) return;
     const captured = scope, generation = ++generationRef.current, requestId = ++requestRef.current;
     setBusy('asking'); setError('');
     dispatch({ type: 'start', scope: captured, requestId });
     try {
-      const turn = await api.operatorTurn(csrf, value, captured.contextVersion);
+      const canonical = beforeTurn ? await beforeTurn() : null;
+      if (!mountedRef.current || generation !== generationRef.current || !sameScope(scopeRef.current, captured)) return;
+      const turn = await api.operatorTurn(canonical?.csrf_token ?? csrf, value, captured.contextVersion);
       if (mountedRef.current && generation === generationRef.current && sameScope(scopeRef.current, captured)) {
-        if (!matches(captured, turn.company_id, turn.context_version) || turn.read_only !== true || (turn.proposal && turn.proposal.context_version !== captured.contextVersion)) throw new DemoApiError('The operator returned a result outside the current workspace.');
+        if (!acceptsOperatorTurn(turn, captured)) throw new DemoApiError('The operator returned a result outside the current workspace.');
         dispatch({ type: 'turn', scope: captured, requestId, turn });
+        if (matchesUtilitySession(turn, captured) && turn.session) { onSession(turn.session, turn.action_result); if (turn.action_result?.view) onNavigate?.(turn.action_result.view); }
         setMessage('');
       }
     } catch (cause) { if (mountedRef.current && generation === generationRef.current) setError(errorText(cause)); }
@@ -151,7 +190,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   }
 
   async function apply() {
-    if (!canApplyProposal(state, scope, dirty || blocked, Date.now()) || busy) return;
+    if (!canApplyProposal(state, scope, dirty || blocked, Date.now()) || !reviewCurrent || busy) return;
     const proposal = state.turn!.proposal!;
     const captured = scope, generation = ++generationRef.current;
     setBusy('applying'); setError('');
@@ -162,6 +201,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
       if (outcome.status !== 'applied' || outcome.kind !== proposal.kind || outcome.session.session_id !== captured.sessionId || outcome.session.company?.company_id !== captured.companyId || outcome.session.context_version !== captured.contextVersion || outcome.company_id !== captured.companyId || outcome.context_version !== captured.contextVersion) throw new DemoApiError('The applied result did not match this workspace.');
       dispatch({ type: 'applied', scope: captured, outcome });
       onSession(outcome.session);
+      if (outcome.kind === 'simulate_email') onNavigate?.('outbox');
       const id = ++overviewRef.current;
       api.operator().then(overview => { if (mountedRef.current && id === overviewRef.current && sameScope(scopeRef.current, captured)) dispatch({ type: 'overview', scope: captured, overview }); }).catch(() => {});
     } catch (cause) {
@@ -177,7 +217,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   }
 
   function acceptLiveTurn(turn: OperatorTurn, captured: OperatorScope) {
-    if (!mountedRef.current || !sameScope(scopeRef.current, captured) || dirty || blocked) return;
+    if (!mountedRef.current || !sameScope(scopeRef.current, captured) || blocked || !acceptsOperatorTurn(turn, captured)) return;
     const next = acceptLiveOperatorRequest({ generation: generationRef.current, requestId: requestRef.current, busy });
     generationRef.current = next.generation;
     requestRef.current = next.requestId;
@@ -185,25 +225,32 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
     const requestId = next.requestId;
     dispatch({ type: 'start', scope: captured, requestId });
     dispatch({ type: 'turn', scope: captured, requestId, turn });
+    if (matchesUtilitySession(turn, captured) && turn.session) { onSession(turn.session, turn.action_result); if (turn.action_result?.view) onNavigate?.(turn.action_result.view); }
   }
 
   const proposal = state.turn?.proposal;
-  const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now()) && !busy;
+  const reviewPreview = quotePreviews(state.turn);
+  const reviewCurrent = proposal?.kind !== 'review_quotes' || !!reviewPreview && reviewPreview.rows.every(row =>
+    offers.some(offer => offer.offer_id === row.offer_id && offer.version === row.expected_version && offer.fixture_id === row.fixture_id && offer.document.filename === row.source_filename));
+  const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now()) && reviewCurrent && !busy;
   return <section className="demo-company-panel demo-operator-panel" aria-label="Operator workspace">
     <div className="demo-heading"><div><span className="demo-kicker">Reviewed tools · no automatic actions</span><h2>Operator</h2></div><span className="demo-session">{state.overview?.available ? 'Agent service available' : 'Agent availability unverified'}</span></div>
-    <p>Ask about this fictional company, observed news and the current procurement comparison. Specialist activity and evidence IDs are shown below. Replies are read-only; a proposed workspace change needs your review and a separate apply step.</p>
-    {dirty && <p className="demo-alert">Run a new comparison before using the operator with edited buyer or scenario inputs.</p>}
+    <p>Ask a question, inspect computed analytics, or request a server-validated workspace utility. Proposed messages and business changes need your review and a separate Apply step.</p>
+    {dirty && <p className="demo-alert">Edited buyer inputs will be saved to this temporary session before the next question or voice conversation. Run a new comparison before reviewing a recovery or RFQ proposal.</p>}
     {error && <p className="demo-alert" role="alert">Operator unavailable: {error}</p>}
     {state.overview && <div className="demo-operator-overview"><div><h3>Company attention</h3>{state.overview.attention.length ? <ul>{state.overview.attention.map((item, index) => { const line = formatOperatorAttention(item, materials); return <li key={index}><strong>{line.title}</strong>{line.detail && <span>{line.detail}</span>}{line.synthetic && <small>Synthetic stock and lead-time comparison</small>}</li>; })}</ul> : <p>No attention items returned.</p>}</div><div><h3>Watch items</h3>{state.overview.watch_items.length ? <ul>{state.overview.watch_items.map((item, index) => { const line = formatOperatorWatch(item, materials, scope.companyId); return <li key={index}><strong>{line.title}</strong>{line.detail && <span>{line.detail}</span>}{line.synthetic && <small>Synthetic watch item</small>}</li>; })}</ul> : <p>No watch items saved.</p>}</div></div>}
     {state.overview && <><p className="demo-muted">Available specialists: {state.overview.agents.map(agent => `${agent.name} (${agent.role})`).join('; ') || 'none reported'}.</p>{state.overview.limitations.length > 0 && <p className="demo-alert">Limits: {state.overview.limitations.join('; ')}</p>}{!state.overview.available && <p className="demo-alert">The agent provider is unavailable. Read the company and news panels or try again later.</p>}</>}
-    <form onSubmit={send} className="demo-operator-chat"><label htmlFor="demo-operator-message">Your message</label><textarea id="demo-operator-message" value={message} maxLength={1200} onChange={event => setMessage(event.target.value)} placeholder="Ask what needs attention, or request a reviewable watch, recovery, or unsent RFQ proposal." disabled={dirty || blocked || !!busy || state.overview?.available === false} /><div><span>{message.length}/1200 characters</span><button className="demo-button" disabled={!message.trim() || dirty || blocked || !!busy || state.overview?.available === false}>Send</button><button type="button" className="demo-link" disabled={busy === 'applying'} onClick={cancel}>Cancel current turn</button></div></form>
-    <LiveVoice key={voiceRevision} scope={scope} csrf={csrf} disabled={dirty || blocked || busy === 'applying' || state.overview?.available === false} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} />
+    <form onSubmit={send} className="demo-operator-chat"><label htmlFor="demo-operator-message">Your message</label><textarea id="demo-operator-message" value={message} maxLength={1200} onChange={event => setMessage(event.target.value)} placeholder="Ask what needs attention, inspect analytics, or request a reviewable action." disabled={blocked || !!busy || state.overview?.available === false} /><div><span>{message.length}/1200 characters</span><button className="demo-button" disabled={!message.trim() || blocked || !!busy || state.overview?.available === false}>Send</button><button type="button" className="demo-link" disabled={busy === 'applying'} onClick={cancel}>Cancel current turn</button></div></form>
+    <LiveVoice key={voiceRevision} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} />
     {busy === 'asking' && <p role="status">Specialists are reviewing the current workspace…</p>}
-    {(state.turns?.length ? state.turns : state.turn ? [state.turn] : []).map((shownTurn) => <div key={shownTurn.turn_id} className="demo-operator-result"><span className="demo-kicker">Read-only outcome · {shownTurn.status}</span><p className="demo-operator-answer">{shownTurn.assistant_text}</p><h3>Evidence in this workspace</h3>{shownTurn.evidence_ids.length ? <ul className="demo-operator-evidence">{shownTurn.evidence_ids.map(id => {
+    {(state.turns?.length ? state.turns : state.turn ? [state.turn] : []).map((shownTurn) => <div key={shownTurn.turn_id} className="demo-operator-result"><span className="demo-kicker">{shownTurn.read_only ? 'Read-only outcome' : 'Server-confirmed workspace update'} · {shownTurn.status}</span><p className="demo-operator-answer">{shownTurn.assistant_text}</p>{shownTurn.action_result && <p className="demo-alert"><strong>{shownTurn.action_result.tool}:</strong> {shownTurn.action_result.summary}{shownTurn.action_result.fields_changed?.length ? ` · Filled: ${shownTurn.action_result.fields_changed.join(', ')}` : ''}</p>}{shownTurn.analytics && <OperatorAnalytics analytics={shownTurn.analytics} />}<h3>Evidence in this workspace</h3>{shownTurn.evidence_ids.length ? <ul className="demo-operator-evidence">{shownTurn.evidence_ids.map(id => {
       const evidence = resolveOperatorEvidence(id, scope, news, offers, plan);
       return <li key={id}><code>{id}</code><span>{evidence.kind === 'news' ? 'Observed news' : evidence.kind === 'quote' ? 'Quote' : evidence.kind === 'plan' ? 'Comparison' : 'Unavailable'}</span>{evidence.href ? <a href={evidence.href} target="_blank" rel="noopener noreferrer">{evidence.title} ↗</a> : <strong>{evidence.title}</strong>}{evidence.publisher && <span>Publisher: {evidence.publisher}</span>}{evidence.detail && <small>{evidence.detail}</small>}{evidence.kind === 'news' && !evidence.href && <small>Source link unavailable</small>}</li>;
     })}</ul> : <p>No evidence IDs returned.</p>}<h3>Actual agent activity</h3>{shownTurn.agent_steps.length ? <ol>{shownTurn.agent_steps.map((step, index) => <li key={index}><strong>{step.agent} · {step.role}</strong><span>{step.status} · {step.model} · provider call {step.provider_call} · tool {step.tool}</span><p>{step.summary}</p></li>)}</ol> : <p>No specialist calls were recorded for this turn.</p>}</div>)}
-    {proposal && <div className="demo-operator-proposal"><span className="demo-kicker">Reviewable {proposal.kind} proposal</span><h3>{proposal.summary}</h3><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p><strong>Exact proposed arguments</strong><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />I reviewed the exact arguments and want to apply this change to the current session.</label><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>Apply reviewed proposal</button><p>No supplier message or order is sent.</p></div>}
-    {state.outcome && <div className="demo-operator-result"><span className="demo-kicker">Applied to server session · {state.outcome.kind}</span><p>This result is the server-confirmed workspace change. The current session and comparison below were restored from its response.</p>{state.outcome.kind === 'watch' ? (() => { const line = formatOperatorWatch(state.outcome.result, materials, scope.companyId); return <p><strong>{line.title}</strong>{line.detail && ` · ${line.detail}`}{line.synthetic && ' · Synthetic watch item'}</p>; })() : <p>{state.outcome.kind === 'recovery' ? 'The hypothetical recovery comparison is available below.' : 'The unsent RFQ draft is available below.'}</p>}</div>}
+    {proposal && <div className="demo-operator-proposal"><span className="demo-kicker">Reviewable {proposal.kind} proposal</span><h3>{proposal.summary}</h3><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p>{proposal.kind === 'review_quotes' && <div className="demo-quote-preview"><h4>Review sample quotes</h4>{reviewPreview ? <><p>Material: {reviewPreview.materialId} · Offer IDs: {reviewPreview.offerIds.join(', ')}</p>{reviewPreview.rows.map(row => {
+      const original = offers.find(offer => offer.offer_id === row.offer_id);
+      return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Fixture: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested synthetic document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;
+    })}</> : <p className="demo-alert">Quote preview unavailable. Request a new proposal.</p>}{!reviewCurrent && <p className="demo-alert">A quote source or version changed. Request a new review proposal.</p>}</div>}<strong>Exact proposed arguments</strong><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy || !reviewCurrent} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />I reviewed the exact arguments and want to apply this change to the current session.</label><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>Apply reviewed proposal</button><p>{proposal.kind === 'simulate_email' ? 'No external delivery. Applying records a simulated sent message in this session only.' : proposal.kind === 'review_quotes' ? 'Only these synthetic quote values will be corrected and saved after your review. No supplier message or order is sent.' : 'No supplier message or order is sent.'}</p></div>}
+    {state.outcome && <div className="demo-operator-result"><span className="demo-kicker">Applied to server session · {state.outcome.kind}</span><p>This result is the server-confirmed workspace change. The current session and comparison below were restored from its response.</p>{state.outcome.kind === 'watch' ? (() => { const line = formatOperatorWatch(state.outcome.result, materials, scope.companyId); return <p><strong>{line.title}</strong>{line.detail && ` · ${line.detail}`}{line.synthetic && ' · Synthetic watch item'}</p>; })() : <p>{state.outcome.kind === 'recovery' ? 'The hypothetical recovery comparison is available below.' : state.outcome.kind === 'simulate_email' ? 'A simulated sent record is available in the outbox. No external delivery occurred.' : state.outcome.kind === 'review_quotes' ? 'The reviewed synthetic quotes were restored from the confirmed server session.' : 'The unsent RFQ draft is available below.'}</p>}</div>}
   </section>;
 }

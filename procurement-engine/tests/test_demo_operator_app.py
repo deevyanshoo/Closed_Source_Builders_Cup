@@ -1,6 +1,6 @@
 """Hosted operator/voice boundaries use fakes, never live providers."""
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Event
 import base64
 
@@ -338,13 +338,26 @@ def test_expired_proposal_cannot_be_confirmed():
 
 def test_operator_turn_budget_and_stale_news_evidence():
     provider = Provider(intent='inspect', action='none', evidence=())
-    with demo(provider) as client:
+    current = [NOW]
+    app = create_app(clock=lambda: current[0], operator_provider=provider)
+    app.state.sessions.ttl_seconds = 7200
+    with TestClient(app, base_url='https://demo.test') as client:
         headers = auth(client)
-        for index in range(MAX_OPERATOR_TURNS):
+        for index in range(30):
+            response = turn(client, headers, message='Inspect inventory', key=f'inspect-{index}')
+            assert response.status_code == 200 and response.json()['status'] == 'completed'
+        assert len(provider.calls) == 90
+        hourly = turn(client, headers, message='Inspect inventory', key='hourly-over')
+        assert hourly.status_code == 429
+        assert 'within one hour' in hourly.json()['error']['message']
+        current[0] += timedelta(hours=1, seconds=1)
+        for index in range(30, MAX_OPERATOR_TURNS):
             response = turn(client, headers, message='Inspect inventory', key=f'inspect-{index}')
             assert response.status_code == 200 and response.json()['status'] == 'completed'
         assert len(provider.calls) == 3 * MAX_OPERATOR_TURNS
-        assert turn(client, headers, message='Inspect inventory', key='over-budget').status_code == 429
+        session_cap = turn(client, headers, message='Inspect inventory', key='session-over')
+        assert session_cap.status_code == 429
+        assert '36 operator turns' in session_cap.json()['error']['message']
 
 
 def test_voice_transcription_rejects_late_company_response():

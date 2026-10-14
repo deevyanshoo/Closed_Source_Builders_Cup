@@ -111,4 +111,14 @@ describe('hosted demo API', () => {
     expect(JSON.parse(calls[4][1].body as string)).toEqual({ text: 'Verified answer', expected_context_version: 4, idempotency_key: 'key-4' });
     for (const [, options] of calls.slice(1)) expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'csrf' });
   });
+  it('saves buyer draft fields with the current context and a fresh idempotency key', async () => {
+    const send = vi.fn(async () => json({ session_id: 's1', buyer_draft: { material: 'copper' } }));
+    const api = createDemoApi(send, () => 'draft-key');
+    const draft = { material: 'copper', quantity: '1200', current_stock: '200', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '9000', additional_cost_per_unit: '0.5' };
+    await api.buyerDraft('csrf', draft, 8);
+    const [path, options] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe('/api/demo/buyer-draft');
+    expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'csrf' });
+    expect(JSON.parse(options.body as string)).toEqual({ buyer_draft: draft, expected_context_version: 8, idempotency_key: 'draft-key' });
+  });
 });

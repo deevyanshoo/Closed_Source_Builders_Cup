@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { filterNewsItems, NewsWorkspace } from './demo-company-news';
+import { filterNewsItems, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import type { CompanyProfile, NewsView } from './demo-api';
 
 const company: CompanyProfile = {
@@ -58,5 +58,24 @@ describe('company news workspace', () => {
     const refreshing = renderToStaticMarkup(<NewsWorkspace company={company} view={loaded} loading={true} error="" onRefresh={() => {}} />);
     expect(refreshing).toContain('The items below are from the previous check');
     expect(refreshing).toContain('Checking sources…');
+  });
+  it('counts direct and indirect matches separately and explains heuristic metadata without treating it as probability', () => {
+    const direct = { ...news.items[0], relevance_kind: 'direct_material' as const, relevance_score: 0.8, matched_operations: ['wire production'], summary: 'Copper line disruption reported.' };
+    const indirect = { ...news.items[2], item_id: 'sector', relevance_kind: 'sector' as const, relevance_score: 0.4, matched_operations: ['wire production'], summary: 'Manufacturing activity reported.' };
+    expect(filterNewsItems([direct, indirect], 'all', 'all').map(item => item.item_id)).toEqual(['a', 'sector']);
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [direct, indirect] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('1 direct material match');
+    expect(html).toContain('1 indirect match');
+    expect(html).toContain('Wire production');
+    expect(html).toContain('Uncalibrated relevance heuristic');
+    expect(html).toContain('Copper line disruption reported.');
+  });
+  it('shows only this company’s server-confirmed simulated messages with no delivery claim', () => {
+    const message = { message_id: 'm1', company_id: company.company_id, material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Availability check', body: 'Please review.', status: 'simulated_sent' as const, simulated: true as const, external_delivery: false as const, created_at: '2026-10-14T12:00:00Z' };
+    const html = renderToStaticMarkup(<OutboxWorkspace company={company} messages={[message, { ...message, message_id: 'm2', company_id: 'elsewhere' }, { ...message, message_id: 'm3', status: 'draft' as never, subject: 'Unconfirmed draft' }]} />);
+    expect(html).toContain('No external delivery');
+    expect(html).toContain('Availability check');
+    expect(html.match(/Please review\./g)).toHaveLength(1);
+    expect(html).not.toContain('Unconfirmed draft');
   });
 });

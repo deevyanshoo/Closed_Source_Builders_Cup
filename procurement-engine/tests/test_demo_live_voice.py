@@ -203,11 +203,10 @@ def test_repeated_provider_call_id_reuses_verified_operator_turn():
     async def scenario():
         store, session = setup()
         socket, provider = Socket(start(session)), DuplicateProvider()
-        count = 0
+        keys = []
 
-        async def operate(*_):
-            nonlocal count
-            count += 1
+        async def operate(message, context_version, key):
+            keys.append(key)
             return {'turn_id': 'one', 'company_id': session.company_id,
                     'context_version': 1, 'status': 'unavailable',
                     'assistant_text': 'No verified result.', 'agent_steps': [],
@@ -222,7 +221,7 @@ def test_repeated_provider_call_id_reuses_verified_operator_turn():
         await next_type(socket, 'tool_result')
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
-        assert count == 1
+        assert len(keys) == 2 and keys[0] == keys[1]
     asyncio.run(scenario())
 
 
@@ -411,4 +410,5 @@ def test_sdk_config_contains_one_bounded_workspace_tool_and_transcriptions():
     assert config.output_audio_transcription is not None
     assert config.speech_config.voice_config.prebuilt_voice_config.voice_name == 'Charon'
     assert len(config.tools) == 1
-    assert [tool.name for tool in config.tools[0].function_declarations] == ['operate_workspace']
+    assert len(config.tools[0].function_declarations) == 9
+    assert config.tools[0].function_declarations[0].name == 'operate_workspace'

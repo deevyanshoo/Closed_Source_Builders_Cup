@@ -186,6 +186,7 @@ def test_default_transport_disables_redirects_and_environment_credentials(monkey
     assert _default_transport('https://www.eia.gov/rss/todayinenergy.xml', timeout=(2, 4), max_bytes=4) == b'ok'
     assert settings['allow_redirects'] is False and settings['stream'] is True
     assert settings['trust_env'] is False
+    assert 'headers' not in settings or settings['headers'].get('Accept') == '*/*'
 
 
 def test_fixed_sources_are_fetched_concurrently():

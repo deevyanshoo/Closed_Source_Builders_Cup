@@ -190,8 +190,7 @@ def _default_transport(url, *, timeout, max_bytes):
     session = requests.Session()
     session.trust_env = False  # Ignore netrc credentials and ambient proxy settings.
     try:
-        with session.get(url, timeout=timeout, allow_redirects=False, stream=True,
-                         headers={'Accept': 'application/xml, application/rss+xml, application/json'}) as response:
+        with session.get(url, timeout=timeout, allow_redirects=False, stream=True) as response:
             if response.status_code != 200:
                 raise ValueError('Source unavailable')
             body = bytearray()

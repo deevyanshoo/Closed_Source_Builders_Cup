@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
-import { acceptsLiveTurn, matchesLiveSession, pcm16Base64, releaseLiveVoice, restoreLiveSession } from './demo-live-voice';
+import { acceptsLiveTurn, appendLiveCaption, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+
+vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
 const scope = { sessionId: 's1', companyId: 'solara', contextVersion: 1, epoch: 2 };
 const turn = { turn_id: 't1', company_id: 'solara', context_version: 1, status: 'proposal', assistant_text: 'Review this first.', agent_steps: [], evidence_ids: [], proposal: { proposal_id: 'p1', kind: 'watch', summary: 'Watch', parameters: {}, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-01-01T00:00:00Z' }, read_only: true } satisfies OperatorTurn;
@@ -66,5 +68,109 @@ describe('live conversation boundary', () => {
     expect(calls).toEqual(['processor', 'source', 'track', 'playback', 'input', 'output', 'stop', 'socket']);
     expect(current.processor.onaudioprocess).toBeNull();
     expect(current.playback.size).toBe(0);
+  });
+  it('merges more than twenty transcript fragments without dropping the start of the sentence', () => {
+    let captions: { direction: 'input' | 'output'; text: string }[] = [];
+    for (const fragment of ['The', ...Array.from({ length: 25 }, (_, index) => ` supplier ${index + 1}`)]) {
+      captions = appendLiveCaption(captions, 'input', fragment);
+    }
+    captions = appendLiveCaption(captions, 'output', 'I found');
+    captions = appendLiveCaption(captions, 'output', ' three options.');
+    expect(captions).toEqual([
+      { direction: 'input', text: `The${Array.from({ length: 25 }, (_, index) => ` supplier ${index + 1}`).join('')}` },
+      { direction: 'output', text: 'I found three options.' },
+    ]);
+    for (let index = 0; index < 25; index++) captions = appendLiveCaption(captions, index % 2 ? 'output' : 'input', `Turn ${index}`);
+    expect(captions).toHaveLength(24);
+    expect(captions[0].text).toBe('Turn 1');
+  });
+  it('starts a new assistant caption after turn completion without splitting deltas within either utterance', () => {
+    let captions = updateLiveCaptions([], { type: 'transcript', direction: 'output', text: 'First' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: ' answer.' });
+    captions = updateLiveCaptions(captions, { type: 'turn_complete' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: 'Second' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: ' answer.' });
+    expect(captions.map(caption => caption.text)).toEqual(['First answer.', 'Second answer.']);
+  });
+  it('starts a new assistant caption after interruption, while retaining bounded history', () => {
+    let captions = updateLiveCaptions([], { type: 'transcript', direction: 'output', text: 'Interrupted' });
+    captions = updateLiveCaptions(captions, { type: 'interrupted' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: 'Restarted' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: ' response.' });
+    expect(captions.map(caption => caption.text)).toEqual(['Interrupted', 'Restarted response.']);
+    for (let index = 0; index < 25; index++) {
+      captions = updateLiveCaptions(captions, { type: 'turn_complete' });
+      captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'output', text: `Reply ${index}` });
+    }
+    expect(captions).toHaveLength(24);
+    expect(captions[0].text).toBe('Reply 1');
+  });
+  it('hides retained captions immediately when company or context changes', () => {
+    const captions = [{ direction: 'input' as const, text: 'Our private buyer question' }];
+    expect(visibleLiveCaptions(captions, scope, scope)).toEqual(captions);
+    expect(visibleLiveCaptions(captions, scope, { ...scope, companyId: 'loom' })).toEqual([]);
+    expect(visibleLiveCaptions(captions, scope, { ...scope, contextVersion: 2 })).toEqual([]);
+  });
+  it('does not show an old voice status or error in a newly selected scope', () => {
+    expect(visibleLiveVoiceState('thinking', 'Connection lost', scope, scope)).toEqual({ status: 'thinking', error: 'Connection lost' });
+    expect(visibleLiveVoiceState('thinking', 'Connection lost', scope, { ...scope, companyId: 'loom' })).toEqual({ status: 'idle', error: '' });
+    expect(visibleLiveVoiceState('speaking', 'Connection lost', scope, { ...scope, contextVersion: 2 })).toEqual({ status: 'idle', error: '' });
+  });
+  it('tags an unsupported-browser preflight alert to the current scope and hides it after a switch', () => {
+    for (const missing of ['microphone', 'audioContext', 'webSocket'] as const) {
+      const available = { microphone: true, audioContext: true, webSocket: true, [missing]: false };
+      const preflight = preflightLiveVoice(scope, available);
+      expect(visibleLiveVoiceState('idle', preflight.error, preflight.scope, scope).error)
+        .toBe('Live voice is unavailable in this browser. Use the text composer.');
+      expect(visibleLiveVoiceState('idle', preflight.error, preflight.scope, { ...scope, companyId: 'loom' }).error)
+        .toBe('');
+    }
+    expect(preflightLiveVoice(scope, { microphone: true, audioContext: true, webSocket: true }).error).toBe('');
+  });
+  it('shows thinking for input, speaking through queued playback, and muted only after audio ends', () => {
+    const playback = new Set<object>();
+    const current = { ready: false, muted: false, playback };
+    expect(voiceVisualState(current, false)).toBe('connecting');
+    current.ready = true;
+    expect(voiceVisualState(current, false)).toBe('listening');
+    expect(voiceVisualState(current, true)).toBe('thinking');
+    const node = {};
+    playback.add(node);
+    current.muted = true;
+    expect(voiceVisualState(current, false)).toBe('speaking');
+    playback.delete(node);
+    expect(voiceVisualState(current, false)).toBe('muted');
+  });
+  it('tracks real transcript and tool activity until audio, interruption or turn completion', () => {
+    expect(voiceThinkingAfterEvent(false, 'transcript')).toBe(true);
+    expect(voiceThinkingAfterEvent(false, 'tool_result')).toBe(true);
+    expect(voiceThinkingAfterEvent(true, 'audio')).toBe(false);
+    expect(voiceThinkingAfterEvent(true, 'turn_complete')).toBe(false);
+    expect(voiceThinkingAfterEvent(true, 'interrupted')).toBe(false);
+  });
+  it('keeps playback scheduled after turn completion until every audio node ends', () => {
+    const starts: number[] = [];
+    const nodes: { onended?: () => void; buffer?: { duration: number }; start: (when: number) => void; connect: () => void }[] = [];
+    const output = {
+      currentTime: 1,
+      createBuffer: (_channels: number, length: number) => ({ duration: length / 24000, getChannelData: () => new Float32Array(length) }),
+      createBufferSource: () => {
+        const node = { start: (when: number) => starts.push(when), connect: () => {}, onended: undefined as (() => void) | undefined, buffer: undefined as { duration: number } | undefined };
+        nodes.push(node);
+        return node;
+      },
+      destination: {},
+    };
+    const current = { output, playback: new Set<object>(), nextTime: 0, ready: true, muted: false };
+    const encoded = btoa(String.fromCharCode(...new Uint8Array(4800)));
+    const states: string[] = [];
+    queueLivePlayback(current as never, encoded, () => states.push(voiceVisualState(current, false)));
+    queueLivePlayback(current as never, encoded, () => states.push(voiceVisualState(current, false)));
+    expect(starts).toEqual([1, 1.1]);
+    expect(voiceVisualState(current, false)).toBe('speaking');
+    nodes[0].onended?.();
+    expect(voiceVisualState(current, false)).toBe('speaking');
+    nodes[1].onended?.();
+    expect(states).toEqual(['speaking', 'speaking', 'speaking', 'listening']);
   });
 });

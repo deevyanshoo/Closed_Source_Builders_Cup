@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
+import { AssistantOrb } from './demo-activity';
 
 const api = createDemoApi();
 const CONNECT_TIMEOUT_MS = 15000;
@@ -54,6 +55,72 @@ function pcm24Buffer(context: AudioContext, encoded: string): AudioBuffer {
   return buffer;
 }
 type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean };
+type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
+type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
+const CAPTION_LIMIT = 24;
+const CAPTION_TEXT_LIMIT = 16000;
+
+export function appendLiveCaption(captions: Caption[], direction: Caption['direction'], fragment: string): Caption[] {
+  if (!fragment.trim()) return captions;
+  const text = fragment.replace(/\s+/g, ' ');
+  const last = captions[captions.length - 1];
+  if (last?.direction === direction && !last.sealed) {
+    const separator = /\s$/.test(last.text) || /^\s|^[,.!?;:]/.test(text) ? '' : ' ';
+    const joined = last.text + separator + text;
+    if (joined.length <= CAPTION_TEXT_LIMIT) return [...captions.slice(0, -1), { direction, text: joined }];
+  }
+  return [...captions, { direction, text: text.slice(0, CAPTION_TEXT_LIMIT) }].slice(-CAPTION_LIMIT);
+}
+
+export function updateLiveCaptions(captions: Caption[], event:
+  { type: 'transcript'; direction: Caption['direction']; text: string } |
+  { type: 'turn_complete' | 'interrupted' }): Caption[] {
+  if (event.type === 'transcript') return appendLiveCaption(captions, event.direction, event.text);
+  const last = captions[captions.length - 1];
+  return last && !last.sealed ? [...captions.slice(0, -1), { ...last, sealed: true }] : captions;
+}
+
+export function visibleLiveCaptions(captions: Caption[], captured: LiveScope | null, current: LiveScope): Caption[] {
+  return captured && sameLiveScope(captured, current) ? captions : [];
+}
+
+export function visibleLiveVoiceState(status: 'idle' | VoiceVisualState, error: string,
+  captured: LiveScope | null, current: LiveScope): { status: 'idle' | VoiceVisualState; error: string } {
+  return captured && sameLiveScope(captured, current) ? { status, error } : { status: 'idle', error: '' };
+}
+
+export function preflightLiveVoice(scope: LiveScope, available:
+  { microphone: boolean; audioContext: boolean; webSocket: boolean }): { scope: LiveScope; error: string } {
+  return { scope, error: available.microphone && available.audioContext && available.webSocket ? '' :
+    'Live voice is unavailable in this browser. Use the text composer.' };
+}
+
+export function voiceVisualState(current: { ready: boolean; muted: boolean; playback: Set<unknown> }, thinking: boolean): VoiceVisualState {
+  if (!current.ready) return 'connecting';
+  if (current.playback.size) return 'speaking';
+  if (thinking) return 'thinking';
+  return current.muted ? 'muted' : 'listening';
+}
+
+export function voiceThinkingAfterEvent(previous: boolean,
+  event: 'transcript' | 'tool_result' | 'audio' | 'turn_complete' | 'interrupted'): boolean {
+  if (event === 'transcript' || event === 'tool_result') return true;
+  if (event === 'audio' || event === 'turn_complete' || event === 'interrupted') return false;
+  return previous;
+}
+
+export function queueLivePlayback(current: Pick<ActiveVoice, 'output' | 'playback' | 'nextTime'>,
+  encoded: string, onState: () => void): void {
+  const node = current.output.createBufferSource();
+  node.buffer = pcm24Buffer(current.output, encoded);
+  node.connect(current.output.destination);
+  node.onended = () => { current.playback.delete(node); onState(); };
+  const startTime = Math.max(current.output.currentTime, current.nextTime);
+  node.start(startTime);
+  current.nextTime = startTime + node.buffer.duration;
+  current.playback.add(node);
+  onState();
+}
 export function releaseLiveVoice(current: ActiveVoice): void {
   clearTimeout(current.timer); clearTimeout(current.startupTimer);
   current.processor.onaudioprocess = null;
@@ -67,10 +134,13 @@ export function releaseLiveVoice(current: ActiveVoice): void {
 }
 
 export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown }: { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void }) {
-  const [status, setStatus] = useState<'idle' | 'connecting' | 'listening' | 'muted'>('idle');
+  const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
+  const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [error, setError] = useState('');
-  const [captions, setCaptions] = useState<{ direction: string; text: string }[]>([]);
+  const [captions, setCaptions] = useState<Caption[]>([]);
+  const [captionScope, setCaptionScope] = useState<LiveScope | null>(null);
   const active = useRef<ActiveVoice | null>(null);
+  const thinking = useRef(false);
   const generation = useRef(0);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -85,19 +155,28 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
   function end() {
     generation.current += 1;
     const current = active.current;
+    thinking.current = false;
+    setMicrophoneMuted(false);
     if (!current) { setStatus('idle'); return; }
     active.current = null;
     releaseLiveVoice(current);
     setStatus('idle');
   }
-  useEffect(() => () => { generation.current += 1; end(); }, [scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch]);
+  useEffect(() => () => { end(); setCaptions([]); setCaptionScope(null); setError(''); }, [scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch]);
   useEffect(() => { if (disabled) end(); }, [disabled]);
 
   async function start() {
     if (disabled || active.current) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === 'undefined' || typeof WebSocket === 'undefined') { setError('Live voice is unavailable in this browser. Use the text composer.'); return; }
+    const preflight = preflightLiveVoice(scope, {
+      microphone: typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia,
+      audioContext: typeof AudioContext !== 'undefined', webSocket: typeof WebSocket !== 'undefined',
+    });
+    setCaptionScope(preflight.scope);
+    if (preflight.error) { setError(preflight.error); setStatus('idle'); return; }
     const captured = scope;
     const attempt = ++generation.current;
+    thinking.current = false;
+    setMicrophoneMuted(false);
     setError(''); setCaptions([]); setStatus('connecting');
     let stream: MediaStream | null = null;
     let input: AudioContext | null = null;
@@ -145,18 +224,34 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
         if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
         let data: Record<string, unknown>;
         try { data = JSON.parse(String(event.data)); } catch { setError('Live voice returned an unreadable event.'); end(); return; }
-        if (data.type === 'ready') { clearTimeout(current.startupTimer); current.ready = true; setStatus(current.muted ? 'muted' : 'listening'); }
+        if (data.type === 'ready') { clearTimeout(current.startupTimer); current.ready = true; setStatus(voiceVisualState(current, thinking.current)); }
         else if (data.type === 'audio' && typeof data.data === 'string' && data.sample_rate_hertz === 24000) {
           try {
-            const node = current.output.createBufferSource(); node.buffer = pcm24Buffer(current.output, data.data); node.connect(current.output.destination);
-            node.onended = () => current.playback.delete(node);
-            node.start(Math.max(current.output.currentTime, current.nextTime));
-            current.nextTime = Math.max(current.output.currentTime, current.nextTime) + node.buffer.duration;
-            current.playback.add(node);
+            thinking.current = voiceThinkingAfterEvent(thinking.current, 'audio');
+            queueLivePlayback(current, data.data, () => {
+              if (active.current === current && sameLiveScope(scopeRef.current, captured)) setStatus(voiceVisualState(current, thinking.current));
+            });
           } catch { setError('Received audio could not be played.'); }
-        } else if (data.type === 'interrupted') stopPlayback(current);
-        else if (data.type === 'transcript' && (data.direction === 'input' || data.direction === 'output') && typeof data.text === 'string') setCaptions(old => [...old.slice(-19), { direction: data.direction as string, text: data.text as string }]);
-        else if (data.type === 'tool_result' && acceptsLiveTurn(data.result, captured, scopeRef.current)) onTurnRef.current(data.result, captured);
+        } else if (data.type === 'interrupted') {
+          stopPlayback(current);
+          setCaptions(old => updateLiveCaptions(old, { type: 'interrupted' }));
+          thinking.current = voiceThinkingAfterEvent(thinking.current, 'interrupted');
+          setStatus(voiceVisualState(current, thinking.current));
+        }
+        else if (data.type === 'transcript' && (data.direction === 'input' || data.direction === 'output') && typeof data.text === 'string') {
+          setCaptions(old => updateLiveCaptions(old, { type: 'transcript', direction: data.direction as Caption['direction'], text: data.text as string }));
+          thinking.current = voiceThinkingAfterEvent(thinking.current, 'transcript');
+          setStatus(voiceVisualState(current, thinking.current));
+        } else if (data.type === 'turn_complete') {
+          setCaptions(old => updateLiveCaptions(old, { type: 'turn_complete' }));
+          thinking.current = voiceThinkingAfterEvent(thinking.current, 'turn_complete');
+          setStatus(voiceVisualState(current, thinking.current));
+        }
+        else if (data.type === 'tool_result' && acceptsLiveTurn(data.result, captured, scopeRef.current)) {
+          thinking.current = voiceThinkingAfterEvent(thinking.current, 'tool_result');
+          setStatus(voiceVisualState(current, thinking.current));
+          onTurnRef.current(data.result, captured);
+        }
         else if (data.type === 'error') {
           if (data.code === 'session_expired' || data.code === 'stale_context') {
             void restoreLiveSession(() => api.session(), captured, () => scopeRef.current, onSession, onUnknown);
@@ -187,7 +282,23 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
     if (!current) return;
     current.muted = !current.muted;
     if (current.muted && current.socket.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ type: 'audio_end' }));
-    setStatus(current.muted ? 'muted' : 'listening');
+    setMicrophoneMuted(current.muted);
+    setStatus(voiceVisualState(current, thinking.current));
   }
-  return <div className="demo-operator-voice"><strong>Live conversation · Google speech</strong><p>Start a hands-free conversation. Speech pauses automatically; interrupt by speaking. Proposals still require review and Apply.</p><div><button type="button" className="demo-button" disabled={disabled || status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={status === 'idle'} onClick={mute}>{status === 'muted' ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" disabled={status === 'idle'} onClick={end}>End conversation</button></div><p role="status">{status === 'connecting' ? 'Connecting live voice…' : status === 'listening' ? 'Listening and responding' : status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.'}</p>{error && <p className="demo-alert" role="alert">{error}</p>}{captions.length > 0 && <ol className="demo-live-captions" aria-label="Live transcript">{captions.map((caption, index) => <li key={index}><strong>{caption.direction === 'input' ? 'You' : 'Operator'}:</strong> {caption.text}</li>)}</ol>}</div>;
+  const visible = visibleLiveVoiceState(status, error, captionScope, scope);
+  const orbState = visible.error ? 'error' : visible.status;
+  const statusLabel = visible.status === 'connecting' ? 'Connecting live voice…' :
+    visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? 'Thinking' :
+    visible.status === 'speaking' ? microphoneMuted ? 'Speaking · microphone muted' : 'Speaking' :
+    visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';
+  const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
+  return <div className="demo-operator-voice">
+    <strong>Live conversation · Google speech</strong>
+    <p>Start a hands-free conversation. Speech pauses automatically; interrupt by speaking. Proposals still require review and Apply.</p>
+    <div className="demo-voice-orb"><AssistantOrb state={orbState} size={64} theme="dark" /></div>
+    <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
+    <div className="demo-voice-controls"><button type="button" className="demo-button" disabled={disabled || visible.status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={end}>End conversation</button></div>
+    {visible.error && <p className="demo-alert" role="alert">{visible.error}</p>}
+    {shownCaptions.length > 0 && <ol className="demo-live-captions" aria-label="Live transcript">{shownCaptions.map((caption, index) => <li className={`demo-caption ${caption.direction === 'input' ? 'is-user' : 'is-assistant'}`} key={index}><strong>{caption.direction === 'input' ? 'You' : 'Operator'}:</strong> {caption.text}</li>)}</ol>}
+  </div>;
 }

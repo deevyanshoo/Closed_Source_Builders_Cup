@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CompanyProfile, NewsItem, NewsView, SimulatedOutboxMessage } from './demo-api';
+import { ActivityIndicator } from './demo-activity';
 
 const dateLabel = (value: string | null | undefined) => {
   if (!value) return 'Time unavailable';
@@ -43,7 +44,7 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh }: { co
     <div className="demo-heading"><div><span className="demo-kicker">Observed public sources · conditional company exposure</span><h2>News workspace</h2></div><button type="button" className="demo-button" disabled={loading} onClick={onRefresh}>{loading ? 'Checking sources…' : 'Refresh sources'}</button></div>
     <p className="demo-muted">News is observed public information. {company.name} is fictional; a matching topic is not a confirmed supplier delay, price change, or forecast. Source reliability and company relevance are separate assessments.</p>
     {error && <div className="demo-alert" role="alert">Source check unavailable: {error}. Previously displayed results, if any, keep their recorded check time.</div>}
-    {loading && view && <p className="demo-muted" role="status">Checking sources now. The items below are from the previous check at {dateLabel(view.checked_at)}.</p>}
+    {loading && <ActivityIndicator state="searching" label="Checking public news sources" detail={view ? `The items below are from the previous check at ${dateLabel(view.checked_at)}.` : 'Fetching observed headline metadata and source health for this company.'} />}
     {!view ? <p className="demo-alert">{loading ? 'Checking reviewed public sources…' : 'News coverage unavailable. No synthetic articles are substituted.'}</p> : <>
       <div className="demo-news-status"><strong>Coverage: {view.cache_state}</strong><span>Checked {dateLabel(view.checked_at)}</span><span>{relevantCount} company-relevant of {view.items.length} observed items · {directCount} direct material {directCount === 1 ? 'match' : 'matches'} · {indirectCount} indirect {indirectCount === 1 ? 'match' : 'matches'}</span></div>
       <div className="demo-company-grid"><div><h3>Source health</h3>{view.sources.length ? <ul>{view.sources.map(source => <li key={source.source_id}><strong>{source.name}: {source.state}</strong> · checked {dateLabel(source.last_checked_at)}{source.reason ? ` · ${source.reason}` : ''}</li>)}</ul> : <p className="demo-muted">No source status returned.</p>}</div>

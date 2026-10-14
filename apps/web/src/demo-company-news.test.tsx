@@ -21,6 +21,15 @@ const news: NewsView = {
 };
 
 describe('company news workspace', () => {
+  it('shows animated source-check feedback only while fetching and keeps prior evidence dated', () => {
+    const pending = renderToStaticMarkup(<NewsWorkspace company={company} view={news} loading={true} error="" onRefresh={() => {}} />);
+    expect(pending).toContain('<canvas');
+    expect(pending).toContain('data-activity="searching"');
+    expect(pending).toContain('previous check');
+    const settled = renderToStaticMarkup(<NewsWorkspace company={company} view={news} loading={false} error="Timeout" onRefresh={() => {}} />);
+    expect(settled).not.toContain('<canvas');
+    expect(settled).toContain('Source check unavailable');
+  });
   it('filters observed items by both material and category without treating source reliability as relevance', () => {
     expect(filterNewsItems(news.items, 'copper', 'trade').map(item => item.item_id)).toEqual(['a']);
     expect(filterNewsItems(news.items, 'copper', 'energy')).toEqual([]);

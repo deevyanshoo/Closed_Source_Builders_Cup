@@ -18,6 +18,14 @@ const report: RiskReport = { company_id: 'atlas', context_version: 2, checked_at
 
 afterEach(() => vi.useRealTimers());
 describe('proactive risk monitor', () => {
+  it('rests before the first actual risk request rather than claiming an active scan', () => {
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    expect(html).toContain('<canvas');
+    expect(html).toContain('data-activity="idle"');
+    expect(html).toContain('data-paused="true"');
+    expect(html).not.toContain('data-activity="searching"');
+    expect(html).toContain('No agent call');
+  });
   it('accepts only reports for the captured session/company/context/epoch', () => {
     expect(acceptsRiskReport(report, scope, scope)).toBe(true);
     for (const changed of [{ ...scope, sessionId: 's2' }, { ...scope, companyId: 'loom' }, { ...scope, contextVersion: 3 }, { ...scope, epoch: 5 }])

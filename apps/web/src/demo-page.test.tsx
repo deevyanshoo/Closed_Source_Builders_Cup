@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
@@ -346,6 +346,9 @@ describe('demo response state', () => {
   });
 
   it('offers optional fictional buyer inputs with the dated synthetic currency assumption', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-14T08:00:00Z'));
+    try {
     expect(sampleBuyerInputs()).toEqual({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
     expect(html).toContain('Use sample buyer inputs');
@@ -353,6 +356,7 @@ describe('demo response state', () => {
     expect(html).not.toContain('EUR 1 = USD 1.25');
     expect(html).toContain('2026-10-14');
     expect(html).toContain('fictional');
+    } finally { vi.useRealTimers(); }
   });
 
   it('explains infeasible reasons and the buyer-added total in plain language', () => {

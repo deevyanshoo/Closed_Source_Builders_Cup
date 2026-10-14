@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator } from './demo-activity';
 import { createDemoApi } from './demo-api';
 import type { RiskAlert, RiskReport } from './demo-api';
 
@@ -41,6 +42,7 @@ export function RiskMonitor({ scope, initialReport = null, onReport, onOpenCompa
 }) {
   const [snapshot, setSnapshot] = useState<{ scope: RiskScope; report: RiskReport | null }>({ scope, report: initialReport });
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
   const [filter, setFilter] = useState<'all' | 'current'>('all');
   const [category, setCategory] = useState<'all' | RiskAlert['category']>('all');
   const [severity, setSeverity] = useState<'all' | RiskAlert['severity']>('all');
@@ -49,18 +51,28 @@ export function RiskMonitor({ scope, initialReport = null, onReport, onOpenCompa
   const report = sameRiskScope(snapshot.scope, scope) ? snapshot.report : null;
   useEffect(() => {
     const captured = scope;
+    let active = true;
     setError('');
-    return startRiskPolling(captured, () => scopeRef.current, () => api.risks(), value => {
+    setChecking(false);
+    const stop = startRiskPolling(captured, () => scopeRef.current, () => {
+      setChecking(true);
+      return api.risks().finally(() => {
+        if (active && sameRiskScope(scopeRef.current, captured)) setChecking(false);
+      });
+    }, value => {
       setSnapshot({ scope: captured, report: value }); setError(''); reportRef.current(value, captured);
     }, cause => setError(errorText(cause)), () => document.visibilityState === 'visible', listener => {
       document.addEventListener('visibilitychange', listener);
       return () => document.removeEventListener('visibilitychange', listener);
     });
+    return () => { active = false; stop(); };
   }, [scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch]);
   const reports = report?.companies.filter(company => filter === 'all' || company.company_id === scope.companyId) ?? [];
   return <section className="demo-risk-monitor demo-company-panel" aria-label="Proactive risk monitor">
     <div className="demo-heading"><div><span className="demo-kicker">01 / Across all company workspaces</span><h2>Proactive risk monitor</h2></div><span className="demo-session">Checks while this workspace is open · every 60 seconds</span></div>
     <p>Deterministic inventory and supplier checks plus cached public news. Alerts describe possible exposure, not confirmed shipment delays or price moves. No agent call or business action runs automatically.</p>
+    {checking && <ActivityIndicator state={report ? 'working' : 'searching'} label={report ? 'Refreshing company risk signals' : 'Scanning the ten company workspaces…'} detail={report ? 'The report below keeps its last confirmed check time until this read completes.' : 'Checking synthetic inventory and supplier scenarios against available public news. No agent call.'} />}
+    {!report && !error && !checking && <ActivityIndicator state="idle" label="Risk monitor ready" detail="Checks start when this workspace is visible. No agent call runs automatically." />}
     {report ? <><div className="demo-risk-summary"><strong>{report.summary.high} high</strong><strong>{report.summary.medium} medium</strong><strong>{report.summary.low} low</strong><span>{report.summary.companies_with_alerts} companies with alerts · checked {report.checked_at}</span></div>
       {report.companies.length !== 10 && <p className="demo-alert">Coverage incomplete: {report.companies.length} of 10 company reports returned.</p>}
       <div className="demo-risk-filters"><label>Companies<select value={filter} onChange={event => setFilter(event.target.value as 'all' | 'current')}><option value="all">All companies</option><option value="current">Current company</option></select></label><label>Category<select value={category} onChange={event => setCategory(event.target.value as typeof category)}><option value="all">All categories</option><option value="inventory">Inventory</option><option value="supplier_delay">Supplier delay</option><option value="news">News</option></select></label><label>Severity<select value={severity} onChange={event => setSeverity(event.target.value as typeof severity)}><option value="all">All severities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label></div>

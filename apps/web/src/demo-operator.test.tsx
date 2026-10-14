@@ -10,6 +10,60 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('hides old company questions, answers, attention and proposals immediately before scope effects run', () => {
+    const requested = applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1, question: 'Old company copper question' });
+    const answered = applyOperatorResult(requested, { type: 'turn', scope, requestId: 1, turn });
+    const html = renderToStaticMarkup(<OperatorPanel scope={{ ...scope, companyId: 'atlas-petrochem', contextVersion: 2 }} csrf="csrf" dirty={false}
+      initialState={answered} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).not.toContain('Old company copper question');
+    expect(html).not.toContain('A reviewable watch is ready.');
+    expect(html).not.toContain('Watch copper');
+    expect(html).not.toContain('Exact proposed arguments');
+    expect(html).toContain('Start conversation');
+  });
+  it('keeps voice first, scoped answers readable, and the typed composer last with evidence collapsed', () => {
+    const first = { ...turn, turn_id: 'first', status: 'completed' as const, proposal: null, assistant_text: 'A first answer.' };
+    const second = { ...turn, turn_id: 'second', status: 'completed' as const, proposal: null, assistant_text: 'A second answer.' };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: second, turns: [first, second] }}
+      news={news} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('aria-label="Assistant conversation"');
+    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('A first answer.'));
+    expect(html.indexOf('A first answer.')).toBeLessThan(html.indexOf('A second answer.'));
+    expect(html.indexOf('A second answer.')).toBeLessThan(html.indexOf('Your message'));
+    expect(html.match(/<details class="demo-assistant-trace"/g)).toHaveLength(2);
+    expect(html).not.toMatch(/<details class="demo-assistant-trace"[^>]* open/);
+    expect(html).toContain('Evidence and specialist activity');
+    expect(html).not.toContain('<script>');
+  });
+  it('puts the voice console immediately after the heading even with risks and an unavailable provider', () => {
+    const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: false,
+      agents: [], attention: [], watch_items: [], limitations: [] };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true}
+      initialState={{ ...initialOperatorState, scope, overview }}
+      riskSummary={{ high: 1, medium: 0, low: 0, checkedAt: '2026-10-15' }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html.indexOf('>Operator</h2>')).toBeLessThan(html.indexOf('Start conversation'));
+    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('Current company risks:'));
+    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('Company attention'));
+    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('The agent provider is unavailable'));
+    expect(html).toContain('The agent provider is unavailable');
+    expect(html).toContain('Your message');
+  });
+  it('keeps attention compact while review arguments, checkbox, and Apply remain outside closed traces', () => {
+    const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: true,
+      agents: [], attention: [{ material_id: 'copper', synthetic: true, stock_cover_days: '12', minimum_lead_time_days: 15 }],
+      watch_items: [], limitations: [] };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, overview, turn, turns: [turn] }}
+      materials={[{ material_id: 'copper', name: 'Copper' }]} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toMatch(/<details class="demo-assistant-attention"[^>]*><summary[^>]*>.*Company attention/s);
+    expect(html).toContain('1 signal');
+    expect(html).toContain('Stock cover: 12 days');
+    expect(html).toContain('Exact proposed arguments');
+    expect(html.indexOf('Exact proposed arguments')).toBeGreaterThan(html.lastIndexOf('</details>'));
+    expect(html).toContain('I reviewed the exact arguments');
+    expect(html).toContain('Apply reviewed proposal');
+  });
   it('seeds only an exact current-company risk message, without sending or approving it', () => {
     const seed = { id: 7, ...scope, message: 'Inspect copper quote alternatives for Atlas.' };
     expect(operatorSeedMessage(seed, scope)).toBe(seed.message);
@@ -40,6 +94,45 @@ describe('operator response boundary', () => {
     const second = applyOperatorResult(applyOperatorResult(first, { type: 'start', scope, requestId: 2 }), { type: 'turn', scope, requestId: 2, turn: { ...turn, turn_id: 't2', assistant_text: 'A second answer.' } });
     expect(second.turns.map(item => item.turn_id)).toEqual(['t1', 't2']);
     expect(applyOperatorResult(second, { type: 'scope', scope: { ...scope, sessionId: 's2' } }).turns).toEqual([]);
+  });
+  it('pairs typed questions with accepted answers or explicit failures, and isolates each company session', () => {
+    const first = applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1, question: 'What changed for copper?' });
+    expect(first.exchanges).toEqual([]);
+    const answered = applyOperatorResult(first, { type: 'turn', scope, requestId: 1, turn: { ...turn, proposal: null, status: 'completed' } });
+    expect(answered.exchanges).toMatchObject([{ question: 'What changed for copper?', turn: { turn_id: 't1' } }]);
+    const pending = applyOperatorResult(answered, { type: 'start', scope, requestId: 2, question: 'Can we compare?' });
+    const failed = applyOperatorResult(pending, { type: 'failed', scope, requestId: 2, error: 'Provider unavailable' });
+    expect(failed.exchanges).toMatchObject([{ question: 'What changed for copper?', turn: { turn_id: 't1' } }, { question: 'Can we compare?', error: 'Provider unavailable' }]);
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={failed} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html.indexOf('What changed for copper?')).toBeLessThan(html.indexOf('A reviewable watch is ready.'));
+    expect(html.indexOf('Can we compare?')).toBeLessThan(html.indexOf('Provider unavailable'));
+    expect(html).toContain('Request failed');
+    const edited = applyOperatorResult(failed, { type: 'scope', scope: { ...scope, epoch: 1 } });
+    expect(edited.exchanges).toEqual(failed.exchanges);
+    expect(applyOperatorResult(edited, { type: 'scope', scope: { ...scope, companyId: 'loomworks', epoch: 2 } }).exchanges).toEqual([]);
+    expect(applyOperatorResult(edited, { type: 'scope', scope: { ...scope, sessionId: 's2', epoch: 2 } }).exchanges).toEqual([]);
+  });
+  it('omits cancelled, superseded, and out-of-scope typed questions from the transcript', () => {
+    const pending = applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1, question: 'Cancelled question' });
+    const cancelled = applyOperatorResult(pending, { type: 'cancel' });
+    expect(applyOperatorResult(cancelled, { type: 'turn', scope, requestId: 1, turn }).exchanges).toEqual([]);
+    expect(applyOperatorResult(cancelled, { type: 'failed', scope, requestId: 1, error: 'Late error' }).exchanges).toEqual([]);
+    const live = applyOperatorResult(pending, { type: 'start', scope, requestId: 2 });
+    const accepted = applyOperatorResult(live, { type: 'turn', scope, requestId: 2, turn });
+    expect(accepted.exchanges).toMatchObject([{ question: null, turn: { turn_id: 't1' } }]);
+    expect(applyOperatorResult(accepted, { type: 'failed', scope, requestId: 1, error: 'Late error' }).exchanges).toEqual(accepted.exchanges);
+    const moved = applyOperatorResult(pending, { type: 'scope', scope: { ...scope, epoch: 1 } });
+    expect(applyOperatorResult(moved, { type: 'turn', scope, requestId: 1, turn }).exchanges).toEqual([]);
+  });
+  it('bounds local exchanges without separating a question from its result', () => {
+    let state = { ...initialOperatorState, scope };
+    for (let id = 1; id <= 25; id += 1) {
+      state = applyOperatorResult(state, { type: 'start', scope, requestId: id, question: `Question ${id}` });
+      state = applyOperatorResult(state, { type: 'turn', scope, requestId: id, turn: { ...turn, turn_id: `t${id}`, assistant_text: `Answer ${id}` } });
+    }
+    expect(state.exchanges).toHaveLength(20);
+    expect(state.exchanges[0]).toMatchObject({ question: 'Question 6', turn: { assistant_text: 'Answer 6' } });
+    expect(state.exchanges.at(-1)).toMatchObject({ question: 'Question 25', turn: { assistant_text: 'Answer 25' } });
   });
   it('lets a live result supersede a typed request without leaving the panel stuck asking', () => {
     const typed = { generation: 4, requestId: 2, busy: 'asking' };

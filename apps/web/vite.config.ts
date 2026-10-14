@@ -7,6 +7,14 @@ const tokenFile = process.env.GATEWAY_DEV_TOKEN_FILE;
 
 export default defineConfig({
   plugins: [react()],
+  esbuild: { legalComments: 'inline' },
+  build: {
+    rollupOptions: {
+      output: {
+        banner: `/*! Thinking Orbs license\n${readFileSync(new URL('./public/licenses/thinking-orbs.txt', import.meta.url), 'utf8')}\n*/`,
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5317,

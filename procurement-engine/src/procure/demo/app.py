@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
 
 from .sessions import SessionError, SessionStore
+from .company import DEFAULT_COMPANY_ID, get_company, list_companies
 
 COOKIE = 'demo_session'
 MAX_BODY = 750_000
@@ -65,7 +66,8 @@ class BodyLimit:
         await self.app(scope, bounded_receive, send)
 
 
-def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) -> FastAPI:
+def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
+               news_service=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock)
     app.state.sessions = store
@@ -74,6 +76,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     workers = threading.BoundedSemaphore(2)
     process_calls = 0
     pending_cache = set()
+    news_lock = threading.RLock()
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(SessionError)
@@ -151,6 +154,35 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     def active(value):
         if not value.active or value.expires_at <= store.now():
             raise SessionError('session_expired', 'Session changed or expired. Refresh the demo.', 401)
+
+    def context(value, data, *, explicit=False):
+        active(value)
+        expected = data.get('expected_context_version')
+        if expected is None and not explicit and value.company_id == DEFAULT_COMPANY_ID and value.context_version == 1:
+            return
+        if type(expected) is not int or expected < 1:
+            raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
+        if expected != value.context_version:
+            raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
+
+    def quote_coverage(value, *, fixture_id=None, material=None):
+        coverage = get_company(value.company_id)['quote_coverage']
+        if (fixture_id is not None and fixture_id not in coverage['fixture_ids']) or (material is not None and material not in coverage['materials']):
+            raise SessionError('quote_unavailable', 'No reviewed synthetic quote coverage for this company and material.', 422)
+
+    def news_adapter():
+        nonlocal news_service
+        with news_lock:
+            if news_service is None:
+                from .news import NewsService
+                news_service = NewsService(clock=store.now)
+            return news_service
+
+    def news_view(value, payload, company_id, version):
+        if not isinstance(payload, dict):
+            raise SessionError('news_unavailable', 'News is unavailable right now.', 503)
+        return {**deepcopy(payload), 'company_id': company_id,
+                'context_version': version}
 
     def start(value, data, action):
         active(value)
@@ -231,7 +263,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
                     'persistence': 'ephemeral', 'offers': deepcopy(list(value.offers.values())),
                     'provider': provider(), 'plan': deepcopy(active_plan(value)),
                     'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
-                    'rfq': deepcopy(value.rfq)}
+                    'rfq': deepcopy(value.rfq), 'company': get_company(value.company_id),
+                    'context_version': value.context_version}
 
     def session_response(value):
         response = JSONResponse(view(value))
@@ -252,6 +285,73 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
                 raise
             value = store.create()
         return session_response(value)
+
+    @app.get('/api/demo/companies')
+    async def companies():
+        return {'companies': list_companies()}
+
+    @app.post('/api/demo/company')
+    async def select_company(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('company_id', 'expected_context_version', 'idempotency_key'))
+        if not isinstance(data['company_id'], str) or get_company(data['company_id']) is None:
+            raise SessionError('company_not_found', 'Select a listed fictional company.', 404)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'company')
+            if replay is not None:
+                return session_response(value)
+            try:
+                value.select_company(data['company_id'])
+                complete(value, key, {'company_id': value.company_id,
+                                      'context_version': value.context_version})
+                return session_response(value)
+            except Exception:
+                failed(value, key)
+                raise
+
+    @app.get('/api/demo/news')
+    async def get_news(request: Request):
+        value = session(request)
+        with value.lock:
+            active(value)
+            company_id, version = value.company_id, value.context_version
+            company = get_company(company_id)
+        payload = await run_in_threadpool(news_adapter().get, company)
+        with value.lock:
+            active(value)
+            if value.company_id != company_id or value.context_version != version:
+                raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
+            result = news_view(value, payload, company_id, version)
+            value.news = deepcopy(result)
+            return result
+
+    @app.post('/api/demo/news/refresh')
+    async def refresh_news(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('expected_context_version', 'idempotency_key'))
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'news_refresh')
+            if replay is not None:
+                return replay
+            company_id, version = value.company_id, value.context_version
+            company = get_company(company_id)
+        try:
+            payload = await run_in_threadpool(news_adapter().get, company, force=True)
+            with value.lock:
+                active(value)
+                if value.company_id != company_id or value.context_version != version:
+                    raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
+                result = news_view(value, payload, company_id, version)
+                value.news = deepcopy(result)
+                return complete(value, key, result)
+        except Exception:
+            with value.lock:
+                failed(value, key)
+            raise
 
     @app.get('/api/demo/fixtures')
     async def fixtures():
@@ -279,13 +379,13 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         data = await body(request)
         from .quote_service import fixture_bytes, match_fixture, extract_fixture, new_offer
         if 'fixture_id' in data:
-            shape(data, ('fixture_id', 'mode', 'idempotency_key'))
+            shape(data, ('fixture_id', 'mode', 'idempotency_key'), ('expected_context_version',))
             fixture_id = data['fixture_id']
             if not isinstance(fixture_id, str) or len(fixture_id) > 100:
                 raise SessionError('invalid_fixture', 'Select a synthetic demo fixture.', 422)
             _, raw = fixture_bytes(fixture_id)
         else:
-            shape(data, ('filename', 'document_base64', 'mode', 'idempotency_key'))
+            shape(data, ('filename', 'document_base64', 'mode', 'idempotency_key'), ('expected_context_version',))
             filename, encoded = data['filename'], data['document_base64']
             if not isinstance(filename, str) or len(filename) > 150 or '/' in filename or '\\' in filename:
                 raise SessionError('invalid_upload', 'Upload an unchanged synthetic demo fixture.', 422)
@@ -299,6 +399,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         if data['mode'] not in ('rules', 'gemini'):
             raise SessionError('invalid_mode', 'Choose rules or gemini extraction.', 422)
         with value.lock:
+            context(value, data)
+            quote_coverage(value, fixture_id=fixture_id)
+            company_id, context_version = value.company_id, value.context_version
             key, replay = start(value, data, 'extract')
             if replay:
                 return replay
@@ -336,9 +439,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
                         cache.popitem(last=False)
             with value.lock:
                 active(value)
+                if value.company_id != company_id or value.context_version != context_version:
+                    raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
                 if len(value.offers) >= MAX_OFFERS:
                     raise SessionError('offer_limit', 'Session offer limit reached.', 429)
                 offer = new_offer(deepcopy(payload), offer_id=secrets.token_urlsafe(18), today=today)
+                offer['fixture_id'] = fixture_id
                 offer['served_from_cache'] = cached
                 value.offers[offer['offer_id']] = offer
                 clear_derived(value)
@@ -359,8 +465,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     async def change(request, offer_id, operation):
         value = mutate(request)
         data = await body(request)
-        shape(data, ('expected_version', 'idempotency_key', 'field', 'value') if operation == 'correct' else ('expected_version', 'idempotency_key'))
+        shape(data, ('expected_version', 'idempotency_key', 'field', 'value') if operation == 'correct' else ('expected_version', 'idempotency_key'), ('expected_context_version',))
         with value.lock:
+            context(value, data)
             original = owned(value, offer_id)
             key, replay = start(value, data, f'{operation}:{offer_id}')
             if replay:
@@ -396,19 +503,22 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         from .planner import build_plan
         shape(data, ('offer_ids', 'expected_versions', 'material', 'quantity_kg', 'current_stock_kg',
                      'need_by', 'decision_date', 'reporting_currency', 'budget', 'additional_cost_per_kg'),
-              ('delay_days_by_offer',))
+              ('delay_days_by_offer', 'expected_context_version'))
         ids, versions = data['offer_ids'], data['expected_versions']
         if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_OFFERS or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids) or not isinstance(versions, dict) or set(versions) != set(ids):
             raise SessionError('invalid_offers', 'Provide unique offer IDs and their exact versions.', 422)
         with value.lock:
-            active(value)
+            context(value, data)
+            quote_coverage(value, material=data['material'])
             selected = [owned(value, i) for i in ids]
             for offer in selected:
+                quote_coverage(value, fixture_id=offer.get('fixture_id'))
                 version(offer, versions[offer['offer_id']])
-            result = build_plan(deepcopy(selected), data, today=store.now().date())
+            plan_data = {key: item for key, item in data.items() if key != 'expected_context_version'}
+            result = build_plan(deepcopy(selected), plan_data, today=store.now().date())
             result['plan_id'] = secrets.token_urlsafe(18)
             value.last_plan = deepcopy(result)
-            value.plan_request = deepcopy(data)
+            value.plan_request = deepcopy(plan_data)
             value.recovery = None
             value.rfq = None
             return result
@@ -417,9 +527,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     async def recovery(request: Request):
         value = mutate(request)
         data = await body(request)
-        shape(data, ('baseline_plan_id', 'expected_versions', 'delay_days_by_offer', 'idempotency_key'))
+        shape(data, ('baseline_plan_id', 'expected_versions', 'delay_days_by_offer', 'idempotency_key'), ('expected_context_version',))
         with value.lock:
-            active(value)
+            context(value, data)
             baseline, original_request = value.last_plan, value.plan_request
             if (baseline is None or original_request is None
                     or not isinstance(data['baseline_plan_id'], str)
@@ -452,9 +562,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     async def rfq(request: Request):
         value = mutate(request)
         data = await body(request)
-        shape(data, ('plan_id', 'expected_versions', 'reviewed', 'idempotency_key'))
+        shape(data, ('plan_id', 'expected_versions', 'reviewed', 'idempotency_key'), ('expected_context_version',))
         with value.lock:
-            active(value)
+            context(value, data)
             plan = active_plan(value)
             if plan is None or not isinstance(data['plan_id'], str) or data['plan_id'] != plan.get('plan_id'):
                 raise SessionError('stale_plan', 'Active comparison changed. Review the current plan.', 409)
@@ -514,6 +624,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         with value.lock:
             return JSONResponse({'synthetic': True, 'persistence': 'ephemeral',
                                  'exported_at': store.now().isoformat(),
+                                 'company': get_company(value.company_id),
+                                 'context_version': value.context_version,
+                                 'news': deepcopy(value.news),
                                  'offers': deepcopy(list(value.offers.values())),
                                  'plan': deepcopy(active_plan(value)),
                                  'baseline_plan': deepcopy(value.last_plan),
@@ -524,6 +637,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
     @app.post('/api/demo/reset')
     async def reset(request: Request):
         value = mutate(request)
+        data = await body(request)
+        shape(data, (), ('expected_context_version',))
+        with value.lock:
+            context(value, data)
         store.invalidate(value)
         return session_response(store.create())
 

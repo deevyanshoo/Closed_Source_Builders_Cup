@@ -11,7 +11,7 @@ export type OfferView = {
   review_flags: { flag: string; locator?: string | null; text?: string }[];
   normalized: Record<string, unknown>; blocking_reasons: { code: string; field: string; message: string }[];
 };
-export type DemoSession = { session_id: string; csrf_token: string; expires_at: string; synthetic: true; persistence: 'ephemeral'; offers: OfferView[]; provider: { model: string; available: boolean }; plan?: PlanView | null; plan_request?: PlanRequest | null; recovery?: RecoveryView | null; rfq?: RfqView | null };
+export type DemoSession = { session_id: string; csrf_token: string; expires_at: string; synthetic: true; persistence: 'ephemeral'; offers: OfferView[]; provider: { model: string; available: boolean }; plan?: PlanView | null; plan_request?: PlanRequest | null; recovery?: RecoveryView | null; rfq?: RfqView | null; company?: CompanyProfile; context_version?: number };
 export type DemoFixture = { id: string; name: string; filename: string; description: string; download_url: string };
 export type PlanRequest = { offer_ids: string[]; expected_versions: Record<string, number>; material: string; quantity_kg: string; current_stock_kg: string; need_by: string; decision_date: string; reporting_currency: string; budget: string; additional_cost_per_kg: string; delay_days_by_offer?: Record<string, number> };
 export type PlanView = { plan_id: string; synthetic: true; decision_date: string; need_by: string; material: string; quantity_kg: string; current_stock_kg: string; required_purchase_kg: string; reporting_currency: string; assumptions: Record<string, unknown>; alternatives: { offer_id: string; supplier: string; feasible: boolean; reasons: string[]; arrival_date: string | null; unit_price_per_kg: string | null; total_cost: string | null; quantity_kg: string }[]; selected_offer_id: string | null; total_cost: string | null; explanation: string; forecast_action: 'ABSTAIN'; customer_savings: null; offer_versions: Record<string, number> };
@@ -19,6 +19,21 @@ export type RecoveryRequest = { baseline_plan_id: string; expected_versions: Rec
 export type RecoveryView = { comparison_id: string; synthetic: true; baseline: PlanView; scenario: PlanView; baseline_request: PlanRequest; scenario_request: PlanRequest; cost_delta: string | null; selection_changed: boolean; outcome: 'changed' | 'unchanged' | 'infeasible' | 'stock_covers_need'; replayed: boolean };
 export type RfqRequest = { plan_id: string; expected_versions: Record<string, number>; reviewed: true };
 export type RfqView = { draft_id: string; plan_id: string; offer_versions: Record<string, number>; synthetic: true; status: 'draft_unsent'; supplier: string; material: string; quantity_kg: string; need_by: string; reporting_currency: string; total_cost: string; created_at: string; text: string };
+export type CompanyProfile = {
+  company_id: string; name: string; sector: string; size: string; synthetic: true; as_of: string; description: string;
+  locations: { country: string; city: string }[]; reporting_currency: string;
+  materials: { material_id: string; name: string; quantity_unit: string; stock: string; consumption_per_day: string; monthly_requirement: string; criticality: string; keywords: string[] }[];
+  suppliers: { supplier_id: string; name: string; country: string; settlement_currency: string; materials: string[]; lead_time_days: number }[];
+  orders: { order_id: string; material_id: string; quantity: string; unit: string; need_by: string; status: string }[];
+  routes: { route_id: string; origin: string; destination: string; via: string[]; materials: string[]; direction: 'import' | 'export'; currency: string }[];
+  currencies: string[]; news_keywords: string[];
+  quote_coverage: { materials: string[]; fixture_ids: string[]; note: string };
+  buyer_defaults: PlanRequest | null;
+};
+export type SourceState = { source_id: string; name: string; state: string; last_checked_at: string | null; reason: string | null };
+export type NewsItem = { item_id: string; title: string; url: string; publisher: string | null; provider: string; published_at: string | null; first_seen_at: string | null; retrieved_at: string; source_tier: string; source_reliability: string; reliability_reason: string; category: string; matched_materials: string[]; matched_routes: string[]; matched_currencies: string[]; relevance_reason: string; implication: string; implication_confidence: string; next_steps: string[]; synthetic: false };
+export type FxObservation = { base: string; quote: string; rate: string; observation_date: string; provider: string; retrieved_at: string; informational: true };
+export type NewsView = { company_id: string; context_version: number; checked_at: string; cache_state: string; sources: SourceState[]; items: NewsItem[]; fx: FxObservation[]; limitations: string[] };
 
 export class DemoApiError extends Error {
   constructor(message: string, readonly status = 0, readonly code = 'unavailable') { super(message); this.name = 'DemoApiError'; }
@@ -63,7 +78,8 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
     return btoa(binary);
   }
 
-  const mutate = <T,>(path: string, body: Record<string, unknown>, csrf: string) => request<T>(path, 'POST', { ...body, idempotency_key: key() }, csrf);
+  const withContext = (contextVersion?: number) => contextVersion === undefined ? {} : { expected_context_version: contextVersion };
+  const mutate = <T,>(path: string, body: Record<string, unknown>, csrf: string, contextVersion?: number) => request<T>(path, 'POST', { ...body, ...withContext(contextVersion), idempotency_key: key() }, csrf);
   async function download(path: string, failure: string): Promise<Blob> {
     let response: Response;
     try { response = await send(`/api/demo${path}`, { credentials: 'same-origin' }); }
@@ -73,16 +89,20 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
   }
   return {
     session: () => request<DemoSession>('/session'),
+    companies: async (): Promise<CompanyProfile[]> => (await request<{ companies: CompanyProfile[] }>('/companies')).companies,
+    company: (csrf: string, companyId: string, contextVersion: number) => mutate<DemoSession>('/company', { company_id: companyId }, csrf, contextVersion),
+    news: () => request<NewsView>('/news'),
+    refreshNews: (csrf: string, contextVersion: number) => mutate<NewsView>('/news/refresh', {}, csrf, contextVersion),
     fixtures: async (): Promise<DemoFixture[]> => (await request<{ fixtures: DemoFixture[] }>('/fixtures')).fixtures,
-    extract: (csrf: string, source: { fixture_id: string; mode: 'gemini' | 'rules' }) => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', source, csrf),
-    upload: async (csrf: string, file: File, mode: 'gemini' | 'rules') => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', { filename: file.name, document_base64: await encode(file), mode }, csrf),
-    correct: (csrf: string, id: string, field: string, value: unknown, version: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/correct`, { field, value, expected_version: version }, csrf),
-    save: (csrf: string, id: string, version: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/save`, { expected_version: version }, csrf),
-    plan: (csrf: string, planRequest: PlanRequest) => request<PlanView>('/plan', 'POST', planRequest, csrf),
-    recovery: (csrf: string, body: RecoveryRequest) => mutate<RecoveryView>('/recovery', body, csrf),
-    rfq: (csrf: string, body: RfqRequest) => mutate<RfqView>('/rfq', body, csrf),
+    extract: (csrf: string, source: { fixture_id: string; mode: 'gemini' | 'rules' }, contextVersion?: number) => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', source, csrf, contextVersion),
+    upload: async (csrf: string, file: File, mode: 'gemini' | 'rules', contextVersion?: number) => mutate<{ offer: OfferView; provider: OfferView['extractor_detail']; replayed: boolean; served_from_cache: boolean }>('/extract', { filename: file.name, document_base64: await encode(file), mode }, csrf, contextVersion),
+    correct: (csrf: string, id: string, field: string, value: unknown, version: number, contextVersion?: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/correct`, { field, value, expected_version: version }, csrf, contextVersion),
+    save: (csrf: string, id: string, version: number, contextVersion?: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/save`, { expected_version: version }, csrf, contextVersion),
+    plan: (csrf: string, planRequest: PlanRequest, contextVersion?: number) => request<PlanView>('/plan', 'POST', { ...planRequest, ...withContext(contextVersion) }, csrf),
+    recovery: (csrf: string, body: RecoveryRequest, contextVersion?: number) => mutate<RecoveryView>('/recovery', body, csrf, contextVersion),
+    rfq: (csrf: string, body: RfqRequest, contextVersion?: number) => mutate<RfqView>('/rfq', body, csrf, contextVersion),
     downloadRfq: (id: string) => download(`/rfq/${encodeURIComponent(id)}/download`, 'The RFQ draft could not be downloaded.'),
     exportReport: () => download('/export', 'The report could not be downloaded.'),
-    reset: (csrf: string) => request<DemoSession>('/reset', 'POST', {}, csrf),
+    reset: (csrf: string, contextVersion?: number) => request<DemoSession>('/reset', 'POST', withContext(contextVersion), csrf),
   };
 }

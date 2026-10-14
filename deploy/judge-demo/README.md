@@ -1,4 +1,10 @@
-# Hosted synthetic quote-to-plan demo
+# Hosted company, news and quote-to-plan demo
+
+The company selector exposes ten fictional, dated operating profiles with distinct sectors, currencies, inventory units/volumes, suppliers, orders and trade routes. Larger profiles include broader catalogues: Atlas Petrochem 12 materials, GridSpring Batteries 10 and StoneBridge Materials 8. These are demonstration records, not customer data. Solara Cables alone has runnable reviewed copper quote coverage; other profiles support company/news exploration and clearly disclose unavailable procurement coverage.
+
+Company switching saves/restores isolated temporary workspaces. Every new browser mutation carries the expected company context version; in-flight quote/news work is rejected after a switch. Refresh and ambiguous switch failures recover the authoritative session. Public news is observed metadata, independently labelled from synthetic company operations. EIA energy headlines, ECB publications/reference rates and GDELT discovery use fixed HTTPS endpoints, a shared 15-minute process cache and a bounded parallel refresh. Unavailable/stale sources remain explicit, and no synthetic news replaces an outage. Article bodies are not republished. Headline matches indicate conditional exposure, never a confirmed shipment delay or predicted price movement.
+
+Run `python deploy/judge-demo/company_news_smoke.py --url https://SERVICE --output /path/to/receipt.json --live --with-baseline-smoke` as the deployment owner after a release. This checks all ten profiles, context/session isolation, live source provenance and differing company relevance, plus the existing live Gemini procurement smoke when requested. A cached source receipt proves a dated observation, not a new fetch; check the receipt's observation status and source times.
 
 The isolated `procure.demo.app` serves React `/demo` and same-origin session API. It does not change the private-machine Go gateway. Documents and economics are labelled synthetic, with optional live Vertex Gemini extraction and document-field evidence. The planner compares single-offer feasibility/cost under entered assumptions, not market timing, real procurement or a multi-period/global optimizer.
 

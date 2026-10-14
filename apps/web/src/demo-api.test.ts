@@ -65,4 +65,25 @@ describe('hosted demo API', () => {
     expect(await (await api.downloadRfq('draft/1')).text()).toBe('Synthetic RFQ draft');
     expect((send.mock.calls as unknown as [string, RequestInit][])[0][0]).toBe('/api/demo/rfq/draft%2F1/download');
   });
+
+  it('scopes every mutation to the selected company context and loads company/news routes', async () => {
+    const send = vi.fn(async () => json({ companies: [], items: [], session_id: 's2' }));
+    const api = createDemoApi(send, () => 'key');
+    await api.companies();
+    await api.news();
+    await api.company('csrf', 'loomworks', 7);
+    await api.refreshNews('csrf', 7);
+    await api.extract('csrf', { fixture_id: 'quote-a', mode: 'rules' }, 7);
+    await api.correct('csrf', 'q1', 'material', 'cotton', 2, 7);
+    await api.save('csrf', 'q1', 2, 7);
+    await api.plan('csrf', { offer_ids: ['q1'], expected_versions: { q1: 2 }, material: 'cotton', quantity_kg: '1000', current_stock_kg: '0', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '1000', additional_cost_per_kg: '0' }, 7);
+    await api.recovery('csrf', { baseline_plan_id: 'p1', expected_versions: { q1: 2 }, delay_days_by_offer: {} }, 7);
+    await api.rfq('csrf', { plan_id: 'p1', expected_versions: { q1: 2 }, reviewed: true }, 7);
+    await api.reset('csrf', 7);
+    const calls = send.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.slice(0, 4).map(([path]) => path)).toEqual(['/api/demo/companies', '/api/demo/news', '/api/demo/company', '/api/demo/news/refresh']);
+    expect(JSON.parse(calls[2][1].body as string)).toEqual({ company_id: 'loomworks', expected_context_version: 7, idempotency_key: 'key' });
+    for (const [, options] of calls.slice(2)) expect(JSON.parse(options.body as string)).toMatchObject({ expected_context_version: 7 });
+    expect(JSON.parse(calls[7][1].body as string)).toMatchObject({ material: 'cotton', quantity_kg: '1000', expected_context_version: 7 });
+  });
 });

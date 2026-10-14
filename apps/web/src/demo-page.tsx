@@ -1,30 +1,38 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import type { CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import { CompanyOverview, NewsWorkspace } from './demo-company-news';
 import './demo.css';
 
-export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
-export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false, dirty: false, focusedId: null };
-export type DemoAction = { type: 'session'; session: DemoSession; epoch: number } | { type: 'reset-start' } |
+export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
+export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
+export type DemoAction = { type: 'session'; session: DemoSession; epoch: number } | { type: 'reset-start' } | { type: 'company-start' } |
   { type: 'offer'; offer: OfferView; epoch: number; cached?: boolean } | { type: 'plan'; plan: PlanView; request?: PlanRequest; epoch: number } |
   { type: 'recovery'; recovery: RecoveryView; epoch: number } | { type: 'rfq'; rfq: RfqView; epoch: number } |
+  { type: 'news'; news: NewsView; sessionId: string; epoch: number } |
   { type: 'reviewed'; value: boolean } | { type: 'invalidate' } | { type: 'scenario-edit' } | { type: 'focus'; offerId: string };
 
 const currentVersions = (offers: OfferView[], versions: Record<string, number>) => Object.entries(versions).every(([id, version]) => offers.some(o => o.offer_id === id && o.version === version && acceptedStatus(o.status)));
 
 export function applyDemoResult(state: DemoState, action: DemoAction): DemoState {
-  if (action.type === 'reset-start') return { ...initialDemoState, epoch: state.epoch + 1 };
+  if (action.type === 'reset-start' || action.type === 'company-start') return { ...initialDemoState, epoch: state.epoch + 1 };
   if (action.type === 'invalidate') return { ...state, epoch: state.epoch + 1, plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false, dirty: true };
   if (action.type === 'scenario-edit') return { ...state, epoch: state.epoch + 1, rfq: null, reviewed: false, dirty: true };
   if (action.type === 'focus') return { ...state, focusedId: action.offerId };
   if (action.type === 'reviewed') return state.dirty ? state : { ...state, reviewed: action.value };
+  if (action.type === 'news') {
+    if (action.epoch !== state.epoch || action.sessionId !== state.session?.session_id ||
+      action.news.company_id !== state.session?.company?.company_id || action.news.context_version !== state.session?.context_version) return state;
+    return { ...state, news: action.news };
+  }
   if (action.epoch !== state.epoch) return state;
   if (action.type === 'session') {
     const request = action.session.plan_request ?? action.session.recovery?.baseline_request ?? null;
     const recovery = request ? action.session.recovery ?? null : null;
     const plan = request ? recovery?.scenario ?? action.session.plan ?? null : null;
-    return { ...state, session: action.session, offers: action.session.offers, dirty: false,
+    const sameContext = state.session?.session_id === action.session.session_id && state.session?.company?.company_id === action.session.company?.company_id && state.session?.context_version === action.session.context_version;
+    return { ...state, session: action.session, offers: action.session.offers, news: sameContext ? state.news : null, dirty: false,
       plan, planRequest: request, recovery, rfq: state.dirty ? null : action.session.rfq ?? null, reviewed: false,
       focusedId: action.session.offers.some(o => o.offer_id === state.focusedId) ? state.focusedId : action.session.offers.at(-1)?.offer_id ?? null };
   }
@@ -50,13 +58,17 @@ export function applyDemoResult(state: DemoState, action: DemoAction): DemoState
 }
 
 const api = createDemoApi();
+export async function selectCompanyWithRecovery(select: () => Promise<DemoSession>, readSession: () => Promise<DemoSession>): Promise<DemoSession> {
+  try { return await select(); }
+  catch { return readSession(); }
+}
 const today = () => {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const defaultInputs = () => ({ material: '', quantity_kg: '', current_stock_kg: '0', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_kg: '0' });
 export function canonicalBuyerState(session: DemoSession) {
-  const request = session.plan_request ?? session.recovery?.baseline_request;
+  const request = session.plan_request ?? session.recovery?.baseline_request ?? session.company?.buyer_defaults;
   const delayControls = session.recovery ? delayControlsForRecovery(session.recovery) : session.plan && request ? delayControlsForPlan(session.plan, request) : { offerId: '', days: '0' };
   return {
     selected: request?.offer_ids.filter(id => session.offers.some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
@@ -191,6 +203,11 @@ export function RecoveryResults({ recovery, offers }: { recovery: RecoveryView; 
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
+  const [companies, setCompanies] = useState<CompanyProfile[]>([]);
+  const [companyError, setCompanyError] = useState('');
+  const [newsError, setNewsError] = useState('');
+  const [newsBusy, setNewsBusy] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news'>('company');
   const [fixtureId, setFixtureId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<'gemini' | 'rules'>('gemini');
@@ -202,9 +219,15 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [delayDays, setDelayDays] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).delayControls.days : '0');
   const epochRef = useRef(initialState.epoch);
   const actionRef = useRef(0);
+  const newsRequestRef = useRef(0);
   const offer = state.offers.find(o => o.offer_id === state.focusedId) ?? null;
+  const company = state.session?.company;
   const accepted = state.offers.filter(o => acceptedStatus(o.status));
   const chosen = accepted.filter(o => selected.includes(o.offer_id));
+  const supportedFixtures = company ? fixtures.filter(fixture => company.quote_coverage.fixture_ids.includes(fixture.id)) : fixtures;
+  const selectedFixtureId = supportedFixtures.some(fixture => fixture.id === fixtureId) ? fixtureId : supportedFixtures[0]?.id ?? '';
+  const coveredMaterial = !company || company.quote_coverage.materials.some(material => material.toLowerCase() === inputs.material.trim().toLowerCase());
+  const companyOptions = companies.length ? companies : company ? [company] : [];
 
   function restoreSession(session: DemoSession, epoch: number) {
     const buyer = canonicalBuyerState(session);
@@ -219,8 +242,24 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     const epoch = epochRef.current;
     if (!initialState.session) api.session().then(session => { if (!cancelled && epoch === epochRef.current) restoreSession(session, epoch); }).catch(e => { if (!cancelled && epoch === epochRef.current) setError(message(e)); });
     api.fixtures().then(list => { if (!cancelled) { setFixtures(list); setFixtureId(list[0]?.id ?? ''); } }).catch(e => { if (!cancelled) setError(message(e)); });
+    api.companies().then(list => { if (!cancelled) setCompanies(list); }).catch(e => { if (!cancelled) setCompanyError(message(e)); });
     return () => { cancelled = true; };
   }, [initialState.session]);
+
+  useEffect(() => {
+    if (!state.session?.company || state.session.context_version === undefined || state.news) return;
+    let cancelled = false;
+    const epoch = state.epoch;
+    const sessionId = state.session.session_id;
+    const requestId = ++newsRequestRef.current;
+    setNewsBusy(true); setNewsError('');
+    const timer = setTimeout(() => {
+      api.news().then(news => { if (!cancelled && requestId === newsRequestRef.current) dispatch({ type: 'news', news, sessionId, epoch }); })
+        .catch(e => { if (!cancelled && requestId === newsRequestRef.current) setNewsError(message(e)); })
+        .finally(() => { if (!cancelled && requestId === newsRequestRef.current) setNewsBusy(false); });
+    }, 150);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [state.session?.session_id, state.session?.company?.company_id, state.session?.context_version, state.epoch, state.news]);
 
   async function run<T>(name: string, operation: () => Promise<T>, success: (value: T, epoch: number) => void) {
     const epoch = epochRef.current, action = ++actionRef.current;
@@ -238,13 +277,46 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     epochRef.current += 1; actionRef.current += 1;
     dispatch({ type: 'scenario-edit' }); setBusy(''); setError('');
   }
+  async function switchCompany(companyId: string) {
+    if (!state.session?.company || state.session.context_version === undefined || companyId === state.session.company.company_id) return;
+    const prior = state.session;
+    const contextVersion = state.session.context_version;
+    epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
+    dispatch({ type: 'company-start' });
+    setSelected([]); setInputs(defaultInputs()); setFile(null); setDelayOfferId(''); setDelayDays('0');
+    setNewsBusy(false); setNewsError(''); setError(''); setBusy('company'); setWorkspaceTab('company');
+    const epoch = epochRef.current;
+    try {
+      const session = await selectCompanyWithRecovery(async () => {
+        const selected = await api.company(prior.csrf_token, companyId, contextVersion);
+        if (selected.company?.company_id !== companyId || selected.context_version === undefined) throw new DemoApiError('The selected company did not match the returned session.');
+        return selected;
+      }, () => api.session());
+      if (epoch !== epochRef.current) return;
+      restoreSession(session, epoch);
+    } catch (e) {
+      if (epoch === epochRef.current) setError(`Could not confirm the current company. The workspace is cleared until the session can be reloaded. ${message(e)}`);
+    } finally { if (epoch === epochRef.current) setBusy(''); }
+  }
+  async function refreshNews() {
+    if (!state.session?.company || state.session.context_version === undefined || newsBusy) return;
+    const epoch = epochRef.current, sessionId = state.session.session_id;
+    const requestId = ++newsRequestRef.current;
+    setNewsBusy(true); setNewsError('');
+    try {
+      const news = await api.refreshNews(state.session.csrf_token, state.session.context_version);
+      if (requestId === newsRequestRef.current) dispatch({ type: 'news', news, sessionId, epoch });
+    } catch (e) { if (requestId === newsRequestRef.current) setNewsError(message(e)); }
+    finally { if (requestId === newsRequestRef.current) setNewsBusy(false); }
+  }
 
   function extract(event: FormEvent) {
     event.preventDefault();
     if (!state.session) return;
-    if (!file && !fixtureId) { setError('Choose a synthetic quote or upload one of the listed documents.'); return; }
+    if (!file && !selectedFixtureId) { setError('Choose a synthetic quote or upload one of the listed documents.'); return; }
+    if (company && (!supportedFixtures.length || (file && !supportedFixtures.some(fixture => fixture.filename === file.name)))) { setError('This company has no matching quote fixture for that document.'); return; }
     invalidate();
-    run('extract', () => file ? api.upload(state.session!.csrf_token, file, mode) : api.extract(state.session!.csrf_token, { fixture_id: fixtureId, mode }), (result, epoch) => {
+    run('extract', () => file ? api.upload(state.session!.csrf_token, file, mode, state.session!.context_version) : api.extract(state.session!.csrf_token, { fixture_id: selectedFixtureId, mode }, state.session!.context_version), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch, cached: result.served_from_cache }); setFile(null);
     });
   }
@@ -252,7 +324,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     if (!offer || !state.session) return;
     const current = offer;
     invalidate();
-    run('correct', () => api.correct(state.session!.csrf_token, current.offer_id, name, value, current.version), (result, epoch) => {
+    run('correct', () => api.correct(state.session!.csrf_token, current.offer_id, name, value, current.version, state.session!.context_version), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch }); setSelected(ids => ids.filter(id => id !== current.offer_id));
     });
   }
@@ -260,17 +332,17 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     if (!offer || !state.session) return;
     const current = offer;
     invalidate();
-    run('save', () => api.save(state.session!.csrf_token, current.offer_id, current.version), (result, epoch) => {
+    run('save', () => api.save(state.session!.csrf_token, current.offer_id, current.version, state.session!.context_version), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch }); setSelected(ids => ids.includes(current.offer_id) ? ids : [...ids, current.offer_id]);
       if (!inputs.material) setInputs(old => ({ ...old, material: String(current.items[0]?.material?.value ?? '') }));
     });
   }
   function compare(event: FormEvent) {
     event.preventDefault();
-    if (!state.session || !chosen.length) return;
+    if (!state.session || !chosen.length || !coveredMaterial) return;
     const request: PlanRequest = { ...inputs, offer_ids: chosen.map(o => o.offer_id), expected_versions: Object.fromEntries(chosen.map(o => [o.offer_id, o.version])) };
     invalidate();
-    run('plan', () => api.plan(state.session!.csrf_token, request), (plan, epoch) => {
+    run('plan', () => api.plan(state.session!.csrf_token, request, state.session!.context_version), (plan, epoch) => {
       dispatch({ type: 'plan', plan, request, epoch });
       const controls = delayControlsForPlan(plan, request);
       setDelayOfferId(controls.offerId); setDelayDays(controls.days);
@@ -283,7 +355,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     if (!state.session || !baseline) return;
     const expected_versions = baseline.offer_versions;
     editScenario();
-    run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days }), (recovery, epoch) => {
+    run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days }, state.session!.context_version), (recovery, epoch) => {
       dispatch({ type: 'recovery', recovery, epoch });
       const controls = delayControlsForRecovery(recovery, selectedDelayOffer);
       setDelayOfferId(controls.offerId); setDelayDays(controls.days);
@@ -292,7 +364,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   function prepareRfq() {
     if (state.dirty || !state.session || !state.plan || !state.reviewed || !state.plan.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan.required_purchase_kg)) return;
     const plan = state.plan;
-    run('rfq', () => api.rfq(state.session!.csrf_token, { plan_id: plan.plan_id, expected_versions: plan.offer_versions, reviewed: true }), (rfq, epoch) => dispatch({ type: 'rfq', rfq, epoch }));
+    run('rfq', () => api.rfq(state.session!.csrf_token, { plan_id: plan.plan_id, expected_versions: plan.offer_versions, reviewed: true }, state.session!.context_version), (rfq, epoch) => dispatch({ type: 'rfq', rfq, epoch }));
   }
   function downloadRfq() {
     if (state.dirty || !state.rfq) return;
@@ -305,10 +377,10 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   function reset() {
     if (!state.session) return;
     const csrf = state.session.csrf_token;
-    dispatch({ type: 'reset-start' }); epochRef.current += 1; actionRef.current += 1;
+    dispatch({ type: 'reset-start' }); epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
     setBusy('reset'); setError(''); setSelected([]); setFile(null); setInputs(defaultInputs()); setDelayOfferId(''); setDelayDays('0');
     const epoch = epochRef.current;
-    api.reset(csrf).then(session => { if (epoch === epochRef.current) restoreSession(session, epoch); })
+    api.reset(csrf, state.session.context_version).then(session => { if (epoch === epochRef.current) restoreSession(session, epoch); })
       .catch(async e => { if (epoch !== epochRef.current) return; try { const session = await api.session(); if (epoch === epochRef.current) restoreSession(session, epoch); } catch { if (epoch === epochRef.current) setError(`${message(e)} Refresh the page to recover the session.`); } })
       .finally(() => { if (epoch === epochRef.current) setBusy(''); });
   }
@@ -324,13 +396,19 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   return <div className="demo-page"><header className="demo-masthead"><a className="demo-brand" href="/demo">CLOSED<span>SOURCE</span><sup> / DEMO</sup></a><span>QUOTE → FEASIBLE PLAN</span></header><main>
     <section className="demo-hero"><div><p className="demo-kicker">A working procurement walkthrough</p><h1>From supplier quote<br /><em>to buying decision.</em></h1></div><p>Review a source-backed quote, correct what the document leaves unclear, then compare which supplier can actually deliver within your limits.</p></section>
     <div className="demo-boundary"><strong>Synthetic documents</strong><span>Quotes and buyer inputs are for this demonstration. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
-    {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} {state.session && <button type="button" className="demo-link" onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button>}</div>}
-    <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : 'Opening session…'}</span></div>
-      <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={fixtureId} onChange={e => { setFixtureId(e.target.value); setFile(null); }}><option value="">Choose a document</option>{fixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
-        <label><span>Or upload one of these sample files</span><input type="file" accept=".pdf,.csv,application/pdf,text/csv" onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
+    {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · temporary and isolated workspace · context v{state.session?.context_version ?? 'unknown'}</p></div>
+      {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
+      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button></div>
+      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} />}
+    </section>}
+    {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button></div>}
+    <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
+      <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={selectedFixtureId} disabled={!!company && !supportedFixtures.length} onChange={e => { setFixtureId(e.target.value); setFile(null); }}><option value="">Choose a document</option>{supportedFixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
+        <label><span>Or upload one of these sample files</span><input type="file" accept=".pdf,.csv,application/pdf,text/csv" disabled={!!company && !supportedFixtures.length} onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
         <label><span>Extraction method</span><select value={mode} onChange={e => setMode(e.target.value as 'gemini' | 'rules')}><option value="gemini">Gemini · live extraction</option><option value="rules">Rules · comparison fallback</option></select></label>
-        <button className="demo-button" disabled={!state.session || !!busy}>{busy === 'extract' ? 'Reading quote…' : 'Read quote'}</button></form>
-      {fixtures.length > 0 && <div className="demo-fixtures"><span>Sample documents</span>{fixtures.map(f => <a key={f.id} href={f.download_url} download>{f.filename} ↗</a>)}</div>}
+        <button className="demo-button" disabled={!state.session || !!busy || (!!company && !supportedFixtures.length)}>{busy === 'extract' ? 'Reading quote…' : 'Read quote'}</button></form>
+      {company && !supportedFixtures.length && <p className="demo-alert">This company has no runnable quote fixture. Explore its fictional operations and observed news; quote comparison is unavailable here.</p>}
+      {supportedFixtures.length > 0 && <div className="demo-fixtures"><span>Sample documents</span>{supportedFixtures.map(f => <a key={f.id} href={f.download_url} download>{f.filename} ↗</a>)}</div>}
       {state.session && !state.session.provider.available && <p className="demo-provider">Gemini is currently unavailable. Rule extraction can still be tried and will be labelled separately.</p>}
     </section>
     {state.offers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes in this session">{state.offers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === state.focusedId ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
@@ -338,9 +416,9 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     <section className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
-      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session} onClick={() => { if (!state.session) return; invalidate(); setInputs(sampleBuyerInputs()); }}>Use sample buyer inputs</button><span>Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.</span></div>
+      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !company.buyer_defaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(company?.buyer_defaults ? { ...canonicalBuyerState({ ...state.session, plan_request: null, recovery: null }).inputs } : sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? company.buyer_defaults ? 'Dated synthetic buyer assumptions from this fictional company. Edit any input below; kg-only quote coverage still applies.' : 'No buyer defaults or runnable quote scenario are available for this company.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
       <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{([['material', 'Material'], ['quantity_kg', 'Needed quantity (kg)'], ['current_stock_kg', 'Current stock (kg)'], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_kg', 'Extra cost per kg']] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity_kg', 'current_stock_kg', 'budget', 'additional_cost_per_kg'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
-        <p className="demo-assumption">Extra cost is your synthetic per-kg assumption; total cost includes it but does not prove full freight or tariffs. Scenario FX reference when conversion applies: EUR 1 = USD 1.25, dated 2026-10-14 (synthetic). Budget and price are decimal amounts in the reporting currency.</p><button className="demo-button" disabled={!state.session || !chosen.length || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
+        <p className="demo-assumption">Extra cost is your synthetic per-kg assumption; total cost includes it but does not prove full freight or tariffs. Scenario FX reference when conversion applies: EUR 1 = USD 1.25, dated 2026-10-14 (synthetic). Budget and price are decimal amounts in the reporting currency. Current quote planning is kg-only.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
     {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>

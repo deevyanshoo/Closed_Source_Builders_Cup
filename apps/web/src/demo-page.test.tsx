@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, initialDemoState, PlanResults, sampleBuyerInputs } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, initialDemoState, PlanResults, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
 import type { DemoSession, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
 const offer = (version: number, status = 'corrected'): OfferView => ({
@@ -15,8 +15,69 @@ const request: PlanRequest = { offer_ids: ['q1'], expected_versions: { q1: 1 }, 
 const selectedPlan: PlanView = { ...plan, selected_offer_id: 'q1', total_cost: '86000', required_purchase_kg: '1000', alternatives: [{ offer_id: 'q1', supplier: 'Swift', feasible: true, reasons: [], arrival_date: '2026-10-29', unit_price_per_kg: '84', total_cost: '86000', quantity_kg: '1000' }] };
 const recovery: RecoveryView = { comparison_id: 'c1', synthetic: true, baseline: { ...selectedPlan, plan_id: 'p1', total_cost: '82000' }, scenario: { ...selectedPlan, plan_id: 'p2' }, baseline_request: request, scenario_request: { ...request, delay_days_by_offer: { q1: 20 } }, cost_delta: '4000', selection_changed: true, outcome: 'changed', replayed: false };
 const rfq: RfqView = { draft_id: 'd1', plan_id: 'p2', offer_versions: { q1: 1 }, synthetic: true, status: 'draft_unsent', supplier: 'Swift', material: 'copper', quantity_kg: '1000', need_by: '2026-10-30', reporting_currency: 'USD', total_cost: '86000', created_at: '2026-10-14T10:00:00Z', text: 'Synthetic unsent request for quotation' };
+const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };
+const companySession = { ...session, offers: [offer(1, 'saved')], company, context_version: 1, plan: selectedPlan, plan_request: request, rfq };
+const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', materials: [{ ...company.materials[0], material_id: 'cotton', name: 'Cotton' }], quote_coverage: { materials: [], fixture_ids: [], note: 'No runnable quote coverage.' }, buyer_defaults: null };
 
 describe('demo response state', () => {
+  it('clears prior company state and ignores late session/news responses after a switch', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const switching = applyDemoResult(loaded, { type: 'company-start' });
+    expect(switching).toMatchObject({ session: null, offers: [], plan: null, rfq: null, news: null });
+    const next = applyDemoResult(switching, { type: 'session', session: { ...companySession, company: emptyCompany, context_version: 2, offers: [], plan: null, plan_request: null, rfq: null }, epoch: 1 });
+    expect(applyDemoResult(next, { type: 'session', session: companySession, epoch: 0 }).session?.company?.company_id).toBe('loomworks');
+    const oldNews = { company_id: 'solara-cables', context_version: 1, checked_at: '2026-10-14T10:00:00Z', cache_state: 'fresh', sources: [], items: [], fx: [], limitations: [] };
+    expect(applyDemoResult(next, { type: 'news', news: oldNews, sessionId: 's1', epoch: 0 }).news).toBeNull();
+    expect(applyDemoResult(next, { type: 'news', news: oldNews, sessionId: 's1', epoch: 1 }).news).toBeNull();
+    const currentNews = { ...oldNews, company_id: 'loomworks', context_version: 2 };
+    expect(applyDemoResult(next, { type: 'news', news: currentNews, sessionId: 's1', epoch: 1 }).news?.company_id).toBe('loomworks');
+    const switchingBack = applyDemoResult(next, { type: 'company-start' });
+    const restored = applyDemoResult(switchingBack, { type: 'session', session: { ...companySession, context_version: 3 }, epoch: 2 });
+    expect(restored.offers.map(item => item.offer_id)).toEqual(['q1']);
+    expect(restored.plan?.plan_id).toBe('p1');
+    expect(restored.rfq?.draft_id).toBe('d1');
+  });
+
+  it('recovers the authoritative session after a lost company-switch response and leaves failure to the caller when recovery fails', async () => {
+    const serverSession = { ...companySession, session_id: 's2', company: emptyCompany, context_version: 2, offers: [], plan: null, plan_request: null, rfq: null };
+    const recovered = await selectCompanyWithRecovery(
+      async () => { throw new Error('response lost'); },
+      async () => serverSession,
+    );
+    expect(recovered).toEqual(serverSession);
+    await expect(selectCompanyWithRecovery(
+      async () => { throw new Error('response lost'); },
+      async () => { throw new Error('session unavailable'); },
+    )).rejects.toThrow('session unavailable');
+    expect(applyDemoResult(applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 }), { type: 'company-start' }))
+      .toMatchObject({ session: null, offers: [], plan: null, rfq: null, news: null });
+  });
+
+  it('binds news to session identity and captured epoch, including a buyer edit during a pending read', () => {
+    const news = { company_id: 'solara-cables', context_version: 1, checked_at: '2026-10-14T10:00:00Z', cache_state: 'fresh', sources: [], items: [], fx: [], limitations: [] };
+    const s1 = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const withNews = applyDemoResult(s1, { type: 'news', news, sessionId: 's1', epoch: 0 });
+    expect(withNews.news).toEqual(news);
+    const s2 = applyDemoResult(withNews, { type: 'session', session: { ...companySession, session_id: 's2' }, epoch: 0 });
+    expect(s2.news).toBeNull();
+    expect(applyDemoResult(s2, { type: 'news', news, sessionId: 's1', epoch: 0 }).news).toBeNull();
+    expect(applyDemoResult(s2, { type: 'news', news, sessionId: 's2', epoch: -1 }).news).toBeNull();
+    expect(applyDemoResult(s2, { type: 'news', news, sessionId: 's2', epoch: 0 }).news).toEqual(news);
+    const edited = applyDemoResult(s1, { type: 'invalidate' });
+    expect(applyDemoResult(edited, { type: 'news', news, sessionId: 's1', epoch: 0 }).news).toBeNull();
+    expect(applyDemoResult(edited, { type: 'news', news, sessionId: 's1', epoch: 1 }).news).toEqual(news);
+  });
+
+  it('shows company inventory/orders and blocks unsupported quote planning', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: emptyCompany, plan: null, plan_request: null, rfq: null }, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    expect(html).toContain('Loomworks');
+    expect(html).toContain('Cotton');
+    expect(html).toContain('order-1');
+    expect(html).toContain('No runnable quote coverage.');
+    expect(html).toMatch(/disabled=""[^>]*>Run comparison/);
+    expect(html).toContain('News workspace');
+  });
   it('adds a second supplier delay without losing the first and can remove all delays', () => {
     expect(delayRequest({ q1: 20 }, 'q2', '10')).toEqual({ q1: 20, q2: 10 });
     expect(delayRequest({ q1: 20, q2: 10 }, 'q2', '0')).toEqual({ q1: 20, q2: 0 });

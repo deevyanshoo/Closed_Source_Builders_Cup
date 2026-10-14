@@ -144,9 +144,17 @@ def correct_offer(view: dict, *, field: str, value, today: date) -> dict:
         raise _offer_error(exc) from None
     if problems:
         raise DemoError("invalid_value", f"{field}: " + "; ".join(problems))
-    previous = {"status": current["status"], "value": current["value"]}
+    previous = {"status": current["status"], "value": copy.deepcopy(current["value"])}
+    if "original" in current:
+        original = copy.deepcopy(current["original"])
+    elif current["status"] == "corrected":
+        # Older corrected offers have no recoverable document-backed snapshot.
+        original = {"value": None, "status": "unavailable", "source": "unknown", "evidence": []}
+    else:
+        original = {key: copy.deepcopy(current.get(key)) for key in ("value", "status", "source", "evidence")}
     current.update({"status": "corrected", "value": value, "source": "user", "evidence": [],
                     "evidence_status": "user_entered_without_document_evidence", "previous": previous,
+                    "original": original,
                     "corrected_by": "session_reviewer", "corrected_at": today.isoformat(), "reasons": []})
     updated["normalized"] = lc.compute_normalized(updated, today, rate_lookup=synthetic_rate)
     updated["version"] += 1

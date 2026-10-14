@@ -1,6 +1,7 @@
 """The hosted synthetic quote boundary, exercised without a provider call."""
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import date
 
 import pytest
@@ -60,6 +61,40 @@ def test_correction_recomputes_normalized_price_and_rejects_invalid_type():
     with pytest.raises(api.DemoError) as err:
         api.correct_offer(updated, field="settlement_currency", value="usd", today=TODAY)
     assert err.value.code == "invalid_value"
+
+
+def test_first_pricing_correction_preserves_original_extracted_field_with_evidence():
+    api = service()
+    offer = api.new_offer(api.extract_fixture("express-copper", mode="rules", as_of=TODAY),
+                          offer_id="price-first", today=TODAY)
+    extracted = deepcopy(offer["items"][0]["pricing"])
+    assert extracted["value"]["unit_price"] == {"amount": "10.50", "currency": "USD"}
+    revised = api.correct_offer(offer, field="items[0].pricing", value={
+        "type": "fixed", "unit_price": {"amount": "11.00", "currency": "USD"}, "per_unit": "kg"},
+        today=TODAY)
+    pricing = revised["items"][0]["pricing"]
+    assert pricing["original"] == {key: extracted[key] for key in ("value", "status", "source", "evidence")}
+    assert pricing["status"] == "corrected" and pricing["evidence"] == []
+    assert pricing["original"]["evidence"] and pricing["original"]["source"] == "rules"
+    assert offer["items"][0]["pricing"] == extracted
+
+
+def test_repeated_pricing_corrections_keep_first_document_snapshot():
+    api = service()
+    offer = api.new_offer(api.extract_fixture("express-copper", mode="rules", as_of=TODAY),
+                          offer_id="price-repeated", today=TODAY)
+    original = deepcopy(offer["items"][0]["pricing"])
+    first = api.correct_offer(offer, field="items[0].pricing", value={
+        "type": "fixed", "unit_price": {"amount": "11.00", "currency": "USD"}, "per_unit": "kg"},
+        today=TODAY)
+    second = api.correct_offer(first, field="items[0].pricing", value={
+        "type": "fixed", "unit_price": {"amount": "12.00", "currency": "USD"}, "per_unit": "kg"},
+        today=TODAY)
+    pricing = second["items"][0]["pricing"]
+    assert pricing["original"] == {key: original[key] for key in ("value", "status", "source", "evidence")}
+    assert pricing["previous"]["value"]["unit_price"]["amount"] == "11.00"
+    assert pricing["value"]["unit_price"]["amount"] == "12.00"
+    assert api.save_offer(second, today=TODAY)["items"][0]["pricing"]["original"] == pricing["original"]
 
 
 def test_settlement_and_fixed_price_currency_conflict_blocks_save():

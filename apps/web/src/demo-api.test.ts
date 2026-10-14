@@ -46,4 +46,23 @@ describe('hosted demo API', () => {
     const [, options] = send.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(options.body as string)).toMatchObject({ offer_ids: ['q1'], expected_versions: { q1: 4 }, quantity_kg: '1000.25', budget: '9999.99' });
   });
+
+  it('sends exact recovery and reviewed RFQ bodies with generated keys', async () => {
+    const send = vi.fn(async () => json({ comparison_id: 'c1', draft_id: 'd1' }));
+    const api = createDemoApi(send, () => 'generated');
+    await api.recovery('csrf', { baseline_plan_id: 'p1', expected_versions: { q1: 2 }, delay_days_by_offer: { q1: 20 } });
+    await api.rfq('csrf', { plan_id: 'p2', expected_versions: { q1: 2 }, reviewed: true });
+    const calls = send.mock.calls as unknown as [string, RequestInit][];
+    expect(calls[0][0]).toBe('/api/demo/recovery');
+    expect(JSON.parse(calls[0][1].body as string)).toEqual({ baseline_plan_id: 'p1', expected_versions: { q1: 2 }, delay_days_by_offer: { q1: 20 }, idempotency_key: 'generated' });
+    expect(calls[1][0]).toBe('/api/demo/rfq');
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ plan_id: 'p2', expected_versions: { q1: 2 }, reviewed: true, idempotency_key: 'generated' });
+  });
+
+  it('downloads only the requested draft as text', async () => {
+    const send = vi.fn(async () => new Response('Synthetic RFQ draft'));
+    const api = createDemoApi(send);
+    expect(await (await api.downloadRfq('draft/1')).text()).toBe('Synthetic RFQ draft');
+    expect((send.mock.calls as unknown as [string, RequestInit][])[0][0]).toBe('/api/demo/rfq/draft%2F1/download');
+  });
 });

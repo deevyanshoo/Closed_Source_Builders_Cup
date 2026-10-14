@@ -1,29 +1,50 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView } from './demo-api';
+import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import './demo.css';
 
-export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; focusedId: string | null };
-export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, focusedId: null };
+export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
+export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false, dirty: false, focusedId: null };
 export type DemoAction = { type: 'session'; session: DemoSession; epoch: number } | { type: 'reset-start' } |
-  { type: 'offer'; offer: OfferView; epoch: number; cached?: boolean } | { type: 'plan'; plan: PlanView; epoch: number } | { type: 'focus'; offerId: string };
+  { type: 'offer'; offer: OfferView; epoch: number; cached?: boolean } | { type: 'plan'; plan: PlanView; request?: PlanRequest; epoch: number } |
+  { type: 'recovery'; recovery: RecoveryView; epoch: number } | { type: 'rfq'; rfq: RfqView; epoch: number } |
+  { type: 'reviewed'; value: boolean } | { type: 'invalidate' } | { type: 'scenario-edit' } | { type: 'focus'; offerId: string };
+
+const currentVersions = (offers: OfferView[], versions: Record<string, number>) => Object.entries(versions).every(([id, version]) => offers.some(o => o.offer_id === id && o.version === version && acceptedStatus(o.status)));
 
 export function applyDemoResult(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset-start') return { ...initialDemoState, epoch: state.epoch + 1 };
+  if (action.type === 'invalidate') return { ...state, epoch: state.epoch + 1, plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false, dirty: true };
+  if (action.type === 'scenario-edit') return { ...state, epoch: state.epoch + 1, rfq: null, reviewed: false, dirty: true };
   if (action.type === 'focus') return { ...state, focusedId: action.offerId };
+  if (action.type === 'reviewed') return state.dirty ? state : { ...state, reviewed: action.value };
   if (action.epoch !== state.epoch) return state;
-  if (action.type === 'session') return { ...state, session: action.session, offers: action.session.offers, plan: null,
-    focusedId: action.session.offers.some(o => o.offer_id === state.focusedId) ? state.focusedId : action.session.offers.at(-1)?.offer_id ?? null };
+  if (action.type === 'session') {
+    const request = action.session.plan_request ?? action.session.recovery?.baseline_request ?? null;
+    const recovery = request ? action.session.recovery ?? null : null;
+    const plan = request ? recovery?.scenario ?? action.session.plan ?? null : null;
+    return { ...state, session: action.session, offers: action.session.offers, dirty: false,
+      plan, planRequest: request, recovery, rfq: state.dirty ? null : action.session.rfq ?? null, reviewed: false,
+      focusedId: action.session.offers.some(o => o.offer_id === state.focusedId) ? state.focusedId : action.session.offers.at(-1)?.offer_id ?? null };
+  }
   if (action.type === 'offer') {
     const prior = state.offers.find(o => o.offer_id === action.offer.offer_id);
     if (prior && prior.version >= action.offer.version) return state;
     const nextOffer = { ...action.offer, served_from_cache: action.cached ?? action.offer.served_from_cache ?? prior?.served_from_cache };
-    return { ...state, offers: [...state.offers.filter(o => o.offer_id !== action.offer.offer_id), nextOffer], focusedId: action.offer.offer_id, plan: null };
+    return { ...state, offers: [...state.offers.filter(o => o.offer_id !== action.offer.offer_id), nextOffer], focusedId: action.offer.offer_id, plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false };
   }
   if (action.type === 'plan') {
-    if (Object.entries(action.plan.offer_versions).some(([id, version]) => state.offers.find(o => o.offer_id === id)?.version !== version)) return state;
-    return { ...state, plan: action.plan };
+    if (!currentVersions(state.offers, action.plan.offer_versions)) return state;
+    return { ...state, plan: action.plan, planRequest: action.request ?? null, recovery: null, rfq: null, reviewed: false, dirty: false };
+  }
+  if (action.type === 'recovery') {
+    if ((state.recovery?.baseline ?? state.plan)?.plan_id !== action.recovery.baseline.plan_id || !currentVersions(state.offers, action.recovery.baseline.offer_versions) || !currentVersions(state.offers, action.recovery.scenario.offer_versions)) return state;
+    return { ...state, plan: action.recovery.scenario, recovery: action.recovery, rfq: null, reviewed: false, dirty: false };
+  }
+  if (action.type === 'rfq') {
+    if (state.dirty || state.plan?.plan_id !== action.rfq.plan_id || !currentVersions(state.offers, action.rfq.offer_versions) || !state.reviewed) return state;
+    return { ...state, rfq: action.rfq };
   }
   return state;
 }
@@ -34,10 +55,32 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const defaultInputs = () => ({ material: '', quantity_kg: '', current_stock_kg: '0', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_kg: '0' });
+export function canonicalBuyerState(session: DemoSession) {
+  const request = session.plan_request ?? session.recovery?.baseline_request;
+  const delayControls = session.recovery ? delayControlsForRecovery(session.recovery) : session.plan && request ? delayControlsForPlan(session.plan, request) : { offerId: '', days: '0' };
+  return {
+    selected: request?.offer_ids.filter(id => session.offers.some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
+    inputs: request ? { material: request.material, quantity_kg: request.quantity_kg, current_stock_kg: request.current_stock_kg, need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_kg: request.additional_cost_per_kg } : defaultInputs(),
+    delayControls,
+  };
+}
 export const sampleBuyerInputs = () => ({ material: 'copper', quantity_kg: '10000', current_stock_kg: '2000', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_kg: '0.25' });
 const words = (s: string) => s.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const message = (error: unknown) => error instanceof DemoApiError ? error.message : 'Something went wrong. Please try again.';
 const acceptedStatus = (status: string) => status === 'saved' || status === 'used_in_plan';
+export const delayRequest = (prior: Record<string, number>, offerId: string, days: string): Record<string, number> =>
+  offerId && /^\d+$/.test(days) && Number(days) <= 3650 ? { ...prior, [offerId]: Number(days) } : {};
+export function delayControlsForPlan(plan: PlanView, request: PlanRequest): { offerId: string; days: string } {
+  return { offerId: plan.selected_offer_id ?? request.offer_ids[0] ?? '', days: '0' };
+}
+export function delayControlsForRecovery(recovery: RecoveryView, preferredOfferId = ''): { offerId: string; days: string } {
+  const delays = recovery.scenario_request.delay_days_by_offer ?? {};
+  const delayedIds = Object.keys(delays);
+  const offerId = delayedIds.includes(preferredOfferId) ? preferredOfferId :
+    recovery.baseline.selected_offer_id && delayedIds.includes(recovery.baseline.selected_offer_id) ? recovery.baseline.selected_offer_id :
+      delayedIds[0] ?? recovery.baseline.selected_offer_id ?? recovery.baseline_request.offer_ids[0] ?? '';
+  return { offerId, days: String(delays[offerId] ?? 0) };
+}
 
 function show(value: unknown): string {
   if (value == null || value === '') return 'Not stated';
@@ -131,6 +174,20 @@ export function PlanResults({ plan, offers }: { plan: PlanView; offers: OfferVie
   </section>;
 }
 
+function PlanSnapshot({ title, plan, offers }: { title: string; plan: PlanView; offers: OfferView[] }) {
+  const choice = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
+  const stock = /^0(?:\.0+)?$/.test(plan.required_purchase_kg);
+  return <article className="demo-snapshot"><h3>{title}</h3><dl><dt>Supplier</dt><dd>{stock ? 'No purchase needed; stock covers this need' : choice?.supplier ?? 'No feasible quote'}</dd><dt>Arrival</dt><dd>{choice?.arrival_date ?? 'No selected arrival'}</dd><dt>Buyer total</dt><dd>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</dd><dt>Feasibility</dt><dd>{stock ? 'Stock covers need' : choice ? 'Feasible' : 'No feasible quote'}</dd></dl>
+    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{a.supplier}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{a.offer_id === plan.selected_offer_id ? 'Selected' : a.feasible ? 'Feasible alternative' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}</article>;
+}
+
+export function RecoveryResults({ recovery, offers }: { recovery: RecoveryView; offers: OfferView[] }) {
+  return <section className="demo-results demo-recovery-results" aria-label="Hypothetical delay comparison"><span className="demo-kicker">05 / Hypothetical supplier delay</span><h2>Original and changed plan</h2><p>This is a synthetic what-if comparison. No shipment delay or production effect has been observed.</p>
+    <div className="demo-paired"><PlanSnapshot title="Original baseline" plan={recovery.baseline} offers={offers} /><PlanSnapshot title="Hypothetical scenario" plan={recovery.scenario} offers={offers} /></div>
+    <p><strong>Buyer cost change:</strong> {recovery.cost_delta == null ? 'Unavailable because a plan has no selection' : `${recovery.cost_delta} ${recovery.scenario.reporting_currency}`} · Outcome: {words(recovery.outcome)}. This is an illustrative cost difference, not customer savings.</p>
+  </section>;
+}
+
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
@@ -139,18 +196,28 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [mode, setMode] = useState<'gemini' | 'rules'>('gemini');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
-  const [inputs, setInputs] = useState(defaultInputs);
+  const [selected, setSelected] = useState<string[]>(() => initialState.session ? canonicalBuyerState(initialState.session).selected : []);
+  const [inputs, setInputs] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).inputs : defaultInputs());
+  const [delayOfferId, setDelayOfferId] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).delayControls.offerId : '');
+  const [delayDays, setDelayDays] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).delayControls.days : '0');
   const epochRef = useRef(initialState.epoch);
   const actionRef = useRef(0);
   const offer = state.offers.find(o => o.offer_id === state.focusedId) ?? null;
   const accepted = state.offers.filter(o => acceptedStatus(o.status));
   const chosen = accepted.filter(o => selected.includes(o.offer_id));
 
+  function restoreSession(session: DemoSession, epoch: number) {
+    const buyer = canonicalBuyerState(session);
+    dispatch({ type: 'session', session, epoch });
+    setSelected(buyer.selected); setInputs(buyer.inputs);
+    setDelayOfferId(buyer.delayControls.offerId);
+    setDelayDays(buyer.delayControls.days);
+  }
+
   useEffect(() => {
     let cancelled = false;
     const epoch = epochRef.current;
-    if (!initialState.session) api.session().then(session => { if (!cancelled) dispatch({ type: 'session', session, epoch }); }).catch(e => { if (!cancelled) setError(message(e)); });
+    if (!initialState.session) api.session().then(session => { if (!cancelled && epoch === epochRef.current) restoreSession(session, epoch); }).catch(e => { if (!cancelled && epoch === epochRef.current) setError(message(e)); });
     api.fixtures().then(list => { if (!cancelled) { setFixtures(list); setFixtureId(list[0]?.id ?? ''); } }).catch(e => { if (!cancelled) setError(message(e)); });
     return () => { cancelled = true; };
   }, [initialState.session]);
@@ -163,10 +230,20 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     finally { if (epoch === epochRef.current && action === actionRef.current) setBusy(''); }
   }
 
+  function invalidate() {
+    epochRef.current += 1; actionRef.current += 1;
+    dispatch({ type: 'invalidate' }); setBusy(''); setError('');
+  }
+  function editScenario() {
+    epochRef.current += 1; actionRef.current += 1;
+    dispatch({ type: 'scenario-edit' }); setBusy(''); setError('');
+  }
+
   function extract(event: FormEvent) {
     event.preventDefault();
     if (!state.session) return;
     if (!file && !fixtureId) { setError('Choose a synthetic quote or upload one of the listed documents.'); return; }
+    invalidate();
     run('extract', () => file ? api.upload(state.session!.csrf_token, file, mode) : api.extract(state.session!.csrf_token, { fixture_id: fixtureId, mode }), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch, cached: result.served_from_cache }); setFile(null);
     });
@@ -174,6 +251,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   function correct(name: string, value: unknown) {
     if (!offer || !state.session) return;
     const current = offer;
+    invalidate();
     run('correct', () => api.correct(state.session!.csrf_token, current.offer_id, name, value, current.version), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch }); setSelected(ids => ids.filter(id => id !== current.offer_id));
     });
@@ -181,6 +259,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   function save() {
     if (!offer || !state.session) return;
     const current = offer;
+    invalidate();
     run('save', () => api.save(state.session!.csrf_token, current.offer_id, current.version), (result, epoch) => {
       dispatch({ type: 'offer', offer: result.offer, epoch }); setSelected(ids => ids.includes(current.offer_id) ? ids : [...ids, current.offer_id]);
       if (!inputs.material) setInputs(old => ({ ...old, material: String(current.items[0]?.material?.value ?? '') }));
@@ -190,19 +269,51 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     event.preventDefault();
     if (!state.session || !chosen.length) return;
     const request: PlanRequest = { ...inputs, offer_ids: chosen.map(o => o.offer_id), expected_versions: Object.fromEntries(chosen.map(o => [o.offer_id, o.version])) };
-    run('plan', () => api.plan(state.session!.csrf_token, request), (plan, epoch) => dispatch({ type: 'plan', plan, epoch }));
+    invalidate();
+    run('plan', () => api.plan(state.session!.csrf_token, request), (plan, epoch) => {
+      dispatch({ type: 'plan', plan, request, epoch });
+      const controls = delayControlsForPlan(plan, request);
+      setDelayOfferId(controls.offerId); setDelayDays(controls.days);
+    });
+  }
+  const baseline = state.recovery?.baseline ?? state.plan;
+  const delayOffers = baseline ? accepted.filter(o => baseline.offer_versions[o.offer_id] === o.version) : [];
+  const selectedDelayOffer = delayOffers.some(o => o.offer_id === delayOfferId) ? delayOfferId : delayOffers[0]?.offer_id ?? '';
+  function compareDelay(days: Record<string, number>) {
+    if (!state.session || !baseline) return;
+    const expected_versions = baseline.offer_versions;
+    editScenario();
+    run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days }), (recovery, epoch) => {
+      dispatch({ type: 'recovery', recovery, epoch });
+      const controls = delayControlsForRecovery(recovery, selectedDelayOffer);
+      setDelayOfferId(controls.offerId); setDelayDays(controls.days);
+    });
+  }
+  function prepareRfq() {
+    if (state.dirty || !state.session || !state.plan || !state.reviewed || !state.plan.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan.required_purchase_kg)) return;
+    const plan = state.plan;
+    run('rfq', () => api.rfq(state.session!.csrf_token, { plan_id: plan.plan_id, expected_versions: plan.offer_versions, reviewed: true }), (rfq, epoch) => dispatch({ type: 'rfq', rfq, epoch }));
+  }
+  function downloadRfq() {
+    if (state.dirty || !state.rfq) return;
+    run('download-rfq', () => api.downloadRfq(state.rfq!.draft_id), blob => {
+      const url = URL.createObjectURL(blob), anchor = document.createElement('a');
+      anchor.href = url; anchor.download = 'synthetic-rfq-draft.txt'; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    });
   }
   function reset() {
     if (!state.session) return;
     const csrf = state.session.csrf_token;
     dispatch({ type: 'reset-start' }); epochRef.current += 1; actionRef.current += 1;
-    setBusy('reset'); setError(''); setSelected([]); setFile(null); setInputs(defaultInputs());
+    setBusy('reset'); setError(''); setSelected([]); setFile(null); setInputs(defaultInputs()); setDelayOfferId(''); setDelayDays('0');
     const epoch = epochRef.current;
-    api.reset(csrf).then(session => { if (epoch === epochRef.current) dispatch({ type: 'session', session, epoch }); })
-      .catch(async e => { if (epoch !== epochRef.current) return; try { const session = await api.session(); if (epoch === epochRef.current) dispatch({ type: 'session', session, epoch }); } catch { if (epoch === epochRef.current) setError(`${message(e)} Refresh the page to recover the session.`); } })
+    api.reset(csrf).then(session => { if (epoch === epochRef.current) restoreSession(session, epoch); })
+      .catch(async e => { if (epoch !== epochRef.current) return; try { const session = await api.session(); if (epoch === epochRef.current) restoreSession(session, epoch); } catch { if (epoch === epochRef.current) setError(`${message(e)} Refresh the page to recover the session.`); } })
       .finally(() => { if (epoch === epochRef.current) setBusy(''); });
   }
   function exportReport() {
+    if (state.dirty) return;
     run('export', () => api.exportReport(), blob => {
       const url = URL.createObjectURL(blob), anchor = document.createElement('a');
       anchor.href = url; anchor.download = 'closed-source-demo-report.json'; anchor.click();
@@ -213,7 +324,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   return <div className="demo-page"><header className="demo-masthead"><a className="demo-brand" href="/demo">CLOSED<span>SOURCE</span><sup> / DEMO</sup></a><span>QUOTE → FEASIBLE PLAN</span></header><main>
     <section className="demo-hero"><div><p className="demo-kicker">A working procurement walkthrough</p><h1>From supplier quote<br /><em>to buying decision.</em></h1></div><p>Review a source-backed quote, correct what the document leaves unclear, then compare which supplier can actually deliver within your limits.</p></section>
     <div className="demo-boundary"><strong>Synthetic documents</strong><span>Quotes and buyer inputs are for this demonstration. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
-    {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} {state.session && <button type="button" className="demo-link" onClick={() => run('refresh', () => api.session(), (session, epoch) => dispatch({ type: 'session', session, epoch }))}>Refresh session</button>}</div>}
+    {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} {state.session && <button type="button" className="demo-link" onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button>}</div>}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : 'Opening session…'}</span></div>
       <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={fixtureId} onChange={e => { setFixtureId(e.target.value); setFile(null); }}><option value="">Choose a document</option>{fixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
         <label><span>Or upload one of these sample files</span><input type="file" accept=".pdf,.csv,application/pdf,text/csv" onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
@@ -226,12 +337,26 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     {offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
     <section className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
-      <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id))} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
-      <div className="demo-sample"><button type="button" className="demo-link" onClick={() => setInputs(sampleBuyerInputs())}>Use sample buyer inputs</button><span>Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.</span></div>
-      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{([['material', 'Material'], ['quantity_kg', 'Needed quantity (kg)'], ['current_stock_kg', 'Current stock (kg)'], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_kg', 'Extra cost per kg']] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required value={inputs[name]} onChange={e => setInputs(old => ({ ...old, [name]: e.target.value }))} inputMode={['quantity_kg', 'current_stock_kg', 'budget', 'additional_cost_per_kg'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
+      <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
+      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session} onClick={() => { if (!state.session) return; invalidate(); setInputs(sampleBuyerInputs()); }}>Use sample buyer inputs</button><span>Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.</span></div>
+      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{([['material', 'Material'], ['quantity_kg', 'Needed quantity (kg)'], ['current_stock_kg', 'Current stock (kg)'], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_kg', 'Extra cost per kg']] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity_kg', 'current_stock_kg', 'budget', 'additional_cost_per_kg'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-kg assumption; total cost includes it but does not prove full freight or tariffs. Scenario FX reference when conversion applies: EUR 1 = USD 1.25, dated 2026-10-14 (synthetic). Budget and price are decimal amounts in the reporting currency.</p><button className="demo-button" disabled={!state.session || !chosen.length || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
-    {state.plan && <PlanResults plan={state.plan} offers={state.offers} />}
-    <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p></div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
+    {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
+    {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
+      <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. A delay changes only the selected supplier arrival assumption.</p>
+      <div className="demo-delay-controls"><label><span>Accepted supplier</span><select value={selectedDelayOffer} onChange={e => { editScenario(); setDelayOfferId(e.target.value); setDelayDays(String(state.recovery?.scenario_request.delay_days_by_offer?.[e.target.value] ?? 0)); }}>{delayOffers.map(o => <option key={o.offer_id} value={o.offer_id}>{o.document.filename}</option>)}</select></label><label><span>Hypothetical delay (whole days)</span><input type="number" min="0" max="3650" step="1" value={delayDays} onChange={e => { editScenario(); setDelayDays(e.target.value); }} /></label></div>
+      <p className="demo-assumption">Scenario: {selectedDelayOffer ? `${delayOffers.find(o => o.offer_id === selectedDelayOffer)?.document.filename} delayed ${delayDays || '0'} days` : 'Choose an accepted supplier'}{state.recovery && Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).length ? ` · Current comparison: ${Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).map(([id, days]) => `${delayOffers.find(o => o.offer_id === id)?.document.filename ?? id} +${days} days`).join(', ')}` : ''}; the original quote and evidence remain unchanged.</p>
+      <div className="demo-actions"><button type="button" className="demo-button" disabled={!selectedDelayOffer || !/^\d+$/.test(delayDays) || Number(delayDays) > 3650 || !!busy} onClick={() => compareDelay(delayRequest(state.recovery?.scenario_request.delay_days_by_offer ?? {}, selectedDelayOffer, delayDays))}>{busy === 'recovery' ? 'Comparing delay…' : 'Compare hypothetical delay'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={() => compareDelay({})}>Remove delay</button></div>
+    </section>}
+    {state.recovery && <RecoveryResults recovery={state.recovery} offers={state.offers} />}
+    <section className="demo-planning demo-rfq"><div className="demo-heading"><div><span className="demo-kicker">06 / Prepare an RFQ draft</span><h2>Review before you download</h2></div><span className="demo-session">Synthetic · unsent · no order commitment</span></div>
+      <p className="demo-muted">The draft uses the current selected plan and quote. The buyer total is a scenario comparison, not the supplier's commercial quote.</p>
+      {state.dirty && <p className="demo-alert">Inputs changed. Run a new comparison before reviewing, preparing or downloading an RFQ draft.</p>}
+      <label className="demo-review-check"><input type="checkbox" checked={state.reviewed} disabled={state.dirty || !state.plan?.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan?.required_purchase_kg ?? '0')} onChange={e => dispatch({ type: 'reviewed', value: e.target.checked })} />I reviewed this plan and understand the RFQ is an unsent draft</label>
+      <div className="demo-actions"><button type="button" className="demo-button" disabled={state.dirty || !state.reviewed || !state.plan?.selected_offer_id || !!busy} onClick={prepareRfq}>{busy === 'rfq' ? 'Preparing draft…' : 'Prepare unsent RFQ'}</button></div>
+      {state.rfq && <div className="demo-draft"><p><strong>Draft for {state.rfq.supplier}</strong> · {state.rfq.status.replace('_', ' ')} · current reviewed comparison</p><pre>{state.rfq.text}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
+    </section>
+    <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
   </main><footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

@@ -203,11 +203,35 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         return {'model': assumptions()['news']['gemini_model'],
                 'available': os.getenv('OFFLINE', '').lower() not in ('1', 'true')}
 
+    def clear_derived(value):
+        value.last_plan = None
+        value.plan_request = None
+        value.recovery = None
+        value.rfq = None
+
+    def active_plan(value):
+        return value.recovery['scenario'] if value.recovery is not None else value.last_plan
+
+    def current_offers(value, plan, expected_versions, *, today):
+        from procure.offers import lifecycle as lc
+        if not isinstance(expected_versions, dict) or expected_versions != plan.get('offer_versions'):
+            raise SessionError('stale_version', 'Offer versions changed. Compare again.', 409)
+        ids = list(plan['offer_versions'])
+        selected = [owned(value, offer_id) for offer_id in ids]
+        for offer in selected:
+            version(offer, expected_versions[offer['offer_id']])
+            if offer.get('status') != 'saved' or lc.blocking_reasons(offer, today):
+                raise SessionError('stale_plan', 'A reviewed quote is no longer current.', 409)
+        return selected
+
     def view(value):
         with value.lock:
             return {'session_id': value.session_id, 'csrf_token': value.csrf_token,
                     'expires_at': value.expires_at.isoformat(), 'synthetic': True,
-                    'persistence': 'ephemeral', 'offers': deepcopy(list(value.offers.values())), 'provider': provider()}
+                    'persistence': 'ephemeral', 'offers': deepcopy(list(value.offers.values())),
+                    'provider': provider(), 'plan': deepcopy(active_plan(value)),
+                    'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
+                    'rfq': deepcopy(value.rfq)}
 
     def session_response(value):
         response = JSONResponse(view(value))
@@ -317,6 +341,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
                 offer = new_offer(deepcopy(payload), offer_id=secrets.token_urlsafe(18), today=today)
                 offer['served_from_cache'] = cached
                 value.offers[offer['offer_id']] = offer
+                clear_derived(value)
                 result = {'offer': deepcopy(offer), 'provider': deepcopy(offer.get('extractor_detail', {})),
                           'replayed': False, 'served_from_cache': cached}
                 return complete(value, key, result)
@@ -350,7 +375,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
                 else:
                     result = save_offer(deepcopy(original), today=store.now().date())
                 value.offers[offer_id] = result
-                value.last_plan = None
+                clear_derived(value)
                 return complete(value, key, {'offer': deepcopy(result), 'replayed': False})
             except Exception:
                 failed(value, key)
@@ -383,7 +408,105 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
             result = build_plan(deepcopy(selected), data, today=store.now().date())
             result['plan_id'] = secrets.token_urlsafe(18)
             value.last_plan = deepcopy(result)
+            value.plan_request = deepcopy(data)
+            value.recovery = None
+            value.rfq = None
             return result
+
+    @app.post('/api/demo/recovery')
+    async def recovery(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('baseline_plan_id', 'expected_versions', 'delay_days_by_offer', 'idempotency_key'))
+        with value.lock:
+            active(value)
+            baseline, original_request = value.last_plan, value.plan_request
+            if (baseline is None or original_request is None
+                    or not isinstance(data['baseline_plan_id'], str)
+                    or data['baseline_plan_id'] != baseline.get('plan_id')):
+                raise SessionError('stale_plan', 'Original comparison changed. Compare again.', 409)
+            selected = current_offers(value, baseline, data['expected_versions'], today=store.now().date())
+            delays = data['delay_days_by_offer']
+            if (not isinstance(delays, dict) or not set(delays) <= set(baseline['offer_versions'])
+                    or any(type(days) is not int or not 0 <= days <= 3650 for days in delays.values())):
+                raise SessionError('invalid_delay', 'Use whole nonnegative days for accepted offers.', 422)
+            key, replay = start(value, data, 'recovery')
+            if replay is not None:
+                if value.recovery is None or replay.get('comparison_id') != value.recovery.get('comparison_id'):
+                    raise SessionError('stale_plan', 'This comparison has been replaced.', 409)
+                return replay
+            try:
+                from .recovery import compare
+                comparison = compare(baseline, original_request, selected, delays, today=store.now().date())
+                comparison['comparison_id'] = secrets.token_urlsafe(18)
+                comparison['scenario']['plan_id'] = secrets.token_urlsafe(18)
+                result = complete(value, key, comparison)
+                value.recovery = deepcopy(result)
+                value.rfq = None
+                return result
+            except Exception:
+                failed(value, key)
+                raise
+
+    @app.post('/api/demo/rfq')
+    async def rfq(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('plan_id', 'expected_versions', 'reviewed', 'idempotency_key'))
+        with value.lock:
+            active(value)
+            plan = active_plan(value)
+            if plan is None or not isinstance(data['plan_id'], str) or data['plan_id'] != plan.get('plan_id'):
+                raise SessionError('stale_plan', 'Active comparison changed. Review the current plan.', 409)
+            selected = current_offers(value, plan, data['expected_versions'], today=store.now().date())
+            if data['reviewed'] is not True:
+                raise SessionError('review_required', 'Review the selected plan before drafting.', 422)
+            selected_id = plan.get('selected_offer_id')
+            if selected_id is None or plan.get('required_purchase_kg') == '0':
+                raise SessionError('draft_unavailable', 'The current plan has no purchase to request.', 409)
+            chosen = next((offer for offer in selected if offer['offer_id'] == selected_id), None)
+            if chosen is None:
+                raise SessionError('stale_plan', 'Selected quote is no longer available.', 409)
+            key, replay = start(value, data, 'rfq')
+            if replay is not None:
+                if value.rfq is None or replay.get('draft_id') != value.rfq.get('draft_id'):
+                    raise SessionError('stale_plan', 'This RFQ draft has been replaced.', 409)
+                replay.pop('replayed', None)
+                return replay
+            try:
+                from .rfq import build_draft
+                draft = build_draft(deepcopy(plan), deepcopy(chosen),
+                                    all_offers=deepcopy(selected), created_at=store.now())
+                draft['draft_id'] = secrets.token_urlsafe(18)
+                result = complete(value, key, draft)
+                value.rfq = deepcopy(result)
+                return result
+            except Exception:
+                failed(value, key)
+                raise
+
+    @app.get('/api/demo/rfq/{draft_id}/download')
+    async def rfq_download(request: Request, draft_id: str):
+        try:
+            value = session(request)
+        except SessionError as exc:
+            if exc.status_code != 401:
+                raise
+            raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404) from None
+        with value.lock:
+            draft, plan = value.rfq, active_plan(value)
+            if (draft is None or plan is None or draft.get('draft_id') != draft_id
+                    or draft.get('plan_id') != plan.get('plan_id')):
+                raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404)
+            try:
+                selected = current_offers(value, plan, draft.get('offer_versions'), today=store.now().date())
+                if (plan.get('selected_offer_id') not in {offer['offer_id'] for offer in selected}
+                        or plan.get('required_purchase_kg') == '0'):
+                    raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404)
+            except SessionError:
+                raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404) from None
+            return Response(draft['text'], media_type='text/plain',
+                            headers={'Content-Disposition': 'attachment; filename="synthetic-rfq-draft.txt"'})
 
     @app.get('/api/demo/export')
     async def export(request: Request):
@@ -391,7 +514,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None) 
         with value.lock:
             return JSONResponse({'synthetic': True, 'persistence': 'ephemeral',
                                  'exported_at': store.now().isoformat(),
-                                 'offers': deepcopy(list(value.offers.values())), 'plan': deepcopy(value.last_plan)},
+                                 'offers': deepcopy(list(value.offers.values())),
+                                 'plan': deepcopy(active_plan(value)),
+                                 'baseline_plan': deepcopy(value.last_plan),
+                                 'plan_request': deepcopy(value.plan_request),
+                                 'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 
     @app.post('/api/demo/reset')

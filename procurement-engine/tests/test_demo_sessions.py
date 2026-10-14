@@ -36,3 +36,17 @@ def test_reset_invalidates_old_handle_and_preserves_other_session():
     with pytest.raises(SessionError):
         store.get(first.session_id)
     assert store.get(second.session_id).offers['b']['offer_id'] == 'b'
+
+
+def test_invalidation_clears_plan_recovery_request_and_rfq():
+    store = SessionStore()
+    value = store.create()
+    value.last_plan = {'plan_id': 'baseline'}
+    value.plan_request = {'budget': '100000'}
+    value.recovery = {'comparison_id': 'changed'}
+    value.rfq = {'draft_id': 'unsent'}
+    store.invalidate(value)
+    assert value.last_plan is None
+    assert value.plan_request is None
+    assert value.recovery is None
+    assert value.rfq is None

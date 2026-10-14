@@ -22,6 +22,9 @@ class Session:
     offers: dict = field(default_factory=dict)
     idempotency: dict = field(default_factory=dict)
     last_plan: dict | None = None
+    plan_request: dict | None = None
+    recovery: dict | None = None
+    rfq: dict | None = None
     active: bool = True
     requests: int = 0
     live_calls: int = 0
@@ -69,4 +72,7 @@ class SessionStore:
             session.offers.clear()
             session.idempotency.clear()
             session.last_plan = None
+            session.plan_request = None
+            session.recovery = None
+            session.rfq = None
             self._sessions.pop(session.session_id, None)

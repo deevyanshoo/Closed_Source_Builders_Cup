@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 from decimal import Decimal, InvalidOperation
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -125,6 +126,38 @@ class Client:
             raise AcceptanceError(stage, code if isinstance(code, str) else "unexpected_http_status", status)
         return data
 
+    def text(self, stage: str, path: str, *, expected_status: int = 200) -> str:
+        request = urllib.request.Request(self.base + path, headers={"Accept": "text/plain"})
+        try:
+            with self.opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+                status = response.status
+                content_type = response.headers.get_content_type()
+                disposition = response.headers.get("Content-Disposition", "")
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            content_type = exc.headers.get_content_type()
+            disposition = ""
+            raw = exc.read(MAX_RESPONSE_BYTES + 1)
+        except AcceptanceError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise AcceptanceError(stage, "transport_error") from None
+        require(len(raw) <= MAX_RESPONSE_BYTES, stage, "response_too_large")
+        if status != expected_status:
+            try:
+                error = json.loads(raw).get("error", {})
+                code = error.get("code") if isinstance(error, dict) else None
+            except (UnicodeError, ValueError, AttributeError):
+                code = None
+            raise AcceptanceError(stage, code if isinstance(code, str) else "unexpected_http_status", status)
+        require(content_type == "text/plain" and "synthetic-rfq-draft.txt" in disposition,
+                stage, "download_headers_wrong")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeError:
+            raise AcceptanceError(stage, "download_not_utf8") from None
+
 
 def denied(client: Client, stage: str, path: str, body: dict, csrf: str,
            expected_status: int, expected_code: str, *, origin: str | None = None) -> None:
@@ -132,6 +165,17 @@ def denied(client: Client, stage: str, path: str, body: dict, csrf: str,
         client.json(stage, path, body=body, csrf=csrf, origin=origin)
     except AcceptanceError as exc:
         if exc.status != expected_status or exc.code != expected_code:
+            raise AcceptanceError(stage, exc.code, exc.status) from None
+    else:
+        raise AcceptanceError(stage, "unexpected_success")
+
+
+def denied_status(client: Client, stage: str, path: str, body: dict, csrf: str,
+                  expected_status: int) -> None:
+    try:
+        client.json(stage, path, body=body, csrf=csrf)
+    except AcceptanceError as exc:
+        if exc.status != expected_status:
             raise AcceptanceError(stage, exc.code, exc.status) from None
     else:
         raise AcceptanceError(stage, "unexpected_success")
@@ -251,6 +295,98 @@ def check_plan(plan: dict, offers: dict[str, dict], *, low_budget: bool) -> dict
                 and numeric(summary["total_cost"], stage) == Decimal("82000"),
                 stage, "main_selection_wrong")
     return summary
+
+
+def selected_fixture(plan: dict, offers: dict[str, dict]) -> str | None:
+    return next((fixture for fixture, offer in offers.items()
+                 if offer["offer_id"] == plan.get("selected_offer_id")), None)
+
+
+def check_recovery(view: dict, baseline: dict, offers: dict[str, dict],
+                   *, selected: str | None, total: str | None, delta: str | None,
+                   outcome: str, delayed: dict[str, int]) -> dict:
+    stage = "recovery_" + outcome
+    require(view.get("synthetic") is True and isinstance(view.get("comparison_id"), str)
+            and bool(view["comparison_id"]) and view.get("replayed") is False,
+            stage, "invalid_comparison")
+    base = view.get("baseline")
+    scenario = view.get("scenario")
+    require(isinstance(base, dict) and isinstance(scenario, dict)
+            and base == baseline and base.get("plan_id") == baseline.get("plan_id"),
+            stage, "baseline_changed")
+    require(view.get("outcome") == outcome and view.get("selection_changed") is (selected != "eu-copper"),
+            stage, "outcome_wrong")
+    require(scenario.get("synthetic") is True and scenario.get("reporting_currency") == "USD"
+            and scenario.get("offer_versions") == baseline.get("offer_versions")
+            and scenario.get("forecast_action") == "ABSTAIN"
+            and scenario.get("customer_savings") is None,
+            stage, "scenario_provenance_wrong")
+    require(selected_fixture(scenario, offers) == selected, stage, "scenario_selection_wrong")
+    require((scenario.get("total_cost") is None if total is None else
+             numeric(scenario.get("total_cost"), stage) == Decimal(total)), stage, "scenario_cost_wrong")
+    require((view.get("cost_delta") is None if delta is None else
+             numeric(view.get("cost_delta"), stage) == Decimal(delta)), stage, "cost_delta_wrong")
+    original = view.get("baseline_request")
+    scenario_request = view.get("scenario_request")
+    require(isinstance(original, dict) and isinstance(scenario_request, dict)
+            and original.get("delay_days_by_offer", {}) == {}
+            and scenario_request.get("delay_days_by_offer", {}) == delayed
+            and {k: v for k, v in scenario_request.items() if k != "delay_days_by_offer"}
+            == {k: v for k, v in original.items() if k != "delay_days_by_offer"},
+            stage, "request_pair_wrong")
+    alternatives = {entry["offer_id"]: entry for entry in scenario.get("alternatives", [])
+                    if isinstance(entry, dict) and isinstance(entry.get("offer_id"), str)}
+    require(set(alternatives) == {offer["offer_id"] for offer in offers.values()},
+            stage, "alternatives_wrong")
+    eu = alternatives[offers["eu-copper"]["offer_id"]]
+    swift = alternatives[offers["express-copper"]["offer_id"]]
+    require(numeric(eu.get("total_cost"), stage) == Decimal("82000")
+            and numeric(swift.get("total_cost"), stage) == Decimal("86000"),
+            stage, "quoted_cost_changed")
+    require(eu.get("arrival_date") == ("2026-11-13" if delayed.get(offers["eu-copper"]["offer_id"]) == 20 else "2026-10-24")
+            and swift.get("arrival_date") == ("2026-11-07" if delayed.get(offers["express-copper"]["offer_id"]) == 10 else "2026-10-28"),
+            stage, "arrival_wrong")
+    return {"selected_fixture": selected, "total_cost": scenario.get("total_cost"),
+            "cost_delta": view.get("cost_delta"), "outcome": outcome}
+
+
+def check_rfq(rfq: dict, plan: dict, offers: dict[str, dict], client: Client,
+              *, fixture: str) -> dict:
+    stage = "rfq_" + fixture.replace("-", "_")
+    require(isinstance(rfq, dict) and isinstance(rfq.get("draft_id"), str)
+            and bool(rfq["draft_id"]) and rfq.get("plan_id") == plan.get("plan_id")
+            and rfq.get("offer_versions") == plan.get("offer_versions")
+            and rfq.get("synthetic") is True and rfq.get("status") == "draft_unsent",
+            stage, "draft_identity_wrong")
+    require(isinstance(rfq.get("supplier"), str)
+            and rfq["supplier"].startswith(FIXTURES[fixture][1])
+            and rfq.get("material") == "copper"
+            and numeric(rfq.get("quantity_kg"), stage) == Decimal("8000")
+            and rfq.get("need_by") == "2026-11-05"
+            and rfq.get("reporting_currency") == "USD"
+            and numeric(rfq.get("total_cost"), stage) == numeric(plan.get("total_cost"), stage)
+            and isinstance(rfq.get("created_at"), str) and bool(rfq["created_at"]),
+            stage, "draft_facts_wrong")
+    body = rfq.get("text")
+    require(isinstance(body, str) and bool(body), stage, "draft_text_missing")
+    downloaded = client.text(stage + "_download", "/api/demo/rfq/" +
+                             urllib.parse.quote(rfq["draft_id"], safe="") + "/download")
+    require(downloaded == body, stage, "download_mismatch")
+    lower = body.lower()
+    require(all(term in lower for term in ("synthetic", "unsent", "request for quotation"))
+            and ("no order" in lower or "not an order" in lower or "no purchase order" in lower)
+            and "8000" in body and "2026-11-05" in body
+            and FIXTURES[fixture][1].lower() in lower
+            and ("SYN-" + ("eu-copper.csv" if fixture == "eu-copper" else "express-copper.pdf") in body
+                 or "sha256:" + FIXTURES[fixture][0] in body),
+            stage, "draft_text_facts_wrong")
+    if fixture == "express-copper":
+        require("10.50" in body and "USD" in body and "86000" in body
+                and "20" in body, stage, "swift_quote_or_delay_missing")
+    if fixture == "eu-copper":
+        require("8.00" in body and "EUR" in body, stage, "eu_quote_missing")
+    return {"fixture": fixture, "total_cost": rfq.get("total_cost"),
+            "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()}
 
 
 def run(base: str, receipt: dict) -> None:
@@ -393,6 +529,144 @@ def run(base: str, receipt: dict) -> None:
             "mode": "gemini", "idempotency_key": key()}, csrf, 422, "fixture_not_allowed")
     receipt["checks"]["unlisted_upload_422"] = True
 
+    versions = main["offer_versions"]
+    baseline_rfq_body = {"plan_id": main["plan_id"], "expected_versions": versions,
+                         "reviewed": True, "idempotency_key": key()}
+    denied(client, "rfq_review_required", "/api/demo/rfq",
+           {**baseline_rfq_body, "reviewed": False, "idempotency_key": key()},
+           csrf, 422, "review_required")
+    baseline_rfq = client.json("baseline_rfq", "/api/demo/rfq",
+                               body=baseline_rfq_body, csrf=csrf)
+    receipt["rfqs"]["baseline"] = check_rfq(baseline_rfq, main, offers, client,
+                                              fixture="eu-copper")
+    require(client.json("baseline_rfq_replay", "/api/demo/rfq", body=baseline_rfq_body,
+                        csrf=csrf) == baseline_rfq,
+            "baseline_rfq_replay", "exact_replay_changed_draft")
+    receipt["checks"]["reviewed_baseline_rfq_download"] = True
+
+    eu_id = offers["eu-copper"]["offer_id"]
+    swift_id = offers["express-copper"]["offer_id"]
+    delay_body = {"baseline_plan_id": main["plan_id"], "expected_versions": versions,
+                  "delay_days_by_offer": {eu_id: 20}, "idempotency_key": key()}
+    for bad in (-1, 1.5, True, 3651):
+        denied_status(client, "invalid_delay", "/api/demo/recovery",
+                      {**delay_body, "delay_days_by_offer": {eu_id: bad},
+                       "idempotency_key": key()}, csrf, 422)
+    denied_status(client, "unknown_delay_offer", "/api/demo/recovery",
+                  {**delay_body, "delay_days_by_offer": {"foreign-offer": 1},
+                   "idempotency_key": key()}, csrf, 422)
+    require(client.json("post_invalid_delay_session", "/api/demo/session").get("rfq")
+            == baseline_rfq, "post_invalid_delay_session", "valid_draft_overwritten")
+    receipt["checks"]["malformed_delay_rejected"] = True
+
+    delayed = client.json("eu_delay", "/api/demo/recovery", body=delay_body, csrf=csrf)
+    receipt["recoveries"]["eu_delay"] = check_recovery(
+        delayed, main, offers, selected="express-copper", total="86000", delta="4000",
+        outcome="changed", delayed={eu_id: 20})
+    require(delayed.get("baseline_request") == plan_body,
+            "eu_delay", "baseline_request_changed")
+    require(client.json("eu_delay_replay", "/api/demo/recovery", body=delay_body,
+                        csrf=csrf).get("replayed") is True,
+            "eu_delay_replay", "exact_replay_missing")
+    delayed_session = client.json("delayed_session", "/api/demo/session")
+    require(delayed_session.get("recovery") == delayed
+            and delayed_session.get("plan") == delayed["scenario"],
+            "delayed_session", "recovery_restore_wrong")
+    try:
+        client.text("old_rfq_download", "/api/demo/rfq/" +
+                    urllib.parse.quote(baseline_rfq["draft_id"], safe="") + "/download")
+    except AcceptanceError as exc:
+        require(exc.status == 404 and exc.code == "draft_not_found",
+                "old_rfq_download", "old_draft_not_invalidated")
+    else:
+        raise AcceptanceError("old_rfq_download", "unexpected_success")
+    denied(client, "old_plan_rfq", "/api/demo/rfq",
+           {**baseline_rfq_body, "idempotency_key": key()}, csrf, 409, "stale_plan")
+    denied_status(client, "old_rfq_replay", "/api/demo/rfq", baseline_rfq_body, csrf, 409)
+    receipt["checks"]["delay_changed_selection_and_stale_draft"] = True
+
+    delayed_plan = delayed["scenario"]
+    delayed_rfq_body = {"plan_id": delayed_plan["plan_id"], "expected_versions": versions,
+                        "reviewed": True, "idempotency_key": key()}
+    delayed_rfq = client.json("delayed_rfq", "/api/demo/rfq",
+                              body=delayed_rfq_body, csrf=csrf)
+    receipt["rfqs"]["eu_delay"] = check_rfq(delayed_rfq, delayed_plan, offers, client,
+                                              fixture="express-copper")
+    require(client.json("delayed_rfq_session", "/api/demo/session").get("rfq") == delayed_rfq,
+            "delayed_rfq_session", "draft_restore_wrong")
+    require(client.json("delayed_rfq_export", "/api/demo/export").get("rfq") == delayed_rfq,
+            "delayed_rfq_export", "draft_export_wrong")
+    denied(other, "cross_session_rfq", "/api/demo/rfq",
+           {**delayed_rfq_body, "idempotency_key": key()}, other_csrf, 409, "stale_plan")
+    denied_status(other, "cross_session_recovery", "/api/demo/recovery",
+                  {**delay_body, "idempotency_key": key()}, other_csrf, 409)
+    denied(client, "rfq_bad_csrf", "/api/demo/rfq",
+           {**delayed_rfq_body, "idempotency_key": key()}, "invalid", 403, "invalid_csrf")
+    denied(client, "recovery_bad_csrf", "/api/demo/recovery",
+           {**delay_body, "idempotency_key": key()}, "invalid", 403, "invalid_csrf")
+    try:
+        other.text("cross_session_download", "/api/demo/rfq/" +
+                   urllib.parse.quote(delayed_rfq["draft_id"], safe="") + "/download")
+    except AcceptanceError as exc:
+        require(exc.status == 404 and exc.code == "draft_not_found",
+                "cross_session_download", "foreign_draft_visible")
+    else:
+        raise AcceptanceError("cross_session_download", "unexpected_success")
+    receipt["checks"]["delayed_rfq_and_cross_session_protection"] = True
+
+    both_body = {**delay_body, "delay_days_by_offer": {eu_id: 20, swift_id: 10},
+                 "idempotency_key": key()}
+    both = client.json("both_delayed", "/api/demo/recovery", body=both_body, csrf=csrf)
+    receipt["recoveries"]["both_delayed"] = check_recovery(
+        both, main, offers, selected=None, total=None, delta=None,
+        outcome="infeasible", delayed={eu_id: 20, swift_id: 10})
+    denied(client, "infeasible_rfq", "/api/demo/rfq",
+           {"plan_id": both["scenario"]["plan_id"], "expected_versions": versions,
+            "reviewed": True, "idempotency_key": key()}, csrf, 409, "draft_unavailable")
+    require(client.json("infeasible_session", "/api/demo/session").get("recovery") == both,
+            "infeasible_session", "failed_rfq_overwrote_comparison")
+    denied_status(client, "stale_delay_replay", "/api/demo/recovery", delay_body, csrf, 409)
+    receipt["checks"]["infeasible_blocks_rfq_and_stale_replay"] = True
+
+    remove_body = {**delay_body, "delay_days_by_offer": {}, "idempotency_key": key()}
+    removed = client.json("delay_removed", "/api/demo/recovery", body=remove_body, csrf=csrf)
+    receipt["recoveries"]["removed"] = check_recovery(
+        removed, main, offers, selected="eu-copper", total="82000", delta="0",
+        outcome="unchanged", delayed={})
+    current_rfq = client.json("current_rfq", "/api/demo/rfq",
+                              body={"plan_id": removed["scenario"]["plan_id"],
+                                    "expected_versions": versions, "reviewed": True,
+                                    "idempotency_key": key()}, csrf=csrf)
+    receipt["rfqs"]["removed"] = check_rfq(current_rfq, removed["scenario"], offers,
+                                             client, fixture="eu-copper")
+    current_export = client.json("current_export", "/api/demo/export")
+    require(current_export.get("plan") == removed["scenario"]
+            and current_export.get("baseline_plan") == main
+            and current_export.get("recovery") == removed
+            and current_export.get("rfq") == current_rfq
+            and current_export.get("plan_request") == plan_body,
+            "current_export", "paired_state_missing")
+    restored = client.json("current_session", "/api/demo/session")
+    require(restored.get("plan") == removed["scenario"]
+            and restored.get("recovery") == removed
+            and restored.get("rfq") == current_rfq,
+            "current_session", "paired_state_restore_wrong")
+    for fixture, offer in offers.items():
+        persisted = next((entry for entry in current_export.get("offers", [])
+                          if isinstance(entry, dict) and entry.get("offer_id") == offer["offer_id"]), None)
+        require(persisted == offer, "current_export", "quote_evidence_changed")
+    receipt["checks"]["removal_export_restore_and_evidence"] = True
+
+    fresh = client.json("fresh_plan", "/api/demo/plan", body=plan_body, csrf=csrf)
+    require(check_plan(fresh, offers, low_budget=False) == receipt["plans"]["main"],
+            "fresh_plan", "fresh_plan_wrong")
+    fresh_session = client.json("fresh_plan_session", "/api/demo/session")
+    require(fresh_session.get("plan") == fresh and fresh_session.get("recovery") is None
+            and fresh_session.get("rfq") is None,
+            "fresh_plan_session", "old_derived_state_retained")
+    denied_status(client, "old_comparison_replay", "/api/demo/recovery", remove_body, csrf, 409)
+    receipt["checks"]["new_plan_invalidates_derived_state"] = True
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -401,7 +675,8 @@ def main() -> int:
     args = parser.parse_args()
     receipt = {"success": False, "deployed_revision": None,
                "fixture_hashes": {name: value[0] for name, value in FIXTURES.items()},
-               "checks": {}, "extractions": [], "plans": {}, "errors": []}
+               "checks": {}, "extractions": [], "plans": {}, "recoveries": {},
+               "rfqs": {}, "errors": []}
     try:
         base = base_url(args.url)
         run(base, receipt)

@@ -11,10 +11,14 @@ export type OfferView = {
   review_flags: { flag: string; locator?: string | null; text?: string }[];
   normalized: Record<string, unknown>; blocking_reasons: { code: string; field: string; message: string }[];
 };
-export type DemoSession = { session_id: string; csrf_token: string; expires_at: string; synthetic: true; persistence: 'ephemeral'; offers: OfferView[]; provider: { model: string; available: boolean } };
+export type DemoSession = { session_id: string; csrf_token: string; expires_at: string; synthetic: true; persistence: 'ephemeral'; offers: OfferView[]; provider: { model: string; available: boolean }; plan?: PlanView | null; plan_request?: PlanRequest | null; recovery?: RecoveryView | null; rfq?: RfqView | null };
 export type DemoFixture = { id: string; name: string; filename: string; description: string; download_url: string };
 export type PlanRequest = { offer_ids: string[]; expected_versions: Record<string, number>; material: string; quantity_kg: string; current_stock_kg: string; need_by: string; decision_date: string; reporting_currency: string; budget: string; additional_cost_per_kg: string; delay_days_by_offer?: Record<string, number> };
 export type PlanView = { plan_id: string; synthetic: true; decision_date: string; need_by: string; material: string; quantity_kg: string; current_stock_kg: string; required_purchase_kg: string; reporting_currency: string; assumptions: Record<string, unknown>; alternatives: { offer_id: string; supplier: string; feasible: boolean; reasons: string[]; arrival_date: string | null; unit_price_per_kg: string | null; total_cost: string | null; quantity_kg: string }[]; selected_offer_id: string | null; total_cost: string | null; explanation: string; forecast_action: 'ABSTAIN'; customer_savings: null; offer_versions: Record<string, number> };
+export type RecoveryRequest = { baseline_plan_id: string; expected_versions: Record<string, number>; delay_days_by_offer: Record<string, number> };
+export type RecoveryView = { comparison_id: string; synthetic: true; baseline: PlanView; scenario: PlanView; baseline_request: PlanRequest; scenario_request: PlanRequest; cost_delta: string | null; selection_changed: boolean; outcome: 'changed' | 'unchanged' | 'infeasible' | 'stock_covers_need'; replayed: boolean };
+export type RfqRequest = { plan_id: string; expected_versions: Record<string, number>; reviewed: true };
+export type RfqView = { draft_id: string; plan_id: string; offer_versions: Record<string, number>; synthetic: true; status: 'draft_unsent'; supplier: string; material: string; quantity_kg: string; need_by: string; reporting_currency: string; total_cost: string; created_at: string; text: string };
 
 export class DemoApiError extends Error {
   constructor(message: string, readonly status = 0, readonly code = 'unavailable') { super(message); this.name = 'DemoApiError'; }
@@ -60,6 +64,13 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
   }
 
   const mutate = <T,>(path: string, body: Record<string, unknown>, csrf: string) => request<T>(path, 'POST', { ...body, idempotency_key: key() }, csrf);
+  async function download(path: string, failure: string): Promise<Blob> {
+    let response: Response;
+    try { response = await send(`/api/demo${path}`, { credentials: 'same-origin' }); }
+    catch { throw new DemoApiError(`${failure} Check your connection.`); }
+    if (!response.ok) throw new DemoApiError(failure, response.status);
+    return response.blob();
+  }
   return {
     session: () => request<DemoSession>('/session'),
     fixtures: async (): Promise<DemoFixture[]> => (await request<{ fixtures: DemoFixture[] }>('/fixtures')).fixtures,
@@ -68,13 +79,10 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
     correct: (csrf: string, id: string, field: string, value: unknown, version: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/correct`, { field, value, expected_version: version }, csrf),
     save: (csrf: string, id: string, version: number) => mutate<{ offer: OfferView; replayed: boolean }>(`/offers/${encodeURIComponent(id)}/save`, { expected_version: version }, csrf),
     plan: (csrf: string, planRequest: PlanRequest) => request<PlanView>('/plan', 'POST', planRequest, csrf),
-    exportReport: async (): Promise<Blob> => {
-      let response: Response;
-      try { response = await send('/api/demo/export', { credentials: 'same-origin' }); }
-      catch { throw new DemoApiError('The report could not be downloaded. Check your connection.'); }
-      if (!response.ok) throw new DemoApiError('The report could not be downloaded. Please try again.', response.status);
-      return response.blob();
-    },
+    recovery: (csrf: string, body: RecoveryRequest) => mutate<RecoveryView>('/recovery', body, csrf),
+    rfq: (csrf: string, body: RfqRequest) => mutate<RfqView>('/rfq', body, csrf),
+    downloadRfq: (id: string) => download(`/rfq/${encodeURIComponent(id)}/download`, 'The RFQ draft could not be downloaded.'),
+    exportReport: () => download('/export', 'The report could not be downloaded.'),
     reset: (csrf: string) => request<DemoSession>('/reset', 'POST', {}, csrf),
   };
 }

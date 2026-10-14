@@ -1,7 +1,17 @@
 # Scheduled news and natural demo presentation
 
 Date: 2026-10-15
-Status: Proposed; awaiting review. No scheduler, storage, IAM or product changes deployed.
+Status: Approved by the user on 2026-10-15 for implementation, testing and deployment using parallel agents in Antigravity, subject to the additional free-tier-only constraint below.
+
+## Approved free-tier-only constraint (supersedes conflicting initial settings)
+
+The user explicitly requested no new cost from scheduling. Trial credits are not free-tier usage. Prepare and test the complete feature, but activate recurring infrastructure only after its free allowance headroom and bounded usage are verified. If that cannot be established, leave scheduling inactive and report the exact blocker; the independent natural-wording release may proceed under existing deployment authorization.
+
+Use `us-central1` for the news job and dedicated Standard Storage bucket, because Mumbai Storage has no Always Free allowance. Keep the existing portal in Mumbai. Limit the worker to 120 seconds, one task, 1 vCPU, 512 MiB, zero job retries and zero Scheduler retries, with no automated Gemini calls. At 744 hourly executions in a 31-day month the configured execution upper bound is 89,280 vCPU-seconds and 44,640 GiB-seconds before any account-shared usage; retries, manual invocations and regional pricing discounts must be assessed separately.
+
+Storage Always Free currently includes 5 GB-months, 5,000 Class A operations, 50,000 Class B operations and 100 GB of eligible North American data transfer. Cap snapshot payloads at 2 MiB and retain seven days. Use one deterministic hourly object name with generation-zero conditional creation so the first valid publication wins atomically; use bounded object reads rather than listing on every portal request. Pause/inhibit deployment activation on unknown shared quota headroom. Google does not provide a universal hard zero-spend cap; forecasts or budget alerts alone are not a zero-cost guarantee.
+
+References: https://cloud.google.com/storage/pricing, https://cloud.google.com/run/pricing, https://cloud.google.com/scheduler/pricing.
 
 ## Intended outcome
 

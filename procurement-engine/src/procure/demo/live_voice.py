@@ -118,13 +118,13 @@ def _audio(data: dict) -> bytes:
     return chunk
 
 
-def _config():
+def _config(company=None):
     from google.genai import types
 
     text = {'type': 'string', 'minLength': 1, 'maxLength': 128}
     values = {'type': 'object', 'additionalProperties': False, 'properties': {
         key: {'type': 'string', 'maxLength': 40} for key in
-        ('quantity', 'current_stock', 'budget', 'additional_cost_per_unit', 'need_by', 'decision_date')}}
+        ('quantity', 'current_stock', 'budget', 'additional_cost_per_unit', 'need_by')}}
     specs = [
         ('operate_workspace', 'Multi-agent grounded answer, recovery or reviewed RFQ proposal.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
@@ -138,10 +138,23 @@ def _config():
         ('compare_suppliers', 'Run the procurement planner on saved quotes and current buyer inputs.', {'material_id': text}, ['material_id']),
         ('prepare_simulated_email', 'Prepare a reviewed simulated email; never sends externally.',
          {'material_id': text, 'recipient_label': {'type': 'string', 'maxLength': 160},
-          'subject': {'type': 'string', 'maxLength': 200}, 'body': {'type': 'string', 'maxLength': 2000}}, ['material_id']),
+          'subject': {'type': 'string', 'maxLength': 120}, 'body': {'type': 'string', 'maxLength': 1000}}, ['material_id']),
         ('navigate_workspace', 'Show a workspace view.',
          {'view': {'type': 'string', 'enum': ['company', 'news', 'procurement', 'outbox']}}, ['view']),
     ]
+    instruction = INSTRUCTION
+    if company is not None:
+        catalogue = {'company_id': company['company_id'], 'name': company['name'],
+                     'materials': [{'material_id': row['material_id'], 'name': row['name'],
+                                    'unit': row['quantity_unit']} for row in company['materials']]}
+        material_ids = [row['material_id'] for row in company['materials']]
+        specs = [(name, description, {**properties,
+                 **({'material_id': {**text, 'enum': material_ids}} if 'material_id' in properties else {})}, required)
+                 for name, description, properties, required in specs]
+        instruction += (' Use exact material_id values from this trusted current company catalogue: '
+                        + json.dumps(catalogue, ensure_ascii=True) +
+                        '. If a tool fails, explicitly say no change was made; ask for clarification. '
+                        'Never describe a failed tool as successful.')
     declarations = [types.FunctionDeclaration(name=name, description=description,
         parameters_json_schema={'type': 'object', 'additionalProperties': False,
                                 'properties': properties, 'required': required})
@@ -152,13 +165,13 @@ def _config():
         output_audio_transcription=types.AudioTranscriptionConfig(),
         speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(
             prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name='Charon'))),
-        system_instruction=INSTRUCTION,
+        system_instruction=instruction,
         tools=[types.Tool(function_declarations=declarations)],
     )
 
 
 @asynccontextmanager
-async def _vertex_connection():
+async def _vertex_connection(company=None):
     """Use runtime ADC on the server; never issue a browser token."""
     project = os.getenv('GOOGLE_CLOUD_PROJECT', '').strip()
     if (os.getenv('OFFLINE', '').lower() in {'1', 'true', 'yes'} or
@@ -171,7 +184,7 @@ async def _vertex_connection():
     client = genai.Client(vertexai=True, project=project, location=LOCATION,
                           http_options=types.HttpOptions(api_version='v1beta1'))
     try:
-        async with client.aio.live.connect(model=MODEL, config=_config()) as connection:
+        async with client.aio.live.connect(model=MODEL, config=_config(company)) as connection:
             yield connection
     finally:
         await client.aio.aclose()
@@ -192,11 +205,12 @@ async def run_live_voice(
     global _PROCESS_STARTS, _PROCESS_WINDOW_STARTED
     await websocket.accept()
     started = monotonic()
-    input_bytes = output_bytes = input_frames = tool_calls = 0
+    input_bytes = output_bytes = produced_output_bytes = input_frames = tool_calls = 0
     tool_results: dict[str, tuple[str, str, dict]] = {}
     accepted = False
     reserved = False
     provider_ready = False
+    suppress_failed_speech = False
     counted_window = None
     counted_company = None
     context_version = None
@@ -234,7 +248,8 @@ async def run_live_voice(
             counted_company = session.company_id
         accepted = True
 
-        factory = client_factory or _vertex_connection
+        from .company import get_company
+        factory = client_factory or (lambda: _vertex_connection(get_company(session.company_id)))
         async with asyncio.timeout(max(0, MAX_SECONDS - (monotonic() - started))), factory() as provider:
             await websocket.send_json({'type': 'ready', 'input_mime_type': 'audio/pcm;rate=16000',
                                        'output_mime_type': 'audio/pcm;rate=24000',
@@ -242,7 +257,7 @@ async def run_live_voice(
             provider_ready = True
 
             async def from_browser():
-                nonlocal input_bytes, input_frames
+                nonlocal input_bytes, input_frames, suppress_failed_speech
                 from google.genai import types
                 while True:
                     _current(session, store, context_version)
@@ -269,7 +284,7 @@ async def run_live_voice(
                         audio=types.Blob(data=chunk, mime_type='audio/pcm;rate=16000'))
 
             async def from_provider():
-                nonlocal output_bytes, tool_calls
+                nonlocal output_bytes, produced_output_bytes, tool_calls, suppress_failed_speech
                 from google.genai import types
                 while True:
                     async for event in provider.receive():
@@ -341,9 +356,17 @@ async def run_live_voice(
                             if not repeated:
                                 tool_results[call_id] = (binding, key, result)
                             await websocket.send_json({'type': 'tool_result', 'result': result})
+                            suppress_failed_speech = result['status'] in {'needs_clarification', 'unavailable'}
+                            if suppress_failed_speech:
+                                await websocket.send_json({'type': 'interrupted'})
+                                await websocket.send_json({'type': 'transcript', 'direction': 'output',
+                                    'text': result['assistant_text'][:MAX_TRANSCRIPT_CHARS]})
                             # The browser needs its authoritative session. The model never
                             # receives session identifiers, CSRF tokens or document payloads.
                             model_result = {key: value for key, value in result.items() if key != 'session'}
+                            if suppress_failed_speech:
+                                model_result.update(tool_succeeded=False, action_applied=False,
+                                    required_spoken_response=result['assistant_text'])
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 model_result.pop('workspace', None)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
@@ -355,13 +378,16 @@ async def run_live_voice(
                         content = getattr(event, 'server_content', None)
                         if content is None:
                             continue
-                        if getattr(content, 'interrupted', False):
+                        interrupted_frame = bool(getattr(content, 'interrupted', False))
+                        if interrupted_frame:
+                            suppress_failed_speech = False
                             await websocket.send_json({'type': 'interrupted'})
+                            # Discard delivery below, but validate/count every audio byte.
                         for speaker, field in (('input', 'input_transcription'),
                                                ('output', 'output_transcription')):
                             transcription = getattr(content, field, None)
                             value = getattr(transcription, 'text', None)
-                            if isinstance(value, str) and value:
+                            if isinstance(value, str) and value and not interrupted_frame and (speaker == 'input' or not suppress_failed_speech):
                                 await websocket.send_json({'type': 'transcript', 'direction': speaker,
                                                            'text': value[:MAX_TRANSCRIPT_CHARS]})
                         model_turn = getattr(content, 'model_turn', None)
@@ -375,13 +401,17 @@ async def run_live_voice(
                                     getattr(inline, 'mime_type', '') not in
                                     {'audio/pcm', 'audio/pcm;rate=24000'}):
                                 raise _Invalid()
-                            output_bytes += len(audio)
-                            if output_bytes > MAX_OUTPUT_BYTES:
+                            produced_output_bytes += len(audio)
+                            if produced_output_bytes > MAX_OUTPUT_BYTES:
                                 raise _Invalid()
+                            if suppress_failed_speech or interrupted_frame:
+                                continue
+                            output_bytes += len(audio)
                             await websocket.send_json({'type': 'audio', 'sample_rate_hertz': 24000,
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
                             await websocket.send_json({'type': 'turn_complete'})
+                            suppress_failed_speech = False
 
             async def watch_context():
                 while True:

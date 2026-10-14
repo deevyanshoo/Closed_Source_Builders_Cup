@@ -857,10 +857,25 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                        'prepare_simulated_email', 'navigate_workspace'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
-            data = {'name': name, 'args': args, 'expected_context_version': context_version,
-                    'idempotency_key': key}
             with value.lock:
-                context(value, data, explicit=True)
+                context(value, {'expected_context_version': context_version}, explicit=True)
+                # Gemini may return a catalogue name or a case variant of its ID.
+                # Resolve only exact owned-company matches before binding the retry.
+                args = deepcopy(args)
+                if 'material_id' in args:
+                    supplied = args['material_id']
+                    if not isinstance(supplied, str) or not supplied.strip():
+                        raise SessionError('invalid_material',
+                            f'{name} made no change: choose an exact material ID or name from this company.', 422)
+                    needle = supplied.strip().casefold()
+                    matches = {row['material_id'] for row in get_company(value.company_id)['materials']
+                               if needle in (row['material_id'].casefold(), row['name'].casefold())}
+                    if len(matches) != 1:
+                        raise SessionError('invalid_material',
+                            f'{name} made no change: choose an exact material ID or name from this company.', 422)
+                    args['material_id'] = matches.pop()
+                data = {'name': name, 'args': args, 'expected_context_version': context_version,
+                        'idempotency_key': key}
                 token, replay = start(value, data, 'voice_workspace_tool')
                 if replay is not None:
                     if value.idempotency[token].get('state_marker') != snapshot_marker(operator_snapshot(value)):
@@ -972,7 +987,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
                               'context_version': value.context_version,
                               'status': 'needs_clarification' if exc.status_code < 500 else 'unavailable',
-                              'assistant_text': exc.message if exc.status_code < 500 else 'Workspace tool is unavailable right now.',
+                              'assistant_text': (f'{name} made no change: {exc.message}' if exc.status_code < 500
+                                                 else f'{name} made no change: workspace tool is unavailable right now.'),
                               'agent_steps': [], 'evidence_ids': [], 'proposal': None,
                               'read_only': True}
                     complete(value, token, result)

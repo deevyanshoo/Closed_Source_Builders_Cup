@@ -392,6 +392,66 @@ def test_native_voice_form_tool_updates_owned_session_without_sending_tokens_to_
         assert voice_client.get('/api/demo/session').json()['buyer_draft']['quantity'] == '12000'
 
 
+def test_native_voice_material_name_normalizes_only_owned_exact_matches(monkeypatch):
+    from procure.demo import live_voice
+    monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+
+    class NamedMaterialProvider(LiveProvider):
+        calls = (('Polymer', '12000'), ('Cable insulation polymer', '13000'),
+                 ('PET resin', '14000'))
+
+        def __init__(self):
+            super().__init__()
+            self.index = 0
+            self.arguments = []
+
+        async def send_realtime_input(self, **kwargs):
+            if kwargs.get('audio'):
+                material, quantity = self.calls[self.index]
+                self.index += 1
+                arguments = {'material_id': material, 'values': {'quantity': quantity}}
+                self.arguments.append(arguments)
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                    name='fill_buyer_form', args=arguments, id=f'named-material-{self.index}')]),
+                    server_content=None))
+
+    provider = NamedMaterialProvider()
+
+    @asynccontextmanager
+    async def factory():
+        yield provider
+
+    application = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                             operator_provider=Available(), live_client_factory=factory)
+    with TestClient(application, base_url='https://demo.test') as voice_client:
+        session = voice_client.get('/api/demo/session').json()
+        with voice_client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                            headers={'origin': 'https://demo.test'}) as socket:
+            socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                              'expected_context_version': 1})
+            while socket.receive_json()['type'] != 'ready':
+                pass
+            results = []
+            for _ in range(3):
+                socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+                event = socket.receive_json()
+                while event['type'] != 'tool_result':
+                    assert event['type'] != 'error', event
+                    event = socket.receive_json()
+                results.append(event['result'])
+                while socket.receive_json()['type'] != 'turn_complete':
+                    pass
+            assert [item['session']['buyer_draft']['quantity'] for item in results[:2]] == ['12000', '13000']
+            assert all(item['session']['selected_material_id'] == 'polymer' for item in results[:2])
+            assert results[2]['status'] == 'needs_clarification'
+            assert results[2]['read_only'] is True and 'session' not in results[2]
+            assert 'fill_buyer_form made no change' in results[2]['assistant_text']
+            socket.send_json({'type': 'stop'})
+        assert voice_client.get('/api/demo/session').json()['buyer_draft']['quantity'] == '13000'
+        assert [item['material_id'] for item in provider.arguments] == [
+            'Polymer', 'Cable insulation polymer', 'PET resin']
+
+
 def test_native_voice_repeat_call_id_cannot_restore_stale_form(monkeypatch):
     from procure.demo import live_voice
     monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)

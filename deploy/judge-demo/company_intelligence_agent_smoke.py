@@ -118,7 +118,7 @@ def run(base, receipt):
                 and 1 <= len(offers) <= 3 and all(offer.get('status') != 'saved' for offer in offers),
                 'solara:load', 'quotes_not_draft')
         try:
-            client.json('solara:compare_before_review', '/api/demo/operator', csrf=csrf, body={
+            blocked = client.json('solara:compare_before_review', '/api/demo/operator', csrf=csrf, body={
                 'message': 'Compare copper quotes', 'expected_context_version': context,
                 'idempotency_key': key()})
         except AcceptanceError as exc:
@@ -127,7 +127,15 @@ def run(base, receipt):
             receipt['rejections'].append({'stage': 'solara:compare_before_review',
                                           'code': exc.code, 'status': exc.status})
         else:
-            raise AcceptanceError('solara:compare_before_review', 'unsaved_quotes_compared')
+            # The classifier may ask for review before dispatching the compare
+            # tool. That safe read-only outcome is equivalent to its domain 409.
+            require(blocked.get('read_only') is True and
+                    blocked.get('status') in ('needs_clarification', 'unavailable') and
+                    not blocked.get('action_result'),
+                    'solara:compare_before_review', 'unsaved_quotes_compared')
+            receipt['rejections'].append({'stage': 'solara:compare_before_review',
+                'status': blocked['status'], 'read_only': True,
+                'assistant_text': blocked['assistant_text']})
         session = client.json('solara:after_rejection', '/api/demo/session')
         require(session.get('plan') is None and all(offer.get('status') != 'saved'
                 for offer in session.get('offers', [])), 'solara:after_rejection', 'unsaved_state_changed')

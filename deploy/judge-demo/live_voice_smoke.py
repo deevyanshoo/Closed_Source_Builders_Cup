@@ -62,7 +62,9 @@ async def run(base, audio_path, output_audio, *, rfq=False):
                         tool=event['result']; require(tool['status']==('proposal' if rfq else 'completed') and tool['read_only'] is True,'operator','unverified_turn')
                         actual=[s for s in tool['agent_steps'] if s.get('provider_call')=='real']
                         require(len(actual)==3,'operator','roles_not_real')
-                    elif kind=='turn_complete' and tool is not None and audio:break
+                    # An early spoken acknowledgement is not the verified
+                    # business answer. Wait for audio after the tool result.
+                    elif kind=='turn_complete' and tool is not None and first_verified_audio is not None:break
             await sender
             await ws.send(json.dumps({'type':'stop'}))
         finally:

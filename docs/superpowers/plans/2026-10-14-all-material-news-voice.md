@@ -25,15 +25,15 @@ Files: company.py, quote_service.py, demo_fixtures and their tests.
 - [x] Add `quote_coverage.scenarios: [{material_id, fixture_ids, buyer_defaults}]`, covering every catalogue material with three documents.
 - [x] Preserve the primary defaults; add coherent same-unit amounts, budgets, supplier references and dated fictional prices.
 - [x] Run the 52-case review/save/plan/delay/RFQ matrix.
-- [ ] Check review/save on October 17 while using explicitly dated October 14 synthetic FX.
+- [x] Check review/save on October 17 while using explicitly dated October 14 synthetic FX.
 
 ## Task 2: Material selector and news session recovery (Antigravity web worker)
 
 Files: demo-page.tsx, demo-api.ts, demo-company-news.tsx, demo.css and web tests.
 
-- [ ] Select a material before its quote, filter accepted quotes, load its scenario defaults and invalidate stale results.
-- [ ] Recover expired news sessions visibly and distinguish no-match, unavailable, stale and refreshing states.
-- [ ] Run web tests, typecheck and production build; inspect desktop and mobile.
+- [x] Select a material before its quote, filter accepted quotes, load its scenario defaults and invalidate stale results.
+- [x] Recover expired news sessions visibly and distinguish no-match, unavailable, stale and refreshing states.
+- [x] Run web tests, typecheck and production build; inspect desktop and mobile.
 
 ## Task 3: News and voice repair (bounded chat workers)
 
@@ -42,7 +42,7 @@ Files: news.py, live_voice.py, demo-live-voice.tsx, demo-operator.tsx and focuse
 - [x] Reproduce GDELT HTTP 429; expose a safe rate-limit reason without automatic retry or invented articles.
 - [x] Preflight the canonical session before microphone access; guard stale asynchronous recovery and provide clear failure states.
 - [x] Refund failed provider startup; use bounded renewable process allowance, keeping concurrency and conversation duration bounded.
-- [ ] Verify actual Google audio, browser playback and cleanup after deployment.
+- [x] Verify actual Google audio, browser playback and cleanup after deployment.
 
 ## Task 4: Integration and release (coordinator)
 
@@ -50,6 +50,8 @@ Files: app.py, regression tests, deployment acceptance scripts and release evide
 
 - [x] Reproduce expired news and voice handshake failures; deliver a safe same-origin WebSocket expiry error without opening Google.
 - [x] Bound local operations to 4,000 requests, 2,400 replay keys and 48 active-company offers; keep extraction paid budgets unchanged.
-- [ ] Run independent integration review, backend and web gates, immutable package and digest deployment.
-- [ ] Verify 52 material scenarios/156 quotes through the hosted API in one visit, fresh observed news, and native voice plus reviewed RFQ.
-- [ ] Record exact source/revision/image/checks, limits and rollback to revision 00011-gnj/image 3c20c667838543c781a77bbaef313ac0b6708d2622583befba3cca8265f45b7c.
+- [x] Run independent integration review, backend and web gates, immutable package and digest deployment.
+- [x] Verify 52 material scenarios/156 quotes through the hosted API in one visit, fresh observed news, and native voice plus reviewed RFQ.
+- [x] Record exact source/revision/image/checks, limits and rollback to revision 00011-gnj/image 3c20c667838543c781a77bbaef313ac0b6708d2622583befba3cca8265f45b7c.
+
+Release verified on revision `closed-source-quote-demo-00013-6cp` at 100% traffic. See `docs/All_Material_News_Voice_Release_20261014.md` for evidence and limits.

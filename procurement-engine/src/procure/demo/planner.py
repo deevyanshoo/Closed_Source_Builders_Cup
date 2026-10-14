@@ -12,6 +12,7 @@ from procure.offers import normalize as nz
 
 from .errors import DemoError
 from .quote_service import synthetic_rate
+from .quote_service import company_for_offer
 
 _DECIMAL = re.compile(r"^(0|[1-9][0-9]*)(\.[0-9]+)?$")
 _DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -48,8 +49,19 @@ def _decimal_kg(normalized: dict | None) -> Decimal | None:
     return nz._bounded_decimal(normalized.get("kg"), allow_negative=False)
 
 
+def _quantity_in_unit(normalized: dict | None, unit: str) -> Decimal | None:
+    if not isinstance(normalized, dict) or normalized.get('status') != 'ok':
+        return None
+    if unit == 'kg':
+        return _decimal_kg(normalized)
+    if normalized.get('unit') != unit:
+        return None
+    return nz._bounded_decimal(normalized.get('quantity'), allow_negative=False)
+
+
 def _alternative(offer: dict, *, material: str, quantity: Decimal, decision: date, need: date, today: date,
-                 reporting_currency: str, budget: Decimal, additional: Decimal, delay: int) -> dict:
+                 reporting_currency: str, budget: Decimal, additional: Decimal, delay: int,
+                 quantity_unit: str) -> dict:
     reasons: list[str] = []
     offer_id = offer["offer_id"]
     supplier = _field(offer, "supplier_name") or "Unknown supplier"
@@ -81,19 +93,19 @@ def _alternative(offer: dict, *, material: str, quantity: Decimal, decision: dat
             reasons.append("arrives_after_need_by")
 
     normalized = offer.get("normalized") or {}
-    min_kg = _decimal_kg(normalized.get("min_order"))
-    capacity_kg = _decimal_kg(normalized.get("capacity"))
-    if min_kg is None:
+    minimum = _quantity_in_unit(normalized.get("min_order"), quantity_unit)
+    capacity = _quantity_in_unit(normalized.get("capacity"), quantity_unit)
+    if minimum is None:
         reasons.append("minimum_order_unknown")
-    elif quantity < min_kg:
+    elif quantity < minimum:
         reasons.append("below_min_order")
-    if capacity_kg is None:
+    if capacity is None:
         reasons.append("capacity_unknown")
     else:
         capacity_period = (normalized.get("capacity") or {}).get("original", {}).get("period")
         if capacity_period != "month":
             reasons.append("capacity_period_unsupported")
-        if quantity > capacity_kg:
+        if quantity > capacity:
             reasons.append("exceeds_capacity")
 
     unit_price = None
@@ -101,10 +113,10 @@ def _alternative(offer: dict, *, material: str, quantity: Decimal, decision: dat
     if item_index is not None:
         normalized_items = normalized.get("items") or []
         normalized_item = normalized_items[item_index] if item_index < len(normalized_items) else {}
-        offered_kg = _decimal_kg(normalized_item.get("quantity"))
-        if offered_kg is None:
+        offered = _quantity_in_unit(normalized_item.get("quantity"), quantity_unit)
+        if offered is None:
             reasons.append("offered_quantity_unknown")
-        elif quantity > offered_kg:
+        elif quantity > offered:
             reasons.append("exceeds_offered_quantity")
         price_field = offer["items"][item_index].get("pricing", {})
         price_value = lc.usable(price_field) if price_field else None
@@ -114,13 +126,22 @@ def _alternative(offer: dict, *, material: str, quantity: Decimal, decision: dat
             quote_currency = price_value.get("unit_price", {}).get("currency")
             if _field(offer, "settlement_currency") != quote_currency:
                 reasons.append("settlement_price_currency_mismatch")
-            price = nz.normalize_pricing(price_value, reporting_currency=reporting_currency,
-                                         as_of=decision, rate_lookup=synthetic_rate)
-            converted = price.get("reporting") or {}
-            money = converted.get("per_kg") or {}
+            if quantity_unit == 'kg':
+                price = nz.normalize_pricing(price_value, reporting_currency=reporting_currency,
+                                             as_of=decision, rate_lookup=synthetic_rate)
+                money = (price.get('reporting') or {}).get('per_kg') or {}
+            elif price_value.get('per_unit') == quantity_unit:
+                amount = nz._bounded_decimal(price_value['unit_price'].get('amount'), allow_negative=False)
+                rate = synthetic_rate(quote_currency, reporting_currency, decision) if quote_currency != reporting_currency else None
+                converted = amount if rate is None else amount * rate.rate if amount is not None and rate.rate is not None else None
+                price = {'status': 'ok' if converted is not None else 'fx_unavailable'}
+                money = {'amount': nz.fmt(converted)} if converted is not None else {}
+            else:
+                price = {'status': 'unsupported_unit'}
+                money = {}
             unit_price = nz._bounded_decimal(money.get("amount"), allow_negative=False)
             if unit_price is None:
-                reasons.append("fx_unavailable" if price.get("status") == "ok" else "price_unavailable")
+                reasons.append("fx_unavailable" if price.get("status") in {'ok', 'fx_unavailable'} else "price_unavailable")
             else:
                 with localcontext() as context:
                     context.prec = nz.ARITHMETIC_PRECISION
@@ -128,11 +149,17 @@ def _alternative(offer: dict, *, material: str, quantity: Decimal, decision: dat
                 if total > budget:
                     reasons.append("over_budget")
 
-    return {"offer_id": offer_id, "supplier": supplier, "feasible": not reasons,
+    result = {"offer_id": offer_id, "supplier": supplier, "feasible": not reasons,
             "reasons": reasons, "arrival_date": arrival.isoformat() if arrival else None,
-            "unit_price_per_kg": nz.fmt(unit_price) if unit_price is not None else None,
+            "unit_price_per_unit": nz.fmt(unit_price) if unit_price is not None else None,
+            "unit_price": nz.fmt(unit_price) if unit_price is not None else None,
+            "quantity_unit": quantity_unit,
             "total_cost": nz.fmt(total) if total is not None else None,
-            "quantity_kg": nz.fmt(quantity)}
+            "quantity": nz.fmt(quantity)}
+    if quantity_unit == 'kg':
+        result['unit_price_per_kg'] = result['unit_price']
+        result['quantity_kg'] = result['quantity']
+    return result
 
 
 def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
@@ -154,10 +181,28 @@ def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
         if offer.get("status") != "saved":
             raise DemoError("offer_not_accepted", "Only accepted offers can enter a plan", 409)
 
-    quantity = _number(request, "quantity_kg", positive=True)
-    stock = _number(request, "current_stock_kg")
+    companies = {company_for_offer(offer) for offer in offers}
+    company_id = next(iter(companies)) if len(companies) == 1 else None
+    if company_id is None or request.get('company_id', company_id) != company_id:
+        raise DemoError('company_mismatch', 'Offers and buyer company must match', 422)
+
+    unit = request.get('quantity_unit', 'kg')
+    if not isinstance(unit, str) or not unit or len(unit) > 30:
+        raise DemoError('invalid_value', 'quantity_unit is required')
+    generic = any(key in request for key in ('quantity', 'current_stock', 'additional_cost_per_unit'))
+    if generic and not all(key in request for key in ('quantity', 'current_stock', 'additional_cost_per_unit', 'quantity_unit')):
+        raise DemoError('invalid_request', 'Generic quantity, stock, extra cost, and unit are required together', 422)
+    if unit != 'kg' and any(key in request for key in ('quantity_kg', 'current_stock_kg', 'additional_cost_per_kg')):
+        raise DemoError('unit_mismatch', 'Kilogram aliases cannot describe a non-kilogram material', 422)
+    quantity = _number(request, 'quantity' if generic else 'quantity_kg', positive=True)
+    stock = _number(request, 'current_stock' if generic else 'current_stock_kg')
     budget = _number(request, "budget")
-    additional = _number(request, "additional_cost_per_kg")
+    additional = _number(request, 'additional_cost_per_unit' if generic else 'additional_cost_per_kg')
+    if generic and unit == 'kg':
+        for old, current in (('quantity_kg', quantity), ('current_stock_kg', stock),
+                             ('additional_cost_per_kg', additional)):
+            if old in request and _number(request, old) != current:
+                raise DemoError('unit_mismatch', 'Kilogram aliases disagree with generic values', 422)
     decision = _date(request, "decision_date")
     need = _date(request, "need_by")
     if decision > need:
@@ -166,6 +211,12 @@ def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
     reporting = request.get("reporting_currency")
     if not isinstance(material, str) or not material.strip() or len(material) > 100:
         raise DemoError("invalid_value", "material is required")
+    if generic:
+        from .company import list_companies
+        matching = [m for p in list_companies() for m in p['materials']
+                    if m['material_id'] == material and m['quantity_unit'] == unit]
+        if not matching:
+            raise DemoError('unit_mismatch', 'Material and quantity unit do not match', 422)
     if not isinstance(reporting, str) or reporting not in nz.ISO_4217_CODES or reporting in nz._NON_SETTLEMENT_CODES:
         raise DemoError("invalid_value", "reporting_currency must be an ISO currency")
     delays = request.get("delay_days_by_offer") or {}
@@ -179,7 +230,7 @@ def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
     alternatives = ([] if purchase == 0 else [
         _alternative(by_id[offer_id], material=material, quantity=purchase, decision=decision, today=today,
                      need=need, reporting_currency=reporting, budget=budget,
-                     additional=additional, delay=delays.get(offer_id, 0)) for offer_id in ids])
+                     additional=additional, delay=delays.get(offer_id, 0), quantity_unit=unit) for offer_id in ids])
     feasible = [alternative for alternative in alternatives if alternative["feasible"]]
     selected = min(feasible, key=lambda a: (Decimal(a["total_cost"]), a["offer_id"])) if feasible else None
     if purchase == 0:
@@ -189,18 +240,33 @@ def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
                        "stated synthetic assumptions.")
     else:
         explanation = "No selected single offer meets every stated constraint."
-    assumptions = {"additional_cost_per_kg": nz.fmt(additional),
+    fx_pairs = {(lc.usable(item.get('pricing', {})) or {}).get('unit_price', {}).get('currency')
+                for offer in offers for item in offer.get('items', [])}
+    fx_rates = []
+    for base in sorted(fx_pairs - {reporting, None}):
+        rate = synthetic_rate(base, reporting, decision)
+        if rate.rate is not None:
+            fx_rates.append({'base': base, 'quote': reporting, 'rate': nz.fmt(rate.rate),
+                             'rate_date': rate.rate_date, 'source': rate.source})
+    assumptions = {"additional_cost_per_unit": nz.fmt(additional),
                    "additional_cost_currency": reporting, "additional_cost_source": "buyer_synthetic_assumption",
-                   "fx_source": "synthetic_scenario", "fx_rates": [{"base": "EUR", "quote": "USD", "rate": "1.25",
-                                                                   "rate_date": "2026-10-14", "source": "synthetic_scenario"}],
+                   "fx_source": "synthetic_scenario", "fx_rates": fx_rates,
                    "delay_days_by_offer": delays, "comparison": "single_offer"}
+    if unit == 'kg':
+        assumptions['additional_cost_per_kg'] = nz.fmt(additional)
     plan_key = {"offer_ids": ids, "offer_versions": versions, "request": request}
     plan_id = "plan-" + hashlib.sha256(json.dumps(plan_key, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
-    return {"plan_id": plan_id, "synthetic": True, "decision_date": decision.isoformat(),
-            "need_by": need.isoformat(), "material": material, "quantity_kg": nz.fmt(quantity),
-            "current_stock_kg": nz.fmt(stock), "required_purchase_kg": nz.fmt(purchase),
+    result = {"plan_id": plan_id, "synthetic": True, "company_id": company_id,
+            "decision_date": decision.isoformat(),
+            "need_by": need.isoformat(), "material": material, "quantity": nz.fmt(quantity),
+            "current_stock": nz.fmt(stock), "required_purchase": nz.fmt(purchase),
+            "quantity_unit": unit,
             "reporting_currency": reporting, "assumptions": assumptions,
             "alternatives": alternatives, "selected_offer_id": selected["offer_id"] if selected else None,
             "total_cost": selected["total_cost"] if selected else ("0" if purchase == 0 else None),
             "explanation": explanation, "forecast_action": "ABSTAIN", "customer_savings": None,
             "offer_versions": {offer_id: versions[offer_id] for offer_id in ids}}
+    if unit == 'kg':
+        result.update(quantity_kg=result['quantity'], current_stock_kg=result['current_stock'],
+                      required_purchase_kg=result['required_purchase'])
+    return result

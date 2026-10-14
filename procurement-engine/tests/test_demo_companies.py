@@ -59,7 +59,7 @@ def test_catalogue_has_ten_varied_dated_profiles_with_explicit_units_and_coverag
         assert solara['quote_coverage']['materials'] == ['copper']
         assert set(solara['quote_coverage']['fixture_ids']) == {'late-copper', 'express-copper', 'eu-copper'}
         assert solara['buyer_defaults']['material'] == 'copper'
-        assert all(not p['quote_coverage']['fixture_ids'] for p in profiles if p is not solara)
+        assert all(len(p['quote_coverage']['fixture_ids']) == 3 for p in profiles)
 
 
 def test_catalogue_depth_references_and_original_solara_scenario():

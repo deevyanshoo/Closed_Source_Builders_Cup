@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { CompanyOverview, NewsWorkspace } from './demo-company-news';
@@ -67,17 +67,20 @@ const today = () => {
   const date = new Date();
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
-const defaultInputs = () => ({ material: '', quantity_kg: '', current_stock_kg: '0', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_kg: '0' });
+const defaultInputs = () => ({ material: '', quantity: '', current_stock: '0', quantity_unit: 'kg', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_unit: '0' });
+const genericInputs = (request: PlanRequest) => ({ material: request.material, quantity: request.quantity ?? request.quantity_kg ?? '', current_stock: request.current_stock ?? request.current_stock_kg ?? '0', quantity_unit: request.quantity_unit ?? 'kg', need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_unit: request.additional_cost_per_unit ?? request.additional_cost_per_kg ?? '0' });
+export const requiredPurchase = (plan: PlanView): string => plan.required_purchase ?? plan.required_purchase_kg ?? '0';
+export const planUnit = (plan: PlanView) => plan.quantity_unit ?? 'kg';
 export function canonicalBuyerState(session: DemoSession) {
   const request = session.plan_request ?? session.recovery?.baseline_request ?? session.company?.buyer_defaults;
   const delayControls = session.recovery ? delayControlsForRecovery(session.recovery) : session.plan && request ? delayControlsForPlan(session.plan, request) : { offerId: '', days: '0' };
   return {
     selected: request?.offer_ids.filter(id => session.offers.some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
-    inputs: request ? { material: request.material, quantity_kg: request.quantity_kg, current_stock_kg: request.current_stock_kg, need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_kg: request.additional_cost_per_kg } : defaultInputs(),
+    inputs: request ? genericInputs(request) : defaultInputs(),
     delayControls,
   };
 }
-export const sampleBuyerInputs = () => ({ material: 'copper', quantity_kg: '10000', current_stock_kg: '2000', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_kg: '0.25' });
+export const sampleBuyerInputs = () => ({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
 const words = (s: string) => s.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const message = (error: unknown) => error instanceof DemoApiError ? error.message : 'Something went wrong. Please try again.';
 const acceptedStatus = (status: string) => status === 'saved' || status === 'used_in_plan';
@@ -114,10 +117,16 @@ function fields(offer: OfferView): [string, FieldResult][] {
   return [...Object.entries(offer.fields), ...offer.items.flatMap((item, index) => Object.entries(item).map(([name, field]) => [`items[${index}].${name}`, field] as [string, FieldResult]))];
 }
 
-function editDefaults(field: FieldResult): Record<string, string> {
-  const v = field.value && typeof field.value === 'object' ? field.value as Record<string, unknown> : {};
+export function reviewSuggestionFor(offer: OfferView, fixtures: DemoFixture[], fieldName: string): unknown {
+  const fixture = offer.fixture_id ? fixtures.find(item => item.id === offer.fixture_id) : fixtures.find(item => item.filename === offer.document.filename);
+  return fixture?.review_values?.[fieldName];
+}
+const needsReviewerInput = (field: FieldResult) => ['missing', 'unverified', 'unsupported', 'conflict', 'invalid', 'unknown'].includes(field.status);
+function editDefaults(field: FieldResult, suggestion?: unknown): Record<string, string> {
+  const value = needsReviewerInput(field) && suggestion !== undefined ? suggestion : field.value;
+  const v = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const price = v.unit_price && typeof v.unit_price === 'object' ? v.unit_price as Record<string, unknown> : {};
-  return { value: field.value == null ? '' : String(field.value), amount: String(price.amount ?? v.amount ?? ''), currency: String(price.currency ?? ''), unit: String(v.per_unit ?? v.unit ?? 'tonne'), code: String(v.code ?? 'FOB'), place: String(v.place ?? ''), period: String(v.period ?? '') };
+  return { value: value == null ? '' : String(value), amount: String(price.amount ?? v.amount ?? ''), currency: String(price.currency ?? ''), unit: String(v.per_unit ?? v.unit ?? 'tonne'), code: String(v.code ?? 'FOB'), place: String(v.place ?? ''), period: String(v.period ?? '') };
 }
 
 export function correctionValue(field: FieldResult, edit: Record<string, string>): unknown {
@@ -128,17 +137,19 @@ export function correctionValue(field: FieldResult, edit: Record<string, string>
   return field.kind === 'currency' ? edit.value.trim().toUpperCase() : edit.value.trim();
 }
 
-function CorrectionEditor({ field, busy, onApply, onCancel }: { field: FieldResult; busy: boolean; onApply: (value: unknown) => void; onCancel: () => void }) {
-  const [edit, setEdit] = useState(() => editDefaults(field));
+export function CorrectionEditor({ field, busy, units = [], materialIds = [], suggestion, onApply, onCancel }: { field: FieldResult; busy: boolean; units?: string[]; materialIds?: string[]; suggestion?: unknown; onApply: (value: unknown) => void; onCancel: () => void }) {
+  const [edit, setEdit] = useState(() => editDefaults(field, suggestion));
   const set = (name: string, value: string) => setEdit(old => ({ ...old, [name]: value }));
   const input = (name: string, title: string, type = 'text') => <label><span>{title}</span><input type={type} value={edit[name] ?? ''} onChange={e => set(name, e.target.value)} required={name !== 'place' && name !== 'period'} /></label>;
-  const unit = <label><span>Unit</span><select value={edit.unit} onChange={e => set('unit', e.target.value)}><option value="kg">kg</option><option value="tonne">tonne</option><option value="lb">lb</option></select></label>;
+  const availableUnits = [...new Set([...(units.length ? units : ['kg', 'tonne', 'lb', 'barrel', 'bale', 'unit', 'litre', 'roll']), edit.unit].filter(Boolean))];
+  const unit = <label><span>Unit</span><select value={edit.unit} onChange={e => set('unit', e.target.value)}>{availableUnits.map(value => <option key={value} value={value}>{value}</option>)}</select></label>;
   return <form className="demo-editor" onSubmit={e => { e.preventDefault(); onApply(correctionValue(field, edit)); }}><div className="demo-editor-grid">
     {field.kind === 'quantity' ? <>{input('amount', 'Amount')}{unit}{field.name === 'capacity' && input('period', 'Period, if stated')}</> :
       field.kind === 'pricing' ? <>{input('amount', 'Fixed unit price')}{input('currency', 'Currency')}{unit}</> :
         field.kind === 'incoterm' ? <><label><span>Incoterm</span><select value={edit.code} onChange={e => set('code', e.target.value)}>{['EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP'].map(x => <option key={x}>{x}</option>)}</select></label>{input('place', 'Named place, if stated')}</> :
+        field.name === 'material' && materialIds.length ? <label><span>Covered material ID</span><input list="demo-covered-materials" required value={edit.value} onChange={e => set('value', e.target.value)} /><datalist id="demo-covered-materials">{materialIds.map(id => <option key={id} value={id} />)}</datalist></label> :
           input('value', field.kind === 'date' ? 'Date' : field.kind === 'currency' ? 'Currency' : 'Correct value', field.kind === 'date' ? 'date' : 'text')}
-  </div><p>Reviewer entries stay separate from document evidence. The service checks the value again before acceptance.</p><div className="demo-actions"><button className="demo-button" disabled={busy}>Apply correction</button><button className="demo-link" type="button" onClick={onCancel}>Cancel</button></div></form>;
+  </div>{needsReviewerInput(field) && suggestion !== undefined && <p className="demo-alert">Suggested synthetic fixture value. Check the downloaded document before applying this reviewer correction; it is not extracted evidence.</p>}<p>Reviewer entries stay separate from document evidence. The service checks the value again before acceptance.</p><div className="demo-actions"><button className="demo-button" disabled={busy}>Apply correction</button><button className="demo-link" type="button" onClick={onCancel}>Cancel</button></div></form>;
 }
 
 function SourceBadge({ offer, cached }: { offer: OfferView; cached: boolean }) {
@@ -146,7 +157,7 @@ function SourceBadge({ offer, cached }: { offer: OfferView; cached: boolean }) {
   return <span className="demo-badge">{real ? cached ? 'Cached real Gemini extraction' : 'Real Gemini extraction' : offer.extractor === 'rules' ? 'Rule-based extraction' : 'Extraction source unavailable'}</span>;
 }
 
-function OfferReview({ offer, busy, cached, onCorrect, onSave }: { offer: OfferView; busy: boolean; cached: boolean; onCorrect: (field: string, value: unknown) => void; onSave: () => void }) {
+function OfferReview({ offer, company, fixtures, busy, cached, onCorrect, onSave }: { offer: OfferView; company?: CompanyProfile; fixtures: DemoFixture[]; busy: boolean; cached: boolean; onCorrect: (field: string, value: unknown) => void; onSave: () => void }) {
   const [editing, setEditing] = useState<string | null>(null);
   const accepted = acceptedStatus(offer.status);
   return <section className="demo-review"><div className="demo-heading"><div><span className="demo-kicker">02 / Review the evidence</span><h2>{offer.document.filename}</h2></div><SourceBadge offer={offer} cached={cached} /></div>
@@ -157,7 +168,7 @@ function OfferReview({ offer, busy, cached, onCorrect, onSave }: { offer: OfferV
       {field.source === 'user' && <p className="demo-reviewer">Reviewer entry · document evidence is unchanged</p>}
       {field.reasons?.length > 0 && <p className="demo-muted">{field.reasons.map(words).join(' · ')}</p>}
       {!accepted && <button type="button" className="demo-link" onClick={() => setEditing(name)} disabled={busy}>Correct this term</button>}
-      {editing === name && <CorrectionEditor key={`${name}-${offer.version}`} field={field} busy={busy} onApply={value => { onCorrect(name, value); setEditing(null); }} onCancel={() => setEditing(null)} />}
+      {editing === name && <CorrectionEditor key={`${name}-${offer.version}`} field={field} busy={busy} units={company?.materials.map(item => item.quantity_unit)} materialIds={company?.quote_coverage.materials} suggestion={reviewSuggestionFor(offer, fixtures, name)} onApply={value => { onCorrect(name, value); setEditing(null); }} onCancel={() => setEditing(null)} />}
     </article>)}</div>
     {offer.blocking_reasons.length > 0 && <div className="demo-alert" role="alert"><strong>Resolve before accepting this quote</strong><ul>{offer.blocking_reasons.map((r, i) => <li key={i}>{words(r.field)}: {r.message}</li>)}</ul></div>}
     <div className="demo-actions"><button className="demo-button" type="button" onClick={onSave} disabled={busy || accepted || offer.blocking_reasons.length > 0}>{accepted ? 'Quote accepted' : 'Accept reviewed quote'}</button><span>Acceptance uses the latest checked version.</span></div>
@@ -179,17 +190,17 @@ const reasonText = (reason: string) => planReason[reason] ?? words(reason);
 
 export function PlanResults({ plan, offers }: { plan: PlanView; offers: OfferView[] }) {
   const selected = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
-  const stockCoversNeed = /^0(?:\.0+)?$/.test(plan.required_purchase_kg);
+  const stockCoversNeed = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
   return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">04 / Comparison</span><h2>{stockCoversNeed ? 'Stock covers this need' : selected ? `${selected.supplier} is feasible` : 'No feasible quote for these inputs'}</h2><p>{plan.explanation}</p>
-    <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{plan.required_purchase_kg} kg</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
-    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{a.supplier}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{a.unit_price_per_kg == null ? 'Unavailable' : `${a.unit_price_per_kg} ${plan.reporting_currency}/kg`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
-    <p className="demo-muted">Total includes your extra cost per kg. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
+    <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{requiredPurchase(plan)} {planUnit(plan)}</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
+    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{a.supplier}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
+    <p className="demo-muted">Total includes your extra cost per {planUnit(plan)}. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
   </section>;
 }
 
 function PlanSnapshot({ title, plan, offers }: { title: string; plan: PlanView; offers: OfferView[] }) {
   const choice = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
-  const stock = /^0(?:\.0+)?$/.test(plan.required_purchase_kg);
+  const stock = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
   return <article className="demo-snapshot"><h3>{title}</h3><dl><dt>Supplier</dt><dd>{stock ? 'No purchase needed; stock covers this need' : choice?.supplier ?? 'No feasible quote'}</dd><dt>Arrival</dt><dd>{choice?.arrival_date ?? 'No selected arrival'}</dd><dt>Buyer total</dt><dd>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</dd><dt>Feasibility</dt><dd>{stock ? 'Stock covers need' : choice ? 'Feasible' : 'No feasible quote'}</dd></dl>
     {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{a.supplier}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{a.offer_id === plan.selected_offer_id ? 'Selected' : a.feasible ? 'Feasible alternative' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}</article>;
 }
@@ -208,8 +219,10 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [companyError, setCompanyError] = useState('');
   const [newsError, setNewsError] = useState('');
   const [newsBusy, setNewsBusy] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'operator'>('company');
-  const [operatorRevision, setOperatorRevision] = useState(0);
+  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news'>('company');
+  const [operatorOpen, setOperatorOpen] = useState(false);
+  const operatorDockRef = useRef<HTMLElement | null>(null);
+  const operatorToggleRef = useRef<HTMLButtonElement | null>(null);
   const [fixtureId, setFixtureId] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<'gemini' | 'rules'>('gemini');
@@ -228,12 +241,24 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const chosen = accepted.filter(o => selected.includes(o.offer_id));
   const supportedFixtures = company ? fixtures.filter(fixture => company.quote_coverage.fixture_ids.includes(fixture.id)) : fixtures;
   const selectedFixtureId = supportedFixtures.some(fixture => fixture.id === fixtureId) ? fixtureId : supportedFixtures[0]?.id ?? '';
-  const coveredMaterial = !company || company.quote_coverage.materials.some(material => material.toLowerCase() === inputs.material.trim().toLowerCase());
+  const coveredMaterials = company?.materials.filter(item => company.quote_coverage.materials.some(covered => covered.toLowerCase() === item.material_id.toLowerCase() || covered.toLowerCase() === item.name.toLowerCase())) ?? [];
+  const coveredMaterial = !company || coveredMaterials.some(item => (item.material_id.toLowerCase() === inputs.material.trim().toLowerCase() || item.name.toLowerCase() === inputs.material.trim().toLowerCase()) && item.quantity_unit === inputs.quantity_unit);
   const companyOptions = companies.length ? companies : company ? [company] : [];
+  useEffect(() => { if (operatorOpen) operatorDockRef.current?.focus(); }, [operatorOpen]);
+  function closeOperator() { setOperatorOpen(false); operatorToggleRef.current?.focus(); }
+  function operatorKeys(event: KeyboardEvent<HTMLElement>) {
+    if (!operatorOpen) return;
+    if (event.key === 'Escape') { closeOperator(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = [...(operatorDockRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]') ?? [])].filter(item => item.offsetParent !== null);
+    if (!focusable.length) { event.preventDefault(); return; }
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === operatorDockRef.current)) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 
-  function restoreSession(session: DemoSession, epoch: number, resetOperator = true) {
+  function restoreSession(session: DemoSession, epoch: number) {
     const buyer = canonicalBuyerState(session);
-    if (resetOperator) setOperatorRevision(value => value + 1);
     dispatch({ type: 'session', session, epoch });
     setSelected(buyer.selected); setInputs(buyer.inputs);
     setDelayOfferId(buyer.delayControls.offerId);
@@ -241,7 +266,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   }
   function restoreOperatorSession(session: DemoSession) {
     actionRef.current += 1;
-    restoreSession(session, epochRef.current, false);
+    restoreSession(session, epochRef.current);
   }
   function clearUnknownOperatorSession() {
     epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
@@ -375,7 +400,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     });
   }
   function prepareRfq() {
-    if (state.dirty || !state.session || !state.plan || !state.reviewed || !state.plan.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan.required_purchase_kg)) return;
+    if (state.dirty || !state.session || !state.plan || !state.reviewed || !state.plan.selected_offer_id || /^0(?:\.0+)?$/.test(requiredPurchase(state.plan))) return;
     const plan = state.plan;
     run('rfq', () => api.rfq(state.session!.csrf_token, { plan_id: plan.plan_id, expected_versions: plan.offer_versions, reviewed: true }, state.session!.context_version), (rfq, epoch) => dispatch({ type: 'rfq', rfq, epoch }));
   }
@@ -411,9 +436,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     <div className="demo-boundary"><strong>Demo boundaries</strong><span>Company profiles, quotes and buyer inputs are synthetic; news is observed public data. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
     {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · changes kept separately for this visit</p></div>
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
-      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button><button type="button" className={workspaceTab === 'operator' ? 'active' : ''} aria-pressed={workspaceTab === 'operator'} onClick={() => setWorkspaceTab('operator')}>Operator</button></div>
-      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : state.session && state.session.context_version !== undefined ?
-        <OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}:${state.epoch}:${operatorRevision}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} onSession={restoreOperatorSession} onUnknown={clearUnknownOperatorSession} /> : null}
+      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button></div>
+      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} />}
     </section>}
     {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button></div>}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
@@ -426,13 +450,13 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {state.session && !state.session.provider.available && <p className="demo-provider">Gemini is currently unavailable. Rule extraction can still be tried and will be labelled separately.</p>}
     </section>
     {state.offers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes in this session">{state.offers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === state.focusedId ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
-    {offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
+    {offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} company={company} fixtures={supportedFixtures} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
     <section className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
-      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !company.buyer_defaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(company?.buyer_defaults ? { ...canonicalBuyerState({ ...state.session, plan_request: null, recovery: null }).inputs } : sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? company.buyer_defaults ? 'Dated synthetic buyer assumptions from this fictional company. Edit any input below; kg-only quote coverage still applies.' : 'No buyer defaults or runnable quote scenario are available for this company.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
-      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{([['material', 'Material'], ['quantity_kg', 'Needed quantity (kg)'], ['current_stock_kg', 'Current stock (kg)'], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_kg', 'Extra cost per kg']] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity_kg', 'current_stock_kg', 'budget', 'additional_cost_per_kg'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
-        <p className="demo-assumption">Extra cost is your synthetic per-kg assumption; total cost includes it but does not prove full freight or tariffs. Scenario FX reference when conversion applies: EUR 1 = USD 1.25, dated 2026-10-14 (synthetic). Budget and price are decimal amounts in the reporting currency. Current quote planning is kg-only.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
+      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !company.buyer_defaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(company?.buyer_defaults ? { ...canonicalBuyerState({ ...state.session, plan_request: null, recovery: null }).inputs } : sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? company.buyer_defaults ? 'Dated synthetic buyer assumptions from this fictional company. Edit any input below; Coverage uses the listed material unit.' : 'No buyer defaults or runnable quote scenario are available for this company.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
+      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={inputs.material} onChange={e => { const material = coveredMaterials.find(item => item.material_id === e.target.value); if (!material) return; invalidate(); const defaults = company.buyer_defaults && company.buyer_defaults.material.toLowerCase() === material.material_id.toLowerCase() ? genericInputs(company.buyer_defaults) : null; setInputs(old => defaults ?? { ...old, material: material.material_id, quantity: '', current_stock: material.stock, quantity_unit: material.quantity_unit, budget: '', additional_cost_per_unit: '0' }); }}><option value="">Choose a covered material</option>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
+        <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
     {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
@@ -445,10 +469,10 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     <section className="demo-planning demo-rfq"><div className="demo-heading"><div><span className="demo-kicker">06 / Prepare an RFQ draft</span><h2>Review before you download</h2></div><span className="demo-session">Synthetic · unsent · no order commitment</span></div>
       <p className="demo-muted">The draft uses the current selected plan and quote. The buyer total is a scenario comparison, not the supplier's commercial quote.</p>
       {state.dirty && <p className="demo-alert">Inputs changed. Run a new comparison before reviewing, preparing or downloading an RFQ draft.</p>}
-      <label className="demo-review-check"><input type="checkbox" checked={state.reviewed} disabled={state.dirty || !state.plan?.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan?.required_purchase_kg ?? '0')} onChange={e => dispatch({ type: 'reviewed', value: e.target.checked })} />I reviewed this plan and understand the RFQ is an unsent draft</label>
+      <label className="demo-review-check"><input type="checkbox" checked={state.reviewed} disabled={state.dirty || !state.plan?.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan ? requiredPurchase(state.plan) : '0')} onChange={e => dispatch({ type: 'reviewed', value: e.target.checked })} />I reviewed this plan and understand the RFQ is an unsent draft</label>
       <div className="demo-actions"><button type="button" className="demo-button" disabled={state.dirty || !state.reviewed || !state.plan?.selected_offer_id || !!busy} onClick={prepareRfq}>{busy === 'rfq' ? 'Preparing draft…' : 'Prepare unsent RFQ'}</button></div>
-      {state.rfq && <div className="demo-draft"><p><strong>Draft for {state.rfq.supplier}</strong> · {state.rfq.status.replace('_', ' ')} · current reviewed comparison</p><pre>{state.rfq.text}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
+      {state.rfq && <div className="demo-draft"><p><strong>Draft for {state.rfq.supplier}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{state.rfq.text}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
     </section>
     <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
-  </main><footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
+  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} onSession={restoreOperatorSession} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

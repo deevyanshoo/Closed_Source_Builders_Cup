@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal
 
 DEFAULT_COMPANY_ID = 'solara-cables'
 AS_OF = '2026-10-14'
@@ -244,6 +245,61 @@ _add_catalogue_lines('stonebridge-materials', [
 ])
 
 _BY_ID = {profile['company_id']: profile for profile in _PROFILES}
+
+_SCENARIO_PRICE = {
+    'terrapack': '130', 'loomworks': '50000', 'harvest-foods': '45000',
+    'meridian-pharma': '250', 'forgeline-components': '16000',
+    'gridspring-batteries': '20000000', 'circuitpeak-systems': '16',
+    'atlas-petrochem': '280', 'stonebridge-materials': '1500'}
+
+# The catalogue scenarios are a bounded fictional demonstration, not market coverage.
+# Keep Solara's original copper request and fixture IDs exactly as published.
+for _profile_row in _PROFILES:
+    if _profile_row['company_id'] == DEFAULT_COMPANY_ID:
+        _profile_row['buyer_defaults'].update({
+            'quantity': '10000', 'current_stock': '2000',
+            'additional_cost_per_unit': '0.25', 'quantity_unit': 'kg'})
+        continue
+    _material_row = _profile_row['materials'][0]
+    _material_id = _material_row['material_id']
+    _unit = _material_row['quantity_unit']
+    _stock = _material_row['stock']
+    _purchase = _material_row['monthly_requirement']
+    _quantity = str(Decimal(_stock) + Decimal(_purchase))
+    _fixture_ids = [f"{_profile_row['company_id']}-{_material_id}-{role}"
+                    for role in ('late', 'selected', 'alternate')]
+    _profile_row['quote_coverage'] = {
+        'materials': [_material_id], 'fixture_ids': _fixture_ids,
+        'note': 'Three immutable fictional CSV quotes; reviewed values use the stated material unit.'}
+    _profile_row['buyer_defaults'] = {
+        'offer_ids': [], 'expected_versions': {}, 'material': _material_id,
+        'quantity': _quantity, 'current_stock': _stock, 'quantity_unit': _unit,
+        'need_by': '2026-11-05', 'decision_date': AS_OF,
+        'reporting_currency': _profile_row['reporting_currency'],
+        'budget': str(Decimal(_purchase) * Decimal(_SCENARIO_PRICE[_profile_row['company_id']]) * Decimal('1.5')),
+        'additional_cost_per_unit': '0.25'}
+    _profile_row['orders'].append({
+        'order_id': f"{_profile_row['company_id']}-scenario-order",
+        'material_id': _material_id, 'quantity': _quantity, 'unit': _unit,
+        'need_by': '2026-11-05', 'status': 'open'})
+    _place = _profile_row['locations'][0]
+    _source_country = _profile_row['suppliers'][0]['country']
+    for _role, _lead in (('late', 40), ('selected', 12), ('alternate', 10)):
+        _supplier_name = f"{_profile_row['name']} {_material_row['name']} {_role.title()} Source Ltd [SYNTHETIC]"
+        _currency = 'USD' if _role == 'alternate' else _profile_row['reporting_currency']
+        _profile_row['suppliers'].append({
+            'supplier_id': f"{_profile_row['company_id']}-scenario-{_role}",
+            'name': _supplier_name, 'country': _source_country,
+            'settlement_currency': _currency, 'materials': [_material_id],
+            'lead_time_days': _lead})
+        _profile_row['routes'].append({
+            'route_id': f"{_profile_row['company_id']}-scenario-{_role}-route",
+            'origin': _source_country,
+            'destination': f"{_place['city']}, {_place['country']}",
+            'via': [], 'materials': [_material_id], 'direction': 'import',
+            'currency': _currency})
+        if _currency not in _profile_row['currencies']:
+            _profile_row['currencies'].append(_currency)
 
 
 def list_companies():

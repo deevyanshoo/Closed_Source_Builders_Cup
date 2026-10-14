@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, initialDemoState, PlanResults, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
-import type { DemoSession, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import { applyDemoResult, canonicalBuyerState, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, initialDemoState, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
+import type { DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
 const offer = (version: number, status = 'corrected'): OfferView => ({
   offer_id: 'q1', version, status, synthetic: true,
@@ -78,6 +78,51 @@ describe('demo response state', () => {
     expect(html).toMatch(/disabled=""[^>]*>Run comparison/);
     expect(html).toContain('News workspace');
   });
+  it('uses generic units and covered company defaults for a runnable tonne workflow', () => {
+    const generic = { ...request, quantity: '20', current_stock: '3', additional_cost_per_unit: '2', quantity_unit: 'tonne' };
+    const tonneCompany = { ...company, materials: [{ ...company.materials[0], quantity_unit: 'tonne' }], buyer_defaults: generic };
+    const tonnePlan = { ...selectedPlan, quantity: '20', current_stock: '3', required_purchase: '17', quantity_unit: 'tonne', alternatives: [{ ...selectedPlan.alternatives[0], quantity: '17', unit_price_per_unit: '84' }] };
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: tonneCompany, plan: tonnePlan, plan_request: generic }, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    expect(canonicalBuyerState({ ...companySession, company: tonneCompany, plan_request: generic }).inputs).toMatchObject({ quantity: '20', current_stock: '3', quantity_unit: 'tonne' });
+    expect(html).toContain('Needed quantity (tonne)');
+    expect(html).toContain('17 tonne');
+    expect(html).toContain('USD/tonne');
+    expect(html).not.toContain('kg-only');
+  });
+  it('renders quote corrections for barrel, bale and unit and suggests covered material IDs', () => {
+    for (const unit of ['barrel', 'bale', 'unit']) {
+      const field: FieldResult = { name: 'capacity', kind: 'quantity', status: 'extracted', value: { amount: '10', unit }, source: 'document', evidence: [], reasons: [] };
+      const html = renderToStaticMarkup(<CorrectionEditor field={field} busy={false} units={[unit]} materialIds={['crude-oil']} onApply={() => {}} onCancel={() => {}} />);
+      expect(html).toContain(`<option value="${unit}" selected="">${unit}</option>`);
+    }
+    const material: FieldResult = { name: 'material', kind: 'text', status: 'missing', value: null, source: 'document', evidence: [], reasons: [] };
+    const html = renderToStaticMarkup(<CorrectionEditor field={material} busy={false} units={['barrel']} materialIds={['crude-oil', 'cotton-bales', 'electronic-components']} onApply={() => {}} onCancel={() => {}} />);
+    expect(html).toContain('value="cotton-bales"');
+    expect(html).toContain('value="electronic-components"');
+  });
+  it('labels a generic RFQ draft with its material quantity and unit', () => {
+    const generic = { ...request, material: 'crude-oil', quantity: '20', current_stock: '3', quantity_unit: 'barrel', additional_cost_per_unit: '2' };
+    const oilCompany = { ...company, materials: [{ ...company.materials[0], material_id: 'crude-oil', name: 'Crude oil', quantity_unit: 'barrel' }], quote_coverage: { ...company.quote_coverage, materials: ['crude-oil'] }, buyer_defaults: generic };
+    const oilPlan = { ...selectedPlan, material: 'crude-oil', quantity: '20', current_stock: '3', required_purchase: '17', quantity_unit: 'barrel' };
+    const oilRfq = { ...rfq, material: 'crude-oil', quantity: '17', quantity_unit: 'barrel' };
+    const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: oilCompany, plan: oilPlan, plan_request: generic, rfq: oilRfq }, epoch: 0 });
+    expect(renderToStaticMarkup(<DemoPage initialState={restored} />)).toMatch(/Draft for Swift<\/strong>[^<]*17 barrel/);
+  });
+  it('prefills only unverified quote terms from the matching synthetic fixture for explicit reviewer apply', () => {
+    const fixture = { id: 'atlas-quote', name: 'Atlas', filename: 'atlas.csv', description: '', download_url: '/api/demo/fixtures/atlas-quote', review_values: { 'items[0].material': 'naphtha', 'items[0].quantity': { amount: '40', unit: 'barrel' } } };
+    const atlas = { ...offer(1), fixture_id: fixture.id, document: { ...offer(1).document, filename: fixture.filename } };
+    expect(reviewSuggestionFor(atlas, [fixture], 'items[0].material')).toBe('naphtha');
+    expect(reviewSuggestionFor(atlas, [fixture], 'items[0].quantity')).toEqual({ amount: '40', unit: 'barrel' });
+    expect(reviewSuggestionFor({ ...atlas, fixture_id: 'other' }, [fixture], 'items[0].material')).toBeUndefined();
+    const missing: FieldResult = { name: 'material', kind: 'text', status: 'missing', value: null, source: 'document', evidence: [], reasons: [] };
+    const html = renderToStaticMarkup(<CorrectionEditor field={missing} suggestion="naphtha" busy={false} materialIds={['naphtha']} onApply={() => {}} onCancel={() => {}} />);
+    expect(html).toContain('value="naphtha"');
+    expect(html).toContain('Suggested synthetic fixture value');
+    const verified = renderToStaticMarkup(<CorrectionEditor field={{ ...missing, status: 'extracted', value: 'copper' }} suggestion="naphtha" busy={false} onApply={() => {}} onCancel={() => {}} />);
+    expect(verified).toContain('value="copper"');
+    expect(verified).not.toContain('Suggested synthetic fixture value');
+  });
   it('exposes the scoped operator tab beside company and news without removing procurement results', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
@@ -88,6 +133,10 @@ describe('demo response state', () => {
     expect(html).toContain('Turn supply risks into reviewed actions');
     expect(html).toContain('Fictional company profile · changes kept separately for this visit');
     expect(html).not.toContain('context v1');
+    expect(html).toContain('demo-operator-dock');
+    expect(html).toContain('Open operator chat');
+    expect(html).toContain('Start conversation');
+    expect(html).not.toContain('Stop and transcribe');
   });
   it('adds a second supplier delay without losing the first and can remove all delays', () => {
     expect(delayRequest({ q1: 20 }, 'q2', '10')).toEqual({ q1: 20, q2: 10 });
@@ -180,7 +229,7 @@ describe('demo response state', () => {
     const q2 = { ...offer(1, 'saved'), offer_id: 'q2', document: { ...offer(1, 'saved').document, filename: 'second.pdf' } };
     const q2Plan = { ...selectedPlan, selected_offer_id: 'q2', offer_versions: { q2: 1 } };
     const canonical = { ...session, offers: [offer(1, 'saved'), q2], plan: q2Plan, plan_request: { ...request, offer_ids: ['q2'], expected_versions: { q2: 1 }, material: 'aluminium', quantity_kg: '8000' } };
-    expect(canonicalBuyerState(canonical)).toMatchObject({ selected: ['q2'], inputs: { material: 'aluminium', quantity_kg: '8000', budget: '10000' } });
+    expect(canonicalBuyerState(canonical)).toMatchObject({ selected: ['q2'], inputs: { material: 'aluminium', quantity: '8000', budget: '10000' } });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
     expect(html).toContain('value="aluminium"');
@@ -191,7 +240,7 @@ describe('demo response state', () => {
   it('disables buyer edits and sample values until the first session is ready', () => {
     const html = renderToStaticMarkup(<DemoPage />);
     expect(html).toMatch(/disabled=""[^>]*>Use sample buyer inputs/);
-    expect(html).toMatch(/<input type="text" required="" disabled="" value=""/);
+    expect(html).toMatch(/<input required="" disabled="" value=""/);
   });
 
   it('requires an active selected purchase and explicit review before showing draft action as enabled', () => {
@@ -229,10 +278,11 @@ describe('demo response state', () => {
   });
 
   it('offers optional fictional buyer inputs with the dated synthetic currency assumption', () => {
-    expect(sampleBuyerInputs()).toEqual({ material: 'copper', quantity_kg: '10000', current_stock_kg: '2000', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_kg: '0.25' });
+    expect(sampleBuyerInputs()).toEqual({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
     expect(html).toContain('Use sample buyer inputs');
-    expect(html).toContain('EUR 1 = USD 1.25');
+    expect(html).toContain('Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export.');
+    expect(html).not.toContain('EUR 1 = USD 1.25');
     expect(html).toContain('2026-10-14');
     expect(html).toContain('fictional');
   });

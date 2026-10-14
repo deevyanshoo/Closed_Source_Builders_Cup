@@ -4,6 +4,7 @@ export type Evidence = { locator: string; quote: string; text_sha256?: string };
 export type FieldResult = { name: string; kind: string; status: string; value: unknown; source: string; evidence: Evidence[]; reasons: string[]; critical?: boolean; candidates?: unknown[] };
 export type OfferView = {
   offer_id: string; version: number; status: string; synthetic: true;
+  fixture_id?: string;
   served_from_cache?: boolean;
   document: { document_id: string; filename: string; media_type: string; byte_size: number; warnings?: string[] };
   extractor: string; extractor_detail: { requested?: string; call?: string; model?: string; fallback_reason?: string };
@@ -12,13 +13,13 @@ export type OfferView = {
   normalized: Record<string, unknown>; blocking_reasons: { code: string; field: string; message: string }[];
 };
 export type DemoSession = { session_id: string; csrf_token: string; expires_at: string; synthetic: true; persistence: 'ephemeral'; offers: OfferView[]; provider: { model: string; available: boolean }; plan?: PlanView | null; plan_request?: PlanRequest | null; recovery?: RecoveryView | null; rfq?: RfqView | null; company?: CompanyProfile; context_version?: number };
-export type DemoFixture = { id: string; name: string; filename: string; description: string; download_url: string };
-export type PlanRequest = { offer_ids: string[]; expected_versions: Record<string, number>; material: string; quantity_kg: string; current_stock_kg: string; need_by: string; decision_date: string; reporting_currency: string; budget: string; additional_cost_per_kg: string; delay_days_by_offer?: Record<string, number> };
-export type PlanView = { plan_id: string; synthetic: true; decision_date: string; need_by: string; material: string; quantity_kg: string; current_stock_kg: string; required_purchase_kg: string; reporting_currency: string; assumptions: Record<string, unknown>; alternatives: { offer_id: string; supplier: string; feasible: boolean; reasons: string[]; arrival_date: string | null; unit_price_per_kg: string | null; total_cost: string | null; quantity_kg: string }[]; selected_offer_id: string | null; total_cost: string | null; explanation: string; forecast_action: 'ABSTAIN'; customer_savings: null; offer_versions: Record<string, number> };
+export type DemoFixture = { id: string; name: string; filename: string; description: string; download_url: string; review_values?: Record<string, unknown> };
+export type PlanRequest = { offer_ids: string[]; expected_versions: Record<string, number>; material: string; quantity?: string; current_stock?: string; additional_cost_per_unit?: string; quantity_unit?: string; quantity_kg?: string; current_stock_kg?: string; additional_cost_per_kg?: string; need_by: string; decision_date: string; reporting_currency: string; budget: string; delay_days_by_offer?: Record<string, number> };
+export type PlanView = { plan_id: string; synthetic: true; decision_date: string; need_by: string; material: string; quantity?: string; current_stock?: string; required_purchase?: string; quantity_unit?: string; quantity_kg?: string; current_stock_kg?: string; required_purchase_kg?: string; reporting_currency: string; assumptions: Record<string, unknown>; alternatives: { offer_id: string; supplier: string; feasible: boolean; reasons: string[]; arrival_date: string | null; unit_price_per_unit?: string | null; unit_price_per_kg?: string | null; total_cost: string | null; quantity?: string; quantity_kg?: string }[]; selected_offer_id: string | null; total_cost: string | null; explanation: string; forecast_action: 'ABSTAIN'; customer_savings: null; offer_versions: Record<string, number> };
 export type RecoveryRequest = { baseline_plan_id: string; expected_versions: Record<string, number>; delay_days_by_offer: Record<string, number> };
 export type RecoveryView = { comparison_id: string; synthetic: true; baseline: PlanView; scenario: PlanView; baseline_request: PlanRequest; scenario_request: PlanRequest; cost_delta: string | null; selection_changed: boolean; outcome: 'changed' | 'unchanged' | 'infeasible' | 'stock_covers_need'; replayed: boolean };
 export type RfqRequest = { plan_id: string; expected_versions: Record<string, number>; reviewed: true };
-export type RfqView = { draft_id: string; plan_id: string; offer_versions: Record<string, number>; synthetic: true; status: 'draft_unsent'; supplier: string; material: string; quantity_kg: string; need_by: string; reporting_currency: string; total_cost: string; created_at: string; text: string };
+export type RfqView = { draft_id: string; plan_id: string; offer_versions: Record<string, number>; synthetic: true; status: 'draft_unsent'; supplier: string; material: string; quantity?: string; quantity_unit?: string; quantity_kg?: string; need_by: string; reporting_currency: string; total_cost: string; created_at: string; text: string };
 export type CompanyProfile = {
   company_id: string; name: string; sector: string; size: string; synthetic: true; as_of: string; description: string;
   locations: { country: string; city: string }[]; reporting_currency: string;

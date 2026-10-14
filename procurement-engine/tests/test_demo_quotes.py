@@ -17,8 +17,10 @@ def service():
 def test_allowlist_has_two_pdfs_one_csv_and_rejects_altered_bytes():
     api = service()
     fixtures = api.list_fixtures()
-    assert {f["id"] for f in fixtures} == {"late-copper", "express-copper", "eu-copper"}
-    assert sorted(f["filename"].rsplit(".", 1)[-1] for f in fixtures) == ["csv", "pdf", "pdf"]
+    assert all(fixture['review_values'] == api.fixture_review_values(fixture['id']) for fixture in fixtures)
+    assert {"late-copper", "express-copper", "eu-copper"} <= {f["id"] for f in fixtures}
+    assert len(fixtures) == 30
+    assert sorted(f["filename"].rsplit(".", 1)[-1] for f in fixtures).count('pdf') == 2
     for fixture in fixtures:
         filename, data = api.fixture_bytes(fixture["id"])
         assert api.match_fixture(filename, data) == fixture["id"]

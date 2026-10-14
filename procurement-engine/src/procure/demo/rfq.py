@@ -6,6 +6,7 @@ from datetime import datetime
 from procure.offers import lifecycle as lc
 
 from .errors import DemoError
+from .quote_service import company_for_offer
 
 
 def _field(offer: dict, name: str):
@@ -34,6 +35,10 @@ def _price_text(field: dict) -> str:
 
 def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: datetime) -> dict:
     selected = offer["offer_id"]
+    if selected != plan.get('selected_offer_id') or company_for_offer(offer) != plan.get('company_id'):
+        raise DemoError('stale_plan', 'The reviewed selected offer no longer matches this plan.', 409)
+    if offer.get('version') != (plan.get('offer_versions') or {}).get(selected):
+        raise DemoError('stale_version', 'The selected offer version changed.', 409)
     items = [item for item in offer.get("items", []) if lc.usable(item.get("material", {})) == plan["material"]]
     if len(items) != 1:
         raise DemoError("draft_unavailable", "The selected offer has no unique material item.", 409)
@@ -68,6 +73,10 @@ def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: 
                 locator = evidence.get("locator")
                 if isinstance(locator, str) and locator and locator not in locators:
                     locators.append(locator)
+        for evidence in field.get('original_candidate_evidence') or []:
+            locator = evidence.get('locator')
+            if isinstance(locator, str) and locator and locator not in locators:
+                locators.append(locator)
     assumptions = plan.get("assumptions") or {}
     delay = (assumptions.get("delay_days_by_offer") or {}).get(selected, 0)
     names = {other["offer_id"]: _term(_field(other, "supplier_name")) for other in all_offers}
@@ -83,9 +92,10 @@ def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: 
         "SYNTHETIC TEST DOCUMENT — UNSENT REQUEST FOR QUOTATION DRAFT",
         "No order commitment. This text has not been sent to a supplier.",
         f"Supplier: {supplier}",
+        f"Buyer company: {plan.get('company_id', 'Unknown fictional buyer')}",
         f"Requested product: {_term(lc.usable(item.get('description', {})))}",
         f"Material: {plan['material']}",
-        f"Requested quantity: {plan['required_purchase_kg']} kg",
+        f"Requested quantity: {plan['required_purchase']} {plan['quantity_unit']}",
         f"Need by: {plan['need_by']}",
         f"Original quoted price: {_price_text(original_price)}",
         f"Current reviewed price: {money['amount']} {money.get('currency', 'Unknown')} per {pricing.get('per_unit', 'unknown unit')}",
@@ -97,8 +107,8 @@ def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: 
         "Original document locators: " + (", ".join(locators) if locators else "None recorded"),
         f"Hypothetical delay for selected offer: {delay} days; this is not a confirmed shipment event.",
         f"Hypothetical comparison delays across accepted offers: {comparison_delays}.",
-        f"Separate buyer extra-cost assumption: {assumptions.get('additional_cost_per_kg', 'unknown')} "
-        f"{assumptions.get('additional_cost_currency', 'unknown')} per kg "
+        f"Separate buyer extra-cost assumption: {assumptions.get('additional_cost_per_unit', assumptions.get('additional_cost_per_kg', 'unknown'))} "
+        f"{assumptions.get('additional_cost_currency', 'unknown')} per {plan['quantity_unit']} "
         f"({assumptions.get('additional_cost_source', 'unknown source')}).",
         f"Separate synthetic FX assumptions: {fx_text} ({assumptions.get('fx_source', 'unknown source')}).",
         f"Scenario comparison total: {plan['total_cost']} {plan['reporting_currency']}; "
@@ -106,8 +116,12 @@ def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: 
         "Please respond with a fresh formal quotation. No purchase or supplier communication has occurred.",
         "",
     ])
-    return {"plan_id": plan["plan_id"], "offer_versions": dict(plan["offer_versions"]),
+    result = {"plan_id": plan["plan_id"], "offer_versions": dict(plan["offer_versions"]),
             "synthetic": True, "status": "draft_unsent", "supplier": supplier,
-            "material": plan["material"], "quantity_kg": plan["required_purchase_kg"],
+            "company_id": plan.get('company_id'), "material": plan["material"], "quantity": plan["required_purchase"],
+            "quantity_unit": plan['quantity_unit'],
             "need_by": plan["need_by"], "reporting_currency": plan["reporting_currency"],
             "total_cost": plan["total_cost"], "created_at": created_at.isoformat(), "text": text}
+    if plan['quantity_unit'] == 'kg':
+        result['quantity_kg'] = result['quantity']
+    return result

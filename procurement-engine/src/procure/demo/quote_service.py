@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 from procure.documents import DocumentReadError, read_document
 from procure.offers import lifecycle as lc
+from procure.offers import normalize as nz
 from procure.offers.extraction import extract_offer
 from procure.offers.fx_rates import FxRate
 
@@ -31,12 +33,81 @@ _FIXTURES = (
      "filename": "SYN-eu-copper.csv", "description": "Synthetic CSV quote; dated synthetic EUR/USD conversion.",
      "sha256": "8dc9d68ae21f47b03585325f2d2297a0e2710d3ef3a6bdce212faa5bdaf727a5"},
 )
+_COMPANY_FIXTURES = tuple(json.loads((_FIXTURE_DIR / 'company-quote-manifest.json').read_text()))
+_FIXTURES += _COMPANY_FIXTURES
 _BY_ID = {entry["id"]: entry for entry in _FIXTURES}
+_BY_FILENAME = {entry['filename']: entry for entry in _COMPANY_FIXTURES}
+_ALL_BY_FILENAME = {entry['filename']: entry for entry in _FIXTURES}
+
+
+def company_for_offer(view: dict) -> str | None:
+    document = view.get('document') or {}
+    entry = _ALL_BY_FILENAME.get(document.get('filename'))
+    if not entry or document.get('document_id') != 'sha256:' + entry['sha256']:
+        return None
+    return entry.get('company_id', 'solara-cables')
+
+
+def fixture_review_values(fixture_id: str) -> dict:
+    """Explicit reviewer inputs for unsupported catalogue units in fictional CSVs."""
+    entry = _BY_ID.get(fixture_id)
+    if entry is None:
+        raise DemoError('fixture_not_found', 'Synthetic fixture not found', 404)
+    if entry not in _COMPANY_FIXTURES:
+        return {'settlement_currency': 'USD'} if fixture_id == 'late-copper' else {}
+    unit = entry['unit']
+    return {'items[0].material': entry['material'],
+            'items[0].quantity': {'amount': entry['offered'], 'unit': unit},
+            'items[0].pricing': {'type': 'fixed', 'unit_price': {
+                'amount': entry['price'], 'currency': entry['currency']}, 'per_unit': unit},
+            'min_order': {'amount': '1', 'unit': unit},
+            'capacity': {'amount': entry['offered'], 'unit': unit, 'period': 'month'}}
+
+
+def _scenario_entry(view: dict) -> dict | None:
+    return _BY_FILENAME.get((view.get('document') or {}).get('filename'))
+
+
+def _scenario_normalized(view: dict, today: date) -> dict:
+    """Demo-only exact same-unit normalization; no mass or package conversion."""
+    out = lc.compute_normalized(view, today, rate_lookup=synthetic_rate)
+    entry = _scenario_entry(view)
+    if not entry:
+        return out
+    unit = entry['unit']
+    for name in ('min_order', 'capacity'):
+        value = lc.usable(view['fields'][name])
+        if unit != 'kg' and isinstance(value, dict) and value.get('unit') == unit:
+            out[name] = {'original': copy.deepcopy(value), 'quantity': value['amount'],
+                         'unit': unit, 'status': 'ok'}
+    for index, item in enumerate(view['items']):
+        quantity = lc.usable(item['quantity'])
+        if unit != 'kg' and isinstance(quantity, dict) and quantity.get('unit') == unit:
+            out['items'][index]['quantity'] = {
+                'original': copy.deepcopy(quantity), 'quantity': quantity['amount'],
+                'unit': unit, 'status': 'ok'}
+        price = lc.usable(item['pricing'])
+        if isinstance(price, dict) and price.get('type') == 'fixed' and price.get('per_unit') == unit:
+            money = price.get('unit_price') or {}
+            amount = nz._bounded_decimal(money.get('amount'), allow_negative=False)
+            if amount is not None and amount > 0:
+                currency = money.get('currency')
+                rate = synthetic_rate(currency, view['reporting_currency'], today) if currency != view['reporting_currency'] else None
+                converted = amount if rate is None else amount * rate.rate if rate.rate is not None else None
+                out['items'][index]['pricing'] = {
+                    'original': copy.deepcopy(price), 'status': 'ok' if converted is not None else 'fx_unavailable',
+                    'type': 'fixed', 'per_unit': {'amount': nz.fmt(amount), 'currency': currency},
+                    'reporting': {'status': rate.status if rate else 'not_needed',
+                                  'fx': rate.to_dict() if rate and converted is not None else None,
+                                  'per_unit': {'amount': nz.fmt(converted), 'currency': view['reporting_currency']}
+                                  if converted is not None else None}}
+    return out
 
 
 def list_fixtures() -> list[dict]:
     return [{key: entry[key] for key in ("id", "name", "filename", "description")}
-            | {"download_url": f"/api/demo/fixtures/{entry['id']}"} for entry in _FIXTURES]
+            | {"download_url": f"/api/demo/fixtures/{entry['id']}",
+               "review_values": fixture_review_values(entry['id'])} for entry in _FIXTURES]
 
 
 def fixture_bytes(fixture_id: str) -> tuple[str, bytes]:
@@ -64,7 +135,11 @@ def match_fixture(filename: str, data: bytes) -> str:
 
 def synthetic_rate(base: str, quote: str, on: date) -> FxRate:
     """One explicitly dated scenario rate, never a market-data lookup."""
-    rate = Decimal("1.25") if (base, quote, on.isoformat()) == ("EUR", "USD", "2026-10-14") else None
+    rates = {('EUR', 'USD'): '1.25', ('USD', 'INR'): '80', ('USD', 'BDT'): '100',
+             ('USD', 'KES'): '120', ('USD', 'CHF'): '0.9', ('USD', 'MXN'): '20',
+             ('USD', 'KRW'): '1000', ('USD', 'MYR'): '4', ('USD', 'AED'): '4',
+             ('USD', 'ZAR'): '18'}
+    rate = Decimal(rates[base, quote]) if on.isoformat() == '2026-10-14' and (base, quote) in rates else None
     return FxRate(base, quote, rate, on.isoformat() if rate else None,
                   "synthetic_scenario" if rate else None,
                   "2026-10-14T00:00:00+00:00" if rate else None,
@@ -92,7 +167,8 @@ def extract_fixture(fixture_id: str, *, mode: str, as_of: date) -> dict:
     return extraction.to_dict()
 
 
-def _view(payload: dict, *, today: date) -> dict:
+def blocking_reasons(payload: dict, today: date) -> list[dict]:
+    """Public demo save gate, including exact-unit normalized values."""
     reasons = lc.blocking_reasons(payload, today)
     settlement = lc.usable(payload["fields"]["settlement_currency"])
     if settlement:
@@ -102,6 +178,11 @@ def _view(payload: dict, *, today: date) -> dict:
             if isinstance(money, dict) and money.get("currency") != settlement:
                 reasons.append({"code": "currency_conflict", "field": f"items[{index}].pricing",
                                 "message": "Settlement and fixed price currencies disagree"})
+    return reasons
+
+
+def _view(payload: dict, *, today: date) -> dict:
+    reasons = blocking_reasons(payload, today)
     status = payload["status"]
     if status in lc.TRANSITIONS["expire"][0] and any(r["code"] == "expired" for r in reasons):
         status = "expired"
@@ -118,11 +199,18 @@ def new_offer(payload: dict, *, offer_id: str, today: date) -> dict:
     if not isinstance(payload, dict) or not isinstance(offer_id, str) or not offer_id:
         raise DemoError("invalid_request", "A valid extraction and offer ID are required", 400)
     view = copy.deepcopy(payload)
+    if company_for_offer(view) is None:
+        raise DemoError('fixture_not_allowed', 'Only intact listed synthetic documents are accepted', 422)
     if view.get("extractor_detail", {}).get("requested") == "gemini" and not (
             view.get("extractor") == "gemini" and view["extractor_detail"].get("call") == "real"):
         raise DemoError("gemini_unavailable", "Gemini extraction was not confirmed as a real call", 503)
     view.update({"offer_id": offer_id, "version": 1, "synthetic": True,
                  "reporting_currency": "USD", "status": lc.initial_status(view, today)})
+    entry = _scenario_entry(view)
+    if entry:
+        view['reporting_currency'] = entry['reporting_currency']
+        view['normalized'] = _scenario_normalized(view, today)
+        view['status'] = lc.initial_status(view, today)
     return _view(view, today=today)
 
 
@@ -139,7 +227,32 @@ def correct_offer(view: dict, *, field: str, value, today: date) -> dict:
         current = lc.get_field(updated, field)
         if field == "capacity" and isinstance(value, dict) and value.get("period") is not None and not isinstance(value["period"], str):
             raise DemoError("invalid_value", "capacity period must be a supported text value")
-        problems = lc.value_problems(kind, value, field)
+        entry = _scenario_entry(updated)
+        if entry and kind in {'quantity', 'pricing', 'material'}:
+            unit = entry['unit']
+            if kind == 'material':
+                problems = [] if field == 'items[0].material' and value == entry['material'] else ['material does not match this fixture']
+            elif kind == 'quantity':
+                valid = (isinstance(value, dict) and value.get('unit') == unit
+                         and set(value) <= {'amount', 'unit', 'period'}
+                         and isinstance(value.get('amount'), str)
+                         and nz._bounded_decimal(value['amount'], allow_negative=False) is not None
+                         and Decimal(value['amount']) > 0
+                         and (field != 'capacity' or value.get('period') == 'month')
+                         and (field == 'capacity' or 'period' not in value))
+                problems = [] if valid else ['quantity must use the exact supported fixture unit']
+            else:
+                money = value.get('unit_price') if isinstance(value, dict) else None
+                valid = (isinstance(value, dict) and set(value) == {'type', 'unit_price', 'per_unit'}
+                         and value['type'] == 'fixed' and value['per_unit'] == unit
+                         and isinstance(money, dict) and set(money) == {'amount', 'currency'}
+                         and money['currency'] == entry['currency']
+                         and isinstance(money['amount'], str)
+                         and nz._bounded_decimal(money['amount'], allow_negative=False) is not None
+                         and Decimal(money['amount']) > 0)
+                problems = [] if valid else ['price must use the exact supported fixture unit and currency']
+        else:
+            problems = lc.value_problems(kind, value, field)
     except lc.OfferError as exc:
         raise _offer_error(exc) from None
     if problems:
@@ -152,11 +265,15 @@ def correct_offer(view: dict, *, field: str, value, today: date) -> dict:
         original = {"value": None, "status": "unavailable", "source": "unknown", "evidence": []}
     else:
         original = {key: copy.deepcopy(current.get(key)) for key in ("value", "status", "source", "evidence")}
+    candidate_evidence = copy.deepcopy(current.get('original_candidate_evidence') or [
+        evidence for candidate in current.get('candidates') or []
+        for evidence in candidate.get('evidence') or []])
     current.update({"status": "corrected", "value": value, "source": "user", "evidence": [],
                     "evidence_status": "user_entered_without_document_evidence", "previous": previous,
                     "original": original,
+                    "original_candidate_evidence": candidate_evidence,
                     "corrected_by": "session_reviewer", "corrected_at": today.isoformat(), "reasons": []})
-    updated["normalized"] = lc.compute_normalized(updated, today, rate_lookup=synthetic_rate)
+    updated["normalized"] = _scenario_normalized(updated, today)
     updated["version"] += 1
     updated["status"] = "corrected"
     return _view(updated, today=today)

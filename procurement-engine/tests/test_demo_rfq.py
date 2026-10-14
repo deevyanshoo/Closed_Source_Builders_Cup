@@ -51,7 +51,7 @@ def test_reviewed_rfq_from_delayed_active_plan_preserves_quote_and_assumption_bo
     assert response.status_code == 200, response.text
     draft = response.json()
     assert set(draft) == {"draft_id", "plan_id", "offer_versions", "synthetic", "status", "supplier",
-                          "material", "quantity_kg", "need_by", "reporting_currency", "total_cost",
+                          "company_id", "material", "quantity", "quantity_unit", "quantity_kg", "need_by", "reporting_currency", "total_cost",
                           "created_at", "text"}
     assert draft["plan_id"] == scenario["plan_id"]
     assert draft["offer_versions"] == request["expected_versions"]

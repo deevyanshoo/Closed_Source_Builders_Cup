@@ -125,7 +125,8 @@ def _compact(snapshot):
                        for o in snapshot.get('offers', [])],
             'plan': ({'plan_id': plan.get('plan_id'), 'selected_offer_id': plan.get('selected_offer_id'),
                       'offer_versions': plan.get('offer_versions'),
-                      'required_purchase_kg': plan.get('required_purchase_kg')} if plan else None)}
+                      'required_purchase': plan.get('required_purchase', plan.get('required_purchase_kg')),
+                      'quantity_unit': plan.get('quantity_unit', 'kg')} if plan else None)}
 
 
 def _reviewed_supplier(offer):
@@ -413,7 +414,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         rfq_requested = re.search(r'\b(?:rfq|quotation|quote\s+request|request\s+for\s+quot(?:e|ation)|draft)\b',
                                   message, re.IGNORECASE)
         if (proc['action'] == 'rfq' and rfq_requested and plan and
-                plan.get('selected_offer_id') and plan.get('required_purchase_kg') != '0'):
+                plan.get('selected_offer_id') and plan.get('required_purchase', plan.get('required_purchase_kg')) not in (None, '0')):
             candidate = {'kind': 'rfq', 'parameters': {}}
             status, answer = 'proposal', 'Review a draft request for quotation. It will remain unsent.'
         else:

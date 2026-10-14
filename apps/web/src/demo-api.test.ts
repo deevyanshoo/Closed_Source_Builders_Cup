@@ -46,6 +46,13 @@ describe('hosted demo API', () => {
     const [, options] = send.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(options.body as string)).toMatchObject({ offer_ids: ['q1'], expected_versions: { q1: 4 }, quantity_kg: '1000.25', budget: '9999.99' });
   });
+  it('sends a company plan in its explicit unit without kg aliases', async () => {
+    const send = vi.fn(async () => json({ plan_id: 'p2' }));
+    await createDemoApi(send, () => 'plan-key').plan('csrf', { offer_ids: ['q1'], expected_versions: { q1: 4 }, material: 'Steel', quantity: '21.5', current_stock: '3', quantity_unit: 'tonne', need_by: '2026-10-30', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '9999.99', additional_cost_per_unit: '0.25' }, 9);
+    const body = JSON.parse((send.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body).toMatchObject({ quantity: '21.5', current_stock: '3', quantity_unit: 'tonne', additional_cost_per_unit: '0.25', expected_context_version: 9 });
+    expect(body).not.toHaveProperty('quantity_kg');
+  });
 
   it('sends exact recovery and reviewed RFQ bodies with generated keys', async () => {
     const send = vi.fn(async () => json({ comparison_id: 'c1', draft_id: 'd1' }));

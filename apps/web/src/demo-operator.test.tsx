@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn } from './demo-api';
-import { applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
+import { acceptLiveOperatorRequest, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -22,6 +22,30 @@ describe('operator response boundary', () => {
     expect(applyOperatorResult(cancelled, { type: 'turn', requestId: 1, scope, turn }).turn).toBeNull();
     const newSession = applyOperatorResult(pending, { type: 'scope', scope: { ...scope, sessionId: 's2' } });
     expect(newSession.turn).toBeNull();
+  });
+  it('retains accepted turn history within a scope and clears it on session change', () => {
+    const first = applyOperatorResult(applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1 }), { type: 'turn', scope, requestId: 1, turn });
+    const second = applyOperatorResult(applyOperatorResult(first, { type: 'start', scope, requestId: 2 }), { type: 'turn', scope, requestId: 2, turn: { ...turn, turn_id: 't2', assistant_text: 'A second answer.' } });
+    expect(second.turns.map(item => item.turn_id)).toEqual(['t1', 't2']);
+    expect(applyOperatorResult(second, { type: 'scope', scope: { ...scope, sessionId: 's2' } }).turns).toEqual([]);
+  });
+  it('lets a live result supersede a typed request without leaving the panel stuck asking', () => {
+    const typed = { generation: 4, requestId: 2, busy: 'asking' };
+    const live = acceptLiveOperatorRequest(typed);
+    expect(live).toEqual({ generation: 5, requestId: 3, busy: '' });
+    expect(typed.generation === live.generation).toBe(false);
+    const pending = applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: typed.requestId });
+    const accepted = applyOperatorResult(applyOperatorResult(pending, { type: 'start', scope, requestId: live.requestId }), { type: 'turn', scope, requestId: live.requestId, turn });
+    expect(accepted.turn).toEqual(turn);
+    expect(applyOperatorResult(accepted, { type: 'turn', scope, requestId: typed.requestId, turn: { ...turn, turn_id: 'late' } }).turn?.turn_id).toBe('t1');
+  });
+  it('keeps conversation history across buyer edits but clears current proposal and all history on company switch', () => {
+    const accepted = applyOperatorResult(applyOperatorResult({ ...initialOperatorState, scope }, { type: 'start', scope, requestId: 1 }), { type: 'turn', scope, requestId: 1, turn });
+    const edited = applyOperatorResult(accepted, { type: 'scope', scope: { ...scope, epoch: 1 } });
+    expect(edited.turns.map(item => item.turn_id)).toEqual(['t1']);
+    expect(edited.turn).toBeNull();
+    expect(edited.reviewed).toBe(false);
+    expect(applyOperatorResult(edited, { type: 'scope', scope: { ...scope, companyId: 'loomworks', epoch: 2 } }).turns).toEqual([]);
   });
 
   it('requires an explicit review of current exact arguments and clean inputs before apply', () => {

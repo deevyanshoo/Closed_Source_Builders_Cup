@@ -24,7 +24,7 @@ def compare(baseline: dict, original_request: dict, offers: list[dict], delays: 
             context.prec = nz.ARITHMETIC_PRECISION
             cost_delta = nz.fmt(Decimal(scenario["total_cost"]) - Decimal(baseline["total_cost"]))
     changed = baseline["selected_offer_id"] != scenario["selected_offer_id"]
-    if scenario["required_purchase_kg"] == "0":
+    if scenario["required_purchase"] == "0":
         outcome = "stock_covers_need"
     elif scenario["selected_offer_id"] is None:
         outcome = "infeasible"

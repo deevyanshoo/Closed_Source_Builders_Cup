@@ -33,6 +33,7 @@ class Session:
     operator_turns: int = 0
     operator_generation: int = 0
     voice_calls: int = 0
+    live_voice_sessions: int = 0
     company_id: str = DEFAULT_COMPANY_ID
     context_version: int = 1
     workspaces: dict = field(default_factory=dict)

@@ -15,7 +15,7 @@ import secrets
 import threading
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
@@ -70,7 +70,7 @@ class BodyLimit:
 
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
-               news_service=None, operator_provider=None, voice_service=None) -> FastAPI:
+               news_service=None, operator_provider=None, voice_service=None, live_client_factory=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock)
     app.state.sessions = store
@@ -291,14 +291,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         return value.recovery['scenario'] if value.recovery is not None else value.last_plan
 
     def current_offers(value, plan, expected_versions, *, today):
-        from procure.offers import lifecycle as lc
+        from .quote_service import blocking_reasons
         if not isinstance(expected_versions, dict) or expected_versions != plan.get('offer_versions'):
             raise SessionError('stale_version', 'Offer versions changed. Compare again.', 409)
         ids = list(plan['offer_versions'])
         selected = [owned(value, offer_id) for offer_id in ids]
         for offer in selected:
             version(offer, expected_versions[offer['offer_id']])
-            if offer.get('status') != 'saved' or lc.blocking_reasons(offer, today):
+            if offer.get('status') != 'saved' or blocking_reasons(offer, today):
                 raise SessionError('stale_plan', 'A reviewed quote is no longer current.', 409)
         return selected
 
@@ -416,11 +416,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
     @app.post('/api/demo/operator')
     async def operator_turn(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        return await execute_operator_turn(value, data)
+
+    async def execute_operator_turn(value, data):
         nonlocal operator_process_calls
         from .operator import (DEFAULT_MODEL, OperatorUnavailable, OperatorValidationError,
                                run_turn)
-        value = mutate(request)
-        data = await body(request)
         shape(data, ('message', 'expected_context_version', 'idempotency_key'))
         message = data['message']
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
@@ -539,6 +542,30 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         finally:
             operator_workers.release()
 
+    @app.websocket('/api/demo/voice/live')
+    async def live_voice(websocket: WebSocket):
+        # Same trusted runtime and operator boundary as typed chat; no browser token.
+        source = websocket.headers.get('origin')
+        expected_url = str(websocket.url).replace('wss://', 'https://', 1).replace('ws://', 'http://', 1)
+        expected = origin(expected_url)
+        if (source is None or origin(source) != expected or
+                (not secure_cookies and (expected is None or expected[1] not in ('localhost', '127.0.0.1', '::1')))):
+            await websocket.close(code=1008)
+            return
+        try:
+            value = session(websocket)
+        except SessionError:
+            await websocket.close(code=1008)
+            return
+        from .live_voice import run_live_voice
+
+        async def operate(message, context_version, key):
+            return await execute_operator_turn(value, {'message': message,
+                'expected_context_version': context_version, 'idempotency_key': key})
+
+        await run_live_voice(websocket, session=value, store=store,
+                             operate_workspace=operate, client_factory=live_client_factory)
+
     @app.post('/api/demo/operator/confirm')
     async def operator_confirm(request: Request):
         value = mutate(request)
@@ -609,7 +636,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     selected = current_offers(value, plan, proposal['offer_versions'],
                                               today=store.now().date())
                     chosen = next((o for o in selected if o['offer_id'] == plan.get('selected_offer_id')), None)
-                    if chosen is None or plan.get('required_purchase_kg') == '0':
+                    if chosen is None or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0':
                         raise SessionError('draft_unavailable', 'Current plan has no purchase to draft.', 409)
                     result = build_draft(deepcopy(plan), deepcopy(chosen),
                                          all_offers=deepcopy(selected), created_at=store.now())
@@ -888,9 +915,13 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         value = mutate(request)
         data = await body(request)
         from .planner import build_plan
-        shape(data, ('offer_ids', 'expected_versions', 'material', 'quantity_kg', 'current_stock_kg',
-                     'need_by', 'decision_date', 'reporting_currency', 'budget', 'additional_cost_per_kg'),
-              ('delay_days_by_offer', 'expected_context_version'))
+        generic = any(key in data for key in ('quantity', 'current_stock', 'additional_cost_per_unit'))
+        quantities = ('quantity', 'current_stock', 'additional_cost_per_unit', 'quantity_unit') if generic else (
+            'quantity_kg', 'current_stock_kg', 'additional_cost_per_kg')
+        aliases = ('quantity_kg', 'current_stock_kg', 'additional_cost_per_kg') if generic else ('quantity_unit',)
+        shape(data, ('offer_ids', 'expected_versions', 'material', 'need_by', 'decision_date',
+                     'reporting_currency', 'budget', *quantities),
+              ('delay_days_by_offer', 'expected_context_version', *aliases))
         ids, versions = data['offer_ids'], data['expected_versions']
         if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_OFFERS or any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids) or not isinstance(versions, dict) or set(versions) != set(ids):
             raise SessionError('invalid_offers', 'Provide unique offer IDs and their exact versions.', 422)
@@ -961,7 +992,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if data['reviewed'] is not True:
                 raise SessionError('review_required', 'Review the selected plan before drafting.', 422)
             selected_id = plan.get('selected_offer_id')
-            if selected_id is None or plan.get('required_purchase_kg') == '0':
+            if selected_id is None or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0':
                 raise SessionError('draft_unavailable', 'The current plan has no purchase to request.', 409)
             chosen = next((offer for offer in selected if offer['offer_id'] == selected_id), None)
             if chosen is None:
@@ -1001,7 +1032,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             try:
                 selected = current_offers(value, plan, draft.get('offer_versions'), today=store.now().date())
                 if (plan.get('selected_offer_id') not in {offer['offer_id'] for offer in selected}
-                        or plan.get('required_purchase_kg') == '0'):
+                        or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0'):
                     raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404)
             except SessionError:
                 raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404) from None

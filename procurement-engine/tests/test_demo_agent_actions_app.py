@@ -455,7 +455,8 @@ def test_native_simulated_email_resolves_first_supplier_alias_and_exact_name(mon
     monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
 
     class EmailProvider(LiveProvider):
-        labels = ('first', 'first supplier', 'swift copper trading ltd [synthetic]', 'ResinArc')
+        labels = ('first', 'first supplier', 'swift copper trading ltd [synthetic]',
+                  'Swift Copper Trading Ltd', 'ResinArc')
 
         def __init__(self):
             super().__init__()
@@ -489,7 +490,7 @@ def test_native_simulated_email_resolves_first_supplier_alias_and_exact_name(mon
             while socket.receive_json()['type'] != 'ready':
                 pass
             results = []
-            for _ in range(4):
+            for _ in range(5):
                 socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
                 event = socket.receive_json()
                 while event['type'] != 'tool_result':
@@ -499,11 +500,14 @@ def test_native_simulated_email_resolves_first_supplier_alias_and_exact_name(mon
                 while socket.receive_json()['type'] != 'turn_complete':
                     pass
             assert [result['status'] for result in results] == [
-                'proposal', 'proposal', 'proposal', 'needs_clarification']
+                'proposal', 'proposal', 'proposal', 'proposal', 'needs_clarification']
             assert all(result['proposal']['parameters']['recipient_label'] == expected
-                       for result in results[:3])
-            assert results[3]['read_only'] is True and results[3]['proposal'] is None
-            assert 'made no change' in results[3]['assistant_text']
+                       for result in results[:4])
+            assert all('synthetic' not in result['proposal']['parameters']['subject'].lower()
+                       and 'fictional' not in result['proposal']['parameters']['body'].lower()
+                       for result in results[:4])
+            assert results[4]['read_only'] is True and results[4]['proposal'] is None
+            assert 'made no change' in results[4]['assistant_text']
             socket.send_json({'type': 'stop'})
         assert voice_client.get('/api/demo/session').json()['simulated_outbox'] == []
 

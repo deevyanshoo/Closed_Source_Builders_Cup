@@ -21,6 +21,23 @@ const news: NewsView = {
 };
 
 describe('company news workspace', () => {
+  it('shows independent successful news, FX and attempted refresh times', () => {
+    const scheduled = { ...news, collection: { mode: 'scheduled', status: 'partial',
+      news_success_at: '2026-10-14T08:00:00Z', fx_success_at: '2026-10-14T09:00:00Z',
+      attempted_at: '2026-10-14T10:00:00Z' } };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={scheduled} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('Hourly background collection');
+    expect(html).toContain('Last successful news collection');
+    expect(html).toContain('Last successful FX collection');
+    expect(html).toContain('Last recorded attempt');
+    for (const stamp of [scheduled.collection.news_success_at, scheduled.collection.fx_success_at, scheduled.collection.attempted_at]) {
+      expect(html).toContain(new Date(stamp).toLocaleString());
+    }
+    expect(html).toContain('partial');
+    const manual = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...scheduled, collection: { ...scheduled.collection, mode: 'manual', status: 'manual' } }} loading={false} error="" onRefresh={() => {}} />);
+    expect(manual).toContain('Manual source check');
+    expect(manual).not.toContain('Hourly background collection');
+  });
   it('shows animated source-check feedback only while fetching and keeps prior evidence dated', () => {
     const pending = renderToStaticMarkup(<NewsWorkspace company={company} view={news} loading={true} error="" onRefresh={() => {}} />);
     expect(pending).toContain('<canvas');

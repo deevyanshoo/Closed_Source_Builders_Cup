@@ -14,6 +14,26 @@ const session: DemoSession = { session_id: 's1', csrf_token: 'csrf1', expires_at
 const plan = { plan_id: 'p1', synthetic: true, decision_date: '2026-10-14', need_by: '2026-10-30', material: 'copper', quantity_kg: '1000', current_stock_kg: '0', required_purchase_kg: '1000', reporting_currency: 'USD', assumptions: { additional_cost_per_kg: '0', fx_source: 'synthetic' }, alternatives: [], selected_offer_id: null, total_cost: null, explanation: 'No feasible offer.', forecast_action: 'ABSTAIN', customer_savings: null, offer_versions: { q1: 1 } } satisfies PlanView;
 const request: PlanRequest = { offer_ids: ['q1'], expected_versions: { q1: 1 }, material: 'copper', quantity_kg: '1000', current_stock_kg: '0', need_by: '2026-10-30', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '10000', additional_cost_per_kg: '0' };
 const selectedPlan: PlanView = { ...plan, selected_offer_id: 'q1', total_cost: '86000', required_purchase_kg: '1000', alternatives: [{ offer_id: 'q1', supplier: 'Swift', feasible: true, reasons: [], arrival_date: '2026-10-29', unit_price_per_kg: '84', total_cost: '86000', quantity_kg: '1000' }] };
+
+it('shows a clean supplier label in the comparison without changing the selected offer ID or cost', () => {
+  const raw = 'Europa Copper SA [SYNTHETIC]';
+  const shown = renderToStaticMarkup(<PlanResults plan={{ ...selectedPlan, alternatives: [{ ...selectedPlan.alternatives[0], supplier: raw }] }} offers={[offer(1)]} />);
+  expect(shown).toContain('Europa Copper SA is feasible');
+  expect(shown).toContain('86000');
+  expect(shown).not.toContain('[SYNTHETIC]');
+  expect(selectedPlan.selected_offer_id).toBe('q1');
+});
+
+it('shows a clean RFQ recipient while preserving the canonical server draft', () => {
+  const raw = 'Europa Copper SA [SYNTHETIC]';
+  const canonical = { ...rfq, supplier: raw, text: `Request for quotation to ${raw}. This draft remains unsent.` };
+  const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, rfq: canonical }, epoch: 0 });
+  const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+  expect(html).toContain('Draft for Europa Copper SA</strong>');
+  expect(html).toContain('This draft remains unsent.');
+  expect(html).not.toContain('[SYNTHETIC]');
+  expect(canonical.supplier).toBe(raw);
+});
 const recovery: RecoveryView = { comparison_id: 'c1', synthetic: true, baseline: { ...selectedPlan, plan_id: 'p1', total_cost: '82000' }, scenario: { ...selectedPlan, plan_id: 'p2' }, baseline_request: request, scenario_request: { ...request, delay_days_by_offer: { q1: 20 } }, cost_delta: '4000', selection_changed: true, outcome: 'changed', replayed: false };
 const rfq: RfqView = { draft_id: 'd1', plan_id: 'p2', offer_versions: { q1: 1 }, synthetic: true, status: 'draft_unsent', supplier: 'Swift', material: 'copper', quantity_kg: '1000', need_by: '2026-10-30', reporting_currency: 'USD', total_cost: '86000', created_at: '2026-10-14T10:00:00Z', text: 'Synthetic unsent request for quotation' };
 const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };

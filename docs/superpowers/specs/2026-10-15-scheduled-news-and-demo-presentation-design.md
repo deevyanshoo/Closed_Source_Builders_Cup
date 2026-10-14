@@ -5,6 +5,8 @@ Status: Approved by the user on 2026-10-15 for implementation, testing and deplo
 
 ## Approved free-tier-only constraint (supersedes conflicting initial settings)
 
+User clarification on 2026-10-15: **Existing trial credits are okay; no out-of-pocket charges.** This supersedes the original strict free-allowance-only hold below. Activation is allowed while the billing account is verified to remain an unupgraded active Free Trial with available credit; no paid-account upgrade is authorized. Continue to use the bounded eligible-region configuration to conserve credit. Google's Free Trial auto-closes rather than charging unless manually upgraded: https://cloud.google.com/signup-faqs.
+
 The user explicitly requested no new cost from scheduling. Trial credits are not free-tier usage. Prepare and test the complete feature, but activate recurring infrastructure only after its free allowance headroom and bounded usage are verified. If that cannot be established, leave scheduling inactive and report the exact blocker; the independent natural-wording release may proceed under existing deployment authorization.
 
 Use `us-central1` for the news job and dedicated Standard Storage bucket, because Mumbai Storage has no Always Free allowance. Keep the existing portal in Mumbai. Limit the worker to 120 seconds, one task, 1 vCPU, 512 MiB, zero job retries and zero Scheduler retries, with no automated Gemini calls. At 744 hourly executions in a 31-day month the configured execution upper bound is 89,280 vCPU-seconds and 44,640 GiB-seconds before any account-shared usage; retries, manual invocations and regional pricing discounts must be assessed separately.

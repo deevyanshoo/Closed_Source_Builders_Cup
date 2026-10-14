@@ -297,7 +297,8 @@ def test_correct_plain_supplier_answer_is_bound_to_canonical_supplier_fact():
     supplier = next(s for s in value['company']['suppliers'] if s['name'].startswith('Europa Copper'))
     response = turn(value, f"What is {supplier['name']} supplier lead time for copper?",
                     SmartProvider('answer', 'copper', answer='Europa Copper lead time is 10 days.'))
-    assert supplier['name'] in response['assistant_text']
+    assert supplier['name'].removesuffix(' [SYNTHETIC]') in response['assistant_text']
+    assert '[SYNTHETIC]' not in response['assistant_text']
     assert '10 days' in response['assistant_text']
     corrected = turn(value, f"What is {supplier['name']} supplier lead time for copper?",
              SmartProvider('answer', 'copper', answer='Europa Copper lead time is 45 days.'))
@@ -332,7 +333,9 @@ def test_named_email_request_has_a_safe_default_when_router_arguments_are_incomp
                   SmartProvider('simulate_email','copper',parameters={'view':'outbox'}))
     assert response['status']=='proposal'
     assert response['candidate']['parameters']['recipient_label']==recipient
-    assert 'synthetic demonstration' in response['candidate']['parameters']['body']
+    assert 'available capacity and delivery lead time' in response['candidate']['parameters']['body']
+    assert 'synthetic' not in response['candidate']['parameters']['body'].lower()
+    assert 'unsent' in response['assistant_text'].lower()
 
 
 def test_combined_news_explanation_keeps_evidence_analysis_with_a_stock_lookup():

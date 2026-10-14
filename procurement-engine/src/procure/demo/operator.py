@@ -11,6 +11,7 @@ import threading
 from time import monotonic
 
 from .agent_tools import ToolValidationError, inventory_analytics, prepare_form
+from .presentation import present_answer, supplier_display_name
 
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 _ID = {'type': 'string', 'minLength': 1, 'maxLength': 128}
@@ -183,7 +184,8 @@ def _facts(snapshot, compact):
         for key, source in (('name', 'name'), ('country', 'country'), ('currency', 'settlement_currency'),
                             ('lead_days', 'lead_time_days')):
             if supplier.get(source) is not None:
-                facts[prefix + key] = str(supplier[source])
+                facts[prefix + key] = (supplier_display_name(str(supplier[source]))
+                                       if key == 'name' else str(supplier[source]))
     for order in snapshot['company'].get('orders', []):
         prefix = 'order.' + order['order_id'] + '.'
         for key in ('material_id', 'quantity', 'unit', 'need_by', 'status'):
@@ -209,7 +211,8 @@ def _facts(snapshot, compact):
         prefix = 'offer.' + offer_id + '.'
         for key in ('supplier_name', 'status', 'lead_time_days', 'settlement_currency', 'valid_until'):
             if offer.get(key) is not None:
-                facts[prefix + key] = str(offer[key])
+                facts[prefix + key] = (supplier_display_name(str(offer[key]))
+                                       if key == 'supplier_name' else str(offer[key]))
         for index, price in enumerate(offer.get('pricing') or []):
             if isinstance(price, dict) and isinstance(price.get('unit_price'), dict):
                 for key in ('amount', 'currency'):
@@ -456,7 +459,7 @@ def _canonical_read_template(snapshot, message, material_id):
         return 'The reporting currency is {{company.reporting_currency}}.'
     if re.search(r'\blead(?:[ -]time)?\b', folded):
         named = [row for row in snapshot['company']['suppliers']
-                 if row['name'].casefold().removesuffix(' [synthetic]') in folded
+                 if supplier_display_name(row['name']).casefold() in folded
                  and (material_id is None or material_id in row.get('materials', []))]
         if len(named) == 1:
             prefix = 'supplier.' + named[0]['supplier_id']
@@ -488,7 +491,7 @@ def _grounded_answer(snapshot, message, material_id, evidence, facts, cited):
                                    re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?(?!\w)', text)}
             if numbers(_FACT_TOKEN.sub('', raw)) - numbers(rendered):
                 raise OperatorValidationError('Plain answer contradicts the requested canonical fact.')
-            return rendered + ' Source: fictional company profile.'
+            return rendered
     return _render_answer(raw, facts, cited)
 
 
@@ -515,7 +518,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                         'simulate_email parameters MUST contain exactly subject, body and recipient_label; '
                         'copy explicitly supplied subject/body, otherwise draft brief text without invented '
                         'numbers. recipient_label MUST be an exact current supplier name including the '
-                        'synthetic suffix. Never use view for an email. For compare/load_quotes parameters '
+                        'synthetic suffix, even when the user says only the display name. Never use view for an email. For compare/load_quotes parameters '
                         'MUST be {} (or omitted); the server selects owned current-material quotes. '
                         'For other intents omit parameters or use {}. Classify and select the material; '
                         'evidence_ids must be [] because '
@@ -553,7 +556,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                            'Use next_steps: []. Do not put fact tokens into these fields.')
             if role == 'evidence' and intake['intent'] in {'inspect', 'explain', 'answer', 'analytics'}:
                 prompt += ('\nFor this question, include answer with at least one trusted fact token. '
-                           'Address the actual user question, preserve its material/unit/currency, '
+                     'Address the actual user question naturally without a repeated source disclaimer; '
+                     'preserve its material/unit/currency, '
                            'and describe news implications only as conditional interpretations.')
         prompt += ('\nCite only IDs in the final trusted allowlist. For watch without an explicit '
                    'news item reference, every role must use evidence_ids: []. For watch or '
@@ -770,7 +774,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         # not model arguments. Preserve those exact fields when routing omits them.
         named = [supplier['name'] for supplier in snapshot['company']['suppliers']
                  if material_id in supplier.get('materials', []) and
-                 supplier['name'].casefold() in message.casefold()]
+                 (supplier['name'].casefold() in message.casefold() or
+                  supplier_display_name(supplier['name']).casefold() in message.casefold())]
         if not named and re.search(r'\bfirst\s+supplier\b', message, re.IGNORECASE):
             named = [supplier['name'] for supplier in snapshot['company']['suppliers']
                      if material_id in supplier.get('materials', [])][:1]
@@ -787,8 +792,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         elif len(named) == 1 and set(parameters) != {'subject', 'body', 'recipient_label'}:
             material_name = next(row['name'] for row in snapshot['company']['materials']
                                  if row['material_id'] == material_id)
-            parameters = {'recipient_label': named[0], 'subject': 'Synthetic quote request',
-                          'body': f'Please provide a quotation, available capacity and delivery lead time for {material_name}. This is a synthetic demonstration only.'}
+            parameters = {'recipient_label': named[0], 'subject': 'Quotation request',
+                          'body': f'Please provide a quotation, available capacity and delivery lead time for {material_name}.'}
 
         if (proc['action'] != 'simulate_email' or material_id is None or
                 set(parameters) != {'subject', 'body', 'recipient_label'} or
@@ -803,6 +808,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         selected_name = next((offer.get('supplier_name') for offer in compact['offers']
                               if offer.get('offer_id') == selected), None)
         recipient_stated = (parameters['recipient_label'].casefold() in message.casefold() or
+                            bool(supplier_display_name(parameters['recipient_label']).casefold() in
+                                 message.casefold() and named == matching) or
                             bool(re.search(r'\bfirst\s+supplier\b', message, re.IGNORECASE)
                                  and named == matching) or
                             bool(re.search(r'\bselected\s+supplier\b', message, re.IGNORECASE)
@@ -825,8 +832,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                             for item in flagged[:5])
         if len(flagged) > 5:
             details += f'; {len(flagged) - 5} more attention items are in the overview'
-        answer = grounded_answer or (f"{snapshot['company']['name']} is a fictional workspace with {len(materials)} tracked "
-                  'materials. Inventory and supplier lead times are synthetic. '
+        answer = grounded_answer or (f"{snapshot['company']['name']} tracks {len(materials)} "
+                  'materials. '
                   + (f'Attention: {details}.' if details else
                      'No stated stock-cover shortage against the shortest listed lead is flagged.'))
     elif intent == 'explain':
@@ -878,6 +885,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
             status, answer = 'proposal', 'Review a draft request for quotation. It will remain unsent.'
         else:
             status, answer = 'needs_clarification', 'A current selected purchase plan is needed for an unsent RFQ draft.'
+    answer = present_answer(answer, message, [supplier['name'] for supplier in
+                                             snapshot['company'].get('suppliers', [])])
     return {'status': status, 'assistant_text': answer, 'agent_steps': steps,
             'evidence_ids': cited, 'candidate': candidate,
             'proposal_kind': candidate['kind'] if candidate else None,

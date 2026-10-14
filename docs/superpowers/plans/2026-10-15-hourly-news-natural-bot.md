@@ -10,6 +10,8 @@
 
 **Spec:** ../specs/2026-10-15-scheduled-news-and-demo-presentation-design.md
 
+**Cost clarification:** The user subsequently approved spending existing trial credits with no out-of-pocket charge. Task 4's activation gate therefore accepts a freshly verified active, unupgraded Free Trial with credit and time remaining. Unknown permanent-free quota does not block this explicitly approved mode. No billing upgrade is permitted; all worker/storage bounds remain.
+
 ## Global Constraints
 
 - Existing portal stays in `asia-south1`; new job and Standard Storage use `us-central1`.

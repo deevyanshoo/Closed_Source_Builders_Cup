@@ -36,6 +36,22 @@ describe('operator response boundary', () => {
     expect(html).toContain('Evidence and specialist activity');
     expect(html).not.toContain('<script>');
   });
+  it('shows clean known supplier names in answers and quote evidence but keeps exact proposal arguments', () => {
+    const raw = 'Europa Copper SA [SYNTHETIC]';
+    const namedQuote = { ...quote, fields: { ...quote.fields, supplier_name: { ...quote.fields.supplier_name!, value: raw } } };
+    const namedTurn = { ...turn, assistant_text: `Review a simulated unsent message to ${raw}.`, evidence_ids: ['q1'],
+      proposal: { ...proposal, kind: 'simulate_email' as const, summary: `Message to ${raw}`,
+        parameters: { material_id: 'copper', recipient_label: raw, subject: 'Availability', body: 'Please confirm.' } } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: namedTurn, turns: [namedTurn] }}
+      offers={[namedQuote]} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Review a simulated unsent message to Europa Copper SA.');
+    expect(html).toContain('Message to Europa Copper SA');
+    expect(html).toContain('Quote v2');
+    expect(html).toContain('recipient_label');
+    expect(html).toContain(raw);
+    expect(resolveOperatorEvidence('q1', scope, null, [namedQuote]).title).toBe('Europa Copper SA');
+  });
   it('puts the voice console immediately after the heading even with risks and an unavailable provider', () => {
     const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: false,
       agents: [], attention: [], watch_items: [], limitations: [] };

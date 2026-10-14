@@ -193,7 +193,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         with news_lock:
             if news_service is None:
                 from .news import NewsService
-                news_service = NewsService(clock=store.now)
+                live = NewsService(clock=store.now)
+                bucket = os.environ.get('NEWS_SNAPSHOT_BUCKET', '').strip()
+                if bucket and not live.offline:
+                    from .news_snapshots import GcsSnapshotStore, SnapshotNewsService
+                    news_service = SnapshotNewsService(live=live,
+                        store=GcsSnapshotStore(bucket), clock=store.now)
+                else:
+                    news_service = live
             return news_service
 
     def operator_adapter():
@@ -307,14 +314,19 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         'recovery': deepcopy(recovery), 'buyer_draft': deepcopy(saved.get('buyer_draft')),
                         'selected_material_id': saved.get('selected_material_id')}
                 reports.append(assess_company(snapshot, news.get(cid), now))
+            from .news_snapshots import SnapshotNewsService
+            scheduled_news = isinstance(news_adapter(), SnapshotNewsService)
             alerts = [alert for company in reports for alert in company['alerts']]
             result = {'company_id': company_id, 'context_version': version,
                 'checked_at': now.isoformat(), 'monitoring': 'while_workspace_open',
-                'news_refresh_seconds': 900, 'companies': reports,
+                'news_refresh_seconds': 3600 if scheduled_news else 900,
+                'companies': reports,
                 'summary': {**{severity: sum(a['severity'] == severity for a in alerts)
                               for severity in ('high', 'medium', 'low')},
                             'companies_with_alerts': sum(bool(row['alerts']) for row in reports)},
-                'limitations': ['Monitoring runs while the workspace is open; public news uses a 15-minute cache.',
+                'limitations': [('Risk monitoring runs while the workspace is open; hourly news snapshots are configured. Check recorded collection times and source health in the news workspace.'
+                    if scheduled_news else
+                    'Monitoring runs while the workspace is open; public news uses a 15-minute cache.'),
                     'Company inventory, supplier leads and delay scenarios are synthetic.',
                     'Headlines indicate conditional exposure, not confirmed shipment delays or forecasts.',
                     'Recovery suggestions require current inputs and review; no supplier message or order is sent.']}
@@ -620,6 +632,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'offers': deepcopy(list(staged.values())), 'status': 'reviewed_saved'}
 
     def simulated_email_parameters(value, args):
+        from .presentation import supplier_display_name
         shape(args, ('material_id',), ('recipient_label', 'subject', 'body'))
         material_id = args['material_id']
         scenario(value, material_id)
@@ -631,10 +644,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         draft = current_buyer(value, material_id)
         parameters = {'material_id': material_id,
                       'recipient_label': suppliers[0],
-                      'subject': f'Synthetic request for {material_id}',
-                      'body': (f'This is a fictional follow-up for {material_id}. '
+                      'subject': f'Quotation request for {material_id}',
+                      'body': (f'Please provide a quotation for {material_id}. '
                                f'Our draft requirement is {draft["quantity"]} {draft["quantity_unit"]} '
-                               f'by {draft["need_by"]}. Please review the terms in this simulated workspace.')}
+                               f'by {draft["need_by"]}. Please confirm capacity, delivery lead time and payment terms.')}
         selected_offer_id = (active_plan(value) or {}).get('selected_offer_id')
         if selected_offer_id in value.offers:
             selected_name = (value.offers[selected_offer_id].get('fields', {}).get('supplier_name') or {}).get('value')
@@ -647,7 +660,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if normalized in ('first', 'first supplier'):
                 parameters['recipient_label'] = suppliers[0]
             else:
-                matches = [supplier for supplier in suppliers if supplier.casefold() == normalized]
+                matches = [supplier for supplier in suppliers if supplier.casefold() == normalized
+                           or supplier_display_name(supplier).casefold() == normalized]
                 if len(matches) == 1:
                     parameters['recipient_label'] = matches[0]
         validate_simulated_email(value, parameters)
@@ -981,7 +995,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 count = sum(sum(row['counts'].values()) for row in projection['companies'])
                 return {'turn_id': secrets.token_urlsafe(18), 'company_id': report['company_id'],
                     'context_version': report['context_version'], 'status': 'completed',
-                    'assistant_text': f"Scanned {len(projection['companies'])} fictional companies; {count} risk and watch signals. Review the evidence and conditional impacts before taking action.",
+                    'assistant_text': f"Scanned {len(projection['companies'])} companies; {count} risk and watch signals. Review the evidence and conditional impacts before taking action.",
                     'agent_steps': [{'agent': 'risk_monitor', 'role': 'Assess evidence-bound company risks.',
                         'status': 'completed', 'model': 'none', 'provider_call': 'none',
                         'tool': 'read_risks', 'summary': 'Read current company-owned risk signals.'}],
@@ -1062,7 +1076,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 'simulated_outbox': [{'message_id': item['message_id'], 'material_id': item['material_id'],
                                                       'recipient_label': item['recipient_label'], 'status': item['status']}
                                                      for item in value.simulated_outbox]}
-                        result['assistant_text'] = 'Current fictional workspace facts are ready.'
+                        result['assistant_text'] = 'Current workspace facts are ready.'
                     elif name == 'prepare_simulated_email':
                         parameters = simulated_email_parameters(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'simulate_email',

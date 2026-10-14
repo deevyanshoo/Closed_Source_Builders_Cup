@@ -276,10 +276,19 @@ def run(base: str, wav: Path, receipt: dict, *, live: bool, procurement: bool,
     require(client.json("pre_apply", "/api/demo/operator").get("watch_items") == [],
             "watch", "write_before_review")
     foreign = client_factory(base)
-    foreign_csrf = foreign.json("foreign_session", "/api/demo/session")["csrf_token"]
+    foreign_session = foreign.json("foreign_session", "/api/demo/session")
+    foreign_csrf = foreign_session["csrf_token"]
+    foreign_atlas = foreign.json("foreign_select_atlas", "/api/demo/company",
+                               body={"company_id": "atlas-petrochem",
+                                     "expected_context_version": foreign_session["context_version"],
+                                     "idempotency_key": key()}, csrf=foreign_csrf)
+    foreign_context = foreign_atlas.get("context_version")
+    require(foreign_atlas.get("company", {}).get("company_id") == company and
+            type(foreign_context) is int and foreign_context == context,
+            "foreign_watch", "foreign_context_not_aligned")
     denied_status(foreign, "foreign_watch", "/api/demo/operator/confirm",
                   {"proposal_id": proposal["proposal_id"], "reviewed": True,
-                   "expected_context_version": context, "idempotency_key": key()},
+                   "expected_context_version": foreign_context, "idempotency_key": key()},
                   foreign_csrf, 404)
     applied = apply_once(client, csrf, proposal, company, context, "watch", "watch_apply", receipt)
     watch_id = applied["result"].get("watch_id")

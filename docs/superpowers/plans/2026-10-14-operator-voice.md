@@ -18,7 +18,7 @@
 - Actual independent specialist calls are recorded; tool/rule validation is labelled separately from model calls. Missing provider evidence returns unavailable.
 - Money/stock coverage/feasibility come from Decimal tools, never model arithmetic. Critical number ambiguity requests clarification.
 - Limit message 1200 chars; audio 500000 bytes/20 seconds; synthesis text 1200 chars; model 3 calls/turn, 6 turns/session and 60 operator calls/process, concurrency 2; speech 8 calls/session/40 process. Fixed provider endpoints and bounded timeouts.
-- Current quote model 2.5 Flash retirement documentation says October 20; verify supported successor with deployed identity before changing extraction/agent model. Keep compatibility and old image rollback.
+- Gemini 3.5 Flash-Lite was verified with the deployed identity for strict quote extraction and is now the quote/operator model. Keep original source/schema validation and prior image rollback.
 
 ## Wire contracts
 
@@ -41,7 +41,7 @@ Root owns deployment/config/docs/provider probes, quotas approval and integratio
 
 ## Tasks
 
-1. [ ] Backend: failing intent/evidence/inventory/proposal/isolation/stale/replay tests; implement model-backed roles plus authoritative tools and endpoint state.
-2. [ ] Voice module: failing codec/limits/offline/provider/error/transcript/audio tests; implement fixed Google REST with injected test transport.
-3. [ ] Frontend: failing captured-session/cancel/dirty-input/review action tests; implement actual tool/voice interface and full web gates.
+1. [x] Backend: failing intent/evidence/inventory/proposal/isolation/stale/replay tests; implement model-backed roles plus authoritative tools and endpoint state.
+2. [x] Voice module: failing codec/limits/offline/provider/error/transcript/audio tests; implement fixed Google REST with injected test transport.
+3. [x] Frontend: failing captured-session/cancel/dirty-input/review action tests; implement actual tool/voice interface and full web gates.
 4. [ ] Root: independent review, combined gates, durable model probe and synthetic audio provider check, explicit package/cloud release, actual Chrome typed action + voice/transcript/playback path verification, provider receipts and rollback.

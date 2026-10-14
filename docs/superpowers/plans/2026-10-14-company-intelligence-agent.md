@@ -14,8 +14,8 @@
 - [x] Coordinator: execute `fill_form`, `load_quotes`, `compare` and `navigate` as explicit reversible in-app utilities. `load_quotes` prepares draft documents; reviewed quote acceptance remains a separate action. Add reviewed `simulate_email` and `review_quotes` proposals with no external delivery.
 - [x] Coordinator: native voice exposes named read/analytics/form/quote/comparison/navigation/simulated-email tools, through the same deterministic execution boundaries. Send canonical session updates only to the browser; omit credentials and CSRF from Google tool responses.
 - [x] Antigravity frontend worker: restore authoritative tool sessions into the live form, show changes and analytics, render the simulated outbox, allow questions with edited inputs and synchronize before tools, preserve stale-action protections and continuous voice within the current company.
-- [ ] Review and verify: current company/material binding, mixed units/currencies, repeated actions, stale approval, irrelevant/injected news, failed providers, expired sessions, voice tool reads and writes, mobile/desktop layout.
-- [ ] Deploy the immutable reviewed package to the existing Cloud Run service and verify company news, utility/analytics actions and actual Google voice end to end.
+- [x] Review and verify: current company/material binding, mixed units/currencies, repeated actions, stale approval, irrelevant/injected news, failed providers, expired sessions, voice tool reads and writes, mobile/desktop layout.
+- [x] Deploy the immutable reviewed package to the existing Cloud Run service and verify company news, utility/analytics actions and actual Google voice end to end.
 
 ## Wire additions
 

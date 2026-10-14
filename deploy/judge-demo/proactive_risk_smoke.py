@@ -41,7 +41,7 @@ def unique_strings(value, stage, code):
     return set(value)
 
 
-def validate_alert(alert, company_id, materials, orders, stage):
+def validate_alert(alert, company_id, materials, suppliers, orders, stage):
     require(isinstance(alert, dict) and nonempty(alert.get('alert_id'))
             and re.fullmatch(r'risk-[0-9a-f]{20}', alert['alert_id']) is not None
             and alert.get('company_id') == company_id
@@ -77,7 +77,8 @@ def validate_alert(alert, company_id, materials, orders, stage):
         else:
             require(item.get('url') is None, stage, 'synthetic_evidence_url')
             if item['kind'] == 'profile':
-                require(item['ref_id'] in materials, stage, 'foreign_profile_evidence')
+                require(item['ref_id'] in materials or item['ref_id'] in suppliers,
+                        stage, 'foreign_profile_evidence')
             if item['kind'] == 'order':
                 require(item['ref_id'] in orders, stage, 'foreign_order_evidence')
     require((alert['category'] != 'news') or bool(news_refs), stage, 'news_without_observation')
@@ -117,6 +118,7 @@ def validate_report(view, profiles, active_id, context, stage, *, rows_out=None)
         timestamp(report.get('checked_at'), substage, 'invalid_checked_at')
         coverage = report.get('coverage')
         materials = {m['material_id'] for m in profile['materials']}
+        suppliers = {s['supplier_id'] for s in profile['suppliers']}
         orders = {o['order_id'] for o in profile['orders']}
         require(isinstance(coverage, dict) and type(coverage.get('materials_evaluated')) is int
                 and coverage['materials_evaluated'] == len(materials),
@@ -141,7 +143,7 @@ def validate_report(view, profiles, active_id, context, stage, *, rows_out=None)
         ids = []
         news_refs = set()
         for alert in alerts:
-            news_refs.update(validate_alert(alert, cid, materials, orders, substage))
+            news_refs.update(validate_alert(alert, cid, materials, suppliers, orders, substage))
             ids.append(alert['alert_id'])
             counts[alert['severity']] += 1
         require(len(ids) == len(set(ids)), substage, 'duplicate_alert_id')

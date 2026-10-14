@@ -19,6 +19,13 @@ _NEWS_LIMIT = 5
 _ALERT_LIMIT = 60
 _RISK_WORDS = re.compile(r'\b(?:delay|shortage|disruption|strike|closure|closed|halt|outage|'
                          r'export ban|supply concern|bottleneck|blockade)\b', re.IGNORECASE)
+_EASING_WORDS = re.compile(
+    r'\b(?:averts?|averted|avoids?|avoided|cancels?|cancelled|canceled)\b.{0,80}\bstrike\b|'
+    r'\bstrike\b.{0,80}\b(?:called off|ends?|ended|averted|cancelled|canceled)\b|'
+    r'\b(?:restarts?|restarted|resumes?|resumed|reopens?|reopened|restored)\b'
+    r'.{0,120}\b(?:after|following)\b.{0,80}\b(?:halt|outage|disruption|closure)\b|'
+    r'\bno\s+(?:\w+\s+){0,2}(?:shortage|disruption|outage|strike|closure|halt)\b',
+    re.IGNORECASE)
 _SOURCE_FOR_PROVIDER = {'GDELT': 'gdelt', 'EIA': 'eia', 'ECB': 'ecb'}
 
 
@@ -388,13 +395,15 @@ def _news(snapshot, company, news, now, gaps):
         else:
             continue
         seen.add(key)
-        risk_word = bool(_RISK_WORDS.search(title))
-        candidates.append(({'direct_material': 0, 'route': 1, 'currency': 2, 'sector': 3}[kind],
-                           not risk_word, -published.timestamp(), item_id, key, item, kind,
-                           affected, source_state))
+        easing = bool(_EASING_WORDS.search(title))
+        urgent = bool(_RISK_WORDS.search(title)) and not easing and kind != 'sector'
+        candidates.append((not urgent,
+                           {'direct_material': 0, 'route': 1, 'currency': 2, 'sector': 3}[kind],
+                           -published.timestamp(), item_id, key, item, kind,
+                           affected, source_state, easing))
     candidates.sort()
     alerts = []
-    for _, _, _, item_id, key, item, kind, affected, source_state in candidates[:_NEWS_LIMIT]:
+    for not_urgent, _, _, item_id, key, item, kind, affected, source_state, easing in candidates[:_NEWS_LIMIT]:
         title = item['title'].strip()[:180]
         source_id = item.get('source_id') or _SOURCE_FOR_PROVIDER.get(item.get('provider'))
         source_quality = ('company_news_rss_metadata' if source_id in {
@@ -404,11 +413,12 @@ def _news(snapshot, company, news, now, gaps):
             'public_headline_metadata')
         alerts.append(_alert(
             company['company_id'], 'news',
-            'high' if kind == 'direct_material' and _RISK_WORDS.search(title) else
-            'medium' if kind in {'route', 'currency'} and _RISK_WORDS.search(title) else 'low',
+            'medium' if not not_urgent else 'low',
             key, f'Observed headline: {title}',
             f'{kind.replace("_", " ").title()} relevance from current public headline metadata; underlying event and company effect are unverified.',
-            'Conditional exposure only: this headline may warrant a supplier, route, or price check; it does not confirm a delay or price movement.',
+            ('Conditional context only: this headline may describe easing or resolved exposure; check outstanding impacts before acting. It does not confirm a current delay or price movement.'
+             if easing else
+             'Conditional exposure only: this headline may warrant a supplier, route, or price check; it does not confirm a delay or price movement.'),
             affected, 'observed_news',
             {'level': 'low', 'reason': 'Headline metadata is a relevance signal, not verified operational impact; source freshness is tracked separately.'},
             [_evidence('news', item_id, str(item.get('publisher') or item.get('provider') or 'Public headline')[:80],

@@ -73,6 +73,9 @@ def run(base, receipt):
             result = client.json(stage, '/api/demo/operator', csrf=csrf, body={
                 'message': message, 'expected_context_version': context,
                 'idempotency_key': key()})
+            if result.get('status') != expected:
+                receipt['failed_turn'] = {'stage': stage, **{key: value for key, value in result.items()
+                    if key not in ('session', 'workspace')}}
             checked = check_turn(result, stage, session['company_id'], context, expected)
             receipt['turns'].append({'stage': stage, 'message': message, **checked})
             if 'session' in result:

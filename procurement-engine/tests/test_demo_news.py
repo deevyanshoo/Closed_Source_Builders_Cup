@@ -404,3 +404,17 @@ def test_public_discovery_source_id_binds_headline_to_exact_source_health():
     assert mapped.get('source_id') == 'google_news_2'
     assert '_discovery_source_id' not in mapped
     assert raw['_discovery_source_id'] == 'google_news_2'
+
+
+def test_crypto_catalyst_and_chip_packaging_do_not_map_to_unrelated_industries():
+    from procure.demo.company import get_company
+    from procure.demo.news import _company_item
+    title = 'Litecoin Price Prediction: Remittix Has the Catalyst Buyers Are Watching'
+    assert _company_item({'title': title}, get_company('atlas-petrochem'))['relevance_kind'] == 'unmatched'
+    chip = 'GlobalFoundries and TSMC establish a silicon interposer supply chain for AI packaging'
+    assert _company_item({'title': chip}, get_company('terrapack'))['relevance_kind'] == 'unmatched'
+    assert _company_item({'title': chip}, get_company('circuitpeak-systems'))['relevance_kind'] != 'unmatched'
+    flex = 'Flexible packaging supply chain adapts to new manufacturing standards'
+    assert _company_item({'title': flex}, get_company('terrapack'))['relevance_kind'] == 'sector'
+    direct = 'PET resin supply for semiconductor packaging shifts'
+    assert _company_item({'title': direct}, get_company('terrapack'))['relevance_kind'] == 'direct_material'

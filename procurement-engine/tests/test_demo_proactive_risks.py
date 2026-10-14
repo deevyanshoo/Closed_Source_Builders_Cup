@@ -172,6 +172,60 @@ def test_news_requires_owned_relevance_fresh_metadata_and_source_quality():
     assert not [a for a in assess_company(value, news, NOW)['alerts'] if a['category'] == 'news']
 
 
+def test_resolved_headlines_are_low_context_and_active_headline_is_at_most_medium():
+    value = snapshot()
+    titles = {
+        'averted': 'BHP averts strike at world’s biggest copper mine',
+        'restarted': 'LG Chem restarts Yeosu naphtha cracker after seven-month halt',
+        'called-off': 'Copper mine strike called off after agreement',
+        'no-shortage': 'Copper supply update: no shortage expected',
+        'active': 'Copper mine strike halts deliveries',
+    }
+    news = {'cache_state': 'fresh', 'sources': [{'source_id': 'gdelt', 'state': 'fresh'}],
+            'items': [
+                {'item_id': item_id, 'url': f'https://example.org/{item_id}',
+                 'title': title, 'provider': 'GDELT', 'synthetic': False,
+                 'published_at': '2026-10-14T08:00:00+00:00',
+                 'retrieved_at': '2026-10-14T09:00:00+00:00',
+                 'matched_materials': ['copper'], 'relevance_kind': 'direct_material'}
+                for item_id, title in titles.items()]}
+    alerts = {alert['evidence'][0]['ref_id']: alert for alert in
+              assess_company(value, news, NOW)['alerts'] if alert['category'] == 'news'}
+    assert set(alerts) == set(titles)
+    for item_id in ('averted', 'restarted', 'called-off', 'no-shortage'):
+        assert alerts[item_id]['severity'] == 'low'
+        assert 'easing' in alerts[item_id]['impact'].lower()
+        assert 'outstanding' in alerts[item_id]['impact'].lower()
+    assert alerts['active']['severity'] == 'medium'
+    assert 'easing' not in alerts['active']['impact'].lower()
+
+
+def test_active_route_disruption_out_ranks_newer_resolved_direct_headlines():
+    value = snapshot()
+    route_id = value['company']['routes'][0]['route_id']
+    resolved = [
+        {'item_id': f'resolved-{index}', 'url': f'https://example.org/resolved-{index}',
+         'title': 'BHP averts strike at copper mine', 'provider': 'GDELT',
+         'synthetic': False, 'published_at': '2026-10-14T09:00:00+00:00',
+         'retrieved_at': '2026-10-14T09:05:00+00:00',
+         'matched_materials': ['copper'], 'relevance_kind': 'direct_material'}
+        for index in range(5)]
+    active = {'item_id': 'active-route', 'url': 'https://example.org/active-route',
+              'title': 'Port closure disrupts copper route', 'provider': 'GDELT',
+              'synthetic': False, 'published_at': '2026-10-14T07:00:00+00:00',
+              'retrieved_at': '2026-10-14T08:00:00+00:00',
+              'matched_routes': [route_id], 'matched_operations': ['logistics'],
+              'relevance_kind': 'route'}
+    news = {'cache_state': 'fresh', 'sources': [{'source_id': 'gdelt', 'state': 'fresh'}],
+            'items': [*resolved, active]}
+    alerts = [alert for alert in assess_company(value, news, NOW)['alerts']
+              if alert['category'] == 'news']
+    assert len(alerts) == 5
+    assert alerts[0]['evidence'][0]['ref_id'] == 'active-route'
+    assert alerts[0]['severity'] == 'medium'
+    assert all(alert['severity'] != 'high' for alert in alerts)
+
+
 def test_stale_news_cache_keeps_fresh_source_and_stale_duplicate_cannot_hide_it():
     value = snapshot()
     news = {'cache_state': 'stale', 'sources': [

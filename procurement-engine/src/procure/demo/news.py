@@ -38,7 +38,7 @@ SECTOR_TERMS = {
     'pharmaceutical manufacturing': ('pharmaceutical', 'medicine', 'drug manufacturing'),
     'automotive components': ('automotive', 'auto parts', 'vehicle production'),
     'battery assembly': ('battery', 'energy storage'),
-    'electronics assembly': ('electronics', 'semiconductor', 'circuit board'),
+    'electronics assembly': ('electronics', 'semiconductor', 'circuit board', 'silicon interposer'),
     'petrochemical blending': ('petrochemical', 'refinery', 'chemical plant'),
     'construction materials': ('construction', 'cement', 'concrete'),
 }
@@ -276,7 +276,9 @@ def _company_item(raw, company):
     if currencies and not any(_term_in(item['title'].casefold(), term) for term in
                               ('exchange', 'currency', 'forex', 'fx', 'dollar', 'rate', 'devaluation')):
         currencies = []
-    financial_only = any(_term_in(item['title'].casefold(), term) for term in FINANCIAL_ONLY_TERMS)
+    financial_only = any(_term_in(item['title'].casefold(), term) for term in FINANCIAL_ONLY_TERMS +
+                         ('bitcoin', 'litecoin', 'ethereum', 'dogecoin', 'remittix',
+                          'cryptocurrency', 'crypto', 'memecoin', 'altcoin'))
     if financial_only:
         materials = []
         routes = []
@@ -285,6 +287,12 @@ def _company_item(raw, company):
     title = item['title'].casefold()
     sector = company.get('sector', '').casefold()
     sector_match = not financial_only and any(_term_in(title, term) for term in SECTOR_TERMS.get(sector, ()))
+    # Semiconductor package assembly is a different business from flexible films.
+    # Retain explicit physical material matches, but reject the ambiguous sector word.
+    if sector == 'flexible packaging' and not materials and any(_term_in(title, term) for term in
+            ('chip', 'chips', 'semiconductor', 'wafer', 'silicon interposer',
+             'tsmc', 'globalfoundries', 'amat', 'avgo')):
+        sector_match = False
     operations = [name for name, terms in OPERATIONS.items() if any(_term_in(title, term) for term in terms)]
     # A geographic mention alone does not establish a route disruption.
     route_match = bool(routes and 'logistics' in operations)

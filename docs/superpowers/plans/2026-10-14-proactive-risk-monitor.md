@@ -11,6 +11,6 @@ Design/contract: `docs/proactive-risk-monitor-contract-20261014.md`; stable comp
 - [x] Coordinator: bounded all-company scans, snapshot ownership/context, report API and current/all-company voice tools; proactive reads preserve proposals/forms.
 - [x] Parallel acceptance/review: all ten reports/materials, stale/injected news, synthetic recovery/dedup, UI isolation and native voice.
 - [x] Demo/backend and web gates, independent review, immutable source package.
-- [ ] Deploy same service with existing runtime identity; verify hosted risk/news/voice/actions and save release/rollback evidence; update existing draft PR.
+- [x] Deploy same service with existing runtime identity; verify hosted risk/news/voice/actions and save release/rollback evidence. Source preservation in the existing draft PR is the final release step.
 
-Pre-release gates: 272 demo Python tests passed; 288 web tests passed with six existing skips, typecheck and production build passed. Independent backend review clear; source remains on feature/hosted-quote-to-plan. Hosted checks remain pending.
+Final gates: 277 demo Python tests passed; 288 web tests passed with six existing skips, typecheck and production build passed. Independent backend/comparison review clear. Revision21 serves 100% traffic. All ten/52 risk checks, nine real typed agent turns, actual native voice and Chrome playback, inventory recovery handoff and 390px responsive checks passed. Exact release/rollback identities and evidence scopes are in `docs/hosted-proactive-risk-release-20261014.md`.

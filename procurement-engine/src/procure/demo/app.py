@@ -793,7 +793,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': kind,
                                 'summary': outcome['assistant_text'], 'parameters': parameters,
                                 'plan_id': bound_plan['plan_id'] if bound_plan else None,
-                                'offer_versions': deepcopy(bound_plan['offer_versions']) if bound_plan else {},
+                                'offer_versions': ({item['offer_id']: item['expected_version'] for item in parameters['preview']}
+                                                   if kind == 'review_quotes' else
+                                                   deepcopy(bound_plan['offer_versions']) if bound_plan else {}),
                                 'context_version': value.context_version,
                                 'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
                                 '_marker': marker, '_company_id': value.company_id,

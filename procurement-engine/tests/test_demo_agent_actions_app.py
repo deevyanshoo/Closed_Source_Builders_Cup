@@ -221,6 +221,8 @@ def test_quote_review_uses_verified_fixture_values_and_saves_atomically(client, 
     assert proposal_response.status_code == 200, proposal_response.text
     proposal = proposal_response.json()['proposal']
     assert len(proposal['parameters']['preview']) == 3
+    assert proposal['offer_versions'] == {item['offer_id']: item['expected_version']
+                                          for item in proposal['parameters']['preview']}
     applied = client.post('/api/demo/operator/confirm', headers=headers, json={
         'proposal_id': proposal['proposal_id'], 'reviewed': True,
         'expected_context_version': 1, 'idempotency_key': 'review-apply'})

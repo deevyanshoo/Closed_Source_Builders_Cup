@@ -51,6 +51,10 @@ def test_live_config_binds_exact_owned_material_ids_without_session_credentials(
     ids=tools['fill_buyer_form'].parameters_json_schema['properties']['material_id']['enum']
     assert ids==['copper','polymer','aluminium']
     assert 'decision_date' not in tools['fill_buyer_form'].parameters_json_schema['properties']['values']['properties']
+    assert set(tools['review_sample_quotes'].parameters_json_schema['properties']) == {'material_id'}
+    recipients = tools['prepare_simulated_email'].parameters_json_schema['properties']['recipient_label']['enum']
+    assert 'first supplier' in recipients and any('Swift Copper' in name for name in recipients)
+    assert 'TerraPack Films' not in str(config.system_instruction)
     assert 'Cable insulation polymer' in str(config.system_instruction)
     assert 'csrf_token' not in str(config.system_instruction)
     assert 'session_id' not in str(config.system_instruction)

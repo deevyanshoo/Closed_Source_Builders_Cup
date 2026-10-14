@@ -535,6 +535,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if selected_name in suppliers:
                 parameters['recipient_label'] = selected_name
         parameters.update({key: args[key] for key in ('recipient_label', 'subject', 'body') if key in args})
+        label = parameters['recipient_label']
+        if isinstance(label, str):
+            normalized = label.strip().casefold()
+            if normalized in ('first', 'first supplier'):
+                parameters['recipient_label'] = suppliers[0]
+            else:
+                matches = [supplier for supplier in suppliers if supplier.casefold() == normalized]
+                if len(matches) == 1:
+                    parameters['recipient_label'] = matches[0]
         validate_simulated_email(value, parameters)
         return parameters
 
@@ -977,6 +986,20 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                             utility, message = {'kind': 'navigate', 'parameters': args}, ''
                         action_result, changed = execute_utility(value, utility, message)
                         result['action_result'] = action_result
+                        if name == 'load_sample_quotes':
+                            fixture_ids = scenario(value, args['material_id'])['fixture_ids']
+                            owned_offers = {offer.get('fixture_id'): offer for offer in value.offers.values()
+                                            if offer.get('fixture_id') in fixture_ids and
+                                            company_for_offer(offer) == value.company_id}
+                            result['workspace'] = {'material_id': args['material_id'],
+                                'offers': [{'offer_id': offer['offer_id'],
+                                            'fixture_id': fixture_id,
+                                            'version': offer['version'],
+                                            'status': offer['status'],
+                                            'source_filename': offer.get('document', {}).get('filename'),
+                                            'supplier_name': (offer.get('fields', {}).get('supplier_name') or {}).get('value')}
+                                           for fixture_id in fixture_ids
+                                           if (offer := owned_offers.get(fixture_id)) is not None]}
                         result['read_only'] = not changed
                         result['session'] = view(value)
                         result['assistant_text'] = action_result['summary']

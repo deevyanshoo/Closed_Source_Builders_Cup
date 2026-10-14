@@ -133,8 +133,8 @@ def _config(company=None):
         ('fill_buyer_form', 'Fill the visible buyer form using explicitly requested values or scenario defaults.',
          {'material_id': text, 'values': values}, ['material_id', 'values']),
         ('load_sample_quotes', 'Load owned synthetic quote drafts for a material; drafts require review.', {'material_id': text}, ['material_id']),
-        ('review_sample_quotes', 'Prepare exact hash-verified synthetic quote values for human review.',
-         {'material_id': text, 'offer_ids': {'type': 'array', 'maxItems': 3, 'items': text}}, ['material_id']),
+        ('review_sample_quotes', 'Prepare all current owned unmodified synthetic quote drafts for this material for human review; never invent offer IDs.',
+         {'material_id': text}, ['material_id']),
         ('compare_suppliers', 'Run the procurement planner on saved quotes and current buyer inputs.', {'material_id': text}, ['material_id']),
         ('prepare_simulated_email', 'Prepare a reviewed simulated email; never sends externally.',
          {'material_id': text, 'recipient_label': {'type': 'string', 'maxLength': 160},
@@ -146,14 +146,20 @@ def _config(company=None):
     if company is not None:
         catalogue = {'company_id': company['company_id'], 'name': company['name'],
                      'materials': [{'material_id': row['material_id'], 'name': row['name'],
-                                    'unit': row['quantity_unit']} for row in company['materials']]}
+                                    'unit': row['quantity_unit']} for row in company['materials']],
+                     'suppliers': [{'recipient_label': row['name'], 'materials': row['materials']}
+                                   for row in company['suppliers']]}
         material_ids = [row['material_id'] for row in company['materials']]
         specs = [(name, description, {**properties,
-                 **({'material_id': {**text, 'enum': material_ids}} if 'material_id' in properties else {})}, required)
+                 **({'material_id': {**text, 'enum': material_ids}} if 'material_id' in properties else {}),
+                 **({'recipient_label': {**properties['recipient_label'],
+                     'enum': ['first supplier', 'first'] + [row['name'] for row in company['suppliers']]}}
+                    if 'recipient_label' in properties else {})}, required)
                  for name, description, properties, required in specs]
         instruction += (' Use exact material_id values from this trusted current company catalogue: '
                         + json.dumps(catalogue, ensure_ascii=True) +
-                        '. If a tool fails, explicitly say no change was made; ask for clarification. '
+                        '. Select recipients only from suppliers listing the requested material; use first supplier for an explicit first-supplier request. '
+                        'If a tool fails, explicitly say no change was made; ask for clarification. '
                         'Never describe a failed tool as successful.')
     declarations = [types.FunctionDeclaration(name=name, description=description,
         parameters_json_schema={'type': 'object', 'additionalProperties': False,

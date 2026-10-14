@@ -392,6 +392,121 @@ def test_native_voice_form_tool_updates_owned_session_without_sending_tokens_to_
         assert voice_client.get('/api/demo/session').json()['buyer_draft']['quantity'] == '12000'
 
 
+def test_native_voice_loaded_quotes_expose_only_owned_review_identifiers(monkeypatch):
+    from procure.demo import live_voice
+    from procure.demo.company import get_company
+    monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+
+    class LoadProvider(LiveProvider):
+        async def send_realtime_input(self, **kwargs):
+            if kwargs.get('audio'):
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                    name='load_sample_quotes', args={'material_id': 'polymer'}, id='voice-load-polymer')]),
+                    server_content=None))
+
+    provider = LoadProvider()
+
+    @asynccontextmanager
+    async def factory():
+        yield provider
+
+    application = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                             operator_provider=Available(), live_client_factory=factory)
+    with TestClient(application, base_url='https://demo.test') as voice_client:
+        session = voice_client.get('/api/demo/session').json()
+        with voice_client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                            headers={'origin': 'https://demo.test'}) as socket:
+            socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                              'expected_context_version': 1})
+            while socket.receive_json()['type'] != 'ready':
+                pass
+            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            event = socket.receive_json()
+            while event['type'] != 'tool_result':
+                assert event['type'] != 'error', event
+                event = socket.receive_json()
+            result = event['result']
+            while socket.receive_json()['type'] != 'turn_complete':
+                pass
+            assert result['session']['selected_material_id'] == 'polymer'
+            projection = provider.tool_response.response['workspace']
+            expected_fixtures = set(next(row['fixture_ids'] for row in
+                get_company('solara-cables')['quote_coverage']['scenarios']
+                if row['material_id'] == 'polymer'))
+            assert projection['material_id'] == 'polymer'
+            assert {offer['fixture_id'] for offer in projection['offers']} == expected_fixtures
+            assert {offer['offer_id'] for offer in projection['offers']} == {
+                offer['offer_id'] for offer in result['session']['offers']
+                if offer.get('fixture_id') in expected_fixtures}
+            assert all(set(offer) == {'offer_id', 'fixture_id', 'version', 'status',
+                                      'source_filename', 'supplier_name'}
+                       for offer in projection['offers'])
+            session_status = {offer['offer_id']: offer['status'] for offer in result['session']['offers']}
+            assert all(offer['status'] == session_status[offer['offer_id']] and
+                       offer['status'] != 'saved' for offer in projection['offers'])
+            assert 'session' not in provider.tool_response.response
+            assert session['csrf_token'] not in str(provider.tool_response.response)
+            assert 'document' not in str(provider.tool_response.response)
+            socket.send_json({'type': 'stop'})
+
+
+def test_native_simulated_email_resolves_first_supplier_alias_and_exact_name(monkeypatch):
+    from procure.demo import live_voice
+    monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+
+    class EmailProvider(LiveProvider):
+        labels = ('first', 'first supplier', 'swift copper trading ltd [synthetic]', 'ResinArc')
+
+        def __init__(self):
+            super().__init__()
+            self.index = 0
+
+        async def send_realtime_input(self, **kwargs):
+            if kwargs.get('audio'):
+                label = self.labels[self.index]
+                self.index += 1
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                    name='prepare_simulated_email', args={'material_id': 'polymer',
+                    'recipient_label': label}, id=f'voice-email-{self.index}')]),
+                    server_content=None))
+
+    provider = EmailProvider()
+
+    @asynccontextmanager
+    async def factory():
+        yield provider
+
+    application = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                             operator_provider=Available(), live_client_factory=factory)
+    with TestClient(application, base_url='https://demo.test') as voice_client:
+        session = voice_client.get('/api/demo/session').json()
+        expected = next(row['name'] for row in session['company']['suppliers']
+                        if 'polymer' in row['materials'])
+        with voice_client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                            headers={'origin': 'https://demo.test'}) as socket:
+            socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                              'expected_context_version': 1})
+            while socket.receive_json()['type'] != 'ready':
+                pass
+            results = []
+            for _ in range(4):
+                socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+                event = socket.receive_json()
+                while event['type'] != 'tool_result':
+                    assert event['type'] != 'error', event
+                    event = socket.receive_json()
+                results.append(event['result'])
+                while socket.receive_json()['type'] != 'turn_complete':
+                    pass
+            assert [result['status'] for result in results] == [
+                'proposal', 'proposal', 'proposal', 'needs_clarification']
+            assert all(result['proposal']['parameters']['recipient_label'] == expected
+                       for result in results[:3])
+            assert results[3]['read_only'] is True and results[3]['proposal'] is None
+            assert 'made no change' in results[3]['assistant_text']
+            socket.send_json({'type': 'stop'})
+        assert voice_client.get('/api/demo/session').json()['simulated_outbox'] == []
+
 def test_native_voice_material_name_normalizes_only_owned_exact_matches(monkeypatch):
     from procure.demo import live_voice
     monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)

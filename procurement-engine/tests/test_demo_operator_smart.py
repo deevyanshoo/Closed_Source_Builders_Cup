@@ -277,3 +277,13 @@ def test_named_email_request_has_a_safe_default_when_router_arguments_are_incomp
     assert response['status']=='proposal'
     assert response['candidate']['parameters']['recipient_label']==recipient
     assert 'synthetic demonstration' in response['candidate']['parameters']['body']
+
+
+def test_combined_news_explanation_keeps_evidence_analysis_with_a_stock_lookup():
+    value=snapshot();value['news']['items']=[{'item_id':'news-copper', 'title':'Copper supply and inventory update',
+        'matched_materials':['copper'], 'publisher':'Example'}]
+    result=turn(value,'Explain the copper news and how much copper stock we have.',
+        SmartProvider('explain','copper',answer='Stock is {{material.copper.stock}} {{material.copper.unit}}.',
+                      evidence_ids=('news-copper',)))
+    assert 'AI interpretation (conditional): Check the stated profile.' in result['assistant_text']
+    assert 'Read the requested canonical company facts.' not in result['assistant_text']

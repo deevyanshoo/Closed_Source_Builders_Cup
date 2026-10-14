@@ -579,7 +579,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                 raw = futures[role].result(timeout=max(0, deadline - monotonic()))
             except Exception:
                 raise OperatorUnavailable('Specialist model call unavailable.') from None
-            if role == 'evidence' and isinstance(raw, dict):
+            if (role == 'evidence' and isinstance(raw, dict) and
+                    coordinator['intent'] in {'answer', 'analytics', 'inspect'}):
                 canonical_read = _canonical_read_template(snapshot, message,
                     coordinator['material_id'] or raw.get('material_id'))
                 if canonical_read and all(key in raw for key in

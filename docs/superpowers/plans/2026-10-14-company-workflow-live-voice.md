@@ -23,11 +23,11 @@
 - [x] Chat worker: new live_voice.py relay and focused transport tests. Coordinator integrates thin app route and validated operator callback.
 - [x] Coordinator: provider preflight, shared route/contracts integration, packaging and independent review.
 - [x] Run all focused/backend/frontend gates; exercise all ten complete workflows, unit mismatch, stale context/version and idempotent approval.
-- [ ] Verify actual runtime identity opens Live provider and receives native audio; browser synthetic microphone test proves audible response and interruption. Record measured latency, distinguish physical microphone verification.
-- [ ] Commit verified increment with existing author identity, push branch/update draft PR, build allowlisted package, deploy existing service and verify hosted workflows and voice. Preserve previous live revision for rollback.
+- [x] Verify actual runtime identity opens Live provider and receives native audio; browser synthetic microphone test proves audible response and interruption. Record measured latency, distinguish physical microphone verification.
+- [x] Commit verified increment with existing author identity, push branch/update draft PR, build allowlisted package, deploy existing service and verify hosted workflows and voice. Preserve previous live revision for rollback.
 
 ## Release evidence
 
 Coordinator records exact commit, image/revision, checks, all-ten workflow receipt, real provider/browser outcomes and remaining limitations in output/evidence and local task checkpoint. Deployment is not complete until the actual hosted destination is checked.
 
-The ten-company visit budget allows 36 extraction attempts and 12 operator turns, with six failed extractions maximum per visit. Shared cloud caps remain 60 extraction attempts, 60 specialist calls, and 24 native voice starts per process. HTTP/idempotency budgets are 900/480 so explicit review across ten companies fits one visit. All budgets are temporary demo bounds.
+The ten-company visit budget allows 36 extraction attempts and 12 operator turns, with a six-failure threshold per visit (one already reserved call may finish). Shared cloud caps remain 60 extraction attempts, 60 specialist calls, and 24 native voice starts per process. HTTP/idempotency budgets are 900/480 so explicit review across ten companies fits one visit. All budgets are temporary demo bounds.

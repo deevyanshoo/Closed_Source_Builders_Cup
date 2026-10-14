@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
 
 from .sessions import SessionError, SessionStore
+from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
 
 COOKIE = 'demo_session'
@@ -99,7 +100,6 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             response = await call_next(request)
         except Exception as exc:
             # Only domain errors contain reviewed public messages. Never reflect provider exceptions.
-            from .errors import DemoError
             if isinstance(exc, DemoError):
                 response = failure(exc.code, exc.message, exc.status_code)
             else:
@@ -683,6 +683,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     output = await run_in_threadpool(adapter.transcribe, audio, mime, rate)
                 else:
                     output = await run_in_threadpool(adapter.speak, spoken_text)
+            except DemoError as exc:
+                raise SessionError(exc.code, exc.message, exc.status_code) from None
             except Exception:
                 raise SessionError('voice_unavailable', 'Google speech service did not complete this request.', 503) from None
             if not isinstance(output, dict):

@@ -7,7 +7,7 @@ import wave
 import pytest
 
 from procure.demo.errors import DemoError
-from procure.demo.voice import VoiceService
+from procure.demo.voice import VoiceService, _webm_metadata
 
 
 def _wav(seconds=1, rate=16000):
@@ -36,6 +36,19 @@ def _webm(rate=48000, duration_ms=1000, *, block=True, cluster_ms=0):
     return _element(b'\x1a\x45\xdf\xa3', b'') + segment
 
 
+def _chrome_style_webm(cluster_times):
+    """Chrome MediaRecorder layout: unknown-size Segment and sibling Clusters."""
+    opus = b'OpusHead\x01\x01\0\0' + struct.pack('<I', 48000) + b'\0\0\0'
+    track = _element(b'\xae', _element(b'\x86', b'A_OPUS') + _element(b'\x63\xa2', opus))
+    tracks = _element(b'\x16\x54\xae\x6b', track)
+    unknown_size = b'\x01' + b'\xff' * 7
+    cluster = lambda ms: (b'\x1f\x43\xb6\x75' + unknown_size +
+                          _element(b'\xe7', ms.to_bytes(2, 'big')) +
+                          _element(b'\xa3', b'\x81\0\0\x80\xf8\xff\xfe'))
+    return (_element(b'\x1a\x45\xdf\xa3', b'') + b'\x18\x53\x80\x67' + unknown_size +
+            tracks + b''.join(cluster(ms) for ms in cluster_times))
+
+
 def test_wav_recognition_returns_only_actual_provider_transcript():
     calls = []
     def fake(url, *, payload, timeout, max_bytes):
@@ -58,6 +71,46 @@ def test_webm_recognition_uses_opus_encoding():
     result = VoiceService(transport=fake, offline=False).transcribe(_webm(), 'audio/webm;codecs=opus', 48000)
     assert result['transcript'] == 'Watch steel'
     assert calls[0]['config']['encoding'] == 'WEBM_OPUS'
+
+
+def test_chrome_unknown_size_sibling_clusters_are_valid_audio():
+    calls = []
+    def fake(url, *, payload, **limits):
+        calls.append(payload)
+        return {'results': [{'alternatives': [{'transcript': 'Chrome works'}]}]}
+    result = VoiceService(transport=fake, offline=False).transcribe(
+        _chrome_style_webm(tuple(range(0, 10_000, 1000))), 'audio/webm;codecs=opus', 48000)
+    assert result['transcript'] == 'Chrome works'
+    assert len(calls) == 1
+
+
+def test_chrome_unknown_size_clusters_still_enforce_duration():
+    calls = []
+    def fake(url, *, payload, **limits):
+        calls.append(payload)
+        return {'results': []}
+    with pytest.raises(DemoError) as error:
+        VoiceService(transport=fake, offline=False).transcribe(
+            _chrome_style_webm((0, 21000)), 'audio/webm;codecs=opus', 48000)
+    assert error.value.code == 'voice_invalid_audio'
+    assert calls == []
+
+
+def test_many_chrome_clusters_parse_without_copying_each_remaining_segment():
+    class CountedBytes(bytes):
+        copied = 0
+
+        def __getitem__(self, key):
+            value = super().__getitem__(key)
+            if isinstance(key, slice):
+                self.copied += len(value)
+            return value
+
+    audio = CountedBytes(_chrome_style_webm(range(0, 20_000, 100)))
+    assert _webm_metadata(audio) == 48000
+    # The parser may copy small leaf fields, but a container's entire remaining
+    # Segment must not be copied once per Cluster.
+    assert audio.copied < len(audio) * 5
 
 
 @pytest.mark.parametrize('audio,mime,rate', [

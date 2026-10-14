@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from procure.demo.app import create_app
+from procure.demo.errors import DemoError
 from test_demo_operator import Provider
 
 
@@ -208,6 +209,31 @@ def test_voice_endpoints_share_context_csrf_idempotency_and_no_auto_operator_tur
         assert client.post('/api/demo/voice/speak', headers=headers, json={
             'text': 'x' * 1201, 'expected_context_version': 1,
             'idempotency_key': 'too-long'}).status_code == 422
+
+
+def test_voice_adapter_preserves_reviewed_domain_error_but_sanitizes_unexpected_failure():
+    class FailingVoice(Voice):
+        def transcribe(self, audio, mime_type, sample_rate_hertz):
+            raise DemoError('voice_invalid_audio', 'Unsupported recording structure.', 422)
+
+        def speak(self, text):
+            raise RuntimeError('private provider token and internal stack detail')
+
+    with demo(Provider(evidence=()), FailingVoice()) as client:
+        headers = auth(client)
+        invalid = client.post('/api/demo/voice/transcribe', headers=headers, json={
+            'audio_base64': base64.b64encode(b'RIFFfixture').decode(),
+            'mime_type': 'audio/wav', 'sample_rate_hertz': 16000,
+            'expected_context_version': 1, 'idempotency_key': 'domain-failure'})
+        assert invalid.status_code == 422
+        assert invalid.json() == {'error': {'code': 'voice_invalid_audio',
+                                            'message': 'Unsupported recording structure.'}}
+        unexpected = client.post('/api/demo/voice/speak', headers=headers, json={
+            'text': 'Read this result', 'expected_context_version': 1,
+            'idempotency_key': 'unexpected-failure'})
+        assert unexpected.status_code == 503
+        assert unexpected.json()['error']['code'] == 'voice_unavailable'
+        assert 'private provider token' not in unexpected.text
 
 
 def planned_demo(client, headers):

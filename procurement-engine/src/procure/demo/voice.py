@@ -87,25 +87,39 @@ def _webm_metadata(data: bytes):
     # compressed frame bytes for marker sequences.
     containers = {0x1A45DFA3, 0x18538067, 0x1549A966, 0x1654AE6B,
                   0xAE, 0x1F43B675, 0xA0}
+    # Unknown-size Clusters end at the next Segment-level element. Chrome
+    # MediaRecorder writes sibling Clusters this way instead of sized ones.
+    segment_level = {0x114D9B74, 0x1549A966, 0x1654AE6B, 0x1F43B675,
+                     0x1C53BB6B, 0x1941A469, 0x1043A770, 0x1254C367}
     metadata = {'codec': None, 'rate': None, 'duration': None,
                 'timecode_scale': 1_000_000, 'cluster_timecode': 0,
                 'last_block_ms': 0, 'blocks': 0, 'ebml': False, 'segment': False}
 
-    def visit(start, end, depth=0):
+    def visit(start, end, depth=0, *, parent=None, unknown=False):
         if depth > 8:
             raise _bad_audio()
         position = start
         while position < end:
+            item_start = position
             identifier, position = _vint(data, position, identifier=True)
             size, position = _vint(data, position)
+            if unknown and parent == 0x1F43B675 and identifier in segment_level:
+                return item_start
+            if size is None and identifier not in (0x18538067, 0x1F43B675):
+                raise _bad_audio()
             item_end = end if size is None else position + size
             if item_end > end or item_end < position:
                 raise _bad_audio()
-            content = data[position:item_end]
+            # Container ranges can cover every later sibling when their EBML
+            # size is unknown. Slice only leaf fields whose bytes we inspect.
+            content = (data[position:item_end] if identifier in
+                       (0x86, 0x63A2, 0x2AD7B1, 0x4489, 0xE7, 0xA3, 0xA1) else b'')
             if identifier == 0x1A45DFA3:
                 metadata['ebml'] = True
             elif identifier == 0x18538067:
                 metadata['segment'] = True
+            elif identifier == 0x1F43B675:
+                metadata['cluster_timecode'] = 0
             elif identifier == 0x86:
                 metadata['codec'] = content
             elif identifier == 0x63A2:
@@ -128,8 +142,12 @@ def _webm_metadata(data: bytes):
                     metadata['last_block_ms'] = max(metadata['last_block_ms'],
                         (metadata['cluster_timecode'] + offset) * metadata['timecode_scale'] / 1_000_000)
             if identifier in containers:
-                visit(position, item_end, depth + 1)
-            position = item_end
+                child_position = visit(position, item_end, depth + 1,
+                                       parent=identifier, unknown=size is None)
+                position = child_position if size is None else item_end
+            else:
+                position = item_end
+        return position
 
     visit(0, len(data))
     if not metadata['ebml'] or not metadata['segment'] or metadata['codec'] != b'A_OPUS' or not metadata['blocks']:

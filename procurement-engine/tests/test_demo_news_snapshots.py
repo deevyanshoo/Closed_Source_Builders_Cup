@@ -67,6 +67,54 @@ def test_store_uses_generation_zero_and_deterministic_hourly_name():
     assert session.calls[0][1]['params']['name'] == session.calls[1][1]['params']['name']
     assert session.calls[0][1]['params']['ifGenerationMatch'] == '0'
 
+
+def test_large_bundle_upload_allows_bounded_write_time_without_retry():
+    import requests
+    from procure.demo.news_snapshots import GcsSnapshotStore
+
+    row = bundle()
+    row['views']['solara-cables']['items'] = [{
+        'item_id': 'large', 'title': 'x' * 1_000_000,
+        'url': 'https://example.org/large', 'provider': 'EIA'}]
+
+    class Response:
+        status_code = 200
+        def raise_for_status(self): pass
+
+    class SlowWriteSession:
+        def __init__(self): self.calls = []
+        def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            if kwargs['timeout'][0] < 8:
+                raise requests.ConnectionError('simulated slow socket write')
+            return Response()
+
+    store = GcsSnapshotStore('private-news-bucket')
+    store._session = SlowWriteSession()
+    assert store.create(NOW, row) is True
+    assert len(store._session.calls) == 1
+    _, request = store._session.calls[0]
+    assert len(request['data']) > 1_000_000
+    assert request['timeout'] == (8, 5)
+    assert request['params']['ifGenerationMatch'] == '0'
+
+
+def test_upload_transport_error_propagates_after_one_attempt():
+    import requests
+    from procure.demo.news_snapshots import GcsSnapshotStore
+
+    class FailingSession:
+        def __init__(self): self.calls = 0
+        def post(self, url, **kwargs):
+            self.calls += 1
+            raise requests.ConnectionError('socket write failed')
+
+    store = GcsSnapshotStore('private-news-bucket')
+    store._session = FailingSession()
+    with pytest.raises(requests.ConnectionError, match='socket write failed'):
+        store.create(NOW, bundle())
+    assert store._session.calls == 1
+
 def test_force_runs_live_manual_refresh_without_publishing_or_using_bundle():
     class ManualLive:
         def __init__(self): self.calls = []

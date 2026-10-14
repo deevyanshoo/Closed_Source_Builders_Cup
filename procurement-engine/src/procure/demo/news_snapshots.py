@@ -204,7 +204,7 @@ class GcsSnapshotStore:
     def _create_named(self, name, payload):
         response = self._client().post(f'https://storage.googleapis.com/upload/storage/v1/b/{self.bucket}/o',
                                        params={'uploadType': 'media', 'name': name, 'ifGenerationMatch': '0'},
-                                       data=payload, headers={'Content-Type': 'application/json'}, timeout=(2, 8))
+                                       data=payload, headers={'Content-Type': 'application/json'}, timeout=(8, 5))
         if response.status_code == 412:
             return False
         response.raise_for_status()

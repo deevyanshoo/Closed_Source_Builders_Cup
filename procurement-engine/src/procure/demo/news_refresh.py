@@ -16,6 +16,7 @@ from .news import NewsService, _now
 from .news_snapshots import GcsSnapshotStore, _slot, catalog_version, validate_bundle
 
 _DEADLINE = 120
+_PUBLICATION_RESERVE = 30  # Two bounded cross-region writes, with a small buffer.
 _NEWS_STATES = {'fresh', 'empty', 'cached'}
 
 
@@ -82,7 +83,7 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
     deadline = time.monotonic() + _DEADLINE
     previous = None
     for hours in range(1, 9):
-        if time.monotonic() >= deadline - 20:
+        if time.monotonic() >= deadline - _PUBLICATION_RESERVE:
             break
         try:
             candidate = store.read(slot - timedelta(hours=hours))
@@ -94,7 +95,7 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
                 break
         except (OSError, ValueError, KeyError, TypeError, GoogleAuthError, requests.RequestException):
             continue
-    if previous is None and callable(getattr(store, 'recent_slots', None)) and time.monotonic() < deadline - 20:
+    if previous is None and callable(getattr(store, 'recent_slots', None)) and time.monotonic() < deadline - _PUBLICATION_RESERVE:
         try:
             slots = store.recent_slots(slot - timedelta(hours=1))
         except (OSError, ValueError, KeyError, TypeError, GoogleAuthError, requests.RequestException):
@@ -104,7 +105,7 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
         eligible = sorted({candidate for candidate in slots if isinstance(candidate, datetime)
                            and candidate.tzinfo is not None and oldest <= candidate <= upper}, reverse=True)
         for candidate_slot in eligible[:8]:
-            if time.monotonic() >= deadline - 20:
+            if time.monotonic() >= deadline - _PUBLICATION_RESERVE:
                 break
             try:
                 candidate = store.read(candidate_slot)
@@ -121,7 +122,7 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
     pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix='news-portfolio')
     try:
         futures = {p['company_id']: pool.submit(live.get, p) for p in profiles}
-        done, _ = wait(futures.values(), timeout=max(0, deadline-time.monotonic()-20))
+        done, _ = wait(futures.values(), timeout=max(0, deadline-time.monotonic()-_PUBLICATION_RESERVE))
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     views = {}

@@ -24,7 +24,7 @@ def run(base, live):
             return c.json(cid, path, csrf=csrf, body={**body,'expected_context_version':context})
         offers = []
         provider_calls = []
-        for fid in profile['quote_coverage']['fixture_ids']:
+        for fid in profile['quote_coverage']['scenarios'][0]['fixture_ids']:
             result = post('/api/demo/extract', {'fixture_id':fid,'mode':'gemini' if live else 'rules','idempotency_key':key()})
             offer = result['offer']
             if live:

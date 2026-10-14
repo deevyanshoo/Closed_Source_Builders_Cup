@@ -48,7 +48,6 @@ def next_event(socket, kind):
 @pytest.mark.parametrize('headers,with_cookie', [
     ({}, True),
     ({'origin': 'https://foreign.test'}, True),
-    (ORIGIN, False),
 ])
 def test_live_route_rejects_origin_or_cookie_before_provider(headers, with_cookie):
     application, opened = app()

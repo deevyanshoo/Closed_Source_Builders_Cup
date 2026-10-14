@@ -28,9 +28,11 @@ COOKIE = 'demo_session'
 MAX_BODY = 750_000
 MAX_UPLOAD = 500_000
 MAX_SPEECH_OUTPUT = 750_000
-MAX_REQUESTS = 900
-MAX_OFFERS = 24
-MAX_IDEMPOTENCY = 480
+# A full visit can review 156 quotes across 52 material scenarios. Paid-model
+# budgets remain separate and unchanged; these bound local synthetic work only.
+MAX_REQUESTS = 4000
+MAX_OFFERS = 48
+MAX_IDEMPOTENCY = 2400
 MAX_SESSION_CALLS = 36
 MAX_SESSION_FAILURES = 6
 MAX_OPERATOR_TURNS = 12
@@ -556,7 +558,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             return
         try:
             value = session(websocket)
-        except SessionError:
+        except SessionError as exc:
+            # Only same-origin clients reach here. Accept long enough to deliver
+            # a reviewed recovery reason; no provider connection is opened.
+            await websocket.accept()
+            await websocket.send_json({'type': 'error', 'code': exc.code,
+                                       'message': exc.message})
             await websocket.close(code=1008)
             return
         from .live_voice import run_live_voice

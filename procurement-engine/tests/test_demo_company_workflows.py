@@ -14,7 +14,7 @@ TODAY = date(2026, 10, 14)
 
 def accepted(profile):
     offers = []
-    for fixture_id in profile['quote_coverage']['fixture_ids']:
+    for fixture_id in profile['quote_coverage']['scenarios'][0]['fixture_ids']:
         extracted = quote_service.extract_fixture(fixture_id, mode='rules', as_of=TODAY)
         offer = quote_service.new_offer(extracted, offer_id=fixture_id, today=TODAY)
         for field, value in quote_service.fixture_review_values(fixture_id).items():
@@ -31,7 +31,8 @@ def request(profile, offers):
 @pytest.mark.parametrize('profile', company.list_companies(), ids=lambda p: p['company_id'])
 def test_each_company_has_a_complete_reviewed_three_offer_plan_and_recovery(profile):
     coverage = profile['quote_coverage']
-    assert len(coverage['fixture_ids']) == 3
+    primary_ids = coverage['scenarios'][0]['fixture_ids']
+    assert len(primary_ids) == 3
     assert profile['buyer_defaults']['material'] in coverage['materials']
     offers = accepted(profile)
     for offer in offers:
@@ -48,11 +49,11 @@ def test_each_company_has_a_complete_reviewed_three_offer_plan_and_recovery(prof
     assert all(alt['unit_price_per_unit'] == alt['unit_price'] for alt in baseline['alternatives'])
     selected_index = 2 if profile['company_id'] == 'solara-cables' else 1
     alternate_index = 1 if profile['company_id'] == 'solara-cables' else 2
-    assert baseline['selected_offer_id'] == coverage['fixture_ids'][selected_index]
+    assert baseline['selected_offer_id'] == primary_ids[selected_index]
     assert baseline['required_purchase_kg'] == baseline['required_purchase'] if unit == 'kg' else 'required_purchase_kg' not in baseline
     delayed = recovery.compare(baseline, request(profile, offers), offers,
                                {baseline['selected_offer_id']: 20}, today=TODAY)
-    assert delayed['scenario']['selected_offer_id'] == coverage['fixture_ids'][alternate_index]
+    assert delayed['scenario']['selected_offer_id'] == primary_ids[alternate_index]
     draft = rfq.build_draft(baseline, offers[selected_index], all_offers=offers,
                             created_at=datetime(2026, 10, 14, tzinfo=timezone.utc))
     assert draft['quantity'] == baseline['required_purchase']
@@ -149,7 +150,7 @@ def test_loomworks_document_suggestions_rescue_unverified_critical_fields_only_a
     critical = ('supplier_name', 'origin_country', 'incoterm', 'settlement_currency',
                 'valid_until', 'lead_time_days', 'payment_terms')
     offers = []
-    for fixture_id in profile['quote_coverage']['fixture_ids']:
+    for fixture_id in profile['quote_coverage']['scenarios'][0]['fixture_ids']:
         payload = quote_service.extract_fixture(fixture_id, mode='rules', as_of=TODAY)
         for name in critical:
             field = payload['fields'][name]
@@ -176,7 +177,7 @@ def test_loomworks_document_suggestions_rescue_unverified_critical_fields_only_a
             assert field['original']['value'] is None
         offers.append(quote_service.save_offer(offer, today=TODAY))
     plan = planner.build_plan(offers, request(profile, offers), today=TODAY)
-    assert plan['selected_offer_id'] == profile['quote_coverage']['fixture_ids'][1]
+    assert plan['selected_offer_id'] == profile['quote_coverage']['scenarios'][0]['fixture_ids'][1]
 
 
 @pytest.mark.parametrize('profile', company.list_companies(), ids=lambda p: p['company_id'])
@@ -193,7 +194,7 @@ def test_all_ten_company_workflows_over_http(profile):
             assert selected.status_code == 200, selected.text
             context = 2
         offers = []
-        for index, fixture_id in enumerate(profile['quote_coverage']['fixture_ids']):
+        for index, fixture_id in enumerate(profile['quote_coverage']['scenarios'][0]['fixture_ids']):
             response = client.post('/api/demo/extract', headers=headers, json={
                 'fixture_id': fixture_id, 'mode': 'rules',
                 'expected_context_version': context, 'idempotency_key': f'extract-{index}'})

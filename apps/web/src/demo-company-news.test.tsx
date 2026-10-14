@@ -43,4 +43,20 @@ describe('company news workspace', () => {
     expect(html).not.toContain('Unmatched headline');
     expect(html).toContain('Show unmatched headlines');
   });
+  it('shows observed matched coverage and explains unmatched-only or stale refresh states honestly', () => {
+    const unmatched = Array.from({ length: 23 }, (_, index) => ({ ...news.items[2], item_id: `unmatched-${index}` }));
+    const matched = Array.from({ length: 8 }, (_, index) => ({ ...news.items[0], item_id: `matched-${index}` }));
+    const loaded = { ...news, items: [...matched, ...unmatched] };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={loaded} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('8 company-relevant of 31 observed items');
+    expect(html.match(/Copper lane update/g)).toHaveLength(8);
+    expect(html).not.toContain('Unmatched headline');
+    const stale = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...loaded, items: unmatched }} loading={false} error="Session expired" onRefresh={() => {}} />);
+    expect(stale).toContain('23 observed headlines have no recorded company match');
+    expect(stale).toContain('Unmatched headline');
+    expect(stale).toContain('Previously displayed results');
+    const refreshing = renderToStaticMarkup(<NewsWorkspace company={company} view={loaded} loading={true} error="" onRefresh={() => {}} />);
+    expect(refreshing).toContain('The items below are from the previous check');
+    expect(refreshing).toContain('Checking sources…');
+  });
 });

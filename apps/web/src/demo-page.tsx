@@ -69,13 +69,41 @@ const today = () => {
 };
 const defaultInputs = () => ({ material: '', quantity: '', current_stock: '0', quantity_unit: 'kg', need_by: '', decision_date: today(), reporting_currency: 'USD', budget: '', additional_cost_per_unit: '0' });
 const genericInputs = (request: PlanRequest) => ({ material: request.material, quantity: request.quantity ?? request.quantity_kg ?? '', current_stock: request.current_stock ?? request.current_stock_kg ?? '0', quantity_unit: request.quantity_unit ?? 'kg', need_by: request.need_by, decision_date: request.decision_date, reporting_currency: request.reporting_currency, budget: request.budget, additional_cost_per_unit: request.additional_cost_per_unit ?? request.additional_cost_per_kg ?? '0' });
+export function companyScenarios(company: CompanyProfile) {
+  if (company.quote_coverage.scenarios?.length) return company.quote_coverage.scenarios;
+  return company.buyer_defaults ? [{ material_id: company.buyer_defaults.material, fixture_ids: company.quote_coverage.fixture_ids, buyer_defaults: company.buyer_defaults }] : [];
+}
+export function materialInputs(company: CompanyProfile, materialId: string) {
+  const scenario = companyScenarios(company).find(item => item.material_id === materialId);
+  return scenario ? { ...genericInputs(scenario.buyer_defaults), material: scenario.material_id } : null;
+}
+export function fixturesForMaterial(fixtures: DemoFixture[], company: CompanyProfile | undefined, materialId: string) {
+  if (!company) return fixtures;
+  const scenario = companyScenarios(company).find(item => item.material_id === materialId);
+  return scenario ? fixtures.filter(fixture => scenario.fixture_ids.includes(fixture.id)) : [];
+}
+export function offersForMaterial(offers: OfferView[], fixtures: DemoFixture[], company: CompanyProfile | undefined, materialId: string) {
+  if (!company) return offers;
+  const scenario = companyScenarios(company).find(item => item.material_id === materialId);
+  if (!scenario) return [];
+  return offers.filter(offer => {
+    if (offer.fixture_id) return scenario.fixture_ids.includes(offer.fixture_id);
+    const fixture = fixtures.find(item => item.filename === offer.document.filename);
+    if (fixture) return scenario.fixture_ids.includes(fixture.id);
+    return !company.quote_coverage.scenarios?.length && companyScenarios(company).length === 1;
+  });
+}
 export const requiredPurchase = (plan: PlanView): string => plan.required_purchase ?? plan.required_purchase_kg ?? '0';
 export const planUnit = (plan: PlanView) => plan.quantity_unit ?? 'kg';
-export function canonicalBuyerState(session: DemoSession) {
-  const request = session.plan_request ?? session.recovery?.baseline_request ?? session.company?.buyer_defaults;
+export function canonicalBuyerState(session: DemoSession, preferredMaterial?: string) {
+  const serverRequest = session.plan_request ?? session.recovery?.baseline_request ?? null;
+  const primaryMaterial = session.company?.buyer_defaults?.material ?? (session.company ? companyScenarios(session.company)[0]?.material_id : undefined);
+  const materialId = serverRequest?.material ?? (session.company && preferredMaterial && companyScenarios(session.company).some(item => item.material_id === preferredMaterial) ? preferredMaterial : primaryMaterial) ?? '';
+  const request = serverRequest ?? (session.company ? companyScenarios(session.company).find(item => item.material_id === materialId)?.buyer_defaults ?? null : null);
   const delayControls = session.recovery ? delayControlsForRecovery(session.recovery) : session.plan && request ? delayControlsForPlan(session.plan, request) : { offerId: '', days: '0' };
   return {
-    selected: request?.offer_ids.filter(id => session.offers.some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
+    materialId,
+    selected: request?.offer_ids.filter(id => offersForMaterial(session.offers, [], session.company, materialId).some(o => o.offer_id === id && acceptedStatus(o.status))) ?? [],
     inputs: request ? genericInputs(request) : defaultInputs(),
     delayControls,
   };
@@ -83,6 +111,7 @@ export function canonicalBuyerState(session: DemoSession) {
 export const sampleBuyerInputs = () => ({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
 const words = (s: string) => s.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const message = (error: unknown) => error instanceof DemoApiError ? error.message : 'Something went wrong. Please try again.';
+export const isSessionExpired = (error: unknown) => error instanceof DemoApiError && (error.code === 'session_expired' || [401, 403, 410].includes(error.status));
 const acceptedStatus = (status: string) => status === 'saved' || status === 'used_in_plan';
 export const delayRequest = (prior: Record<string, number>, offerId: string, days: string): Record<string, number> =>
   offerId && /^\d+$/.test(days) && Number(days) <= 3650 ? { ...prior, [offerId]: Number(days) } : {};
@@ -230,19 +259,25 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string[]>(() => initialState.session ? canonicalBuyerState(initialState.session).selected : []);
   const [inputs, setInputs] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).inputs : defaultInputs());
+  const [selectedMaterialId, setSelectedMaterialId] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).materialId : '');
   const [delayOfferId, setDelayOfferId] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).delayControls.offerId : '');
   const [delayDays, setDelayDays] = useState(() => initialState.session ? canonicalBuyerState(initialState.session).delayControls.days : '0');
   const epochRef = useRef(initialState.epoch);
   const actionRef = useRef(0);
   const newsRequestRef = useRef(0);
-  const offer = state.offers.find(o => o.offer_id === state.focusedId) ?? null;
+  const newsAutoRecoveryUsedRef = useRef(false);
+  const selectedMaterialRef = useRef(selectedMaterialId);
+  const materialScopeRef = useRef(initialState.session ? `${initialState.session.session_id}:${initialState.session.company?.company_id ?? ''}:${initialState.session.context_version ?? ''}` : '');
   const company = state.session?.company;
-  const accepted = state.offers.filter(o => acceptedStatus(o.status));
+  const visibleOffers = offersForMaterial(state.offers, fixtures, company, selectedMaterialId);
+  const offer = visibleOffers.find(o => o.offer_id === state.focusedId) ?? visibleOffers.at(-1) ?? null;
+  const accepted = visibleOffers.filter(o => acceptedStatus(o.status));
   const chosen = accepted.filter(o => selected.includes(o.offer_id));
-  const supportedFixtures = company ? fixtures.filter(fixture => company.quote_coverage.fixture_ids.includes(fixture.id)) : fixtures;
+  const supportedFixtures = fixturesForMaterial(fixtures, company, selectedMaterialId);
   const selectedFixtureId = supportedFixtures.some(fixture => fixture.id === fixtureId) ? fixtureId : supportedFixtures[0]?.id ?? '';
-  const coveredMaterials = company?.materials.filter(item => company.quote_coverage.materials.some(covered => covered.toLowerCase() === item.material_id.toLowerCase() || covered.toLowerCase() === item.name.toLowerCase())) ?? [];
-  const coveredMaterial = !company || coveredMaterials.some(item => (item.material_id.toLowerCase() === inputs.material.trim().toLowerCase() || item.name.toLowerCase() === inputs.material.trim().toLowerCase()) && item.quantity_unit === inputs.quantity_unit);
+  const coveredMaterials = company?.materials.filter(item => companyScenarios(company).some(scenario => scenario.material_id === item.material_id)) ?? [];
+  const coveredMaterial = !company || coveredMaterials.some(item => item.material_id === selectedMaterialId && item.material_id === inputs.material && item.quantity_unit === inputs.quantity_unit);
+  const currentDefaults = company ? materialInputs(company, selectedMaterialId) : null;
   const companyOptions = companies.length ? companies : company ? [company] : [];
   useEffect(() => { if (operatorOpen) operatorDockRef.current?.focus(); }, [operatorOpen]);
   function closeOperator() { setOperatorOpen(false); operatorToggleRef.current?.focus(); }
@@ -258,9 +293,11 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   }
 
   function restoreSession(session: DemoSession, epoch: number) {
-    const buyer = canonicalBuyerState(session);
+    const scope = `${session.session_id}:${session.company?.company_id ?? ''}:${session.context_version ?? ''}`;
+    const buyer = canonicalBuyerState(session, scope === materialScopeRef.current ? selectedMaterialRef.current : undefined);
+    materialScopeRef.current = scope; selectedMaterialRef.current = buyer.materialId;
     dispatch({ type: 'session', session, epoch });
-    setSelected(buyer.selected); setInputs(buyer.inputs);
+    setSelectedMaterialId(buyer.materialId); setSelected(buyer.selected); setInputs(buyer.inputs);
     setDelayOfferId(buyer.delayControls.offerId);
     setDelayDays(buyer.delayControls.days);
   }
@@ -271,8 +308,32 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   function clearUnknownOperatorSession() {
     epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
     dispatch({ type: 'company-start' });
+    selectedMaterialRef.current = ''; materialScopeRef.current = ''; setSelectedMaterialId('');
     setSelected([]); setInputs(defaultInputs()); setFile(null); setDelayOfferId(''); setDelayDays('0');
-    setBusy(''); setError('The reviewed action may have changed the server workspace, but the current session could not be confirmed. Refresh session before continuing.');
+    setBusy(''); setError('The current workspace could not be confirmed. Refresh session before continuing.');
+  }
+
+  async function recoverExpiredNews(epoch: number, requestId: number) {
+    if (epoch !== epochRef.current || requestId !== newsRequestRef.current) return;
+    const attemptRecovery = !newsAutoRecoveryUsedRef.current;
+    newsAutoRecoveryUsedRef.current = true;
+    epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
+    dispatch({ type: 'company-start' });
+    selectedMaterialRef.current = ''; materialScopeRef.current = ''; setSelectedMaterialId('');
+    setSelected([]); setInputs(defaultInputs()); setFile(null); setDelayOfferId(''); setDelayDays('0');
+    setNewsBusy(false); setNewsError('');
+    setError('The session expired. The previous company, news, comparison and review are cleared. Refresh session to continue.');
+    if (!attemptRecovery) { setBusy(''); return; }
+    const recoveryEpoch = epochRef.current;
+    setBusy('session');
+    try {
+      const session = await api.session();
+      if (recoveryEpoch !== epochRef.current) return;
+      restoreSession(session, recoveryEpoch);
+      setError('The session expired and a new canonical workspace was opened. Review the company and buyer inputs before continuing.');
+    } catch {
+      if (recoveryEpoch === epochRef.current) setError('The session expired and the current workspace could not be confirmed. Refresh session to continue.');
+    } finally { if (recoveryEpoch === epochRef.current) setBusy(''); }
   }
 
   useEffect(() => {
@@ -292,12 +353,15 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     const requestId = ++newsRequestRef.current;
     setNewsBusy(true); setNewsError('');
     const timer = setTimeout(() => {
-      api.news().then(news => { if (!cancelled && requestId === newsRequestRef.current) dispatch({ type: 'news', news, sessionId, epoch }); })
-        .catch(e => { if (!cancelled && requestId === newsRequestRef.current) setNewsError(message(e)); })
+      api.news().then(news => { if (!cancelled && requestId === newsRequestRef.current) { setNewsBusy(false); dispatch({ type: 'news', news, sessionId, epoch }); } })
+        .catch(e => { if (!cancelled && requestId === newsRequestRef.current && epoch === epochRef.current) {
+          if (isSessionExpired(e)) void recoverExpiredNews(epoch, requestId);
+          else setNewsError(message(e));
+        } })
         .finally(() => { if (!cancelled && requestId === newsRequestRef.current) setNewsBusy(false); });
     }, 150);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [state.session?.session_id, state.session?.company?.company_id, state.session?.context_version, state.epoch, state.news]);
+  }, [state.session?.session_id, state.session?.company?.company_id, state.session?.context_version, state.epoch]);
 
   async function run<T>(name: string, operation: () => Promise<T>, success: (value: T, epoch: number) => void) {
     const epoch = epochRef.current, action = ++actionRef.current;
@@ -311,6 +375,16 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     epochRef.current += 1; actionRef.current += 1;
     dispatch({ type: 'invalidate' }); setBusy(''); setError('');
   }
+  function selectMaterial(materialId: string) {
+    if (!company || materialId === selectedMaterialRef.current || !companyScenarios(company).some(item => item.material_id === materialId)) return;
+    const next = materialInputs(company, materialId);
+    if (!next) return;
+    invalidate();
+    selectedMaterialRef.current = materialId;
+    setSelectedMaterialId(materialId); setInputs(next); setSelected([]); setFile(null);
+    setFixtureId(companyScenarios(company).find(item => item.material_id === materialId)?.fixture_ids[0] ?? '');
+    setDelayOfferId(''); setDelayDays('0');
+  }
   function editScenario() {
     epochRef.current += 1; actionRef.current += 1;
     dispatch({ type: 'scenario-edit' }); setBusy(''); setError('');
@@ -321,6 +395,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     const contextVersion = state.session.context_version;
     epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
     dispatch({ type: 'company-start' });
+    selectedMaterialRef.current = ''; materialScopeRef.current = ''; setSelectedMaterialId('');
     setSelected([]); setInputs(defaultInputs()); setFile(null); setDelayOfferId(''); setDelayDays('0');
     setNewsBusy(false); setNewsError(''); setError(''); setBusy('company'); setWorkspaceTab('company');
     const epoch = epochRef.current;
@@ -343,8 +418,11 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     setNewsBusy(true); setNewsError('');
     try {
       const news = await api.refreshNews(state.session.csrf_token, state.session.context_version);
-      if (requestId === newsRequestRef.current) dispatch({ type: 'news', news, sessionId, epoch });
-    } catch (e) { if (requestId === newsRequestRef.current) setNewsError(message(e)); }
+      if (requestId === newsRequestRef.current && epoch === epochRef.current) dispatch({ type: 'news', news, sessionId, epoch });
+    } catch (e) { if (requestId === newsRequestRef.current && epoch === epochRef.current) {
+      if (isSessionExpired(e)) void recoverExpiredNews(epoch, requestId);
+      else setNewsError(message(e));
+    } }
     finally { if (requestId === newsRequestRef.current) setNewsBusy(false); }
   }
 
@@ -416,6 +494,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     if (!state.session) return;
     const csrf = state.session.csrf_token;
     dispatch({ type: 'reset-start' }); epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;
+    selectedMaterialRef.current = ''; materialScopeRef.current = ''; setSelectedMaterialId('');
     setBusy('reset'); setError(''); setSelected([]); setFile(null); setInputs(defaultInputs()); setDelayOfferId(''); setDelayDays('0');
     const epoch = epochRef.current;
     api.reset(csrf, state.session.context_version).then(session => { if (epoch === epochRef.current) restoreSession(session, epoch); })
@@ -436,10 +515,11 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     <div className="demo-boundary"><strong>Demo boundaries</strong><span>Company profiles, quotes and buyer inputs are synthetic; news is observed public data. Your work stays in a temporary session and may disappear when the service restarts. No order or supplier message is sent.</span></div>
     {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · changes kept separately for this visit</p></div>
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
+      <div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget. Select this material's quotes below.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div>
       <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button></div>
       {workspaceTab === 'company' ? <CompanyOverview company={company} /> : <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} />}
     </section>}
-    {error && <div className="demo-error" role="alert"><strong>Could not complete that step.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), restoreSession)}>Refresh session</button></div>}
+    {error && <div className="demo-error" role="alert"><strong>Workspace update.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), (session, epoch) => { newsAutoRecoveryUsedRef.current = false; restoreSession(session, epoch); })}>Refresh session</button></div>}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
       <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={selectedFixtureId} disabled={!!company && !supportedFixtures.length} onChange={e => { setFixtureId(e.target.value); setFile(null); }}><option value="">Choose a document</option>{supportedFixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
         <label><span>Or upload one of these sample files</span><input type="file" accept=".pdf,.csv,application/pdf,text/csv" disabled={!!company && !supportedFixtures.length} onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
@@ -449,13 +529,13 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {supportedFixtures.length > 0 && <div className="demo-fixtures"><span>Sample documents</span>{supportedFixtures.map(f => <a key={f.id} href={f.download_url} download>{f.filename} ↗</a>)}</div>}
       {state.session && !state.session.provider.available && <p className="demo-provider">Gemini is currently unavailable. Rule extraction can still be tried and will be labelled separately.</p>}
     </section>
-    {state.offers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes in this session">{state.offers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === state.focusedId ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
+    {visibleOffers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes for selected material">{visibleOffers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === offer?.offer_id ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
     {offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} company={company} fixtures={supportedFixtures} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
     <section className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
-      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !company.buyer_defaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(company?.buyer_defaults ? { ...canonicalBuyerState({ ...state.session, plan_request: null, recovery: null }).inputs } : sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? company.buyer_defaults ? 'Dated synthetic buyer assumptions from this fictional company. Edit any input below; Coverage uses the listed material unit.' : 'No buyer defaults or runnable quote scenario are available for this company.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
-      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={inputs.material} onChange={e => { const material = coveredMaterials.find(item => item.material_id === e.target.value); if (!material) return; invalidate(); const defaults = company.buyer_defaults && company.buyer_defaults.material.toLowerCase() === material.material_id.toLowerCase() ? genericInputs(company.buyer_defaults) : null; setInputs(old => defaults ?? { ...old, material: material.material_id, quantity: '', current_stock: material.stock, quantity_unit: material.quantity_unit, budget: '', additional_cost_per_unit: '0' }); }}><option value="">Choose a covered material</option>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
+      <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !currentDefaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(currentDefaults ?? sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? currentDefaults ? 'Dated synthetic buyer assumptions for the selected material. Edit any input below; quantities use its listed unit.' : 'No buyer defaults or runnable quote scenario are available for this material.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
+      <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={selectedMaterialId} onChange={e => selectMaterial(e.target.value)}>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}

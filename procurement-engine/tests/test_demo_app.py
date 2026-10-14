@@ -3,7 +3,7 @@ import base64
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 import pytest
-from procure.demo.app import create_app, MAX_REQUESTS
+from procure.demo.app import create_app, MAX_REQUESTS, MAX_OFFERS
 
 
 @pytest.fixture
@@ -260,12 +260,12 @@ def test_plan_ownership_exact_versions_and_plan_invalidation(client):
 
 def test_offer_limit_rejects_without_unbounded_session_growth(client):
     headers = auth(client)
-    for i in range(24):
+    for i in range(MAX_OFFERS):
         extract_rules(client, headers, fixture='eu-copper', key=f'offer-{i}')
     response = client.post('/api/demo/extract', headers=headers, json={
         'fixture_id': 'eu-copper', 'mode': 'rules', 'idempotency_key': 'over-capacity'})
     assert response.status_code == 429
-    assert len(client.get('/api/demo/offers').json()['offers']) == 24
+    assert len(client.get('/api/demo/offers').json()['offers']) == MAX_OFFERS
 
 
 def test_provider_exception_is_redacted_and_failed_call_budget_is_bounded(client, monkeypatch):

@@ -17,7 +17,7 @@ async def run(base, audio_path, output_audio, *, rfq=False):
         profile=session['company']; csrf=session['csrf_token']; context=session['context_version']
         def post(path,body):return c.json('rfq prep',path,csrf=csrf,body={**body,'expected_context_version':context})
         offers=[]
-        for fid in profile['quote_coverage']['fixture_ids']:
+        for fid in profile['quote_coverage']['scenarios'][0]['fixture_ids']:
             offer=post('/api/demo/extract',{'fixture_id':fid,'mode':'rules','idempotency_key':key()})['offer']
             for field,value in fixture_review_values(fid).items():
                 offer=post('/api/demo/offers/'+offer['offer_id']+'/correct',{'field':field,'value':value,'expected_version':offer['version'],'idempotency_key':key()})['offer']

@@ -56,10 +56,10 @@ def test_catalogue_has_ten_varied_dated_profiles_with_explicit_units_and_coverag
                 assert set(route['materials']) <= materials.keys()
                 assert route['currency'] in profile['currencies']
         solara = next(p for p in profiles if p['company_id'] == 'solara-cables')
-        assert solara['quote_coverage']['materials'] == ['copper']
-        assert set(solara['quote_coverage']['fixture_ids']) == {'late-copper', 'express-copper', 'eu-copper'}
+        assert solara['quote_coverage']['scenarios'][0]['material_id'] == 'copper'
+        assert set(solara['quote_coverage']['scenarios'][0]['fixture_ids']) == {'late-copper', 'express-copper', 'eu-copper'}
         assert solara['buyer_defaults']['material'] == 'copper'
-        assert all(len(p['quote_coverage']['fixture_ids']) == 3 for p in profiles)
+        assert all(len(p['quote_coverage']['fixture_ids']) == 3 * len(p['materials']) for p in profiles)
 
 
 def test_catalogue_depth_references_and_original_solara_scenario():
@@ -101,7 +101,8 @@ def test_corrected_supplier_gaps_have_matching_settlement_routes():
             ('stonebridge-materials', 'aggregate', 'Mozambique'),
         ):
             profile = profiles[company_id]
-            suppliers = [s for s in profile['suppliers'] if material_id in s['materials']]
+            suppliers = [s for s in profile['suppliers'] if material_id in s['materials']
+                         and '-supplier-' in s['supplier_id']]
             assert len(suppliers) == 1
             supplier = suppliers[0]
             assert supplier['country'] == source_country

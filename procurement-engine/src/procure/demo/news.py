@@ -36,6 +36,10 @@ SOURCES = (
 )
 
 
+class _RateLimited(ValueError):
+    """A fixed public provider declined the bounded request."""
+
+
 def _now(clock):
     value = clock()
     if isinstance(value, (int, float)):
@@ -191,6 +195,8 @@ def _default_transport(url, *, timeout, max_bytes):
     session.trust_env = False  # Ignore netrc credentials and ambient proxy settings.
     try:
         with session.get(url, timeout=timeout, allow_redirects=False, stream=True) as response:
+            if response.status_code == 429:
+                raise _RateLimited('Provider rate limit reached.')
             if response.status_code != 200:
                 raise ValueError('Source unavailable')
             body = bytearray()
@@ -294,7 +300,9 @@ class NewsService:
                             continue
                         source['state'] = 'stale'
                         source['last_checked_at'] = old['last_checked_at']
-                        source['reason'] = 'Refresh failed; showing previously observed metadata.'
+                        source['reason'] = (source['reason'] + ' Showing previously observed metadata.'
+                                            if source['reason'] == 'Provider rate limit reached.'
+                                            else 'Refresh failed; showing previously observed metadata.')
                 if any(source['state'] == 'stale' for source in fresh['sources']):
                     fresh['cache_state'] = 'stale'
                 fresh['items'] = sorted({item['url']: item for item in fresh['items']}.values(),
@@ -337,6 +345,9 @@ class NewsService:
                 items.extend(found)
                 sources.append({'source_id': source_id, 'name': name, 'state': 'fresh' if found or source_id == 'ecb_fx' else 'empty',
                                 'last_checked_at': stamp, 'reason': 'Official reference data received.' if source_id == 'ecb_fx' else ('Metadata received.' if found else 'No valid items in source response.')})
+            except _RateLimited:
+                sources.append({'source_id': source_id, 'name': name, 'state': 'unavailable',
+                                'last_checked_at': stamp, 'reason': 'Provider rate limit reached.'})
             except (requests.RequestException, ValueError, TypeError, ET.ParseError, TimeoutError, json.JSONDecodeError):
                 sources.append({'source_id': source_id, 'name': name, 'state': 'unavailable',
                                 'last_checked_at': stamp, 'reason': 'Source could not be read or validated.'})

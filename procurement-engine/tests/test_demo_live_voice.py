@@ -259,7 +259,7 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
     async def scenario():
         monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
         store, session = setup()
-        for _ in range(2):
+        for _ in range(live_voice.MAX_COMPANY_STARTS):
             socket = Socket(start(session))
             task = asyncio.create_task(live_voice.run_live_voice(
                 socket, session=session, store=store, operate_workspace=lambda *_: None,
@@ -272,8 +272,8 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
                                         operate_workspace=lambda *_: None,
                                         client_factory=connection(Provider()))
         assert (await next_type(third, 'error'))['code'] == 'voice_limit'
-        assert session.live_voice_sessions == 2
-        assert session.live_voice_starts_by_company['solara-cables'] == 2
+        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS
+        assert session.live_voice_starts_by_company['solara-cables'] == live_voice.MAX_COMPANY_STARTS
 
         with session.lock:
             session.select_company('terrapack')
@@ -284,8 +284,8 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
         assert (await next_type(terra, 'ready'))['context_version'] == 2
         await terra.frames.put('{"type":"stop"}')
         await asyncio.wait_for(terra_task, 2)
-        assert session.live_voice_sessions == 3
-        assert session.live_voice_starts_by_company == {'solara-cables': 2, 'terrapack': 1}
+        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS + 1
+        assert session.live_voice_starts_by_company == {'solara-cables': live_voice.MAX_COMPANY_STARTS, 'terrapack': 1}
 
         with session.lock:
             session.select_company('solara-cables')
@@ -294,7 +294,7 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
                                         operate_workspace=lambda *_: None,
                                         client_factory=connection(Provider()))
         assert (await next_type(returned, 'error'))['code'] == 'voice_limit'
-        assert session.live_voice_sessions == 3
+        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS + 1
 
         monkeypatch.setattr(live_voice, '_PROCESS_STARTS', live_voice.MAX_PROCESS_STARTS)
         new_session = store.create()
@@ -304,6 +304,58 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
                                         client_factory=connection(Provider()))
         assert (await next_type(fourth, 'error'))['code'] == 'voice_limit'
         assert new_session.live_voice_sessions == 0
+    asyncio.run(scenario())
+
+
+def test_provider_startup_failure_does_not_exhaust_retry_budget(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+        store, session = setup()
+
+        @asynccontextmanager
+        async def unavailable():
+            raise RuntimeError('private provider detail')
+            yield
+
+        for _ in range(live_voice.MAX_COMPANY_STARTS + 1):
+            socket = Socket(start(session))
+            await live_voice.run_live_voice(socket, session=session, store=store,
+                                            operate_workspace=lambda *_: None,
+                                            client_factory=unavailable)
+            assert (await next_type(socket, 'error'))['code'] == 'voice_unavailable'
+        assert session.live_voice_starts_by_company.get(session.company_id, 0) == 0
+        assert session.live_voice_sessions == 0
+        assert live_voice._PROCESS_STARTS == 0
+        retry = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            retry, session=session, store=store, operate_workspace=lambda *_: None,
+            client_factory=connection(Provider())))
+        assert (await next_type(retry, 'ready'))['context_version'] == 1
+        await retry.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+    asyncio.run(scenario())
+
+
+def test_process_start_budget_resets_after_one_hour(monkeypatch):
+    async def scenario():
+        tick = [1000.0]
+        monkeypatch.setattr(live_voice, 'monotonic', lambda: tick[0])
+        monkeypatch.setattr(live_voice, '_PROCESS_WINDOW_STARTED', 1000.0)
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', live_voice.MAX_PROCESS_STARTS)
+        store, session = setup()
+        blocked = Socket(start(session))
+        await live_voice.run_live_voice(blocked, session=session, store=store,
+                                        operate_workspace=lambda *_: None,
+                                        client_factory=connection(Provider()))
+        assert (await next_type(blocked, 'error'))['code'] == 'voice_limit'
+        tick[0] += 3601
+        retry = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            retry, session=session, store=store, operate_workspace=lambda *_: None,
+            client_factory=connection(Provider())))
+        await next_type(retry, 'ready')
+        await retry.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
     asyncio.run(scenario())
 
 

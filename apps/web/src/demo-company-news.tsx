@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CompanyProfile, NewsItem, NewsView } from './demo-api';
 
 const dateLabel = (value: string | null | undefined) => {
@@ -13,6 +13,7 @@ const sourceHref = (url: string) => {
 export const filterNewsItems = (items: NewsItem[], material: string, category: string, showUnmatched = false) =>
   items.filter(item => (showUnmatched || item.matched_materials.length + item.matched_routes.length + item.matched_currencies.length > 0) &&
     (material === 'all' || item.matched_materials.includes(material)) && (category === 'all' || item.category === category));
+const unmatchedOnly = (view: NewsView | null) => !!view?.items.length && filterNewsItems(view.items, 'all', 'all').length === 0;
 
 export function CompanyOverview({ company }: { company: CompanyProfile }) {
   return <section className="demo-company-panel" aria-label="Company overview">
@@ -29,7 +30,8 @@ export function CompanyOverview({ company }: { company: CompanyProfile }) {
 export function NewsWorkspace({ company, view, loading, error, onRefresh }: { company: CompanyProfile; view: NewsView | null; loading: boolean; error: string; onRefresh: () => void }) {
   const [material, setMaterial] = useState('all');
   const [category, setCategory] = useState('all');
-  const [showUnmatched, setShowUnmatched] = useState(false);
+  const [showUnmatched, setShowUnmatched] = useState(() => unmatchedOnly(view));
+  useEffect(() => { setShowUnmatched(unmatchedOnly(view)); }, [view]);
   const categories = [...new Set(view?.items.map(item => item.category) ?? [])].sort();
   const visible = filterNewsItems(view?.items ?? [], material, category, showUnmatched);
   const relevantCount = filterNewsItems(view?.items ?? [], 'all', 'all').length;
@@ -37,22 +39,25 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh }: { co
     <div className="demo-heading"><div><span className="demo-kicker">Observed public sources · conditional company exposure</span><h2>News workspace</h2></div><button type="button" className="demo-button" disabled={loading} onClick={onRefresh}>{loading ? 'Checking sources…' : 'Refresh sources'}</button></div>
     <p className="demo-muted">News is observed public information. {company.name} is fictional; a matching topic is not a confirmed supplier delay, price change, or forecast. Source reliability and company relevance are separate assessments.</p>
     {error && <div className="demo-alert" role="alert">Source check unavailable: {error}. Previously displayed results, if any, keep their recorded check time.</div>}
+    {loading && view && <p className="demo-muted" role="status">Checking sources now. The items below are from the previous check at {dateLabel(view.checked_at)}.</p>}
     {!view ? <p className="demo-alert">{loading ? 'Checking reviewed public sources…' : 'News coverage unavailable. No synthetic articles are substituted.'}</p> : <>
       <div className="demo-news-status"><strong>Coverage: {view.cache_state}</strong><span>Checked {dateLabel(view.checked_at)}</span><span>{relevantCount} company-relevant of {view.items.length} observed items</span></div>
       <div className="demo-company-grid"><div><h3>Source health</h3>{view.sources.length ? <ul>{view.sources.map(source => <li key={source.source_id}><strong>{source.name}: {source.state}</strong> · checked {dateLabel(source.last_checked_at)}{source.reason ? ` · ${source.reason}` : ''}</li>)}</ul> : <p className="demo-muted">No source status returned.</p>}</div>
         <div><h3>Dated FX reference</h3>{view.fx.length ? <ul>{view.fx.map(rate => <li key={`${rate.provider}-${rate.base}-${rate.quote}-${rate.observation_date}`}>{rate.base}/{rate.quote} {rate.rate} · {rate.observation_date} · {rate.provider} · retrieved {dateLabel(rate.retrieved_at)} · informational, not an executable offer</li>)}</ul> : <p className="demo-muted">No FX observation available.</p>}</div></div>
       {view.limitations.length > 0 && <div className="demo-alert"><strong>Coverage limits</strong><ul>{view.limitations.map((limit, index) => <li key={index}>{limit}</li>)}</ul></div>}
       <div className="demo-news-filters"><label><span>Material relevance</span><select value={material} onChange={event => setMaterial(event.target.value)}><option value="all">All materials</option>{company.materials.map(item => <option key={item.material_id} value={item.material_id}>{item.name}</option>)}</select></label><label><span>Category</span><select value={category} onChange={event => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map(item => <option key={item} value={item}>{item}</option>)}</select></label><label className="demo-news-unmatched"><input type="checkbox" checked={showUnmatched} onChange={event => setShowUnmatched(event.target.checked)} />Show unmatched headlines</label></div>
+      {relevantCount === 0 && view.items.length > 0 && <p className="demo-alert">{view.items.length} observed headlines have no recorded company match. {showUnmatched ? 'Showing unmatched observations for inspection; no company relevance is inferred.' : 'Turn on Show unmatched headlines to inspect them without implying relevance.'}</p>}
       {visible.length ? <div className="demo-news-items">{visible.map(item => {
         const href = sourceHref(item.url);
-        return <article key={item.item_id} className="demo-news-item"><span className="demo-kicker">{item.category} · {item.provider}</span><h3>{href ? <a href={href} target="_blank" rel="noopener noreferrer">{item.title} ↗</a> : item.title}</h3>
+        const unmatched = item.matched_materials.length + item.matched_routes.length + item.matched_currencies.length === 0;
+        return <article key={item.item_id} className="demo-news-item"><span className="demo-kicker">{unmatched ? 'Unmatched observation · ' : ''}{item.category} · {item.provider}</span><h3>{href ? <a href={href} target="_blank" rel="noopener noreferrer">{item.title} ↗</a> : item.title}</h3>
           <p className="demo-muted">{item.publisher ?? 'Publisher unavailable'} · {item.published_at ? `Published ${dateLabel(item.published_at)}` : 'Publication time unavailable'} · First seen {dateLabel(item.first_seen_at)} · Retrieved {dateLabel(item.retrieved_at)}</p>
           <p><strong>Source:</strong> {item.source_tier} · {item.source_reliability}. {item.reliability_reason}</p>
           <p><strong>Company relevance:</strong> {item.relevance_reason} · Materials {item.matched_materials.join(', ') || 'none'} · Routes {item.matched_routes.join(', ') || 'none'} · Currencies {item.matched_currencies.join(', ') || 'none'}</p>
           <p><strong>Conditional implication ({item.implication_confidence}):</strong> {item.implication}</p>
           {item.next_steps.length > 0 && <p><strong>Next checks:</strong> {item.next_steps.join('; ')}</p>}
         </article>;
-      })}</div> : <p className="demo-alert">No observed items match these filters. Check source health and coverage limits above.</p>}
+      })}</div> : <p className="demo-alert">{view.items.length === 0 ? 'No observed headlines were returned by the checked sources. Check source health and coverage limits above.' : 'No observed items match these filters. Change the filters or inspect unmatched headlines; check source health and coverage limits above.'}</p>}
     </>}
   </section>;
 }

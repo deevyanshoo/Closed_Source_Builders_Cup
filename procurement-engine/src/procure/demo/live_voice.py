@@ -26,8 +26,9 @@ MODEL = 'gemini-3.8-live'
 LOCATION = 'us-central1'
 MAX_SECONDS = 180
 MAX_CONNECTIONS = 2
-MAX_COMPANY_STARTS = 2
+MAX_COMPANY_STARTS = 6
 MAX_PROCESS_STARTS = 24
+PROCESS_WINDOW_SECONDS = 3600
 MAX_INPUT_CHUNK = 32_000  # One second of mono PCM16 at 16 kHz.
 MAX_INPUT_BYTES = MAX_SECONDS * 32_000
 MAX_OUTPUT_BYTES = MAX_SECONDS * 48_000
@@ -38,6 +39,7 @@ MAX_TRANSCRIPT_CHARS = 1200
 _SLOTS = threading.BoundedSemaphore(MAX_CONNECTIONS)
 _START_LOCK = threading.Lock()
 _PROCESS_STARTS = 0
+_PROCESS_WINDOW_STARTED = monotonic()
 
 INSTRUCTION = (
     'You are an original procurement workspace voice assistant. Speak in '
@@ -67,6 +69,9 @@ class _Stale(Exception):
 
 class _Capacity(Exception):
     """The process or session has exhausted its voice allowance."""
+
+    def __init__(self, scope: str):
+        self.scope = scope
 
 
 class _Busy(Exception):
@@ -163,13 +168,16 @@ async def run_live_voice(
     expected_context_version}. The route-supplied callback must execute the
     existing operator-turn boundary, including its idempotency and limits.
     """
-    global _PROCESS_STARTS
+    global _PROCESS_STARTS, _PROCESS_WINDOW_STARTED
     await websocket.accept()
     started = monotonic()
     input_bytes = output_bytes = input_frames = tool_calls = 0
     tool_results: dict[str, tuple[str, dict]] = {}
     accepted = False
     reserved = False
+    provider_ready = False
+    counted_window = None
+    counted_company = None
     context_version = None
     try:
         hello = _frame(await asyncio.wait_for(websocket.receive_text(), 5), limit=512)
@@ -185,16 +193,24 @@ async def run_live_voice(
             raise _Busy()
         reserved = True
         with _START_LOCK, session.lock:
+            now = monotonic()
+            if now - _PROCESS_WINDOW_STARTED >= PROCESS_WINDOW_SECONDS:
+                _PROCESS_WINDOW_STARTED = now
+                _PROCESS_STARTS = 0
             if (not session.active or session.expires_at <= store.now() or
                     session.context_version != context_version):
                 raise _Stale()
             by_company = session.live_voice_starts_by_company
             company_starts = by_company.get(session.company_id, 0)
-            if _PROCESS_STARTS >= MAX_PROCESS_STARTS or company_starts >= MAX_COMPANY_STARTS:
-                raise _Capacity()
+            if _PROCESS_STARTS >= MAX_PROCESS_STARTS:
+                raise _Capacity('process')
+            if company_starts >= MAX_COMPANY_STARTS:
+                raise _Capacity('company')
             _PROCESS_STARTS += 1
             session.live_voice_sessions += 1
             by_company[session.company_id] = company_starts + 1
+            counted_window = _PROCESS_WINDOW_STARTED
+            counted_company = session.company_id
         accepted = True
 
         factory = client_factory or _vertex_connection
@@ -202,6 +218,7 @@ async def run_live_voice(
             await websocket.send_json({'type': 'ready', 'input_mime_type': 'audio/pcm;rate=16000',
                                        'output_mime_type': 'audio/pcm;rate=24000',
                                        'context_version': context_version})
+            provider_ready = True
 
             async def from_browser():
                 nonlocal input_bytes, input_frames
@@ -337,16 +354,29 @@ async def run_live_voice(
                 'voice_limit' if isinstance(exc, _Capacity) else
                 'voice_invalid' if isinstance(exc, _Invalid) else
                 'voice_limit' if isinstance(exc, TimeoutError) else 'voice_unavailable')
-        message = ('Workspace changed. Start a new voice session.' if code == 'stale_context' else
+        message = ('Workspace changed or expired. Refresh the demo session before starting voice again.' if code == 'stale_context' else
                    'Live voice is busy. Try again shortly.' if code == 'voice_busy' else
-                   'Live voice is unavailable. Try typed input.' if code == 'voice_unavailable' else
-                   'Live voice ended. Start a new session.' if code == 'voice_limit' else
+                   'Google live voice could not connect or was interrupted. Try again shortly.' if code == 'voice_unavailable' else
+                   'The live voice service has reached its hourly usage limit. Try again later.' if isinstance(exc, _Capacity) and exc.scope == 'process' else
+                   'This company has reached its voice start limit for this demo session. Refresh the session to continue.' if isinstance(exc, _Capacity) else
+                   'This voice conversation reached its three-minute limit. Start another conversation.' if isinstance(exc, TimeoutError) else
                    'Invalid live voice request.')
         try:
             await websocket.send_json({'type': 'error', 'code': code, 'message': message})
         except (RuntimeError, WebSocketDisconnect):
             pass
     finally:
+        if accepted and not provider_ready:
+            # A failed provider setup never gave the visitor a usable voice turn.
+            with _START_LOCK, session.lock:
+                if counted_window == _PROCESS_WINDOW_STARTED:
+                    _PROCESS_STARTS -= 1
+                session.live_voice_sessions -= 1
+                remaining = session.live_voice_starts_by_company[counted_company] - 1
+                if remaining:
+                    session.live_voice_starts_by_company[counted_company] = remaining
+                else:
+                    del session.live_voice_starts_by_company[counted_company]
         if accepted:
             try:
                 await websocket.send_json({'type': 'metrics',

@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, initialDemoState, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
-import type { DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
+import { DemoApiError } from './demo-api';
+import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
 const offer = (version: number, status = 'corrected'): OfferView => ({
   offer_id: 'q1', version, status, synthetic: true,
@@ -18,8 +19,47 @@ const rfq: RfqView = { draft_id: 'd1', plan_id: 'p2', offer_versions: { q1: 1 },
 const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };
 const companySession = { ...session, offers: [offer(1, 'saved')], company, context_version: 1, plan: selectedPlan, plan_request: request, rfq };
 const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', materials: [{ ...company.materials[0], material_id: 'cotton', name: 'Cotton' }], quote_coverage: { materials: [], fixture_ids: [], note: 'No runnable quote coverage.' }, buyer_defaults: null };
+const naphthaRequest: PlanRequest = { ...request, material: 'naphtha', quantity: '240', current_stock: '40', quantity_unit: 'barrel', budget: '6500', reporting_currency: 'EUR', additional_cost_per_unit: '3' };
+const multiCompany = { ...company, materials: [...company.materials, { ...company.materials[0], material_id: 'naphtha', name: 'Naphtha', quantity_unit: 'barrel', stock: '40' }], quote_coverage: { materials: ['copper', 'naphtha'], fixture_ids: ['quote-a', 'naphtha-a'], note: 'Two runnable materials.', scenarios: [{ material_id: 'copper', fixture_ids: ['quote-a'], buyer_defaults: request }, { material_id: 'naphtha', fixture_ids: ['naphtha-a'], buyer_defaults: naphthaRequest }] }, buyer_defaults: request };
+const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', filename: 'copper.csv', description: '', download_url: '/api/demo/fixtures/quote-a' }, { id: 'naphtha-a', name: 'Naphtha quote', filename: 'naphtha.csv', description: '', download_url: '/api/demo/fixtures/naphtha-a' }];
+const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('demo response state', () => {
+  it('uses the selected catalogue scenario and shows only its quote evidence before the quote form', () => {
+    expect(companyScenarios(multiCompany).map(item => item.material_id)).toEqual(['copper', 'naphtha']);
+    expect(fixturesForMaterial(materialFixtures, multiCompany, 'naphtha').map(item => item.id)).toEqual(['naphtha-a']);
+    expect(offersForMaterial([{ ...offer(1, 'saved'), fixture_id: 'quote-a' }, naphthaOffer], materialFixtures, multiCompany, 'naphtha').map(item => item.offer_id)).toEqual(['q2']);
+    expect(materialInputs(multiCompany, 'naphtha')).toMatchObject({ material: 'naphtha', quantity: '240', current_stock: '40', quantity_unit: 'barrel', reporting_currency: 'EUR', budget: '6500' });
+    const canonical = { ...companySession, company: multiCompany, offers: [{ ...offer(1, 'saved'), fixture_id: 'quote-a' }, naphthaOffer], plan: null, plan_request: null, rfq: null };
+    expect(canonicalBuyerState(canonical, 'naphtha').inputs).toMatchObject({ material: 'naphtha', quantity: '240', quantity_unit: 'barrel' });
+    const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...canonical, plan_request: naphthaRequest }, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    expect(html.indexOf('Procurement material')).toBeLessThan(html.indexOf('Sample quote'));
+    expect(html).toContain('Naphtha · barrel');
+    expect(html).toContain('naphtha.csv');
+    expect(html).not.toContain('synthetic.pdf');
+  });
+
+  it('invalidates a pending material comparison without losing other saved offers', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: multiCompany, offers: [{ ...offer(1, 'saved'), fixture_id: 'quote-a' }, naphthaOffer] }, epoch: 0 });
+    const switched = applyDemoResult(loaded, { type: 'invalidate' });
+    expect(switched).toMatchObject({ epoch: 1, dirty: true, plan: null, rfq: null, reviewed: false });
+    expect(switched.offers.map(item => item.offer_id)).toEqual(['q1', 'q2']);
+    expect(applyDemoResult(switched, { type: 'plan', plan: selectedPlan, request, epoch: 0 }).plan).toBeNull();
+    expect(applyDemoResult(switched, { type: 'rfq', rfq, epoch: 0 }).rfq).toBeNull();
+  });
+  it('recognizes expired news sessions and clears stale evidence before accepting a new one', () => {
+    expect(isSessionExpired(new DemoApiError('Session expired', 403, 'session_expired'))).toBe(true);
+    expect(isSessionExpired(new DemoApiError('Session expired', 409, 'session_expired'))).toBe(true);
+    expect(isSessionExpired(new DemoApiError('Source rate limited', 429, 'rate_limited'))).toBe(false);
+    const oldNews = { company_id: 'solara-cables', context_version: 1, checked_at: '2026-10-14T10:00:00Z', cache_state: 'stale', sources: [], items: [], fx: [], limitations: [] };
+    const old = applyDemoResult(applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 }), { type: 'news', news: oldNews, sessionId: 's1', epoch: 0 });
+    const cleared = applyDemoResult(old, { type: 'company-start' });
+    expect(cleared).toMatchObject({ session: null, news: null, plan: null, rfq: null });
+    const fresh = applyDemoResult(cleared, { type: 'session', session: { ...companySession, session_id: 's2', offers: [], plan: null, plan_request: null, rfq: null }, epoch: 1 });
+    expect(fresh.news).toBeNull();
+    expect(applyDemoResult(fresh, { type: 'news', news: oldNews, sessionId: 's1', epoch: 0 }).news).toBeNull();
+  });
   it('clears prior company state and ignores late session/news responses after a switch', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const switching = applyDemoResult(loaded, { type: 'company-start' });

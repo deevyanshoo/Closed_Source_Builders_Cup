@@ -19,7 +19,7 @@ def test_allowlist_has_two_pdfs_one_csv_and_rejects_altered_bytes():
     fixtures = api.list_fixtures()
     assert all(fixture['review_values'] == api.fixture_review_values(fixture['id']) for fixture in fixtures)
     assert {"late-copper", "express-copper", "eu-copper"} <= {f["id"] for f in fixtures}
-    assert len(fixtures) == 30
+    assert len(fixtures) == 156
     assert sorted(f["filename"].rsplit(".", 1)[-1] for f in fixtures).count('pdf') == 2
     for fixture in fixtures:
         filename, data = api.fixture_bytes(fixture["id"])

@@ -124,13 +124,13 @@ def check_catalogue(data: dict, receipt: dict) -> dict[str, dict]:
             and all(len(p["materials"]) >= 3 for p in profiles),
             "catalogue", "material_depth_missing")
     default = indexed["solara-cables"]
-    require(default["quote_coverage"]["materials"] == ["copper"] and
-            set(default["quote_coverage"]["fixture_ids"]) ==
+    require(default["quote_coverage"]["scenarios"][0]["material_id"] == "copper" and
+            set(default["quote_coverage"]["scenarios"][0]["fixture_ids"]) ==
             {"late-copper", "express-copper", "eu-copper"} and
             isinstance(default.get("buyer_defaults"), dict) and
             default["buyer_defaults"].get("material") == "copper", "catalogue", "default_coverage_changed")
-    require(all(not p["quote_coverage"]["fixture_ids"] for cid, p in indexed.items()
-                if cid != "solara-cables"), "catalogue", "unsupported_fixture_coverage")
+    require(all(set(p["quote_coverage"]["materials"]) == {m["material_id"] for m in p["materials"]}
+                for p in indexed.values()), "catalogue", "incomplete_material_coverage")
     receipt["checks"]["ten_diverse_profiles_and_coverage"] = True
     receipt["profiles"] = [{"company_id": p["company_id"], "sector": p["sector"],
                             "material_count": len(p["materials"]), "route_count": len(p["routes"]),

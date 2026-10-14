@@ -28,7 +28,7 @@ export type CompanyProfile = {
   orders: { order_id: string; material_id: string; quantity: string; unit: string; need_by: string; status: string }[];
   routes: { route_id: string; origin: string; destination: string; via: string[]; materials: string[]; direction: 'import' | 'export'; currency: string }[];
   currencies: string[]; news_keywords: string[];
-  quote_coverage: { materials: string[]; fixture_ids: string[]; note: string };
+  quote_coverage: { materials: string[]; fixture_ids: string[]; note: string; scenarios?: { material_id: string; fixture_ids: string[]; buyer_defaults: PlanRequest }[] };
   buyer_defaults: PlanRequest | null;
 };
 export type SourceState = { source_id: string; name: string; state: string; last_checked_at: string | null; reason: string | null };

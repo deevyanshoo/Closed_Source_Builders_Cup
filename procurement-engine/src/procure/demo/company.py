@@ -301,6 +301,83 @@ for _profile_row in _PROFILES:
         if _currency not in _profile_row['currencies']:
             _profile_row['currencies'].append(_currency)
 
+# Additional per-material fictional scenarios use a dated USD/local synthetic FX
+# assumption. These USD prices are illustrative unit prices, not market observations.
+_USD_TO_LOCAL = {'USD': Decimal('1'), 'INR': Decimal('80'), 'BDT': Decimal('100'),
+                 'KES': Decimal('120'), 'CHF': Decimal('0.9'), 'MXN': Decimal('20'),
+                 'KRW': Decimal('1000'), 'MYR': Decimal('4'), 'AED': Decimal('4'),
+                 'ZAR': Decimal('18')}
+_USD_PRICE = {
+    'polymer': '3', 'aluminium': '4', 'inks': '10', 'aluminium-film': '120',
+    'dyes': '12', 'yarn': '5', 'oil': '3', 'cartons': '0.2', 'sugar': '600',
+    'vials': '0.3', 'ethanol': '2', 'copper': '9', 'bearings': '8',
+    'nickel': '10000', 'separators': '150', 'graphite': '1000',
+    'cobalt': '15000', 'manganese': '1200', 'electrolyte': '5',
+    'aluminium-foil': '140', 'copper-foil': '160', 'cell-cans': '3',
+    'boards': '12', 'solder': '35', 'methanol': '400', 'catalyst': '25',
+    'ethane': '600', 'propane': '700', 'benzene': '900', 'toluene': '850',
+    'ethylene': '1100', 'caustic-soda': '500', 'sulfur': '200',
+    'hydrogen': '100', 'polymer-additive': '8', 'gypsum': '100',
+    'rebar': '700', 'aggregate': '50', 'limestone': '80',
+    'fly-ash': '50', 'silica-sand': '100', 'admixture': '4'}
+
+
+def _plain(number):
+    return format(number.normalize(), 'f')
+
+
+for _profile_row in _PROFILES:
+    _coverage = _profile_row['quote_coverage']
+    _primary = _profile_row['materials'][0]['material_id']
+    _coverage['scenarios'] = [{
+        'material_id': _primary, 'fixture_ids': _coverage['fixture_ids'][:],
+        'buyer_defaults': deepcopy(_profile_row['buyer_defaults'])}]
+    _buyer_country = _profile_row['locations'][0]['country']
+    _destination = f"{_profile_row['locations'][0]['city']}, {_buyer_country}"
+    for _material_row in _profile_row['materials'][1:]:
+        _material_id = _material_row['material_id']
+        _unit = _material_row['quantity_unit']
+        _stock = Decimal(_material_row['stock'])
+        _purchase = Decimal(_material_row['monthly_requirement'])
+        _selected_price = Decimal(_USD_PRICE[_material_id]) * _USD_TO_LOCAL[_profile_row['reporting_currency']]
+        _additional = _selected_price * Decimal('0.02')
+        _ids = [f"{_profile_row['company_id']}-{_material_id}-{role}"
+                for role in ('late', 'selected', 'alternate')]
+        _defaults = {
+            'offer_ids': [], 'expected_versions': {}, 'material': _material_id,
+            'quantity': _plain(_stock + _purchase), 'current_stock': _plain(_stock),
+            'quantity_unit': _unit, 'need_by': '2026-11-05', 'decision_date': AS_OF,
+            'reporting_currency': _profile_row['reporting_currency'],
+            'budget': _plain(_purchase * (_selected_price + _additional) * Decimal('1.5')),
+            'additional_cost_per_unit': _plain(_additional)}
+        _coverage['materials'].append(_material_id)
+        _coverage['fixture_ids'].extend(_ids)
+        _coverage['scenarios'].append({'material_id': _material_id,
+                                        'fixture_ids': _ids, 'buyer_defaults': _defaults})
+        _profile_row['orders'].append({
+            'order_id': f"{_profile_row['company_id']}-{_material_id}-scenario-order",
+            'material_id': _material_id, 'quantity': _defaults['quantity'], 'unit': _unit,
+            'need_by': _defaults['need_by'], 'status': 'open'})
+        _sources = [supplier for supplier in _profile_row['suppliers']
+                    if _material_id in supplier['materials']]
+        _source_country = _sources[0]['country']
+        if _source_country == _buyer_country:
+            _source_country = 'Singapore'
+        for _role, _lead in (('late', 40), ('selected', 12), ('alternate', 10)):
+            _currency = 'USD' if _role == 'alternate' else _profile_row['reporting_currency']
+            _profile_row['suppliers'].append({
+                'supplier_id': f"{_profile_row['company_id']}-{_material_id}-scenario-{_role}",
+                'name': f"{_profile_row['name']} {_material_row['name']} {_role.title()} Source Ltd [SYNTHETIC]",
+                'country': _source_country, 'settlement_currency': _currency,
+                'materials': [_material_id], 'lead_time_days': _lead})
+            _profile_row['routes'].append({
+                'route_id': f"{_profile_row['company_id']}-{_material_id}-scenario-{_role}-route",
+                'origin': _source_country, 'destination': _destination, 'via': [],
+                'materials': [_material_id], 'direction': 'import', 'currency': _currency})
+            if _currency not in _profile_row['currencies']:
+                _profile_row['currencies'].append(_currency)
+    _coverage['note'] = 'Three immutable fictional quotes per catalogue material; selected material uses explicit same-unit review.'
+
 
 def list_companies():
     return deepcopy(_PROFILES)

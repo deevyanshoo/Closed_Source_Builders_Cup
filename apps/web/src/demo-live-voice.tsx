@@ -1,8 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import type { OperatorTurn } from './demo-api';
+import { createDemoApi } from './demo-api';
+import type { DemoSession, OperatorTurn } from './demo-api';
+
+const api = createDemoApi();
+const CONNECT_TIMEOUT_MS = 15000;
 
 export type LiveScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
 export const sameLiveScope = (a: LiveScope, b: LiveScope) => a.sessionId === b.sessionId && a.companyId === b.companyId && a.contextVersion === b.contextVersion && a.epoch === b.epoch;
+export const matchesLiveSession = (session: DemoSession, scope: LiveScope, csrf: string) =>
+  session.session_id === scope.sessionId && session.company?.company_id === scope.companyId &&
+  session.context_version === scope.contextVersion && session.csrf_token === csrf;
+export async function restoreLiveSession(read: () => Promise<DemoSession>, captured: LiveScope,
+  current: () => LiveScope, onSession: (session: DemoSession) => void, onUnknown: () => void): Promise<void> {
+  try {
+    const session = await read();
+    if (sameLiveScope(current(), captured)) onSession(session);
+  } catch {
+    if (sameLiveScope(current(), captured)) onUnknown();
+  }
+}
 export function acceptsLiveTurn(value: unknown, captured: LiveScope, current: LiveScope): value is OperatorTurn {
   if (!value || typeof value !== 'object') return false;
   const turn = value as Partial<OperatorTurn>;
@@ -33,9 +49,9 @@ function pcm24Buffer(context: AudioContext, encoded: string): AudioBuffer {
   }
   return buffer;
 }
-type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean };
+type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean };
 export function releaseLiveVoice(current: ActiveVoice): void {
-  clearTimeout(current.timer);
+  clearTimeout(current.timer); clearTimeout(current.startupTimer);
   current.processor.onaudioprocess = null;
   current.processor.disconnect(); current.source.disconnect();
   current.stream.getTracks().forEach(track => track.stop());
@@ -46,7 +62,7 @@ export function releaseLiveVoice(current: ActiveVoice): void {
   current.socket.close();
 }
 
-export function LiveVoice({ scope, csrf, disabled, onTurn }: { scope: LiveScope; csrf: string; disabled: boolean; onTurn: (turn: OperatorTurn, scope: LiveScope) => void }) {
+export function LiveVoice({ scope, csrf, disabled, onTurn, onSession, onUnknown }: { scope: LiveScope; csrf: string; disabled: boolean; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void }) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'listening' | 'muted'>('idle');
   const [error, setError] = useState('');
   const [captions, setCaptions] = useState<{ direction: string; text: string }[]>([]);
@@ -84,6 +100,14 @@ export function LiveVoice({ scope, csrf, disabled, onTurn }: { scope: LiveScope;
     let output: AudioContext | null = null;
     let socket: WebSocket | null = null;
     try {
+      const canonical = await api.session();
+      if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
+      if (!matchesLiveSession(canonical, captured, csrf)) {
+        onSession(canonical);
+        setError('The demo session changed or expired. The current workspace has been restored; review it, then start voice again.');
+        setStatus('idle');
+        return;
+      }
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) { stream.getTracks().forEach(track => track.stop()); return; }
       input = new AudioContext({ sampleRate: 16000 });
@@ -95,7 +119,10 @@ export function LiveVoice({ scope, csrf, disabled, onTurn }: { scope: LiveScope;
       source.connect(processor); processor.connect(input.destination);
       const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${scheme}//${location.host}/api/demo/voice/live`);
-      const current: ActiveVoice = { socket, stream, input, output, source, processor, playback: new Set(), nextTime: 0, timer: setTimeout(() => end(), 180000), scope: captured, ready: false, muted: false };
+      const current: ActiveVoice = { socket, stream, input, output, source, processor, playback: new Set(), nextTime: 0,
+        timer: setTimeout(() => { setError('This voice conversation reached its three-minute limit. Start another conversation.'); end(); }, 180000),
+        startupTimer: setTimeout(() => { setError('The live voice service did not become ready. Try starting again.'); end(); }, CONNECT_TIMEOUT_MS),
+        scope: captured, ready: false, muted: false };
       active.current = current;
       let pending: number[] = [];
       processor.onaudioprocess = event => {
@@ -112,7 +139,7 @@ export function LiveVoice({ scope, csrf, disabled, onTurn }: { scope: LiveScope;
         if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
         let data: Record<string, unknown>;
         try { data = JSON.parse(String(event.data)); } catch { setError('Live voice returned an unreadable event.'); end(); return; }
-        if (data.type === 'ready') { current.ready = true; setStatus(current.muted ? 'muted' : 'listening'); }
+        if (data.type === 'ready') { clearTimeout(current.startupTimer); current.ready = true; setStatus(current.muted ? 'muted' : 'listening'); }
         else if (data.type === 'audio' && typeof data.data === 'string' && data.sample_rate_hertz === 24000) {
           try {
             const node = current.output.createBufferSource(); node.buffer = pcm24Buffer(current.output, data.data); node.connect(current.output.destination);
@@ -124,15 +151,28 @@ export function LiveVoice({ scope, csrf, disabled, onTurn }: { scope: LiveScope;
         } else if (data.type === 'interrupted') stopPlayback(current);
         else if (data.type === 'transcript' && (data.direction === 'input' || data.direction === 'output') && typeof data.text === 'string') setCaptions(old => [...old.slice(-19), { direction: data.direction as string, text: data.text as string }]);
         else if (data.type === 'tool_result' && acceptsLiveTurn(data.result, captured, scopeRef.current)) onTurnRef.current(data.result, captured);
-        else if (data.type === 'error') { setError(typeof data.message === 'string' ? data.message : 'Live voice is unavailable.'); end(); }
+        else if (data.type === 'error') {
+          if (data.code === 'session_expired' || data.code === 'stale_context') {
+            void restoreLiveSession(() => api.session(), captured, () => scopeRef.current, onSession, onUnknown);
+          }
+          setError(typeof data.message === 'string' ? data.message : 'Live voice is unavailable.'); end();
+        }
       };
-      socket.onerror = () => { if (active.current === current) { setError('Live voice connection failed. Use the text composer.'); end(); } };
-      socket.onclose = () => { if (active.current === current) end(); };
+      socket.onerror = () => { if (active.current === current) { setError('The live voice connection failed. Check your connection, refresh the demo session, then try again.'); end(); } };
+      socket.onclose = () => { if (active.current === current) { setError(current.ready ? 'The live voice connection ended. Start another conversation.' : 'The live voice connection closed before it became ready. Refresh the demo session, then try again.'); end(); } };
     } catch (cause) {
       stream?.getTracks().forEach(track => track.stop());
       if (socket) socket.close();
       if (input) void input.close(); if (output) void output.close();
-      if (attempt === generation.current && sameLiveScope(scopeRef.current, captured)) { setStatus('idle'); setError(`Microphone unavailable: ${cause instanceof Error ? cause.message : 'permission or device error'}. Use text instead.`); }
+      if (attempt === generation.current && sameLiveScope(scopeRef.current, captured)) {
+        setStatus('idle');
+        if (!stream) {
+          if (cause instanceof Error && cause.name === 'NotAllowedError') setError('Microphone access was denied. Allow microphone access for this site, then try again.');
+          else if (cause instanceof Error && cause.name === 'NotFoundError') setError('No microphone was found. Connect one, then try again.');
+          else if (cause instanceof Error && cause.name === 'DemoApiError') { onUnknown(); setError('The demo session could not be checked. Refresh the session, then start voice again.'); }
+          else setError('The microphone or demo session could not be opened. Check your device and connection, then try again.');
+        } else setError('The microphone audio connection could not start. Try again.');
+      }
     }
   }
   function mute() {

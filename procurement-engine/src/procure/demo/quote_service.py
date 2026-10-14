@@ -25,6 +25,7 @@ from .errors import DemoError
 
 
 _FIXTURE_DIR = Path(__file__).resolve().parents[3] / "demo_fixtures"
+_ADDITIONAL_FIXTURE_DIR = Path(__file__).resolve().parents[1] / 'demo_fixtures'
 _FIXTURES = (
     {"id": "late-copper", "name": "Atacama copper · lower price, late arrival",
      "filename": "SYN-late-copper.pdf", "description": "Synthetic PDF quote; settlement currency needs reviewer confirmation.",
@@ -36,11 +37,15 @@ _FIXTURES = (
      "filename": "SYN-eu-copper.csv", "description": "Synthetic CSV quote; dated synthetic EUR/USD conversion.",
      "sha256": "8dc9d68ae21f47b03585325f2d2297a0e2710d3ef3a6bdce212faa5bdaf727a5"},
 )
-_COMPANY_FIXTURES = tuple(json.loads((_FIXTURE_DIR / 'company-quote-manifest.json').read_text()))
+_ADDITIONAL_FIXTURES = tuple(json.loads((_ADDITIONAL_FIXTURE_DIR / 'all-material-quote-manifest.json').read_text()))
+_COMPANY_FIXTURES = (tuple(json.loads((_FIXTURE_DIR / 'company-quote-manifest.json').read_text()))
+                     + _ADDITIONAL_FIXTURES)
+_ADDITIONAL_IDS = {entry['id'] for entry in _ADDITIONAL_FIXTURES}
 _FIXTURES += _COMPANY_FIXTURES
 _BY_ID = {entry["id"]: entry for entry in _FIXTURES}
 _BY_FILENAME = {entry['filename']: entry for entry in _COMPANY_FIXTURES}
 _ALL_BY_FILENAME = {entry['filename']: entry for entry in _FIXTURES}
+_SCENARIO_RATE_DATE = date(2026, 10, 14)
 
 
 def company_for_offer(view: dict) -> str | None:
@@ -119,10 +124,14 @@ def _scenario_entry(view: dict) -> dict | None:
 
 def _scenario_normalized(view: dict, today: date) -> dict:
     """Demo-only exact same-unit normalization; no mass or package conversion."""
-    out = lc.compute_normalized(view, today, rate_lookup=synthetic_rate)
     entry = _scenario_entry(view)
     if not entry:
-        return out
+        return lc.compute_normalized(view, today, rate_lookup=synthetic_rate)
+    # Offer validity is checked against today. These fictional quotes use the
+    # explicitly dated scenario conversion, never an observed current rate.
+    out = lc.compute_normalized(
+        view, today,
+        rate_lookup=lambda base, quote, _on: synthetic_rate(base, quote, _SCENARIO_RATE_DATE))
     unit = entry['unit']
     for name in ('min_order', 'capacity'):
         value = lc.usable(view['fields'][name])
@@ -141,7 +150,8 @@ def _scenario_normalized(view: dict, today: date) -> dict:
             amount = nz._bounded_decimal(money.get('amount'), allow_negative=False)
             if amount is not None and amount > 0:
                 currency = money.get('currency')
-                rate = synthetic_rate(currency, view['reporting_currency'], today) if currency != view['reporting_currency'] else None
+                rate = (synthetic_rate(currency, view['reporting_currency'], _SCENARIO_RATE_DATE)
+                        if currency != view['reporting_currency'] else None)
                 converted = amount if rate is None else amount * rate.rate if rate.rate is not None else None
                 out['items'][index]['pricing'] = {
                     'original': copy.deepcopy(price), 'status': 'ok' if converted is not None else 'fx_unavailable',
@@ -164,7 +174,8 @@ def fixture_bytes(fixture_id: str) -> tuple[str, bytes]:
     if entry is None:
         raise DemoError("fixture_not_found", "Synthetic fixture not found", 404)
     try:
-        data = (_FIXTURE_DIR / entry["filename"]).read_bytes()
+        directory = _ADDITIONAL_FIXTURE_DIR if fixture_id in _ADDITIONAL_IDS else _FIXTURE_DIR
+        data = (directory / entry["filename"]).read_bytes()
     except OSError:
         raise DemoError("fixture_unavailable", "Synthetic fixture is unavailable", 503) from None
     if hashlib.sha256(data).hexdigest() != entry["sha256"]:

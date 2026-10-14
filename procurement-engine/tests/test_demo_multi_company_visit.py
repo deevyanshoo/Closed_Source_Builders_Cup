@@ -38,7 +38,7 @@ def test_one_visit_can_extract_review_plan_recover_and_draft_for_all_ten(monkeyp
                 session=post('/company',{'company_id':profile['company_id']})
                 context=session['context_version']
             offers=[]
-            for fid in profile['quote_coverage']['fixture_ids']:
+            for fid in profile['quote_coverage']['scenarios'][0]['fixture_ids']:
                 offer=post('/extract',{'fixture_id':fid,'mode':'gemini'})['offer']
                 for field,value in quote_service.fixture_review_values(fid).items():
                     offer=post('/offers/'+offer['offer_id']+'/correct',{'field':field,'value':value,'expected_version':offer['version']})['offer']

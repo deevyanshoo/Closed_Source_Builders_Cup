@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import threading
 import time
+import pytest
 
 from procure.demo.news import NewsService, _default_transport
 
@@ -187,6 +188,31 @@ def test_default_transport_disables_redirects_and_environment_credentials(monkey
     assert settings['allow_redirects'] is False and settings['stream'] is True
     assert settings['trust_env'] is False
     assert 'headers' not in settings or settings['headers'].get('Accept') == '*/*'
+
+
+def test_provider_rate_limit_is_reported_without_echoing_response_body(monkeypatch):
+    class Response:
+        status_code = 429
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+    class Session:
+        trust_env = True
+        def get(self, url, **kwargs): return Response()
+        def close(self): pass
+    monkeypatch.setattr('procure.demo.news.requests.Session', Session)
+    with pytest.raises(ValueError, match='rate limit') as error:
+        _default_transport('https://api.gdeltproject.org/api/v2/doc/doc', timeout=(2, 8), max_bytes=350_000)
+    assert '429' not in str(error.value)
+
+    def fetch(url, **limits):
+        if 'gdeltproject.org' in url:
+            return _default_transport(url, **limits)
+        return transport(url, **limits)
+    result = NewsService(clock=lambda: NOW, transport=fetch, offline=False).get(COMPANY)
+    source = next(x for x in result['sources'] if x['source_id'] == 'gdelt')
+    assert source['state'] == 'unavailable'
+    assert 'rate limit' in source['reason'].lower()
+    assert any(item['provider'] == 'EIA' for item in result['items'])
 
 
 def test_fixed_sources_are_fetched_concurrently():

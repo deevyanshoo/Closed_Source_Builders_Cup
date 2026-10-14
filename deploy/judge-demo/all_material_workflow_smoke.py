@@ -13,25 +13,96 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+from urllib.parse import urlsplit
 
-from smoke import AcceptanceError, Client, base_url, denied, key, require
+import requests
+
+from smoke import (AcceptanceError, MAX_RESPONSE_BYTES, TIMEOUT_SECONDS, base_url,
+                   denied, key, origin_of, require)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'procurement-engine' / 'src'))
 from procure.demo.quote_service import fixture_bytes, fixture_review_values
 
 
-class CountingClient(Client):
+class PooledClient:
+    """Fixed-origin, bounded HTTP with one connection retry and one cookie jar."""
+
     def __init__(self, base):
-        super().__init__(base)
+        self.base = base
+        self.origin = origin_of(base)
+        self.session = requests.Session()
+        self.session.trust_env = False
         self.calls = 0
+        self.transport_retries = 0
 
-    def json(self, *args, **kwargs):
-        self.calls += 1
-        return super().json(*args, **kwargs)
+    def close(self):
+        self.session.close()
 
-    def text(self, *args, **kwargs):
-        self.calls += 1
-        return super().text(*args, **kwargs)
+    def _request(self, stage, path, *, payload=None, csrf=None, origin=None, accept='application/json'):
+        require(isinstance(path, str) and path.startswith('/') and not path.startswith('//')
+                and '?' not in path and '#' not in path, stage, 'invalid_path')
+        url = self.base + path
+        require(origin_of(url) == self.origin and urlsplit(url).fragment == '',
+                stage, 'invalid_path')
+        headers = {'Accept': accept}
+        if payload is not None:
+            headers.update({'Content-Type': 'application/json', 'Origin': origin or self.base})
+            if csrf is not None:
+                headers['X-CSRF-Token'] = csrf
+        for attempt in range(2):
+            self.calls += 1
+            try:
+                with self.session.request('POST' if payload is not None else 'GET', url,
+                                          data=payload, headers=headers, timeout=TIMEOUT_SECONDS,
+                                          allow_redirects=False, stream=True, verify=True) as response:
+                    raw = bytearray()
+                    for chunk in response.iter_content(chunk_size=8192):
+                        raw.extend(chunk)
+                        require(len(raw) <= MAX_RESPONSE_BYTES, stage, 'response_too_large')
+                    return response.status_code, response.headers, bytes(raw)
+            except requests.exceptions.SSLError:
+                raise AcceptanceError(stage, 'transport_error') from None
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                if attempt == 0:
+                    self.transport_retries += 1
+                    continue
+                raise AcceptanceError(stage, 'transport_error') from None
+            except requests.exceptions.RequestException:
+                raise AcceptanceError(stage, 'transport_error') from None
+        raise AcceptanceError(stage, 'transport_error')
+
+    def json(self, stage, path, *, body=None, csrf=None, origin=None, expected_status=200):
+        payload = None if body is None else json.dumps(body, separators=(',', ':'),
+                                                      allow_nan=False).encode('utf-8')
+        status, _, raw = self._request(stage, path, payload=payload, csrf=csrf, origin=origin)
+        try:
+            data = json.loads(raw)
+        except (UnicodeError, ValueError):
+            raise AcceptanceError(stage, 'invalid_json_response') from None
+        require(isinstance(data, dict), stage, 'invalid_response')
+        if status != expected_status:
+            error = data.get('error')
+            code = error.get('code') if isinstance(error, dict) else None
+            raise AcceptanceError(stage, code if isinstance(code, str) else 'unexpected_http_status', status)
+        return data
+
+    def text(self, stage, path, *, expected_status=200):
+        status, headers, raw = self._request(stage, path, accept='text/plain')
+        if status != expected_status:
+            try:
+                error = json.loads(raw).get('error', {})
+                code = error.get('code') if isinstance(error, dict) else None
+            except (UnicodeError, ValueError, AttributeError):
+                code = None
+            raise AcceptanceError(stage, code if isinstance(code, str) else 'unexpected_http_status', status)
+        content_type = headers.get('Content-Type', '').split(';', 1)[0].strip().lower()
+        disposition = headers.get('Content-Disposition', '')
+        require(content_type == 'text/plain' and 'synthetic-rfq-draft.txt' in disposition,
+                stage, 'download_headers_wrong')
+        try:
+            return raw.decode('utf-8')
+        except UnicodeError:
+            raise AcceptanceError(stage, 'download_not_utf8') from None
 
 
 def number(value, stage):
@@ -50,11 +121,11 @@ def corrected_field(offer, field):
     return offer['fields'][field]
 
 
-def run(base):
-    client = CountingClient(base)  # One cookie jar for the browser-equivalent visit.
+def _run(base, client, receipt):
     health = client.json('health', '/-/health')
     require(health.get('ready') is True and isinstance(health.get('revision'), str)
             and health['revision'] and health['revision'] != 'local', 'health', 'not_ready')
+    receipt['deployed_revision'] = health['revision']
     profiles = client.json('catalogue', '/api/demo/companies').get('companies')
     require(isinstance(profiles, list) and len(profiles) == 10, 'catalogue', 'company_count')
     listed = client.json('fixtures', '/api/demo/fixtures')
@@ -78,7 +149,7 @@ def run(base):
             'session', 'not_fresh')
     context = session['context_version']
     require(type(context) is int and context >= 1, 'session', 'bad_context')
-    rows = []
+    rows = receipt['scenarios']
     checked_fixtures = 0
     corrections = 0
     company_switches = 0
@@ -146,6 +217,7 @@ def run(base):
                         stage, 'review_not_saved')
                 offers.append(offer)
                 checked_fixtures += 1
+                receipt['fixture_count'] = checked_fixtures
 
             maximum_active_offers = max(maximum_active_offers, 3 * scenario_index)
             versions = {offer['offer_id']: offer['version'] for offer in offers}
@@ -216,6 +288,7 @@ def run(base):
                          'currency': plan['reporting_currency'], 'rules_fixtures': 3,
                          'wrong_unit_rejected': True, 'recovery_changed': True,
                          'rfq_unsent_replayed_downloaded': True})
+            receipt['scenario_count'] = len(rows)
             print(f'{stage} verified', flush=True)
 
         current = client.json(cid, '/api/demo/session')
@@ -246,7 +319,18 @@ def run(base):
             'scenario_count': len(rows), 'fixture_count': checked_fixtures,
             'maximum_active_offers': maximum_active_offers,
             'idempotency_keys_used': idempotency_keys, 'http_requests': client.calls,
+            'transport_retries': client.transport_retries,
             'final_export_ephemeral': True, 'scenarios': rows}
+
+
+def run(base, receipt):
+    client = PooledClient(base)  # One cookie jar for the browser-equivalent visit.
+    try:
+        return _run(base, client, receipt)
+    finally:
+        receipt['http_requests'] = client.calls
+        receipt['transport_retries'] = client.transport_retries
+        client.close()
 
 
 if __name__ == '__main__':
@@ -254,12 +338,13 @@ if __name__ == '__main__':
     parser.add_argument('--base', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+    result = {'ok': False, 'scenario_count': 0, 'fixture_count': 0, 'scenarios': []}
     try:
-        result = run(base_url(args.base))
+        result.update(run(base_url(args.base), result))
     except AcceptanceError as exc:
-        result = {'ok': False, 'stage': exc.stage, 'code': exc.code, 'status': exc.status}
+        result.update({'stage': exc.stage, 'code': exc.code, 'status': exc.status})
     except (KeyError, TypeError, IndexError, StopIteration):
-        result = {'ok': False, 'stage': 'response', 'code': 'invalid_response', 'status': None}
+        result.update({'stage': 'response', 'code': 'invalid_response', 'status': None})
     Path(args.output).write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({key: value for key, value in result.items() if key != 'scenarios'}))
     if not result['ok']:

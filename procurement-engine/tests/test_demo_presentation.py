@@ -1,8 +1,11 @@
 """Presentation preserves facts and canonical identities."""
+from decimal import Decimal
+import re
+
 from procure.demo.agent_tools import inventory_analytics
 from procure.demo.company import get_company, list_companies
 from procure.demo.operator import run_turn
-from procure.demo.presentation import present_turn, supplier_display_name
+from procure.demo.presentation import present_answer, present_turn, supplier_display_name
 from procure.demo.live_voice import INSTRUCTION
 
 
@@ -74,7 +77,15 @@ def test_shortest_lead_and_stock_cover_ignore_model_stock_token_for_each_company
                                material=material_id))
         answer = result['assistant_text']
         assert f"{analytics['shortest_supplier_lead_days']} days" in answer
-        assert f"{analytics['stock_cover_days']} days" in answer
+        displayed_cover = re.search(r'stock cover is (approximately )?([0-9.]+) days', answer)
+        assert displayed_cover is not None
+        assert abs(Decimal(displayed_cover.group(2)) - Decimal(analytics['stock_cover_days'])) <= Decimal('0.005')
+        if len(analytics['stock_cover_days'].partition('.')[2]) > 2:
+            assert displayed_cover.group(1) == 'approximately '
+        else:
+            assert displayed_cover.group(1) is None
+            assert displayed_cover.group(2) == analytics['stock_cover_days']
+        assert inventory_analytics(value)['materials'][0]['stock_cover_days'] == analytics['stock_cover_days']
         assert f"{material['stock']} stock cover days" not in answer
         for supplier in fastest:
             assert supplier_display_name(supplier['name']) in answer
@@ -103,7 +114,7 @@ def test_days_of_cover_uses_analytics_and_handles_missing_daily_use():
     value = snapshot()
     result = turn(value, 'How many days of cover do we have for copper?',
                   Provider(answer='{{material.copper.stock}} days of cover.'))
-    assert '6.0000600006000060000600006 days' in result['assistant_text']
+    assert 'stock cover is approximately 6.00 days' in result['assistant_text']
     assert '2000 days' not in result['assistant_text']
 
     value['company']['materials'][0]['consumption_per_day'] = None
@@ -111,6 +122,23 @@ def test_days_of_cover_uses_analytics_and_handles_missing_daily_use():
                   Provider(answer='{{material.copper.stock}} days.'))
     assert 'unavailable' in result['assistant_text']
     assert '2000 days' not in result['assistant_text']
+
+
+def test_presentation_rounds_only_stock_cover_phrase_and_preserves_raw_turn():
+    raw_answer = ('Stock 2000 kg; lead 10 days; unit price 123.456 USD; '
+                  'stock cover is 6.005 days; other coverage 7.891 days.')
+    shown = present_answer(raw_answer, 'How much copper stock cover?', [])
+    assert shown == ('Stock 2000 kg; lead 10 days; unit price 123.456 USD; '
+                     'stock cover is approximately 6.01 days; other coverage 7.891 days.')
+    original = {'assistant_text': raw_answer,
+                'proposal': {'parameters': {'quantity': '2000', 'price': '123.456'}},
+                'analytics': {'stock_cover_days': '6.005', 'shortest_supplier_lead_days': 10}}
+    displayed = present_turn(original, [])
+    assert displayed['assistant_text'] == shown
+    assert original['assistant_text'] == raw_answer
+    assert displayed['proposal'] is original['proposal']
+    assert displayed['analytics'] is original['analytics']
+    assert displayed['analytics']['stock_cover_days'] == '6.005'
 
 
 def test_provenance_question_discloses_sample_records_and_public_news():

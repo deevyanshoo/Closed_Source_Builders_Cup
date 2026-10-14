@@ -1,9 +1,22 @@
 """Human-facing wording; canonical records and action arguments remain untouched."""
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 
 def supplier_display_name(name: str) -> str:
     return name.removesuffix(' [SYNTHETIC]')
+
+
+def _readable_stock_cover(answer: str) -> str:
+    def round_cover(match: re.Match) -> str:
+        try:
+            days = Decimal(match.group('days')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            return match.group(0)
+        return match.group('prefix') + 'approximately ' + format(days, 'f') + match.group('suffix')
+
+    return re.sub(r'(?P<prefix>\bstock cover is )(?P<days>\d+\.\d{3,})(?P<suffix> days\b)',
+                  round_cover, answer, flags=re.IGNORECASE)
 
 
 def present_turn(turn: dict, supplier_names: list[str]) -> dict:
@@ -14,6 +27,7 @@ def present_turn(turn: dict, supplier_names: list[str]) -> dict:
     for raw in supplier_names:
         if isinstance(raw, str):
             answer = answer.replace(raw, supplier_display_name(raw))
+    answer = _readable_stock_cover(answer)
     return {**turn, 'assistant_text': answer}
 
 
@@ -23,6 +37,7 @@ def present_answer(answer: str, question: str, supplier_names: list[str]) -> str
     for raw in supplier_names:
         if isinstance(raw, str):
             answer = answer.replace(raw, supplier_display_name(raw))
+    answer = _readable_stock_cover(answer)
     provenance = bool(re.search(r'\b(?:origin|source|provenance|real|verified|synthetic|fictional|sample|simulated|connected)\b|\bwhere\b.*\b(?:from|come)\b',
                                 question, re.IGNORECASE) and
                       re.search(r'\b(?:data|records?|stock|inventory|suppliers?|news|figures?|information)\b',

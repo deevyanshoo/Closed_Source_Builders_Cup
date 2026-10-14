@@ -41,6 +41,7 @@ describe('demo response state', () => {
     expect(canonicalBuyerState(canonical, 'naphtha').inputs).toMatchObject({ material: 'naphtha', quantity: '240', quantity_unit: 'barrel' });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...canonical, plan_request: naphthaRequest }, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    expect(html.indexOf('Proactive risk monitor')).toBeLessThan(html.indexOf('Start with a supplier quote'));
     expect(html.indexOf('Procurement material')).toBeLessThan(html.indexOf('Sample quote'));
     expect(html).toContain('Naphtha · barrel');
     expect(html).toContain('naphtha.csv');

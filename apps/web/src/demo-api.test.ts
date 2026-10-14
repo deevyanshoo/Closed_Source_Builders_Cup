@@ -6,6 +6,11 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 });
 
 describe('hosted demo API', () => {
+  it('reads the authenticated risk snapshot without a mutation, CSRF, or model request', async () => {
+    const send = vi.fn(async () => json({ companies: [], monitoring: 'while_workspace_open' }));
+    await createDemoApi(send).risks();
+    expect(send).toHaveBeenCalledWith('/api/demo/risks', { method: 'GET', credentials: 'same-origin', headers: {} });
+  });
   it('sends CSRF, a fresh idempotency key and the exact offer version on correction', async () => {
     const send = vi.fn(async () => json({ offer: { offer_id: 'q1', version: 4 }, replayed: false }));
     const api = createDemoApi(send, () => 'new-request-key');

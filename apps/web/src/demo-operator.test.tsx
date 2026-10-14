@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, operatorSeedMessage, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,18 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('seeds only an exact current-company risk message, without sending or approving it', () => {
+    const seed = { id: 7, ...scope, message: 'Inspect copper quote alternatives for Atlas.' };
+    expect(operatorSeedMessage(seed, scope)).toBe(seed.message);
+    expect(operatorSeedMessage({ ...seed, message: `  ${seed.message}  ` }, scope)).toBe(`  ${seed.message}  `);
+    expect(operatorSeedMessage({ ...seed, companyId: 'loom' }, scope)).toBeNull();
+    expect(operatorSeedMessage({ ...seed, sessionId: 'old' }, scope)).toBeNull();
+    expect(operatorSeedMessage({ ...seed, contextVersion: 2 }, scope)).toBeNull();
+    expect(operatorSeedMessage({ ...seed, epoch: 2 }, scope)).toBeNull();
+    expect(operatorSeedMessage({ ...seed, message: '' }, scope)).toBeNull();
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} seed={seed} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).not.toContain('Apply reviewed proposal');
+  });
   it('rejects stale session, company, context, epoch, and cancelled agent results', () => {
     const base = { ...initialOperatorState, scope };
     const pending = applyOperatorResult(base, { type: 'start', requestId: 1, scope });

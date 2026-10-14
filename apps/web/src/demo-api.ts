@@ -34,6 +34,9 @@ export type CompanyProfile = {
   buyer_defaults: PlanRequest | null;
 };
 export type SourceState = { source_id: string; name: string; state: string; last_checked_at: string | null; reason: string | null };
+export type RiskAlert = { alert_id: string; company_id: string; category: 'inventory' | 'supplier_delay' | 'news'; severity: 'high' | 'medium' | 'low'; title: string; summary: string; impact: string; material_ids: string[]; provenance: 'synthetic_profile' | 'synthetic_plan' | 'synthetic_delay_scenario' | 'observed_news'; confidence: { level: 'high' | 'moderate' | 'low'; reason: string }; evidence: { kind: 'profile' | 'order' | 'plan' | 'news'; ref_id: string; label: string; detail: string; url: string | null; observed_at: string | null }[]; metrics: Record<string, string | number | null>; recovery_actions: { action_id: string; label: string; message: string; requires_review: boolean }[] };
+export type CompanyRiskReport = { company_id: string; company_name: string; sector: string; checked_at: string; alerts: RiskAlert[]; coverage: { materials_evaluated: number; news_state: string; news_items_evaluated: number; sources: SourceState[] }; data_gaps: string[] };
+export type RiskReport = { company_id: string; context_version: number; checked_at: string; monitoring: 'while_workspace_open'; news_refresh_seconds: number; companies: CompanyRiskReport[]; summary: { high: number; medium: number; low: number; companies_with_alerts: number }; limitations: string[] };
 export type NewsItem = { item_id: string; title: string; url: string; publisher: string | null; provider: string; published_at: string | null; first_seen_at: string | null; retrieved_at: string; source_tier: string; source_reliability: string; reliability_reason: string; category: string; matched_materials: string[]; matched_routes: string[]; matched_currencies: string[]; matched_operations?: string[]; relevance_kind?: 'direct_material' | 'sector' | 'route' | 'currency' | 'unmatched'; relevance_score?: number; summary?: string | null; relevance_reason: string; implication: string; implication_confidence: string; next_steps: string[]; synthetic: false };
 export type FxObservation = { base: string; quote: string; rate: string; observation_date: string; provider: string; retrieved_at: string; informational: true };
 export type NewsView = { company_id: string; context_version: number; checked_at: string; cache_state: string; sources: SourceState[]; items: NewsItem[]; fx: FxObservation[]; limitations: string[] };
@@ -102,6 +105,7 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
     company: (csrf: string, companyId: string, contextVersion: number) => mutate<DemoSession>('/company', { company_id: companyId }, csrf, contextVersion),
     buyerDraft: (csrf: string, buyerDraft: BuyerDraft, contextVersion: number) => mutate<DemoSession>('/buyer-draft', { buyer_draft: buyerDraft }, csrf, contextVersion),
     news: () => request<NewsView>('/news'),
+    risks: () => request<RiskReport>('/risks'),
     refreshNews: (csrf: string, contextVersion: number) => mutate<NewsView>('/news/refresh', {}, csrf, contextVersion),
     operator: () => request<OperatorOverview>('/operator'),
     operatorTurn: (csrf: string, message: string, contextVersion: number) => mutate<OperatorTurn>('/operator', { message }, csrf, contextVersion),

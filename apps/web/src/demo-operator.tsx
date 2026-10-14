@@ -5,6 +5,12 @@ import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorOvervie
 import { LiveVoice } from './demo-live-voice';
 
 export type OperatorScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
+export type OperatorSeed = { id: number; sessionId: string; companyId: string; contextVersion: number; epoch: number; message: string };
+export function operatorSeedMessage(seed: OperatorSeed | null | undefined, scope: OperatorScope): string | null {
+  const message = seed?.message;
+  return seed?.sessionId === scope.sessionId && seed.companyId === scope.companyId && seed.contextVersion === scope.contextVersion &&
+    seed.epoch === scope.epoch && message?.trim() && message.length <= 1200 ? message : null;
+}
 export type OperatorState = { scope: OperatorScope; requestId: number; overview: OperatorOverview | null; turn: OperatorTurn | null; turns: OperatorTurn[]; reviewed: boolean; outcome: OperatorApplied | null };
 export const initialOperatorState: OperatorState = { scope: { sessionId: '', companyId: '', contextVersion: -1, epoch: -1 }, requestId: 0, overview: null, turn: null, turns: [], reviewed: false, outcome: null };
 type OperatorAction = { type: 'scope'; scope: OperatorScope } | { type: 'start'; scope: OperatorScope; requestId: number } |
@@ -131,8 +137,8 @@ function OperatorAnalytics({ analytics }: { analytics: Record<string, unknown> }
     return <div key={name} className="demo-table-wrap"><h4>{name.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())}</h4>{rows.length ? <table><thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map(column => <td key={column}>{Array.isArray(row[column]) ? (row[column] as unknown[]).map(entry => record(entry)?.name ?? detail(entry)).join(', ') || 'None listed' : detail(row[column])}</td>)}</tr>)}</tbody></table> : <p>No rows returned.</p>}</div>;
   })}</div>;
 }
-export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialState, news = null, offers = [], plan = null, materials = [], beforeTurn, onSession, onNavigate, onUnknown }: {
-  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; beforeTurn?: () => Promise<DemoSession>; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox') => void; onUnknown: () => void;
+export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialState, news = null, offers = [], plan = null, materials = [], seed, riskSummary, beforeTurn, onSession, onNavigate, onUnknown }: {
+  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox') => void; onUnknown: () => void;
 }) {
   const [state, dispatch] = useReducer(applyOperatorResult, initialState ?? { ...initialOperatorState, scope });
   const [message, setMessage] = useState('');
@@ -145,6 +151,10 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   const requestRef = useRef(0);
   const overviewRef = useRef(0);
   scopeRef.current = scope;
+  useEffect(() => {
+    const message = operatorSeedMessage(seed, scopeRef.current);
+    if (message) setMessage(message);
+  }, [seed?.id, seed?.companyId, scope.companyId, scope.sessionId, scope.contextVersion, scope.epoch]);
 
   function cancel() {
     generationRef.current += 1; requestRef.current += 1;
@@ -235,6 +245,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now()) && reviewCurrent && !busy;
   return <section className="demo-company-panel demo-operator-panel" aria-label="Operator workspace">
     <div className="demo-heading"><div><span className="demo-kicker">Reviewed tools · no automatic actions</span><h2>Operator</h2></div><span className="demo-session">{state.overview?.available ? 'Agent service available' : 'Agent availability unverified'}</span></div>
+    {riskSummary && <p className="demo-operator-risk"><strong>Current company risks:</strong> {riskSummary.high} high · {riskSummary.medium} medium · {riskSummary.low} low <small>Checked {riskSummary.checkedAt}</small></p>}
     <p>Ask a question, inspect computed analytics, or request a server-validated workspace utility. Proposed messages and business changes need your review and a separate Apply step.</p>
     {dirty && <p className="demo-alert">Edited buyer inputs will be saved to this temporary session before the next question or voice conversation. Run a new comparison before reviewing a recovery or RFQ proposal.</p>}
     {error && <p className="demo-alert" role="alert">Operator unavailable: {error}</p>}

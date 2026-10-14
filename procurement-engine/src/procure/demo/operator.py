@@ -116,6 +116,16 @@ def attention(company: dict) -> list[dict]:
     return result
 
 
+def _risk_news(snapshot):
+    ids = {evidence['ref_id'] for alert in (snapshot.get('risk_report') or {}).get('alerts', [])
+           for evidence in alert.get('evidence', []) if evidence.get('kind') == 'news'}
+    items = {item.get('item_id'): item for item in
+             (snapshot.get('news') or {}).get('items', []) + snapshot.get('risk_news', [])
+             if isinstance(item, dict)}
+    items = list(items.values())
+    return sorted(items, key=lambda item: item.get('item_id') not in ids)[:30]
+
+
 def _compact(snapshot):
     company = snapshot['company']
     news = snapshot.get('news') or {}
@@ -130,13 +140,15 @@ def _compact(snapshot):
                 'matched_operations': n.get('matched_operations'),
                 'relevance_kind': n.get('relevance_kind'),
                 'relevance_reason': n.get('relevance_reason')}
-                for n in news.get('items', [])[:30] if isinstance(n, dict)]},
+                for n in _risk_news(snapshot)]},
             'offers': [_offer_summary(o) for o in snapshot.get('offers', [])[:30]],
             'plan': snapshot.get('plan'), 'baseline_plan': snapshot.get('baseline_plan'),
             'buyer_draft': snapshot.get('buyer_draft'),
             'selected_material_id': snapshot.get('selected_material_id'),
             'rfq': snapshot.get('rfq'), 'outbox': snapshot.get('outbox'),
-            'analytics': inventory_analytics(snapshot)}
+            'analytics': inventory_analytics(snapshot),
+            'risk_report': snapshot.get('risk_report'),
+            'portfolio_risks': snapshot.get('portfolio_risks', [])}
 
 
 def _offer_summary(offer):
@@ -217,6 +229,16 @@ def _facts(snapshot, compact):
                         'capacity', 'feasible'):
                 if alternative.get(key) is not None:
                     facts[f'alternative.{offer_id}.{key}'] = str(alternative[key])
+    for alert in (snapshot.get('risk_report') or {}).get('alerts', []):
+        prefix = 'risk.' + alert['alert_id'] + '.'
+        for key in ('title', 'summary', 'impact', 'severity', 'provenance'):
+            facts[prefix + key] = str(alert[key])
+        facts[prefix + 'confidence_reason'] = alert['confidence']['reason']
+    for company in snapshot.get('portfolio_risks', []):
+        prefix = 'portfolio.' + company['company_id'] + '.'
+        facts[prefix + 'name'] = company['company_name']
+        for severity, count in company['counts'].items():
+            facts[prefix + severity + '_count'] = str(count)
     return facts
 
 
@@ -480,7 +502,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
     encoded_facts = json.dumps(facts, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
     materials = {m['material_id'] for m in snapshot['company']['materials']}
     offers = {o['offer_id'] for o in snapshot.get('offers', [])}
-    news = {n.get('item_id'): n for n in (snapshot.get('news') or {}).get('items', [])[:30]
+    news = {n.get('item_id'): n for n in _risk_news(snapshot)
             if isinstance(n, dict) and isinstance(n.get('item_id'), str)}
     instructions = {
         'coordinator': ('JSON only. Required keys: intent, material_id, offer_id, delay_days, '
@@ -500,6 +522,9 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                      'confidence_reason, next_steps. Optional answer for an actual user question. '
                      'Assessment: supported|conditional|unavailable. Answer the specific question '
                      'using only trusted facts and fact tokens such as {{material.copper.stock}}. '
+                     'Use risk_report for current proactive impacts and portfolio_risks for company risk counts. '
+                     'Proactive alerts are deterministic fictional scenario or conditional headline signals; '
+                     'never treat them as confirmed real shipment events. '
                      'Include at least one fact token. Put every number in a fact token; do not '
                      'write digits outside tokens. Never claim an unverified event or forecast. '
                      'Give a conditional business implication <=240 characters, confidence_reason <=200 '

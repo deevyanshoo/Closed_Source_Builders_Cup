@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -85,6 +86,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     process_calls = 0
     pending_cache = set()
     news_lock = threading.RLock()
+    risk_news_slots = asyncio.Semaphore(3)
     operator_injected = operator_provider is not None
     voice_injected = voice_service is not None
     operator_lock = threading.RLock()
@@ -210,15 +212,119 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 voice_service = VoiceService()
             return voice_service
 
-    def operator_snapshot(value):
-        return {'company_id': value.company_id, 'context_version': value.context_version,
+    def operator_snapshot(value, *, include_risks=True):
+        snapshot = {'company_id': value.company_id, 'context_version': value.context_version,
                 'company': get_company(value.company_id), 'news': deepcopy(value.news),
                 'offers': deepcopy(list(value.offers.values())),
                 'plan': deepcopy(active_plan(value)), 'baseline_plan': deepcopy(value.last_plan),
+                'last_plan': deepcopy(value.last_plan),
                 'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
                 'watch_items': deepcopy(value.watch_items), 'buyer_draft': deepcopy(value.buyer_draft),
                 'selected_material_id': value.selected_material_id,
                 'simulated_outbox': deepcopy(value.simulated_outbox)}
+        if include_risks:
+            from .proactive_risks import assess_company
+            snapshot['risk_report'] = assess_company(snapshot, value.news, store.now())
+            cached = value.risk_report
+            if (cached and cached['company_id'] == value.company_id and
+                    cached['context_version'] == value.context_version and
+                    cached.get('_state_marker') == snapshot_marker(snapshot)):
+                snapshot['portfolio_risks'] = risk_projection(cached)['companies']
+                snapshot['risk_report'] = deepcopy(next(row for row in cached['companies']
+                                                       if row['company_id'] == value.company_id))
+                snapshot['risk_news'] = deepcopy(cached.get('_current_news', {}).get('items', []))
+        return snapshot
+
+    def risk_projection(report, *, scope='all'):
+        """Bounded provider facts; no session, credentials, document text or hidden state."""
+        companies = report['companies']
+        if scope == 'current':
+            companies = [row for row in companies if row['company_id'] == report['company_id']]
+        rows = []
+        for company in companies:
+            alerts = company['alerts']
+            ranked = sorted(alerts, key=lambda alert: {'high': 0, 'medium': 1, 'low': 2}[alert['severity']])
+            selected = []
+            for category in ('inventory', 'supplier_delay', 'news'):
+                match = next((a for a in ranked if a['category'] == category), None)
+                if match:
+                    selected.append(match)
+            selected.extend(a for a in ranked if a not in selected)
+            rows.append({'company_id': company['company_id'], 'company_name': company['company_name'],
+                'counts': {severity: sum(a['severity'] == severity for a in alerts)
+                           for severity in ('high', 'medium', 'low')},
+                'data_gaps': company['data_gaps'],
+                'alerts': [{key: deepcopy(alert[key]) for key in
+                    ('alert_id', 'category', 'severity', 'title', 'impact', 'material_ids',
+                     'provenance', 'confidence', 'recovery_actions', 'metrics')} |
+                    {'evidence': [{key: e[key] for key in ('kind', 'ref_id', 'label', 'observed_at')}
+                                  for e in alert['evidence'][:1]]} for alert in selected[:3]]})
+        return {'checked_at': report['checked_at'], 'companies': rows,
+                'limitations': report['limitations']}
+
+    async def scan_risks(value, expected_version=None):
+        """Read ten trusted catalogues without switching company or changing proposals."""
+        from .proactive_risks import assess_company
+        with value.lock:
+            active(value)
+            company_id, version = value.company_id, value.context_version
+            if expected_version is not None:
+                context(value, {'expected_context_version': expected_version}, explicit=True)
+        profiles = list_companies()
+        news = {}
+        async def fetch_news(company):
+            try:
+                async with risk_news_slots:
+                    payload = await run_in_threadpool(news_adapter().get, company)
+                news[company['company_id']] = payload if isinstance(payload, dict) else None
+            except Exception:
+                news[company['company_id']] = None
+        try:
+            async with asyncio.timeout(35):
+                await asyncio.gather(*(fetch_news(company) for company in profiles))
+        except TimeoutError:
+            pass  # Completed sources remain usable; queued failures become explicit gaps.
+        with value.lock:
+            active(value)
+            if value.company_id != company_id or value.context_version != version:
+                raise SessionError('stale_context', 'Company context changed during the risk scan.', 409)
+            current = operator_snapshot(value, include_risks=False)
+            reports = []
+            now = store.now()
+            for company in profiles:
+                cid = company['company_id']
+                if cid == company_id:
+                    snapshot = current
+                else:
+                    saved = value.workspaces.get(cid, {})
+                    recovery = saved.get('recovery')
+                    snapshot = {'company_id': cid, 'company': company,
+                        'offers': deepcopy(list(saved.get('offers', {}).values())),
+                        'plan': deepcopy((recovery or {}).get('scenario') or saved.get('last_plan')),
+                        'baseline_plan': deepcopy(saved.get('last_plan')),
+                        'last_plan': deepcopy(saved.get('last_plan')),
+                        'plan_request': deepcopy(saved.get('plan_request')),
+                        'recovery': deepcopy(recovery), 'buyer_draft': deepcopy(saved.get('buyer_draft')),
+                        'selected_material_id': saved.get('selected_material_id')}
+                reports.append(assess_company(snapshot, news.get(cid), now))
+            alerts = [alert for company in reports for alert in company['alerts']]
+            result = {'company_id': company_id, 'context_version': version,
+                'checked_at': now.isoformat(), 'monitoring': 'while_workspace_open',
+                'news_refresh_seconds': 900, 'companies': reports,
+                'summary': {**{severity: sum(a['severity'] == severity for a in alerts)
+                              for severity in ('high', 'medium', 'low')},
+                            'companies_with_alerts': sum(bool(row['alerts']) for row in reports)},
+                'limitations': ['Monitoring runs while the workspace is open; public news uses a 15-minute cache.',
+                    'Company inventory, supplier leads and delay scenarios are synthetic.',
+                    'Headlines indicate conditional exposure, not confirmed shipment delays or forecasts.',
+                    'Recovery suggestions require current inputs and review; no supplier message or order is sent.']}
+            current_ids = {e['ref_id'] for row in reports if row['company_id'] == company_id
+                           for a in row['alerts'] for e in a['evidence'] if e['kind'] == 'news'}
+            current_news = news.get(company_id) or {}
+            value.risk_report = {**deepcopy(result), '_state_marker': snapshot_marker(current),
+                '_current_news': {'items': [deepcopy(item) for item in current_news.get('items', [])
+                                           if item.get('item_id') in current_ids]}}
+            return result
 
     def snapshot_marker(snapshot):
         # Bind asynchronous work and proposals to authoritative state, including observed evidence.
@@ -671,6 +777,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 failed(value, key)
             raise
 
+    @app.get('/api/demo/risks')
+    async def get_risks(request: Request):
+        return await scan_risks(session(request))
+
     @app.get('/api/demo/operator')
     async def operator_overview(request: Request):
         from .operator import ROLES, attention
@@ -859,6 +969,24 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'expected_context_version': context_version, 'idempotency_key': key})
 
         async def workspace_tools(name, args, context_version, key):
+            if name == 'read_risks':
+                if not isinstance(args, dict):
+                    raise SessionError('invalid_utility', 'Risk scope must be an object.', 422)
+                shape(args, (), ('scope',))
+                scope = args.get('scope', 'current')
+                if scope not in ('current', 'all'):
+                    raise SessionError('invalid_utility', 'Choose current or all company risks.', 422)
+                report = await scan_risks(value, context_version)
+                projection = risk_projection(report, scope=scope)
+                count = sum(sum(row['counts'].values()) for row in projection['companies'])
+                return {'turn_id': secrets.token_urlsafe(18), 'company_id': report['company_id'],
+                    'context_version': report['context_version'], 'status': 'completed',
+                    'assistant_text': f"Scanned {len(projection['companies'])} fictional companies; {count} risk and watch signals. Review the evidence and conditional impacts before taking action.",
+                    'agent_steps': [{'agent': 'risk_monitor', 'role': 'Assess evidence-bound company risks.',
+                        'status': 'completed', 'model': 'none', 'provider_call': 'none',
+                        'tool': 'read_risks', 'summary': 'Read current company-owned risk signals.'}],
+                    'evidence_ids': [], 'proposal': None, 'read_only': True,
+                    'workspace': {'risks': projection}}
             from .agent_tools import inventory_analytics
             from .quote_service import company_for_offer
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
@@ -922,6 +1050,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 'buyer_draft': deepcopy(value.buyer_draft),
                                 'selected_material_id': value.selected_material_id,
                                 'news': deepcopy(value.news), 'plan': deepcopy(active_plan(value)),
+                                'risks': deepcopy(snapshot.get('risk_report')),
                                 'offers': [{'offer_id': offer['offer_id'], 'version': offer['version'],
                                             'status': offer['status'], 'fixture_id': offer.get('fixture_id'),
                                             'source_filename': offer.get('document', {}).get('filename'),

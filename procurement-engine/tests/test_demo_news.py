@@ -393,3 +393,14 @@ def test_waiting_company_news_read_returns_unavailable_at_refresh_deadline(monke
         finally:
             release.set()
         first.result(timeout=2)
+
+
+def test_public_discovery_source_id_binds_headline_to_exact_source_health():
+    from procure.demo.company import get_company
+    from procure.demo.news import _company_item
+    raw = {'title': 'Copper supply shortage', 'provider': 'Google News RSS',
+           '_discovery_source_id': 'google_news_2'}
+    mapped = _company_item(raw, get_company('solara-cables'))
+    assert mapped.get('source_id') == 'google_news_2'
+    assert '_discovery_source_id' not in mapped
+    assert raw['_discovery_source_id'] == 'google_news_2'

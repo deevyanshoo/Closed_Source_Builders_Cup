@@ -31,6 +31,7 @@ class Session:
     recovery: dict | None = None
     rfq: dict | None = None
     news: dict | None = None
+    risk_report: dict | None = None
     watch_items: list = field(default_factory=list)
     pending_proposal: dict | None = None
     operator_turns: int = 0
@@ -71,6 +72,7 @@ class Session:
         self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
+        self.risk_report = None
         self.company_id = company_id
         self.context_version += 1
 
@@ -123,6 +125,7 @@ class SessionStore:
             session.recovery = None
             session.rfq = None
             session.news = None
+            session.risk_report = None
             session.watch_items.clear()
             session.pending_proposal = None
             session.operator_turns = 0

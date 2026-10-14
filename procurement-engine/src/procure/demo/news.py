@@ -269,7 +269,9 @@ def _matches(text, company):
 
 def _company_item(raw, company):
     item = dict(raw)
-    item.pop('_discovery_source_id', None)
+    source_id = item.pop('_discovery_source_id', None)
+    if source_id in {'google_news_1', 'google_news_2', 'google_news_3'}:
+        item['source_id'] = source_id
     materials, routes, currencies = _matches(item['title'], company)
     if currencies and not any(_term_in(item['title'].casefold(), term) for term in
                               ('exchange', 'currency', 'forex', 'fx', 'dollar', 'rate', 'devaluation')):

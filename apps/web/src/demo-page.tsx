@@ -1,9 +1,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, RecoveryView, RfqView, RiskReport } from './demo-api';
 import { CompanyOverview, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import { OperatorPanel } from './demo-operator';
+import { RiskMonitor, sameRiskScope } from './demo-risk-monitor';
+import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -266,6 +268,9 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'outbox'>('company');
   const [highlightFields, setHighlightFields] = useState<string[]>([]);
   const [operatorOpen, setOperatorOpen] = useState(false);
+  const [riskSnapshot, setRiskSnapshot] = useState<{ scope: RiskScope; report: RiskReport } | null>(null);
+  const [operatorSeed, setOperatorSeed] = useState<{ id: number; sessionId: string; companyId: string; contextVersion: number; epoch: number; message: string } | null>(null);
+  const seedIdRef = useRef(0);
   const operatorDockRef = useRef<HTMLElement | null>(null);
   const operatorToggleRef = useRef<HTMLButtonElement | null>(null);
   const [fixtureId, setFixtureId] = useState('');
@@ -286,6 +291,14 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const selectedMaterialRef = useRef(selectedMaterialId);
   const materialScopeRef = useRef(initialState.session ? `${initialState.session.session_id}:${initialState.session.company?.company_id ?? ''}:${initialState.session.context_version ?? ''}` : '');
   const company = state.session?.company;
+  const riskScope = state.session && company && state.session.context_version !== undefined ? { sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch } : null;
+  const currentRisks = riskScope && riskSnapshot && sameRiskScope(riskScope, riskSnapshot.scope) ? riskSnapshot.report : null;
+  const currentRiskAlerts = currentRisks?.companies.find(item => item.company_id === company?.company_id)?.alerts ?? [];
+  function seedRiskMessage(message: string, companyId: string, sourceScope: RiskScope) {
+    if (!riskScope || !sameRiskScope(riskScope, sourceScope) || companyId !== riskScope.companyId || !message.trim() || message.length > 1200) return;
+    setOperatorSeed({ id: ++seedIdRef.current, ...riskScope, message });
+    setOperatorOpen(true);
+  }
   const visibleOffers = offersForMaterial(state.offers, fixtures, company, selectedMaterialId);
   const offer = visibleOffers.find(o => o.offer_id === state.focusedId) ?? visibleOffers.at(-1) ?? null;
   const accepted = visibleOffers.filter(o => acceptedStatus(o.status));
@@ -568,6 +581,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : <OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} />}
     </section>}
     {error && <div className="demo-error" role="alert"><strong>Workspace update.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), (session, epoch) => { newsAutoRecoveryUsedRef.current = false; restoreSession(session, epoch); })}>Refresh session</button></div>}
+    {riskScope && <RiskMonitor scope={riskScope} onReport={(report, scope) => setRiskSnapshot({ scope, report })} onOpenCompany={switchCompany} onSeedPrompt={seedRiskMessage} />}
     <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
       <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={selectedFixtureId} disabled={!!company && !supportedFixtures.length} onChange={e => { setFixtureId(e.target.value); setFile(null); }}><option value="">Choose a document</option>{supportedFixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
         <label><span>Or upload one of these sample files</span><input type="file" accept=".pdf,.csv,application/pdf,text/csv" disabled={!!company && !supportedFixtures.length} onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
@@ -602,5 +616,5 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {state.rfq && <div className="demo-draft"><p><strong>Draft for {state.rfq.supplier}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{state.rfq.text}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
     </section>
     <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
-  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
+  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} seed={operatorSeed} riskSummary={currentRisks ? { high: currentRiskAlerts.filter(item => item.severity === 'high').length, medium: currentRiskAlerts.filter(item => item.severity === 'medium').length, low: currentRiskAlerts.filter(item => item.severity === 'low').length, checkedAt: currentRisks.checked_at } : null} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

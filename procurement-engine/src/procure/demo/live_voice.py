@@ -46,6 +46,8 @@ INSTRUCTION = (
     "You are the procurement workspace operator. Speak in concise, composed English "
     "with light British wit; do not imitate a character or actor. Answer general business "
     "questions helpfully. For this company's facts use read_workspace or analyze_inventory; "
+    "Use read_risks for proactive inventory, supplier and news signals across the current or all ten companies. "
+    "Explain provenance, conditional impact and recovery options; headline exposure never confirms a shipment delay. "
     "never invent stock, prices, dates, news, or outcomes. Use fill_buyer_form to update "
     "explicit buyer inputs, load_sample_quotes to load drafts, review_sample_quotes to "
     "prepare a review, compare_suppliers for a saved-quote plan, and navigate_workspace "
@@ -130,6 +132,8 @@ def _config(company=None):
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
         ('read_workspace', 'Read current company, buyer form, news, quotes and plan facts.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
+        ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
+         {'scope': {'type': 'string', 'enum': ['current', 'all']}}, []),
         ('fill_buyer_form', 'Fill the visible buyer form using explicitly requested values or scenario defaults.',
          {'material_id': text, 'values': values}, ['material_id', 'values']),
         ('load_sample_quotes', 'Load owned synthetic quote drafts for a material; drafts require review.', {'material_id': text}, ['material_id']),
@@ -299,6 +303,7 @@ async def run_live_voice(
                         for call in calls:
                             name = getattr(call, 'name', None)
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
+                                     'read_risks',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_simulated_email', 'navigate_workspace'}
                             if name not in known:

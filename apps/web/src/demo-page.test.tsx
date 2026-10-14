@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
@@ -25,6 +25,13 @@ const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', 
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('demo response state', () => {
+  it('retains a recovery notice only when canonical voice preflight changes workspace identity', () => {
+    expect(workspaceChanged(session, { ...session, offers: [] })).toBe(false);
+    expect(workspaceChanged(session, { ...session, session_id: 'renewed' })).toBe(true);
+    expect(workspaceChanged(session, { ...session, csrf_token: 'rotated' })).toBe(true);
+    expect(workspaceChanged(companySession, { ...companySession, context_version: 2 })).toBe(true);
+    expect(workspaceChanged(companySession, { ...companySession, company: emptyCompany })).toBe(true);
+  });
   it('uses the selected catalogue scenario and shows only its quote evidence before the quote form', () => {
     expect(companyScenarios(multiCompany).map(item => item.material_id)).toEqual(['copper', 'naphtha']);
     expect(fixturesForMaterial(materialFixtures, multiCompany, 'naphtha').map(item => item.id)).toEqual(['naphtha-a']);

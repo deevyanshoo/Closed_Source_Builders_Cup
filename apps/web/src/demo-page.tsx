@@ -112,6 +112,9 @@ export const sampleBuyerInputs = () => ({ material: 'copper', quantity: '10000',
 const words = (s: string) => s.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const message = (error: unknown) => error instanceof DemoApiError ? error.message : 'Something went wrong. Please try again.';
 export const isSessionExpired = (error: unknown) => error instanceof DemoApiError && (error.code === 'session_expired' || [401, 403, 410].includes(error.status));
+export const workspaceChanged = (previous: DemoSession | null, current: DemoSession) => !previous ||
+  previous.session_id !== current.session_id || previous.csrf_token !== current.csrf_token ||
+  previous.company?.company_id !== current.company?.company_id || previous.context_version !== current.context_version;
 const acceptedStatus = (status: string) => status === 'saved' || status === 'used_in_plan';
 export const delayRequest = (prior: Record<string, number>, offerId: string, days: string): Record<string, number> =>
   offerId && /^\d+$/.test(days) && Number(days) <= 3650 ? { ...prior, [offerId]: Number(days) } : {};
@@ -302,8 +305,15 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     setDelayDays(buyer.delayControls.days);
   }
   function restoreOperatorSession(session: DemoSession) {
+    const changed = workspaceChanged(state.session, session);
     actionRef.current += 1;
     restoreSession(session, epochRef.current);
+    if (changed) {
+      // The operator remounts on a session change, so its local voice notice
+      // would disappear. Keep recovery guidance in the persistent page.
+      setOperatorOpen(false);
+      setError('The session expired or changed. The current workspace was restored. Review the company and buyer inputs, then start conversation again.');
+    }
   }
   function clearUnknownOperatorSession() {
     epochRef.current += 1; actionRef.current += 1; newsRequestRef.current += 1;

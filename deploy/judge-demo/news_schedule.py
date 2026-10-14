@@ -58,7 +58,8 @@ def validate_gate(proof: dict, now: datetime) -> str:
         raise Refused('Billing observation is stale or in the future')
     mode = proof.get('mode')
     if mode == 'trial_credits':
-        if proof.get('source') != 'authenticated_google_cloud_billing_overview' or proof.get('account_type') != 'free_trial':
+        if proof.get('source') not in ('authenticated_google_cloud_billing_overview',
+                                      'authenticated_google_cloud_console_free_trial_dialog') or proof.get('account_type') != 'free_trial':
             raise Refused('Authenticated Free Trial account evidence is required')
         if proof.get('paid_upgrade') is not False:
             raise Refused('Paid upgrade must be explicitly false')
@@ -97,7 +98,7 @@ def _step(name: str, argv: list[str], *, creates_resource=False, check_argv=None
 
 def prepare(
     proof: dict, *, bucket: str, image: str, now: datetime | None = None,
-    region: str = REGION, timeout_seconds: int = 120, tasks: int = 1,
+    region: str = REGION, job_region: str = REGION, timeout_seconds: int = 120, tasks: int = 1,
     parallelism: int = 1, cpu: int = 1, memory_mib: int = 512,
     job_retries: int = 0, scheduler_retries: int = 0,
     retention_days: int = 7, bundle_max_bytes: int = MAX_BUNDLE_BYTES,
@@ -105,6 +106,8 @@ def prepare(
     """Return reviewable command argv and companion file content, never apply it."""
     now = now or datetime.now(timezone.utc)
     mode = validate_gate(proof, now)
+    if job_region not in (REGION, 'asia-south1') or (job_region == 'asia-south1' and mode != 'trial_credits'):
+        raise Refused('Job region requires the approved active Free Trial mode')
     bounds = (region, timeout_seconds, tasks, parallelism, cpu, memory_mib,
               job_retries, scheduler_retries, retention_days, bundle_max_bytes)
     if bounds != (REGION, 120, 1, 1, 1, 512, 0, 0, 7, MAX_BUNDLE_BYTES):
@@ -120,7 +123,7 @@ def prepare(
     worker_email = f'{WORKER}@{PROJECT}.iam.gserviceaccount.com'
     scheduler_email = f'{SCHEDULER}@{PROJECT}.iam.gserviceaccount.com'
     bucket_uri = f'gs://{bucket}'
-    job_uri = f'https://run.googleapis.com/v2/projects/{PROJECT}/locations/{REGION}/jobs/{JOB}:run'
+    job_uri = f'https://run.googleapis.com/v2/projects/{PROJECT}/locations/{job_region}/jobs/{JOB}:run'
     commands = [
         _step('enable_scheduler_api', ['gcloud', 'services', 'enable', 'cloudscheduler.googleapis.com', f'--project={PROJECT}']),
         _step('create_private_bucket', ['gcloud', 'storage', 'buckets', 'create', bucket_uri,
@@ -145,14 +148,14 @@ def prepare(
                         f'--member=serviceAccount:{member}', f'--role={role}']))
     commands.extend([
         _step('create_bounded_worker_job', ['gcloud', 'run', 'jobs', 'create', JOB,
-             f'--project={PROJECT}', f'--region={REGION}', f'--image={image}',
+             f'--project={PROJECT}', f'--region={job_region}', f'--image={image}',
              f'--service-account={worker_email}', '--tasks=1', '--parallelism=1',
              '--max-retries=0', '--task-timeout=120s', '--cpu=1', '--memory=512Mi',
              '--command=python', '--args=-m,procure.demo.news_refresh',
              f'--set-env-vars=NEWS_SNAPSHOT_BUCKET={bucket}'], creates_resource=True,
-             check_argv=['gcloud', 'run', 'jobs', 'describe', JOB, f'--project={PROJECT}', f'--region={REGION}', '--format=json']),
+             check_argv=['gcloud', 'run', 'jobs', 'describe', JOB, f'--project={PROJECT}', f'--region={job_region}', '--format=json']),
         _step('grant_job_invoker_to_scheduler', ['gcloud', 'run', 'jobs', 'add-iam-policy-binding', JOB,
-             f'--project={PROJECT}', f'--region={REGION}',
+             f'--project={PROJECT}', f'--region={job_region}',
              f'--member=serviceAccount:{scheduler_email}', '--role=roles/run.invoker']),
         _step('create_hourly_oauth_schedule', ['gcloud', 'scheduler', 'jobs', 'create', 'http', SCHEDULE,
              f'--project={PROJECT}', f'--location={REGION}', '--schedule=0 * * * *',
@@ -167,7 +170,7 @@ def prepare(
     fingerprint = hashlib.sha256(json.dumps(proof, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {
         'mode': 'prepare_only', 'activation_gate': mode, 'project': PROJECT,
-        'region': REGION, 'proof_sha256': fingerprint,
+        'region': REGION, 'job_region': job_region, 'proof_sha256': fingerprint,
         'prepared_at': now.astimezone(timezone.utc).isoformat(),
         'monthly_projection': {'max_scheduled_runs_31_days': 744,
                                'max_vcpu_seconds': 89280, 'max_gib_seconds': 44640,
@@ -183,10 +186,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--evidence', required=True, type=Path)
     parser.add_argument('--bucket', required=True)
     parser.add_argument('--image', required=True)
+    parser.add_argument('--job-region', choices=[REGION, 'asia-south1'], default=REGION)
     args = parser.parse_args(argv)
     try:
         proof = json.loads(args.evidence.read_text(encoding='utf-8'))
-        plan = prepare(proof, bucket=args.bucket, image=args.image)
+        plan = prepare(proof, bucket=args.bucket, image=args.image, job_region=args.job_region)
     except (OSError, json.JSONDecodeError, Refused) as exc:
         print(f'Refused: {exc}', file=sys.stderr)
         return 2

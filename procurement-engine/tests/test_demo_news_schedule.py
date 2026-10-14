@@ -63,10 +63,55 @@ def test_strict_free_requires_account_wide_measured_headroom():
         news_schedule.prepare(proof, bucket=BUCKET, image=IMAGE, now=NOW)
 
 
+def strict_free_proof():
+    return {
+        **trial_proof(), 'mode': 'strict_free', 'source': 'billing_account_metered_usage',
+        'billing_account': 'billingAccounts/TEST-ONLY',
+        'account_wide_usage': {
+            'scheduler_jobs_after_create': 1,
+            'cloud_run_vcpu_seconds_after_create': 89280,
+            'cloud_run_gib_seconds_after_create': 44640,
+            'storage_gb_month_after_create': 1,
+            'storage_class_a_after_create': 1000,
+            'storage_class_b_after_create': 1000,
+            'storage_egress_gb_after_create': 20,
+        },
+    }
+
+
+def test_trial_can_prepare_mumbai_job_while_bucket_and_scheduler_stay_in_us():
+    prepared = news_schedule.prepare(trial_proof(), bucket=BUCKET, image=IMAGE,
+                                     now=NOW, job_region='asia-south1')
+    assert prepared['region'] == 'us-central1'
+    assert prepared['job_region'] == 'asia-south1'
+    commands = {step['name']: step for step in prepared['commands']}
+    assert '--location=us-central1' in commands['create_private_bucket']['argv']
+    assert '--region=asia-south1' in commands['create_bounded_worker_job']['argv']
+    assert '--region=asia-south1' in commands['create_bounded_worker_job']['check_argv']
+    assert '--region=asia-south1' in commands['grant_job_invoker_to_scheduler']['argv']
+    schedule = commands['create_hourly_oauth_schedule']['argv']
+    assert '--location=us-central1' in schedule
+    assert '--uri=https://run.googleapis.com/v2/projects/closed-source-builder-261007/locations/asia-south1/jobs/closed-source-news-refresh:run' in schedule
+
+
+def test_strict_free_proof_cannot_prepare_mumbai_job():
+    with pytest.raises(news_schedule.Refused):
+        news_schedule.prepare(strict_free_proof(), bucket=BUCKET, image=IMAGE,
+                              now=NOW, job_region='asia-south1')
+
+
+@pytest.mark.parametrize('job_region', ['europe-west1', 'asia-south2', 'us-east1', ''])
+def test_unapproved_job_regions_are_refused(job_region):
+    with pytest.raises(news_schedule.Refused):
+        news_schedule.prepare(trial_proof(), bucket=BUCKET, image=IMAGE,
+                              now=NOW, job_region=job_region)
+
+
 def test_valid_trial_prepares_private_bounded_resources_without_running_commands():
     prepared = news_schedule.prepare(trial_proof(), bucket=BUCKET, image=IMAGE, now=NOW)
     assert prepared['mode'] == 'prepare_only'
     assert prepared['activation_gate'] == 'trial_credits'
+    assert prepared['job_region'] == 'us-central1'
     assert prepared['monthly_projection']['max_vcpu_seconds'] == 89280
     assert prepared['monthly_projection']['max_gib_seconds'] == 44640
     commands = prepared['commands']

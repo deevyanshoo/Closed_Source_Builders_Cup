@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Existing portal stays in `asia-south1`; new job and Standard Storage use `us-central1`.
+- Existing portal stays in `asia-south1`; collector uses `asia-south1` after the observed Google RSS region failure; Standard Storage and the single Scheduler stay in `us-central1`. Mumbai requires the approved trial-credits gate.
 - Schedule hourly `0 * * * *` UTC (every hour at :30 IST); one task, 1 vCPU, 512 MiB, timeout 120 seconds, zero retries.
 - No automatic paid model calls, no billing upgrade, public bucket, private uploads or actual email delivery.
 - At most 2 MiB per bundle, seven-day retention, generation-zero immutable publication.

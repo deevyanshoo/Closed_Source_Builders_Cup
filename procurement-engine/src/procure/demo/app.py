@@ -28,10 +28,12 @@ COOKIE = 'demo_session'
 MAX_BODY = 750_000
 MAX_UPLOAD = 500_000
 MAX_SPEECH_OUTPUT = 750_000
-MAX_REQUESTS = 240
+MAX_REQUESTS = 900
 MAX_OFFERS = 24
-MAX_IDEMPOTENCY = 120
-MAX_SESSION_CALLS = 6
+MAX_IDEMPOTENCY = 480
+MAX_SESSION_CALLS = 36
+MAX_SESSION_FAILURES = 6
+MAX_OPERATOR_TURNS = 12
 MAX_PROCESS_CALLS = 60
 MAX_CACHE = 64
 
@@ -456,7 +458,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 complete(value, key, result)
                 value.idempotency[key]['state_marker'] = marker
                 return result
-            if value.operator_turns >= 6:
+            if value.operator_turns >= MAX_OPERATOR_TURNS:
                 failed(value, key)
                 raise SessionError('operator_limit', 'Operator turn limit reached for this session.', 429)
             if not operator_workers.acquire(blocking=False):
@@ -826,6 +828,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         cache_key = (hashlib.sha256(raw).hexdigest(), data['mode'], today.isoformat())
         acquired = False
         marked = False
+        provider_completed = False
         try:
             with cache_lock:
                 payload = deepcopy(cache.get(cache_key))
@@ -837,7 +840,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         raise SessionError('provider_busy', 'Extraction is busy. Try again shortly.', 429)
                     acquired = True
                     if data['mode'] == 'gemini':
-                        if not provider()['available'] or value.live_calls >= MAX_SESSION_CALLS or process_calls >= MAX_PROCESS_CALLS:
+                        if not provider()['available'] or value.live_calls >= MAX_SESSION_CALLS or value.live_failed_calls >= MAX_SESSION_FAILURES or process_calls >= MAX_PROCESS_CALLS:
                             raise SessionError('provider_limit', 'Live extraction is unavailable or its demo limit was reached.', 429)
                         value.live_calls += 1
                         process_calls += 1
@@ -847,6 +850,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 payload = await run_in_threadpool(extract_fixture, fixture_id, mode=data['mode'], as_of=today)
                 if data['mode'] == 'gemini' and (payload.get('extractor') != 'gemini' or payload.get('extractor_detail', {}).get('call') != 'real'):
                     raise SessionError('provider_unavailable', 'Gemini did not return a verified live extraction. Try again or select rules.', 503)
+                provider_completed = True
                 with cache_lock:
                     cache[cache_key] = deepcopy(payload)
                     while len(cache) > MAX_CACHE:
@@ -867,6 +871,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 return complete(value, key, result)
         except Exception:
             with value.lock:
+                if marked and data['mode'] == 'gemini' and not provider_completed:
+                    value.live_failed_calls += 1
                 failed(value, key)
             raise
         finally:

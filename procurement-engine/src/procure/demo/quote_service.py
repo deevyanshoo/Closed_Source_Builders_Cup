@@ -6,9 +6,12 @@ engine. Mutable state, ownership and idempotency belong to the session host.
 from __future__ import annotations
 
 import copy
+import csv
 import hashlib
+import io
 import json
-from datetime import date
+import re
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -49,19 +52,65 @@ def company_for_offer(view: dict) -> str | None:
 
 
 def fixture_review_values(fixture_id: str) -> dict:
-    """Explicit reviewer inputs for unsupported catalogue units in fictional CSVs."""
+    """Reviewer suggestions read from intact fictional source bytes, never a model."""
     entry = _BY_ID.get(fixture_id)
     if entry is None:
         raise DemoError('fixture_not_found', 'Synthetic fixture not found', 404)
     if entry not in _COMPANY_FIXTURES:
         return {'settlement_currency': 'USD'} if fixture_id == 'late-copper' else {}
-    unit = entry['unit']
-    return {'items[0].material': entry['material'],
-            'items[0].quantity': {'amount': entry['offered'], 'unit': unit},
-            'items[0].pricing': {'type': 'fixed', 'unit_price': {
-                'amount': entry['price'], 'currency': entry['currency']}, 'per_unit': unit},
-            'min_order': {'amount': '1', 'unit': unit},
-            'capacity': {'amount': entry['offered'], 'unit': unit, 'period': 'month'}}
+    _, data = fixture_bytes(fixture_id)  # verifies the immutable document hash first
+    try:
+        rows = list(csv.reader(io.StringIO(data.decode('utf-8-sig'))))
+        if len(rows) != 14 or rows[0][0] != 'note' or rows[1] != ['field', 'value']:
+            raise ValueError('unexpected synthetic CSV shape')
+        source = {}
+        for row in rows[2:]:
+            if len(row) != 2 or row[0] in source:
+                raise ValueError('ambiguous synthetic CSV row')
+            source[row[0]] = row[1]
+        if set(source) != {'supplier', 'product', 'origin', 'quantity', 'price', 'incoterm',
+                           'minimum order quantity', 'supply capacity', 'lead time',
+                           'settlement currency', 'payment terms', 'valid until'}:
+            raise ValueError('unexpected synthetic CSV fields')
+
+        def amount_unit(value: str) -> tuple[str, str]:
+            match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)?) ([a-z]+)', value)
+            if not match:
+                raise ValueError('invalid exact-unit amount')
+            return nz.fmt(Decimal(match[1])), match[2]
+
+        quantity, unit = amount_unit(source['quantity'])
+        minimum, min_unit = amount_unit(source['minimum order quantity'])
+        capacity_match = re.fullmatch(r'(.+) per month', source['supply capacity'])
+        capacity, capacity_unit = amount_unit(capacity_match[1]) if capacity_match else (None, None)
+        price_match = re.fullmatch(r'([A-Z]{3}) ([0-9]+(?:\.[0-9]+)?(?:E\+[0-9]+)?) per ([a-z]+)',
+                                   source['price'])
+        lead_match = re.fullmatch(r'([0-9]+) days after order confirmation', source['lead time'])
+        incoterm_match = re.fullmatch(r'([A-Z]{3}) (.+)', source['incoterm'])
+        if (not price_match or not lead_match or not incoterm_match
+                or unit != min_unit or unit != capacity_unit or unit != price_match[3]
+                or unit != entry['unit'] or price_match[1] != source['settlement currency']
+                or price_match[1] != entry['currency'] or incoterm_match[1] not in nz.INCOTERMS_2020):
+            raise ValueError('synthetic quote values disagree')
+        from .company import get_company
+        profile = get_company(entry['company_id'])
+        materials = [material for material in profile['materials']
+                     if material['name'] == source['product'] and material['quantity_unit'] == unit]
+        if len(materials) != 1 or materials[0]['material_id'] != entry['material']:
+            raise ValueError('synthetic material does not match catalogue')
+        valid_until = datetime.strptime(source['valid until'], '%d %B %Y').date().isoformat()
+        return {'supplier_name': source['supplier'], 'origin_country': source['origin'],
+                'incoterm': {'code': incoterm_match[1], 'place': incoterm_match[2]},
+                'settlement_currency': source['settlement currency'], 'valid_until': valid_until,
+                'lead_time_days': int(lead_match[1]), 'payment_terms': source['payment terms'],
+                'items[0].material': materials[0]['material_id'],
+                'items[0].quantity': {'amount': quantity, 'unit': unit},
+                'items[0].pricing': {'type': 'fixed', 'unit_price': {
+                    'amount': nz.fmt(Decimal(price_match[2])), 'currency': price_match[1]}, 'per_unit': unit},
+                'min_order': {'amount': minimum, 'unit': unit},
+                'capacity': {'amount': capacity, 'unit': unit, 'period': 'month'}}
+    except (UnicodeError, ValueError, KeyError, IndexError, TypeError):
+        raise DemoError('fixture_unavailable', 'Synthetic fixture review values are unavailable', 503) from None
 
 
 def _scenario_entry(view: dict) -> dict | None:

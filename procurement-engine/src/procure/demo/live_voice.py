@@ -26,7 +26,7 @@ MODEL = 'gemini-3.8-live'
 LOCATION = 'us-central1'
 MAX_SECONDS = 180
 MAX_CONNECTIONS = 2
-MAX_SESSION_STARTS = 2
+MAX_COMPANY_STARTS = 2
 MAX_PROCESS_STARTS = 24
 MAX_INPUT_CHUNK = 32_000  # One second of mono PCM16 at 16 kHz.
 MAX_INPUT_BYTES = MAX_SECONDS * 32_000
@@ -188,11 +188,13 @@ async def run_live_voice(
             if (not session.active or session.expires_at <= store.now() or
                     session.context_version != context_version):
                 raise _Stale()
-            starts = getattr(session, 'live_voice_sessions', 0)
-            if _PROCESS_STARTS >= MAX_PROCESS_STARTS or starts >= MAX_SESSION_STARTS:
+            by_company = session.live_voice_starts_by_company
+            company_starts = by_company.get(session.company_id, 0)
+            if _PROCESS_STARTS >= MAX_PROCESS_STARTS or company_starts >= MAX_COMPANY_STARTS:
                 raise _Capacity()
             _PROCESS_STARTS += 1
-            session.live_voice_sessions = starts + 1
+            session.live_voice_sessions += 1
+            by_company[session.company_id] = company_starts + 1
         accepted = True
 
         factory = client_factory or _vertex_connection

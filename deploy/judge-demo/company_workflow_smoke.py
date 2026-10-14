@@ -12,9 +12,10 @@ def run(base, live):
     catalogue = Client(base).json('catalogue', '/api/demo/companies')['companies']
     require(len(catalogue) == 10, 'catalogue', 'company_count')
     rows = []
+    c = Client(base)
+    session = c.json('session', '/api/demo/session'); csrf = session['csrf_token']; context = session['context_version']
     for profile in catalogue:
-        cid = profile['company_id']; c = Client(base)
-        session = c.json(cid, '/api/demo/session'); csrf = session['csrf_token']; context = session['context_version']
+        cid = profile['company_id']
         if cid != session['company']['company_id']:
             session = c.json(cid, '/api/demo/company', csrf=csrf, body={
                 'company_id':cid,'expected_context_version':context,'idempotency_key':key()})
@@ -61,12 +62,16 @@ def run(base, live):
         require(draft['status']=='draft_unsent' and draft['quantity_unit']==unit and draft['company_id']==cid,cid,'rfq_wrong')
         require(draft['quantity']==plan['required_purchase'] and cid in draft['text'],cid,'rfq_quantity_or_buyer_wrong')
         require(c.text(cid,'/api/demo/rfq/'+draft['draft_id']+'/download')==draft['text'],cid,'download_wrong')
-        rows.append({'company_id':cid,'material':plan['material'],'unit':unit,'purchase':plan['required_purchase'],
+        operator = post('/api/demo/operator', {'message':'Inspect this company inventory', 'idempotency_key':key()})
+        require(operator['status']=='completed' and operator['company_id']==cid,cid,'operator_unavailable')
+        real_roles=[step for step in operator['agent_steps'] if step.get('provider_call')=='real']
+        require(len(real_roles)==3,cid,'operator_roles_not_real')
+        rows.append({'operator_status':operator['status'],'real_operator_roles':len(real_roles),'company_id':cid,'material':plan['material'],'unit':unit,'purchase':plan['required_purchase'],
                      'baseline_cost':plan['total_cost'],'recovery_cost':revised['total_cost'],'currency':plan['reporting_currency'],
                      'recovery':recovery['outcome'],'rfq_status':draft['status'],'provider_calls':provider_calls,
                      'unit_mismatch_rejected':True,'rfq_replay_same_draft':True})
         print(cid+' verified',flush=True)
-    return {'ok':True,'base':base,'checked_at':datetime.now(timezone.utc).isoformat(),'live_gemini':live,'companies':rows}
+    return {'ok':True,'base':base,'checked_at':datetime.now(timezone.utc).isoformat(),'live_gemini':live,'single_browser_session':True,'companies':rows}
 
 if __name__=='__main__':
     p=argparse.ArgumentParser(); p.add_argument('--base',required=True);p.add_argument('--live',action='store_true');p.add_argument('--output',required=True);a=p.parse_args()

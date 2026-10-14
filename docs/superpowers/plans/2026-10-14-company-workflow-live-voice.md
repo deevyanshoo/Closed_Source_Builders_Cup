@@ -12,7 +12,7 @@
 - Each company has at least one complete three-supplier scenario, with catalogue coverage expanded where coherent fixtures can be validated. Exact synthetic document hashes, company/material coverage, evidence review and original prices remain authoritative.
 - Demo quantities, prices, dated FX and deadlines are labelled synthetic. Default baseline is feasible; delaying selected supplier selects another feasible offer or reports infeasibility. RFQ derives material, amount, unit, company and offer-version from the reviewed plan.
 - Persistent right-hand operator on desktop; collapsible accessible panel on mobile. Company switch terminates voice and clears prior context. Existing reviewed proposal controls remain available.
-- `/api/demo/voice/live` WebSocket same-origin session authentication, initial CSRF/context handshake. Input PCM16 16kHz mono, output PCM16 24kHz mono. Events ready/audio/transcript/interrupted/turn_complete/tool_result/error. Browser sends start/audio/audio_end/stop. 180s maximum; at most two simultaneous live sessions; no credentials or retained raw audio in browser/server state.
+- `/api/demo/voice/live` WebSocket same-origin session authentication, initial CSRF/context handshake. Input PCM16 16kHz mono, output PCM16 24kHz mono. Events ready/audio/transcript/interrupted/turn_complete/tool_result/error. Browser sends start/audio/audio_end/stop. 180s maximum; at most two simultaneous live sessions and two starts per company per visit; no credentials or retained raw audio in browser/server state.
 - Original composed, concise, lightly witty voice personality. Gemini native voice, automatic responses, silence detection and barge-in; no manual record/transcribe/send/speak stages in the primary voice flow.
 - Live tool `operate_workspace(message)` calls existing validated multi-role operator. No voice-only mutation or confirmation bypass.
 
@@ -29,3 +29,5 @@
 ## Release evidence
 
 Coordinator records exact commit, image/revision, checks, all-ten workflow receipt, real provider/browser outcomes and remaining limitations in output/evidence and local task checkpoint. Deployment is not complete until the actual hosted destination is checked.
+
+The ten-company visit budget allows 36 extraction attempts and 12 operator turns, with six failed extractions maximum per visit. Shared cloud caps remain 60 extraction attempts, 60 specialist calls, and 24 native voice starts per process. HTTP/idempotency budgets are 900/480 so explicit review across ten companies fits one visit. All budgets are temporary demo bounds.

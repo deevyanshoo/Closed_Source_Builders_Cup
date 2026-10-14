@@ -144,6 +144,41 @@ def test_unsent_rfq_rejects_foreign_or_stale_reviewed_offer():
     assert err.value.code == 'stale_version'
 
 
+def test_loomworks_document_suggestions_rescue_unverified_critical_fields_only_after_review():
+    profile = company.get_company('loomworks')
+    critical = ('supplier_name', 'origin_country', 'incoterm', 'settlement_currency',
+                'valid_until', 'lead_time_days', 'payment_terms')
+    offers = []
+    for fixture_id in profile['quote_coverage']['fixture_ids']:
+        payload = quote_service.extract_fixture(fixture_id, mode='rules', as_of=TODAY)
+        for name in critical:
+            field = payload['fields'][name]
+            field.update(status='unverified', value=None, evidence=[], reasons=['simulated evidence mismatch'])
+        offer = quote_service.new_offer(payload, offer_id=fixture_id, today=TODAY)
+        with pytest.raises(DemoError) as blocked:
+            quote_service.save_offer(offer, today=TODAY)
+        assert blocked.value.code == 'save_blocked'
+        suggested = next(row['review_values'] for row in quote_service.list_fixtures()
+                         if row['id'] == fixture_id)
+        assert set(critical) <= set(suggested)
+        assert suggested['supplier_name'] == next(
+            supplier['name'] for supplier in profile['suppliers']
+            if supplier['supplier_id'].endswith(f"scenario-{fixture_id.rsplit('-', 1)[-1]}"))
+        assert suggested['incoterm'] == {'code': 'DAP', 'place': 'Dhaka Bangladesh'}
+        assert suggested['settlement_currency'] in {'BDT', 'USD'}
+        assert suggested['valid_until'] == '2026-12-31'
+        for name, corrected in suggested.items():
+            offer = quote_service.correct_offer(offer, field=name, value=corrected, today=TODAY)
+        for name in critical:
+            field = offer['fields'][name]
+            assert field['status'] == 'corrected' and field['source'] == 'user'
+            assert field['original']['status'] == 'unverified'
+            assert field['original']['value'] is None
+        offers.append(quote_service.save_offer(offer, today=TODAY))
+    plan = planner.build_plan(offers, request(profile, offers), today=TODAY)
+    assert plan['selected_offer_id'] == profile['quote_coverage']['fixture_ids'][1]
+
+
 @pytest.mark.parametrize('profile', company.list_companies(), ids=lambda p: p['company_id'])
 def test_all_ten_company_workflows_over_http(profile):
     with TestClient(create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc)),

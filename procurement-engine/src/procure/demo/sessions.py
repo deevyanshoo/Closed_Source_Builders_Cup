@@ -34,12 +34,14 @@ class Session:
     operator_generation: int = 0
     voice_calls: int = 0
     live_voice_sessions: int = 0
+    live_voice_starts_by_company: dict = field(default_factory=dict)
     company_id: str = DEFAULT_COMPANY_ID
     context_version: int = 1
     workspaces: dict = field(default_factory=dict)
     active: bool = True
     requests: int = 0
     live_calls: int = 0
+    live_failed_calls: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def select_company(self, company_id: str) -> None:

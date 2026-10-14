@@ -3,7 +3,7 @@ import base64
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 import pytest
-from procure.demo.app import create_app
+from procure.demo.app import create_app, MAX_REQUESTS
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def test_referer_fallback_and_port_mismatch(client):
 
 def test_session_request_budget_rejects_further_work(client):
     auth(client)
-    for _ in range(241):
+    for _ in range(MAX_REQUESTS + 1):
         response = client.get('/api/demo/offers')
     assert response.status_code == 429
 

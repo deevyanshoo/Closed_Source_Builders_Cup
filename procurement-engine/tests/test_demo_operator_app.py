@@ -7,7 +7,7 @@ import base64
 import pytest
 from fastapi.testclient import TestClient
 
-from procure.demo.app import create_app
+from procure.demo.app import create_app, MAX_OPERATOR_TURNS
 from procure.demo.errors import DemoError
 from test_demo_operator import Provider
 
@@ -340,10 +340,10 @@ def test_operator_turn_budget_and_stale_news_evidence():
     provider = Provider(intent='inspect', action='none', evidence=())
     with demo(provider) as client:
         headers = auth(client)
-        for index in range(6):
+        for index in range(MAX_OPERATOR_TURNS):
             response = turn(client, headers, message='Inspect inventory', key=f'inspect-{index}')
             assert response.status_code == 200 and response.json()['status'] == 'completed'
-        assert len(provider.calls) == 18
+        assert len(provider.calls) == 3 * MAX_OPERATOR_TURNS
         assert turn(client, headers, message='Inspect inventory', key='over-budget').status_code == 429
 
 

@@ -255,7 +255,7 @@ def test_context_switch_during_tool_call_discards_stale_result():
     asyncio.run(scenario())
 
 
-def test_session_and_process_start_limits_after_valid_hello(monkeypatch):
+def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
     async def scenario():
         monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
         store, session = setup()
@@ -273,6 +273,28 @@ def test_session_and_process_start_limits_after_valid_hello(monkeypatch):
                                         client_factory=connection(Provider()))
         assert (await next_type(third, 'error'))['code'] == 'voice_limit'
         assert session.live_voice_sessions == 2
+        assert session.live_voice_starts_by_company['solara-cables'] == 2
+
+        with session.lock:
+            session.select_company('terrapack')
+        terra = Socket(start(session, context=2))
+        terra_task = asyncio.create_task(live_voice.run_live_voice(
+            terra, session=session, store=store, operate_workspace=lambda *_: None,
+            client_factory=connection(Provider())))
+        assert (await next_type(terra, 'ready'))['context_version'] == 2
+        await terra.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(terra_task, 2)
+        assert session.live_voice_sessions == 3
+        assert session.live_voice_starts_by_company == {'solara-cables': 2, 'terrapack': 1}
+
+        with session.lock:
+            session.select_company('solara-cables')
+        returned = Socket(start(session, context=3))
+        await live_voice.run_live_voice(returned, session=session, store=store,
+                                        operate_workspace=lambda *_: None,
+                                        client_factory=connection(Provider()))
+        assert (await next_type(returned, 'error'))['code'] == 'voice_limit'
+        assert session.live_voice_sessions == 3
 
         monkeypatch.setattr(live_voice, '_PROCESS_STARTS', live_voice.MAX_PROCESS_STARTS)
         new_session = store.create()

@@ -427,6 +427,49 @@ def _validate(role, raw, materials, offers, evidence):
     return raw
 
 
+def _canonical_read_template(snapshot, message, material_id):
+    """Recognized fact lookups are rendered from source fields, never model prose."""
+    folded = message.casefold()
+    if re.search(r'\breporting\s+currency\b', folded):
+        return 'The reporting currency is {{company.reporting_currency}}.'
+    if re.search(r'\blead(?:[ -]time)?\b', folded):
+        named = [row for row in snapshot['company']['suppliers']
+                 if row['name'].casefold().removesuffix(' [synthetic]') in folded
+                 and (material_id is None or material_id in row.get('materials', []))]
+        if len(named) == 1:
+            prefix = 'supplier.' + named[0]['supplier_id']
+            return '{{' + prefix + '.name}} has a listed lead time of {{' + prefix + '.lead_days}} days.'
+    material = next((row for row in snapshot['company']['materials']
+                     if row['material_id'] == material_id), None)
+    if material and (material_id.casefold() in folded or material['name'].casefold() in folded):
+        prefix = 'material.' + material_id
+        field = ('monthly_requirement' if re.search(r'\bmonthly\b', folded) else
+                 'consumption_per_day' if re.search(r'\bdaily\b|per day', folded) else
+                 'stock' if re.search(r'how much.*\bstock\b|\bstock\b.*how much', folded) else None)
+        if field:
+            label = {'monthly_requirement': 'monthly requirement', 'consumption_per_day': 'daily use', 'stock': 'stock'}[field]
+            return '{{' + prefix + '.name}} ' + label + ' is {{' + prefix + '.' + field + '}} {{' + prefix + '.unit}}.'
+    return None
+
+
+def _grounded_answer(snapshot, message, material_id, evidence, facts, cited):
+    raw = evidence.get('answer')
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        if any(key not in facts for key in _FACT_TOKEN.findall(raw)):
+            raise OperatorValidationError('Answer contains an unknown fact token.')
+        canonical = _canonical_read_template(snapshot, message, material_id)
+        if canonical:
+            rendered = _render_answer(canonical, facts, [])
+            numbers = lambda text: {Decimal(value.replace(',', '')) for value in
+                                   re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?(?!\w)', text)}
+            if numbers(_FACT_TOKEN.sub('', raw)) - numbers(rendered):
+                raise OperatorValidationError('Plain answer contradicts the requested canonical fact.')
+            return rendered + ' Source: fictional company profile.'
+    return _render_answer(raw, facts, cited)
+
+
 def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_call: str) -> dict:
     """Call each specialist once; return only server-checkable suggestions."""
     if not isinstance(message, str) or not message.strip() or len(message) > 1200:
@@ -444,7 +487,14 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                         'evidence_ids. Optional parameters object for a utility. Intent: '
                         'inspect|explain|watch|recovery|rfq|clarify|answer|analytics|fill_form|'
                         'compare|load_quotes|simulate_email|navigate|review_quotes. '
-                        'Classify and select the material; evidence_ids must be [] because '
+                        'For fill_form parameters MUST be exactly {values: {quantity/current_stock/budget/'
+                        'additional_cost_per_unit/need_by: explicit string values}}. For navigate '
+                        'parameters MUST be exactly {view: company|news|procurement|outbox}. For '
+                        'simulate_email parameters MUST contain exactly subject, body and recipient_label; '
+                        'copy explicitly supplied subject/body, otherwise draft brief text without invented '
+                        'numbers. recipient_label MUST be an exact current supplier name including the '
+                        'synthetic suffix. Never use view for an email. For other intents omit parameters '
+                        'or use {}. Classify and select the material; evidence_ids must be [] because '
                         'specialists receive the exact material-matched citation list later.'),
         'evidence': ('JSON only. Required keys: material_id, evidence_ids, assessment, implication, '
                      'confidence_reason, next_steps. Optional answer for an actual user question. '
@@ -469,6 +519,11 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                   f'\nUser message: {json.dumps(message)}')
         if intake is not None:
             prompt += f'\nValidated coordinator intake: {json.dumps(intake, sort_keys=True)}'
+            if role == 'evidence' and intake['intent'] not in {'inspect', 'explain', 'answer', 'analytics'}:
+                prompt += ('\nThis is utility validation, not an inventory question. Omit answer. '
+                           'Use implication: This request prepares a synthetic workspace utility. '
+                           'Use confidence_reason: Server checks verify all inputs. '
+                           'Use next_steps: []. Do not put fact tokens into these fields.')
             if role == 'evidence' and intake['intent'] in {'inspect', 'explain', 'answer', 'analytics'}:
                 prompt += ('\nFor this question, include answer with at least one trusted fact token. '
                            'Address the actual user question, preserve its material/unit/currency, '
@@ -552,7 +607,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
             item_id in news and not _news_relevance(news[item_id], snapshot['company'], material_id)
             for item_id in cited):
         raise OperatorValidationError('News evidence does not match this company exposure.')
-    grounded_answer = _render_answer(ev['answer'], facts, cited) if 'answer' in ev else None
+    grounded_answer = (_grounded_answer(snapshot, message, material_id, ev, facts, cited)
+                       if coord['intent'] in {'inspect', 'explain', 'answer', 'analytics'} else None)
     indirect = [(item_id, _news_relevance(news[item_id], snapshot['company'], material_id))
                 for item_id in cited if item_id in news and
                 _news_relevance(news[item_id], snapshot['company'], material_id)
@@ -647,6 +703,30 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         status, answer = 'proposal', f'Review exact source-backed values for {len(selected)} {material_id} quote drafts.'
     elif intent == 'simulate_email':
         parameters = coord.get('parameters') or {}
+        # Explicit draft content and a named catalogue recipient are user data,
+        # not model arguments. Preserve those exact fields when routing omits them.
+        named = [supplier['name'] for supplier in snapshot['company']['suppliers']
+                 if material_id in supplier.get('materials', []) and
+                 supplier['name'].casefold() in message.casefold()]
+        if not named and re.search(r'\bfirst\s+supplier\b', message, re.IGNORECASE):
+            named = [supplier['name'] for supplier in snapshot['company']['suppliers']
+                     if material_id in supplier.get('materials', [])][:1]
+        if not named and re.search(r'\bselected\s+supplier\b', message, re.IGNORECASE):
+            selected_id = (snapshot.get('plan') or {}).get('selected_offer_id')
+            selected_name = next((offer.get('supplier_name') for offer in compact['offers']
+                                  if offer.get('offer_id') == selected_id), None)
+            if selected_name:
+                named = [selected_name]
+        explicit = re.search(r'\bSubject:\s*(.*?)\.\s*Body:\s*(.+)\Z', message, re.IGNORECASE)
+        if len(named) == 1 and explicit:
+            parameters = {'recipient_label': named[0], 'subject': explicit.group(1).strip(),
+                          'body': explicit.group(2).strip()}
+        elif len(named) == 1 and set(parameters) != {'subject', 'body', 'recipient_label'}:
+            material_name = next(row['name'] for row in snapshot['company']['materials']
+                                 if row['material_id'] == material_id)
+            parameters = {'recipient_label': named[0], 'subject': 'Synthetic quote request',
+                          'body': f'Please provide a quotation, available capacity and delivery lead time for {material_name}. This is a synthetic demonstration only.'}
+
         if (proc['action'] != 'simulate_email' or material_id is None or
                 set(parameters) != {'subject', 'body', 'recipient_label'} or
                 not re.search(r'\b(?:simulate|draft|prepare)\b.*\b(?:email|message)\b',
@@ -660,6 +740,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
         selected_name = next((offer.get('supplier_name') for offer in compact['offers']
                               if offer.get('offer_id') == selected), None)
         recipient_stated = (parameters['recipient_label'].casefold() in message.casefold() or
+                            bool(re.search(r'\bfirst\s+supplier\b', message, re.IGNORECASE)
+                                 and named == matching) or
                             bool(re.search(r'\bselected\s+supplier\b', message, re.IGNORECASE)
                                  and selected_name == parameters['recipient_label']))
         numerical_claims = re.findall(r'(?<!\w)\d+(?:\.\d+)?(?!\w)', subject + ' ' + body)
@@ -778,7 +860,7 @@ class VertexOperatorProvider:
                 if allowed:
                     citations['items']['enum'] = allowed
             config = types.GenerateContentConfig(
-                temperature=0, max_output_tokens=512, response_mime_type='application/json',
+                temperature=0, max_output_tokens=1024, response_mime_type='application/json',
                 response_json_schema=response_schema,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
             response = client.models.generate_content(model=self.model, contents=prompt, config=config)

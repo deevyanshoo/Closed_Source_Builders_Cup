@@ -231,3 +231,46 @@ def test_typed_review_loaded_sample_quotes_proposes_only_current_owned_drafts():
     with pytest.raises(OperatorValidationError):
         turn(value, 'Review loaded copper sample quotes', SmartProvider('review_quotes', 'copper',
              parameters={'offer_ids': [value['offers'][0]['offer_id']]}))
+
+
+def test_correct_plain_supplier_answer_is_bound_to_canonical_supplier_fact():
+    value = snapshot()
+    supplier = next(s for s in value['company']['suppliers'] if s['name'].startswith('Europa Copper'))
+    response = turn(value, f"What is {supplier['name']} supplier lead time for copper?",
+                    SmartProvider('answer', 'copper', answer='Europa Copper lead time is 10 days.'))
+    assert supplier['name'] in response['assistant_text']
+    assert '10 days' in response['assistant_text']
+    with pytest.raises(OperatorValidationError):
+        turn(value, f"What is {supplier['name']} supplier lead time for copper?",
+             SmartProvider('answer', 'copper', answer='Europa Copper lead time is 45 days.'))
+
+
+def test_utility_does_not_use_ancillary_evidence_answer_as_action_text():
+    value = snapshot()
+    recipient = value['company']['suppliers'][0]['name']
+    parameters = {'subject': 'Copper quote inquiry', 'body': 'Please review our fictional request.',
+                  'recipient_label': recipient}
+    response = turn(value, f'Draft a simulated email to {recipient} about copper.',
+                    SmartProvider('simulate_email', 'copper', parameters=parameters,
+                                  answer='Preparing your requested email.'))
+    assert response['candidate']['parameters']['body'] == parameters['body']
+    assert response['status'] == 'proposal'
+
+
+def test_explicit_email_fields_are_read_from_user_request_when_router_omits_them():
+    value = snapshot();recipient = value['company']['suppliers'][0]['name']
+    response = turn(value, f'Draft a simulated email to {recipient} about copper. '
+                    'Subject: Copper quote inquiry. Body: Please review our fictional request.',
+                    SmartProvider('simulate_email', 'copper', parameters={'subject': 'Copper quote inquiry', 'view': 'company'}))
+    assert response['candidate']['parameters'] == {'material_id': 'copper',
+        'recipient_label': recipient, 'subject': 'Copper quote inquiry',
+        'body': 'Please review our fictional request.'}
+
+
+def test_named_email_request_has_a_safe_default_when_router_arguments_are_incomplete():
+    value = snapshot();recipient=value['company']['suppliers'][0]['name']
+    response=turn(value,f'Draft a simulated email to {recipient} about copper.',
+                  SmartProvider('simulate_email','copper',parameters={'view':'outbox'}))
+    assert response['status']=='proposal'
+    assert response['candidate']['parameters']['recipient_label']==recipient
+    assert 'synthetic demonstration' in response['candidate']['parameters']['body']

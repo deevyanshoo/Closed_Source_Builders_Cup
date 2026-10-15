@@ -679,6 +679,47 @@ def test_proposal_replaced_during_independent_verification_never_searches():
     asyncio.run(check())
 
 
+def test_provider_turn_complete_during_verifier_preserves_fresh_approval():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(args, version, key, on_progress):
+            searches.append((args, version))
+            await on_progress('started')
+            return turn(session, 'completed', text='Sourced answer ready.')
+
+        _, session, socket, provider, calls, task = await scenario(
+            verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await provider.spoken('output', '', complete=True)
+        await socket.next('turn_complete')
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'started'
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert (await socket.next('research_progress'))['phase'] == 'completed'
+        assert searches == [({'proposal_id': 'proposal-1'}, 1)]
+        assert [name for name, *_ in calls] == ['prepare_research']
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
 def test_finalized_consent_starts_one_research_without_model_call_and_drains_events():
     async def check():
         started = asyncio.Event()

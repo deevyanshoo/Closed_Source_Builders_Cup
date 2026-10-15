@@ -1156,7 +1156,8 @@ async def run_live_voice(
                                 if research_gate['armed']:
                                     await progress('awaiting_consent', research_gate)
                             elif research_gate is not None:
-                                if pending_confirm is None and not research_gate['consumed']:
+                                if (pending_confirm is None and not research_gate['consumed']
+                                        and consent_task is None):
                                     research_gate['input_spoken'] = ''
                                     research_gate['input_overflow'] = False
                                     research_gate['confirmed'] = False

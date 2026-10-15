@@ -28,6 +28,11 @@ export function workspaceSearch(search: string, view: WorkspaceView, stage: Proc
   return next ? `?${next}` : '';
 }
 
+export function showWorkspaceActivity(view: WorkspaceView, stage: ProcurementStage, busy: string): boolean {
+  const stages: Record<string, ProcurementStage> = { extract: 'add', plan: 'compare', recovery: 'compare', rfq: 'rfq' };
+  return !(view === 'procurement' && stages[busy] === stage);
+}
+
 export function CompanyHub({ companies, current, busy, onOpen }: { companies: CompanyProfile[]; current?: CompanyProfile; busy: boolean; onOpen: (id: string) => void }) {
   const [query, setQuery] = useState('');
   const matches = companies.filter(item => `${item.name} ${item.sector}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
@@ -35,7 +40,7 @@ export function CompanyHub({ companies, current, busy, onOpen }: { companies: Co
     <div className="zoorq-hub-intro"><span className="demo-kicker">Company intelligence</span><h1>Where resilience begins.</h1><p>Choose a company to see the signals, supply position and decisions that matter now.</p>
       {current && <button type="button" className="demo-button" disabled={busy} onClick={() => onOpen(current.company_id)}>Continue {current.name} →</button>}</div>
     <div className="zoorq-hub-list"><div className="zoorq-hub-list-head"><div><span className="demo-kicker">Your workspaces</span><h2>All companies <small>{companies.length}</small></h2></div><label><span>Search companies</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Company or sector" /></label></div>
-      <div className="zoorq-company-grid">{matches.map(item => <article key={item.company_id} className="zoorq-company-card"><div><span className="demo-kicker">{item.sector}</span><h3>{item.name}</h3><p>{item.description}</p></div><div className="zoorq-company-card-foot"><span>{item.materials.length} materials · {item.orders.length} orders</span><button type="button" className="demo-link" aria-label={`Open ${item.name} workspace`} disabled={busy} onClick={() => onOpen(item.company_id)}>Open workspace →</button></div></article>)}</div>
+      <div className="zoorq-company-grid">{matches.map(item => <article key={item.company_id} className="zoorq-company-card"><div><span className="demo-kicker">{item.sector}</span><h3>{item.name}</h3><p>{item.size} · {[...new Set(item.locations.map(location => location.country))].join(' · ')}</p></div><div className="zoorq-company-card-foot"><span>{item.materials.length} materials · {item.orders.length} orders</span><button type="button" className="demo-link" aria-label={`Open ${item.name} workspace`} disabled={busy} onClick={() => onOpen(item.company_id)}>Open workspace →</button></div></article>)}</div>
       {!matches.length && <p role="status">No companies match “{query}”. Try a company or sector name.</p>}
     </div>
   </section>;

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
-import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview } from './zoorq-workspace';
+import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
 
 const offer = (version: number, status = 'corrected'): OfferView => ({
   offer_id: 'q1', version, status, synthetic: true,
@@ -72,6 +72,22 @@ describe('ZOORQ workspace routes', () => {
     const rfqStage = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
     expect(rfqStage).toContain('I reviewed this plan and understand the RFQ is an unsent draft');
     expect(rfqStage).not.toContain('demo-plan-form');
+  });
+  it('shows the exact selected comparison before RFQ review and guides an empty stage', () => {
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
+    expect(html).toContain('Selected supplier');
+    expect(html).toContain('Swift');
+    expect(html).toContain('86000 USD');
+    expect(html).toContain('1000 kg');
+    const noPlan = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan: null, rfq: null }} initialView="procurement" initialStage="rfq" />);
+    expect(noPlan).toContain('Compare accepted quotes first');
+    expect(noPlan).toContain('Open comparison');
+  });
+  it('keeps a pending operation visible when navigation leaves its inline loader', () => {
+    expect(showWorkspaceActivity('procurement', 'add', 'extract')).toBe(false);
+    expect(showWorkspaceActivity('procurement', 'rfq', 'plan')).toBe(true);
+    expect(showWorkspaceActivity('news', 'add', 'extract')).toBe(true);
+    expect(showWorkspaceActivity('hub', 'compare', 'recovery')).toBe(true);
   });
   it('restores only a destination and stage from the URL', () => {
     expect(readWorkspaceLocation('?view=procurement&stage=compare&company=other')).toEqual({ view: 'procurement', stage: 'compare' });

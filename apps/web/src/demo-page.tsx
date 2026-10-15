@@ -11,7 +11,7 @@ import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
-import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceOverview, workspaceSearch } from './zoorq-workspace';
+import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
 import type { ProcurementStage, WorkspaceView } from './zoorq-workspace';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -356,6 +356,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     if (typeof window !== 'undefined') {
       const search = workspaceSearch(window.location.search, nextView, nextStage);
       window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`);
+      window.scrollTo({ top: 0, behavior: 'auto' });
     }
   }
   useEffect(() => {
@@ -540,7 +541,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       }, () => api.session());
       if (epoch !== epochRef.current) return;
       restoreSession(session, epoch);
-      if (session.company?.company_id === companyId && session.context_version !== undefined) navigate('overview');
+      if (session.company?.company_id === companyId && session.context_version !== undefined) navigate('overview', 'add');
       else setError('The requested company could not be confirmed. Review the current session before opening a workspace.');
     } catch (e) {
       if (epoch === epochRef.current) setError(`Could not confirm the current company. The workspace is cleared until the session can be reloaded. ${message(e)}`);
@@ -659,7 +660,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     </>}
     {company && <section hidden={view !== 'news'} className="zoorq-news-destination"><NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} onAction={seedNewsAction} /></section>}
     {view === 'hub' && companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current company remains available.</p>}
-    {progress && !['extract', 'plan', 'recovery', 'rfq'].includes(busy) && <ActivityIndicator {...progress} />}
+    {progress && showWorkspaceActivity(view, stage, busy) && <ActivityIndicator {...progress} />}
     {error && <div className="demo-error" role="alert"><strong>Workspace update.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), (session, epoch) => { newsAutoRecoveryUsedRef.current = false; restoreSession(session, epoch); })}>Refresh session</button></div>}
     {riskScope && <div className="zoorq-risk-container" hidden={view !== 'inventory' || !riskOpen}><RiskMonitor scope={riskScope} onReport={(report, scope) => setRiskSnapshot({ scope, report })} onOpenCompany={switchCompany} onSeedPrompt={seedRiskMessage} /></div>}
     {view === 'procurement' && stage === 'add' && <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
@@ -697,6 +698,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       {busy === 'rfq' && progress && <ActivityIndicator {...progress} />}
       <p className="demo-muted">The draft uses the current selected plan and quote. The buyer total is a scenario comparison, not the supplier's commercial quote.</p>
       {state.dirty && <p className="demo-alert">Inputs changed. Run a new comparison before reviewing, preparing or downloading an RFQ draft.</p>}
+      {!state.dirty && state.plan?.selected_offer_id ? <dl className="zoorq-rfq-summary"><div><dt>Selected supplier</dt><dd>{supplierDisplayName(state.plan.alternatives.find(item => item.offer_id === state.plan!.selected_offer_id)?.supplier ?? 'Supplier unavailable')}</dd></div><div><dt>Requested purchase</dt><dd>{requiredPurchase(state.plan)} {state.plan.quantity_unit ?? 'kg'} · {state.plan.material}</dd></div><div><dt>Needed by</dt><dd>{state.plan.need_by}</dd></div><div><dt>Buyer plan total</dt><dd>{state.plan.total_cost ?? 'Unavailable'} {state.plan.reporting_currency}</dd></div></dl> : !state.dirty && <div className="demo-alert"><strong>Compare accepted quotes first.</strong><p>Choose a feasible supplier in the comparison before reviewing an RFQ.</p><button type="button" className="demo-link" onClick={() => navigate('procurement', 'compare')}>Open comparison</button></div>}
       <label className="demo-review-check"><input type="checkbox" checked={state.reviewed} disabled={state.dirty || !state.plan?.selected_offer_id || /^0(?:\.0+)?$/.test(state.plan ? requiredPurchase(state.plan) : '0')} onChange={e => dispatch({ type: 'reviewed', value: e.target.checked })} />I reviewed this plan and understand the RFQ is an unsent draft</label>
       <div className="demo-actions"><button type="button" className="demo-button" disabled={state.dirty || !state.reviewed || !state.plan?.selected_offer_id || !!busy} onClick={prepareRfq}>{busy === 'rfq' ? 'Preparing draft…' : 'Prepare unsent RFQ'}</button></div>
       {state.rfq && <div className="demo-draft"><p><strong>Draft for {supplierDisplayName(state.rfq.supplier)}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{displaySupplierMentions(state.rfq.text, [state.rfq.supplier])}</pre><div className="demo-actions"><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button><button type="button" className="demo-link" onClick={() => navigate('drafts')}>View saved draft →</button></div></div>}

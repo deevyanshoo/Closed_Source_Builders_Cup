@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView, RecoveryView } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, claimOperatorVoiceRequest, confirmVoiceTransition, focusCurrentProposal, focusValidOperatorSeed, focusVoiceReturn, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, proposalPreviewKey, proposalPreviewReady, researchFromTurn, resolveOperatorEvidence, routeVoiceExit, scopedPreparedDrafts, scopedVoiceHistory, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface, voiceRequestIsCurrent } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, claimOperatorVoiceRequest, confirmVoiceTransition, focusCurrentProposal, focusValidOperatorSeed, focusVoiceReturn, formatOperatorAttention, formatOperatorWatch, formatRiskCheckedAt, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, proposalPreviewKey, proposalPreviewReady, researchFromTurn, resolveOperatorEvidence, routeVoiceExit, scopedPreparedDrafts, scopedVoiceHistory, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface, voiceRequestIsCurrent } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,28 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('gives a pending proposal the main review flow before attention and history', () => {
+    const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: true, agents: [], attention: [], watch_items: [], limitations: [] };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn, overview }} riskSummary={{ high: 1, medium: 2, low: 3, checkedAt: '2026-10-15T23:25:33Z' }}
+      onSession={() => {}} onUnknown={() => {}} />);
+    const reviewStart = html.indexOf('class="demo-assistant-review-flow"');
+    const proposalAt = html.indexOf('aria-label="Current proposal requiring review"');
+    const attentionAt = html.indexOf('Company attention', proposalAt);
+    const historyAt = html.indexOf('aria-label="Assistant conversation"');
+    const composerAt = html.indexOf('class="demo-operator-chat demo-assistant-composer"');
+    expect(reviewStart).toBeGreaterThan(0);
+    expect(reviewStart).toBeLessThan(proposalAt);
+    expect(proposalAt).toBeLessThan(attentionAt);
+    expect(attentionAt).toBeLessThan(historyAt);
+    expect(historyAt).toBeLessThan(composerAt);
+    expect(html).not.toContain('2026-10-15T23:25:33Z');
+  });
+  it('formats risk check times for people and gives invalid values a safe fallback', () => {
+    expect(formatRiskCheckedAt('2026-10-15T23:25:33.039261+00:00')).toMatch(/2026/);
+    expect(formatRiskCheckedAt('2026-10-15T23:25:33.039261+00:00')).not.toContain('T23:25:33');
+    expect(formatRiskCheckedAt('not-a-date')).toBe('time unavailable');
+  });
   it('offers recent earlier voice exchanges only for the current company and session', () => {
     const answered = { ...turn, status: 'completed' as const, proposal: null, assistant_text: 'Earlier copper answer.' };
     const exchanges = [{ id: 'old', question: 'Earlier question?', turn: answered }, { id: 'latest', question: 'Latest question?', turn: { ...answered, assistant_text: 'Latest answer.' } }];
@@ -418,7 +440,7 @@ describe('operator response boundary', () => {
     expect(html).toContain('Your message');
     expect(html).toMatch(/aria-label="Open voice conversation"[^>]* disabled=""/);
   });
-  it('keeps attention compact while review arguments, checkbox, and Apply remain outside closed traces', () => {
+  it('keeps attention compact after the active proposal while review controls stay outside closed traces', () => {
     const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: true,
       agents: [], attention: [{ material_id: 'copper', synthetic: true, stock_cover_days: '12', minimum_lead_time_days: 15 }],
       watch_items: [], limitations: [] };
@@ -429,7 +451,7 @@ describe('operator response boundary', () => {
     expect(html).toContain('1 signal');
     expect(html).toContain('Stock cover: 12 days');
     expect(html).toContain('Exact proposed arguments');
-    expect(html.indexOf('Exact proposed arguments')).toBeGreaterThan(html.indexOf('Stock cover: 12 days'));
+    expect(html.indexOf('Exact proposed arguments')).toBeLessThan(html.indexOf('Stock cover: 12 days'));
     expect(html.indexOf('Exact proposed arguments')).toBeLessThan(html.indexOf('Assistant conversation'));
     expect(html).toContain('I reviewed the exact arguments');
     expect(html).toContain('Apply reviewed proposal');

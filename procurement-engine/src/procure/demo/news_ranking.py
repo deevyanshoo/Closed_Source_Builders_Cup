@@ -10,6 +10,13 @@ _OPERATING = ('production', 'supply', 'shipment', 'shipping', 'export', 'import'
               'port', 'freight', 'terminal', 'pipeline', 'inventory', 'price')
 _CONSUMER = ('farmer', 'farmers', 'household', 'home heating', 'toy', 'lego',
              'cookout', 'barbecue', 'residential')
+_MARKET_CATALYST = ('stock', 'stocks', 'shares', 'share price', 'price target',
+                    'analyst', 'volatility', 'coinmarketcap', 'crypto', 'token',
+                    'ticker', 'nasdaq', 'nyse')
+_CHEMICAL_CATALYST = ('chemical', 'petrochemical', 'process', 'industrial',
+                      'refinery', 'refining', 'cracker', 'feedstock', 'plant',
+                      'reactor', 'catalytic', 'synthesis', 'polymer', 'methanol',
+                      'naphtha', 'hydrogen', 'ethylene', 'ammonia')
 _SECTOR = {'petrochemical blending': ('petrochemical', 'chemical', 'refinery', 'cracker', 'feedstock'),
            'electrical cable manufacturing': ('cable', 'electrical', 'wire', 'conductor')}
 _ORDER = {'strong': 3, 'related': 2, 'background': 1, 'unmatched': 0}
@@ -46,8 +53,12 @@ def rank_item(item, company):
     event = _has(text, _EVENT)
     operation = _has(text, _OPERATING)
     incidental = _has(text, _CONSUMER) and not sector and not route
+    metaphorical_catalyst = (set(item.get('matched_materials') or ()) == {'catalyst'}
+        and _has(text, _MARKET_CATALYST) and not _has(text, _CHEMICAL_CATALYST))
     if kind == 'unmatched':
         strength, reason = 'unmatched', 'No recorded company exposure is named.'
+    elif metaphorical_catalyst:
+        strength, reason = 'background', 'Catalyst is used in a financial context without chemical operations.'
     elif material and event and (sector or route or operation) and not incidental:
         strength, reason = 'strong', 'Recorded material and an operating event appear together.'
     elif route and event:

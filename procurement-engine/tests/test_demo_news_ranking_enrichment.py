@@ -29,6 +29,23 @@ def test_operational_event_precedes_incidental_material_mentions_and_cap():
     assert 'operating event' in ranked[0]['ranking_reason']
 
 
+def test_financial_catalyst_metaphors_do_not_outrank_physical_material_news():
+    titles = [
+        'Plasma (XPL) Price Movement: BVNK Catalyst and Volatility - CoinMarketCap',
+        'BIIB Stock: JPMorgan Sees Increasingly Compelling Catalyst Path For Biogen, Raises Price Target To $300 - Yahoo Finance',
+        'Refinery process catalyst supply disrupted after petrochemical plant shutdown',
+        'Naphtha price rises as feedstock supply tightens - TradingView',
+    ]
+    rows = [_company_item({'title': title, 'url': f'https://example.org/{index}'}, ATLAS)
+            for index, title in enumerate(titles)]
+    ranked = rank_items(rows, ATLAS, as_of=NOW)
+    by_title = {row['title']: row for row in ranked}
+    assert [by_title[title]['relevance_strength'] for title in titles] == [
+        'background', 'background', 'strong', 'related']
+    assert ranked[0]['title'] == titles[2]
+    assert ranked[1]['title'] == titles[3]
+
+
 def test_unknown_publication_date_does_not_become_new_from_first_seen():
     rows = [_company_item({'title': 'Naphtha cracker shutdown delays production',
                            'published_at': published, 'first_seen_at': seen,

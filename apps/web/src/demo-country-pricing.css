@@ -1,0 +1,7 @@
+.demo-pricing-results{margin-top:20px;display:grid;gap:10px}
+.demo-pricing-results h3{font-size:12px;text-transform:uppercase;margin:12px 0 0}
+.demo-pricing-results details{border:1px solid #aaa;background:#fff;padding:12px 14px;font-size:12px;line-height:1.5}
+.demo-pricing-results summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 14px}
+.demo-pricing-results p,.demo-pricing-results li{overflow-wrap:anywhere}
+.demo-pricing-results code{font-size:11px;color:#a5211b}
+.demo-pricing-missing{color:#a5211b}

@@ -11,6 +11,8 @@ import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { CountryPricingPanel } from './demo-country-pricing';
+import type { CountryPricing } from './demo-country-pricing';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
 export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
@@ -286,6 +288,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
+  const [pricing, setPricing] = useState<CountryPricing | null>(null);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);
   const [companyError, setCompanyError] = useState('');
@@ -654,6 +657,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
+    {state.session && company && <CountryPricingPanel key={`${company.company_id}:${state.session.context_version}`} view={pricing?.company_id === company.company_id ? pricing : null} onLoad={setPricing} />}
     {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
       <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. A delay changes only the selected supplier arrival assumption.</p>
       {busy === 'recovery' && progress && <ActivityIndicator {...progress} />}

@@ -236,7 +236,8 @@ describe('demo response state', () => {
     expect(html).toContain('News workspace');
     expect(html).toContain('Operator');
     expect(html).toContain('current reviewed comparison');
-    expect(html).toContain('Turn supply risks into reviewed actions');
+    expect(html).toContain('Read the signals. Review the impact. Choose your next action.');
+    expect(html).toContain('<h1>Solara Cables</h1>');
     expect(html).toContain('Fictional company profile · changes kept separately for this visit');
     expect(html).not.toContain('context v1');
     expect(html).toContain('demo-operator-dock');

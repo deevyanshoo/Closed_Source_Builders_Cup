@@ -14,7 +14,8 @@ import requests
 from google.auth.transport.requests import AuthorizedSession
 
 from .company import list_companies
-from .news import _now
+from .news import _now, _company_item, MAX_ITEMS
+from .news_ranking import rank_items
 
 MAX_BUNDLE_BYTES = 2 * 1024 * 1024
 MAX_ATTEMPT_BYTES = 8 * 1024
@@ -24,7 +25,10 @@ _ALLOWED_ITEM = {'item_id', 'title', 'url', 'publisher', 'provider', 'published_
                  'retrieved_at', 'source_tier', 'source_reliability', 'reliability_reason', 'synthetic',
                  'source_id', 'matched_materials', 'matched_routes', 'matched_currencies',
                  'matched_operations', 'relevance_kind', 'relevance_score', 'category',
-                 'relevance_reason', 'implication', 'implication_confidence', 'next_steps'}
+                 'relevance_reason', 'implication', 'implication_confidence', 'next_steps',
+                 'relevance_strength', 'ranking_reason', 'article'}
+_ARTICLE_FIELDS = {'status', 'method', 'fetched_at', 'title', 'published_at',
+                   'excerpt', 'content_chars', 'reason'}
 _ALLOWED_SOURCE = {'source_id', 'name', 'state', 'last_checked_at', 'reason'}
 _ALLOWED_FX = {'base', 'quote', 'rate', 'observation_date', 'provider', 'retrieved_at', 'informational'}
 _ALLOWED_COLLECTION = {'attempted_at', 'news_success_at', 'fx_success_at', 'status', 'published'}
@@ -98,6 +102,32 @@ def validate_bundle(bundle, profiles=None):
                 if item.get(key): _stamp(item[key])
             if not isinstance(item.get('url'), str) or not item['url'].startswith('https://'):
                 raise ValueError('Invalid article URL')
+            if 'relevance_strength' in item and item['relevance_strength'] not in (
+                    'strong', 'related', 'background', 'unmatched'):
+                raise ValueError('Invalid relevance strength')
+            if 'ranking_reason' in item and (not isinstance(item['ranking_reason'], str)
+                                             or len(item['ranking_reason']) > 240):
+                raise ValueError('Invalid ranking reason')
+            if 'article' in item:
+                article = item['article']
+                if not isinstance(article, dict) or set(article) != _ARTICLE_FIELDS:
+                    raise ValueError('Invalid article fields')
+                if article['status'] not in ('enriched', 'unavailable', 'unsupported') or article['method'] != 'scrapling-static':
+                    raise ValueError('Invalid article status')
+                _stamp(article['fetched_at'])
+                for key, cap in (('title', 240), ('excerpt', 320), ('reason', 100)):
+                    if article[key] is not None and (not isinstance(article[key], str) or len(article[key]) > cap):
+                        raise ValueError('Invalid article text')
+                published = article['published_at']
+                if published is not None:
+                    if not isinstance(published, str):
+                        raise ValueError('Invalid article publication date')
+                    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', published):
+                        datetime.fromisoformat(published)
+                    else:
+                        _stamp(published)
+                if type(article['content_chars']) is not int or not 0 <= article['content_chars'] <= MAX_BUNDLE_BYTES:
+                    raise ValueError('Invalid article length')
         for fx in view['fx']:
             if fx.get('retrieved_at'): _stamp(fx['retrieved_at'])
     encoded = json.dumps(bundle, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
@@ -313,6 +343,8 @@ class SnapshotNewsService:
             attempt = self._attempt
         if bundle and company.get('company_id') in bundle['views']:
             view = json.loads(json.dumps(bundle['views'][company['company_id']]))
+            view['items'] = rank_items((_company_item(item, company) for item in view['items']),
+                                       company, MAX_ITEMS, as_of=now)
             company_collection = view.get('collection') or bundle['collection']
             collection = {**company_collection, 'slot': bundle['slot'],
                           'completed_at': bundle['completed_at'], 'mode': 'scheduled'}
@@ -331,6 +363,8 @@ class SnapshotNewsService:
             if age > timedelta(hours=2) or stale_source or failed_new_attempt or view['cache_state'] in ('stale', 'unavailable'):
                 view['cache_state'] = 'stale' if view['items'] or view['fx'] or stale_source else 'unavailable'
             view['collection'] = collection
+            if callable(getattr(self.live, 'present_view', None)):
+                view = self.live.present_view(view, company)
             return view
         fallback = self.live.get(company, force=force)
         fallback['collection'] = {'status': attempt['status'] if attempt else 'live_fallback',

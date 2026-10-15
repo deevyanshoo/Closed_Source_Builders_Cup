@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, validateAudioCapture } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, confirmVoiceTransition, focusValidOperatorSeed, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, validateAudioCapture, VoiceConversationSurface } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,55 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('keeps one voice connection for reviewed research and closes it for business Apply', () => {
+    let ends = 0, revisions = 0;
+    const close = () => { ends += 1; };
+    const reset = () => { revisions += 1; };
+    expect(confirmVoiceTransition('research', true, close, reset)).toBe(true);
+    expect(confirmVoiceTransition('research', true, close, reset)).toBe(true);
+    expect([ends, revisions]).toEqual([0, 0]);
+    expect(confirmVoiceTransition('rfq', true, close, reset)).toBe(false);
+    expect([ends, revisions]).toEqual([1, 1]);
+    expect(confirmVoiceTransition('research', false, close, reset)).toBe(false);
+    expect([ends, revisions]).toEqual([1, 2]);
+  });
+  it('shows server-confirmed research in the same voice surface after its proposal clears', () => {
+    const result = { research_id: 'r-voice-confirm', query: 'Public port status', status: 'completed' as const, checked_at: '2026-10-15T10:00:00Z', answer: 'Ports remain open.', sources: [{ source_id: 's1', title: 'Port authority', url: 'https://example.org/port' }] };
+    const applied = { status: 'applied' as const, company_id: scope.companyId, context_version: scope.contextVersion, kind: 'research' as const, result,
+      session: { session_id: scope.sessionId, company: { company_id: scope.companyId }, context_version: scope.contextVersion } as never };
+    const next = applyOperatorResult({ ...initialOperatorState, scope, turn: { ...turn, proposal: { ...proposal, kind: 'research' } } }, { type: 'applied', scope, outcome: applied });
+    expect(next.turn).toBeNull();
+    expect(latestVoiceResearch(next, scope)).toEqual(result);
+    const html = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>} research={latestVoiceResearch(next, scope)} />);
+    expect(html).toContain('Ports remain open.');
+    expect(html).toContain('Port authority');
+    expect(html).toContain('Listening');
+    expect(html.match(/Ports remain open\./g)).toHaveLength(1);
+    expect(latestVoiceResearch(next, { ...scope, companyId: 'other' })).toBeNull();
+  });
+  it('focuses an exact-scope seeded composer whether the dock is newly opened or already open', () => {
+    const seed = { id: 8, ...scope, message: 'Ask about this public story.' };
+    let focusCount = 0;
+    expect(focusValidOperatorSeed(seed, scope, () => { focusCount += 1; })).toBe(seed.message);
+    expect(focusValidOperatorSeed({ ...seed, id: 9 }, scope, () => { focusCount += 1; })).toBe(seed.message);
+    expect(focusCount).toBe(2);
+    expect(focusValidOperatorSeed({ ...seed, companyId: 'other' }, scope, () => { focusCount += 1; })).toBeNull();
+    expect(focusCount).toBe(2);
+  });
+  it('keeps a compact voice trigger next to Send while the dedicated voice surface is closed', () => {
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('aria-label="Open voice conversation"');
+    expect(html.indexOf('aria-label="Open voice conversation"')).toBeGreaterThan(html.indexOf('Your message'));
+    expect(html.indexOf('aria-label="Open voice conversation"')).toBeLessThan(html.indexOf('>Send</button>'));
+    expect(html).toMatch(/class="demo-voice-screen"[^>]* hidden=""/);
+  });
+  it('places the current proposal in the dedicated voice surface with one review card', () => {
+    const html = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>} proposal={<div role="region" aria-label="Current proposal requiring review">Public query to share: Hormuz status</div>} />);
+    expect(html).toContain('role="dialog" aria-modal="true"');
+    expect(html).toContain('Listening');
+    expect(html).toContain('Public query to share: Hormuz status');
+    expect(html.match(/Current proposal requiring review/g)).toHaveLength(1);
+  });
   it('uses only complete current-company prepared drafts to refresh the Drafts workspace', () => {
     const full = { draft_id: 'd1', kind: 'email', status: 'draft_unsent', company_id: scope.companyId, material_id: 'copper', recipient_label: 'Supplier', subject: 'Availability', body: 'Please confirm.', created_at: '2026-10-15T10:00:00Z' };
     expect(scopedPreparedDrafts([full], scope)).toEqual([full]);
@@ -149,14 +198,14 @@ describe('operator response boundary', () => {
     expect(html).not.toContain('Exact proposed arguments');
     expect(html).toContain('Start conversation');
   });
-  it('keeps voice first, scoped answers readable, and the typed composer last with evidence collapsed', () => {
+  it('keeps scoped answers readable, voice mode closed, and the composer last with evidence collapsed', () => {
     const first = { ...turn, turn_id: 'first', status: 'completed' as const, proposal: null, assistant_text: 'A first answer.' };
     const second = { ...turn, turn_id: 'second', status: 'completed' as const, proposal: null, assistant_text: 'A second answer.' };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
       initialState={{ ...initialOperatorState, scope, turn: second, turns: [first, second] }}
       news={news} onSession={() => {}} onUnknown={() => {}} />);
     expect(html).toContain('aria-label="Assistant conversation"');
-    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('A first answer.'));
+    expect(html).toMatch(/class="demo-voice-screen"[^>]* hidden=""/);
     expect(html.indexOf('A first answer.')).toBeLessThan(html.indexOf('A second answer.'));
     expect(html.indexOf('A second answer.')).toBeLessThan(html.indexOf('Your message'));
     expect(html.match(/<details class="demo-assistant-trace"/g)).toHaveLength(2);
@@ -180,18 +229,17 @@ describe('operator response boundary', () => {
     expect(html).toContain(raw);
     expect(resolveOperatorEvidence('q1', scope, null, [namedQuote]).title).toBe('Europa Copper SA');
   });
-  it('puts the voice console immediately after the heading even with risks and an unavailable provider', () => {
+  it('keeps the compact chat and disabled mic available with risks and an unavailable provider', () => {
     const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: false,
       agents: [], attention: [], watch_items: [], limitations: [] };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true}
       initialState={{ ...initialOperatorState, scope, overview }}
       riskSummary={{ high: 1, medium: 0, low: 0, checkedAt: '2026-10-15' }} onSession={() => {}} onUnknown={() => {}} />);
-    expect(html.indexOf('>Operator</h2>')).toBeLessThan(html.indexOf('Start conversation'));
-    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('Current company risks:'));
-    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('Company attention'));
-    expect(html.indexOf('Start conversation')).toBeLessThan(html.indexOf('The agent provider is unavailable'));
+    expect(html.indexOf('>Operator</h2>')).toBeLessThan(html.indexOf('Current company risks:'));
+    expect(html.indexOf('Current company risks:')).toBeLessThan(html.indexOf('Your message'));
     expect(html).toContain('The agent provider is unavailable');
     expect(html).toContain('Your message');
+    expect(html).toMatch(/aria-label="Open voice conversation"[^>]* disabled=""/);
   });
   it('keeps attention compact while review arguments, checkbox, and Apply remain outside closed traces', () => {
     const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: true,

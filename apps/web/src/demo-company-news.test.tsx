@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { filterNewsItems, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { feedPublicationLabel, filterNewsItems, rankNewsItems, selectNewsItem, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import type { CompanyProfile, NewsView } from './demo-api';
 
 const company: CompanyProfile = {
@@ -21,6 +21,26 @@ const news: NewsView = {
 };
 
 describe('company news workspace', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T10:00:00Z')); });
+  afterEach(() => vi.useRealTimers());
+  it('ranks operational fit ahead of incidental material mentions, with stable newest sorting', () => {
+    const background = { ...news.items[0], item_id: 'background', relevance_strength: 'background' as const, published_at: '2026-10-15T09:00:00Z' };
+    const strong = { ...news.items[0], item_id: 'strong', relevance_strength: 'strong' as const, published_at: '2026-10-14T09:00:00Z' };
+    const related = { ...news.items[0], item_id: 'related', relevance_strength: 'related' as const, published_at: '2026-10-15T08:00:00Z' };
+    expect(rankNewsItems([background, related, strong], 'relevant').map(item => item.item_id)).toEqual(['strong', 'related', 'background']);
+    expect(rankNewsItems([background, related, strong], 'newest').map(item => item.item_id)).toEqual(['background', 'related', 'strong']);
+    expect(rankNewsItems([strong, { ...strong, item_id: 'a-strong' }], 'relevant').map(item => item.item_id)).toEqual(['a-strong', 'strong']);
+  });
+  it('defaults to seven days and excludes unknown, future and background dates unless disclosed', () => {
+    const dated = { ...news.items[0], published_at: '2026-10-14T09:00:00Z' };
+    const old = { ...dated, item_id: 'old', published_at: '2026-10-01T09:00:00Z' };
+    const unknown = { ...dated, item_id: 'unknown', published_at: null, first_seen_at: '2026-10-15T09:00:00Z' };
+    const future = { ...dated, item_id: 'future', published_at: '2026-10-16T09:00:00Z' };
+    const background = { ...dated, item_id: 'background', relevance_strength: 'background' as const };
+    expect(filterNewsItems([dated, old, unknown, future, background], 'all', 'all', false, { now: Date.parse('2026-10-15T10:00:00Z') }).map(item => item.item_id)).toEqual(['a']);
+    expect(filterNewsItems([dated, old, unknown, future, background], 'all', 'all', false, { now: Date.parse('2026-10-15T10:00:00Z'), age: '30d', includeUnknown: true, includeBackground: true }).map(item => item.item_id)).toEqual(['a', 'old', 'unknown', 'background']);
+    expect(selectNewsItem('from-previous-company', [dated])?.item_id).toBe('a');
+  });
   it('shows independent successful news, FX and attempted refresh times', () => {
     const scheduled = { ...news, collection: { mode: 'scheduled', status: 'partial',
       news_success_at: '2026-10-14T08:00:00Z', fx_success_at: '2026-10-14T09:00:00Z',
@@ -60,41 +80,72 @@ describe('company news workspace', () => {
     expect(html).toContain('Coverage: stale');
     expect(html).toContain('EIA: unavailable');
     expect(html).toContain('Timeout');
-    expect(html).toContain('Publication time unavailable');
-    expect(html).toContain('Conditional implication (low)');
-    expect(html).toContain('If the lane is affected');
+    expect(html).toContain('Include unknown publication dates');
+    expect(html).toContain('No stories match these controls');
     expect(html).toContain('Coverage is incomplete');
-    expect(html).toContain('https://example.com/copper');
-    expect(html).not.toContain('href="javascript:');
+    const dated = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [{ ...news.items[0], published_at: '2026-10-14T09:00:00Z' }] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(dated).toContain('https://example.com/copper');
+    const unsafe = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [{ ...news.items[1], published_at: '2026-10-14T09:00:00Z', relevance_strength: 'strong' }] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(unsafe).not.toContain('href="javascript:');
     expect(html).not.toContain('Unmatched headline');
     expect(html).toContain('Show unmatched headlines');
   });
   it('shows observed matched coverage and explains unmatched-only or stale refresh states honestly', () => {
     const unmatched = Array.from({ length: 23 }, (_, index) => ({ ...news.items[2], item_id: `unmatched-${index}` }));
     const matched = Array.from({ length: 8 }, (_, index) => ({ ...news.items[0], item_id: `matched-${index}` }));
-    const loaded = { ...news, items: [...matched, ...unmatched] };
+    const loaded = { ...news, items: [...matched.map(item => ({ ...item, published_at: '2026-10-14T09:00:00Z' })), ...unmatched] };
     const html = renderToStaticMarkup(<NewsWorkspace company={company} view={loaded} loading={false} error="" onRefresh={() => {}} />);
     expect(html).toContain('8 company-relevant of 31 observed items');
-    expect(html.match(/Copper lane update/g)).toHaveLength(8);
+    expect(html.match(/Copper lane update/g)).toHaveLength(9);
     expect(html).not.toContain('Unmatched headline');
     const stale = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...loaded, items: unmatched }} loading={false} error="Session expired" onRefresh={() => {}} />);
     expect(stale).toContain('23 observed headlines have no recorded company match');
-    expect(stale).toContain('Unmatched headline');
+    expect(stale).toContain('Show unmatched headlines');
+    expect(stale).not.toContain('Unmatched headline</strong>');
     expect(stale).toContain('Previously displayed results');
     const refreshing = renderToStaticMarkup(<NewsWorkspace company={company} view={loaded} loading={true} error="" onRefresh={() => {}} />);
     expect(refreshing).toContain('The items below are from the previous check');
     expect(refreshing).toContain('Checking sources…');
   });
   it('counts direct and indirect matches separately and explains heuristic metadata without treating it as probability', () => {
-    const direct = { ...news.items[0], relevance_kind: 'direct_material' as const, relevance_score: 0.8, matched_operations: ['wire production'], summary: 'Copper line disruption reported.' };
-    const indirect = { ...news.items[2], item_id: 'sector', relevance_kind: 'sector' as const, relevance_score: 0.4, matched_operations: ['wire production'], summary: 'Manufacturing activity reported.' };
+    const direct = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', relevance_kind: 'direct_material' as const, relevance_score: 0.8, matched_operations: ['wire production'], summary: 'Copper line disruption reported.' };
+    const indirect = { ...news.items[2], published_at: '2026-10-14T09:00:00Z', item_id: 'sector', relevance_kind: 'sector' as const, relevance_score: 0.4, matched_operations: ['wire production'], summary: 'Manufacturing activity reported.' };
     expect(filterNewsItems([direct, indirect], 'all', 'all').map(item => item.item_id)).toEqual(['a', 'sector']);
     const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [direct, indirect] }} loading={false} error="" onRefresh={() => {}} />);
     expect(html).toContain('1 direct material match');
     expect(html).toContain('1 indirect match');
-    expect(html).toContain('Wire production');
+    expect(html).toContain('wire production');
     expect(html).toContain('Uncalibrated relevance heuristic');
     expect(html).toContain('Copper line disruption reported.');
+  });
+  it('shows selected-story actions and bounded enrichment, while hiding material actions for background fit', () => {
+    const selected = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', relevance_strength: 'strong' as const, ranking_reason: 'Supply operation and tracked input', article: { status: 'enriched' as const, method: 'scrapling-static' as const, fetched_at: '2026-10-15T09:00:00Z', title: null, published_at: null, excerpt: 'A bounded excerpt from an official source.', content_chars: 231, reason: null } };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [selected] }} loading={false} error="" onRefresh={() => {}} onAction={() => {}} />);
+    expect(html).toContain('Ask operator');
+    expect(html).toContain('Check inventory');
+    expect(html).toContain('Prepare unsent draft');
+    expect(html).toContain('A bounded excerpt from an official source.');
+    expect(html).toContain('Ranking reason:');
+    const background = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [{ ...selected, relevance_strength: 'background' }] }} loading={false} error="" onRefresh={() => {}} onAction={() => {}} />);
+    expect(background).not.toContain('Check inventory');
+    expect(background).not.toContain('Prepare unsent draft');
+  });
+  it('labels the article page date separately without using it for feed-age ranking', () => {
+    const articleDate = '2026-10-13T12:00:00Z';
+    const item = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', article: { status: 'enriched' as const, method: 'scrapling-static' as const, fetched_at: '2026-10-15T09:00:00Z', title: null, published_at: articleDate, excerpt: 'Official article excerpt.', content_chars: 80, reason: null } };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [item] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain(`Article page date: ${new Date(articleDate).toLocaleString()}`);
+    expect(html).toContain(`Article retrieved: ${new Date(item.article.fetched_at).toLocaleString()}`);
+    expect(html).toContain(`Feed published: ${new Date(item.published_at).toLocaleString()}`);
+    expect(rankNewsItems([{ ...item, item_id: 'undated', published_at: null, article: { ...item.article, published_at: '2026-10-15T09:00:00Z' } }, item], 'newest').map(value => value.item_id)).toEqual(['a', 'undated']);
+  });
+  it('labels invalid feed publication as unavailable and never exposes raw invalid time strings', () => {
+    expect(feedPublicationLabel(null)).toBe('Publication time unavailable');
+    expect(feedPublicationLabel('not-a-date')).toBe('Publication time unavailable');
+    expect(filterNewsItems([{ ...news.items[0], published_at: 'not-a-date' }], 'all', 'all', false, { now: Date.parse('2026-10-15T10:00:00Z') })).toEqual([]);
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, checked_at: 'not-a-date', items: [{ ...news.items[0], published_at: '2026-10-14T09:00:00Z' }] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('Checked Time unavailable');
+    expect(html).not.toContain('not-a-date');
   });
   it('shows only this company’s server-confirmed simulated messages with no delivery claim', () => {
     const message = { message_id: 'm1', company_id: company.company_id, material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Availability check', body: 'Please review.', status: 'simulated_sent' as const, simulated: true as const, external_delivery: false as const, created_at: '2026-10-14T12:00:00Z' };

@@ -1,5 +1,29 @@
 from datetime import datetime, timedelta, timezone
 from procure.demo.company import list_companies
+
+
+def test_carry_ranks_stale_strong_item_before_eighty_fresh_background_items():
+    from datetime import datetime, timezone
+    from procure.demo.news_refresh import _carry
+    company = next(p for p in list_companies() if p['company_id'] == 'atlas-petrochem')
+    now = datetime(2026, 10, 15, 10, tzinfo=timezone.utc)
+    old = now.replace(hour=9).isoformat()
+    current = {'sources': [{'source_id': 'eia', 'state': 'unavailable', 'last_checked_at': now.isoformat()},
+                           {'source_id': 'gdelt', 'state': 'fresh', 'last_checked_at': now.isoformat()}],
+               'items': [{'title': f'Farmers weigh propane prices {i}', 'url': f'https://example.org/{i}',
+                          'provider': 'GDELT', 'published_at': now.isoformat(),
+                          'first_seen_at': now.isoformat(), 'retrieved_at': now.isoformat()} for i in range(80)],
+               'fx': [], 'cache_state': 'fresh'}
+    previous = {'sources': [{'source_id': 'eia', 'state': 'fresh', 'last_checked_at': old}],
+                'items': [{'title': 'Naphtha cracker shutdown delays petrochemical production',
+                           'url': 'https://www.eia.gov/todayinenergy/detail.php?id=68284',
+                           'provider': 'EIA', 'source_id': 'eia', 'published_at': old,
+                           'first_seen_at': old, 'retrieved_at': old}], 'fx': []}
+    result = _carry(current, previous, company, now)
+    assert len(result['items']) == 80
+    assert result['items'][0]['provider'] == 'EIA'
+    assert result['items'][0]['retrieved_at'] == old
+    assert result['sources'][0]['last_checked_at'] == old
 from procure.demo.news_refresh import refresh_portfolio
 from test_demo_news_snapshots import bundle
 

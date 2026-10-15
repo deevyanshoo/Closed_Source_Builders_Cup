@@ -12,7 +12,8 @@ import sys
 import time
 
 from .company import list_companies
-from .news import NewsService, _now
+from .news import NewsService, _now, _company_item
+from .news_ranking import rank_items
 from .news_snapshots import GcsSnapshotStore, _slot, catalog_version, validate_bundle
 
 _DEADLINE = 120
@@ -28,7 +29,7 @@ def _checked_this_run(source, started):
         return False
 
 
-def _carry(current, previous):
+def _carry(current, previous, company, now):
     """Retain only failed-source observations, preserving original evidence clocks."""
     if not previous:
         return current
@@ -64,9 +65,12 @@ def _carry(current, previous):
                 current['fx'] = previous.get('fx', [])
         sources.append(source)
     current['sources'] = sources
+    has_current_items = bool(current['items'])
     existing = {item.get('url') for item in current['items']}
     current['items'].extend(item for item in carried_items if item.get('url') not in existing)
-    current['items'] = current['items'][:80]
+    if has_current_items and carried_items:
+        current['items'] = rank_items((_company_item(item, company) for item in current['items']),
+                                      company, 80, as_of=now)
     if any(s['state'] == 'stale' for s in sources):
         current['cache_state'] = 'stale'
     elif all(s['state'] == 'unavailable' for s in sources):
@@ -138,7 +142,7 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
         except (Exception):
             current = {'checked_at': started.isoformat(), 'cache_state': 'unavailable',
                        'sources': [], 'items': [], 'fx': [], 'limitations': []}
-        current = _carry(current, prior_views.get(cid))
+        current = _carry(current, prior_views.get(cid), profile, started)
         if any(s.get('state') in _NEWS_STATES and s.get('source_id') != 'ecb_fx'
                and _checked_this_run(s, started) for s in current['sources']):
             news_success = True

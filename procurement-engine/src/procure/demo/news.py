@@ -21,6 +21,8 @@ import xml.etree.ElementTree as ET
 
 import requests
 
+from .news_ranking import rank_items
+
 
 TTL_SECONDS = 900
 MAX_BYTES = 350_000
@@ -353,11 +355,20 @@ def _google_queries(company):
 
 class NewsService:
     """One process-wide, company-neutral refresh shared by all company views."""
-    def __init__(self, *, clock=None, transport=None, offline=None):
+    def __init__(self, *, clock=None, transport=None, offline=None, article_enricher=None):
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.transport = transport or _default_transport
         self.offline = (any(os.getenv(name, '').lower() in ('1', 'true', 'yes')
                             for name in ('OFFLINE', 'PROCURE_OFFLINE')) if offline is None else bool(offline))
+        # A test/injected feed transport never causes implicit article network calls.
+        enabled = os.getenv('NEWS_ARTICLE_ENRICHMENT', '').lower() in ('1', 'true', 'yes')
+        if article_enricher is not None:
+            self.article_enricher = article_enricher
+        elif enabled and transport is None and not self.offline:
+            from .news_enrichment import default_enricher
+            self.article_enricher = default_enricher()
+        else:
+            self.article_enricher = None
         self._lock = threading.Condition(threading.RLock())
         self._refreshing = False
         self._snapshot = None
@@ -371,18 +382,23 @@ class NewsService:
             return view
         urls = _google_queries(company)
         if not urls:
-            return view
+            return self.present_view(view, company)
         extra = self._company_news(company, urls)
         view['checked_at'] = max(view['checked_at'], extra['checked_at'])
         view['sources'].extend(extra['sources'])
-        view['items'] = sorted({item['url']: item for item in view['items'] + extra['items']}.values(),
-                               key=lambda item: item['published_at'] or item['first_seen_at'] or '', reverse=True)[:MAX_ITEMS]
+        view['items'] = list({item['url']: item for item in view['items'] + extra['items']}.values())
         if extra['cache_state'] == 'stale':
             view['cache_state'] = 'stale'
         elif view['cache_state'] == 'stale':
             pass
         elif extra['items']:
             view['cache_state'] = 'fresh' if extra['cache_state'] == 'fresh' else 'cached'
+        return self.present_view(view, company)
+
+    def present_view(self, view, company, *, enrich=True):
+        view['items'] = rank_items(view.get('items', []), company, MAX_ITEMS, as_of=_now(self.clock))
+        if enrich and self.article_enricher and not self.offline:
+            view['items'] = self.article_enricher.attach(view['items'])
         return view
 
     def _get_global(self, company: dict, force: bool = False) -> dict:
@@ -436,9 +452,7 @@ class NewsService:
                                             else 'Refresh failed; showing previously observed metadata.')
                 if any(source['state'] == 'stale' for source in fresh['sources']):
                     fresh['cache_state'] = 'stale'
-                fresh['items'] = sorted({item['url']: item for item in fresh['items']}.values(),
-                                        key=lambda x: x['published_at'] or x['first_seen_at'] or '',
-                                        reverse=True)[:MAX_ITEMS]
+                fresh['items'] = list({item['url']: item for item in fresh['items']}.values())
                 self._snapshot = {**fresh, 'time': now}
                 return self._view(self._snapshot, company)
         finally:
@@ -546,7 +560,11 @@ class NewsService:
                     source['state'] = 'stale'
                     source['last_checked_at'] = prior['last_checked_at']
                     source['reason'] += ' Showing previously observed metadata.'
-            ordered = sorted(unique.values(), key=lambda item: item['published_at'] or item['first_seen_at'] or '', reverse=True)[:MAX_COMPANY_ITEMS]
+            # Rank this company's complete discovery set before its storage cap.
+            by_url = {item['url']: item for item in unique.values()}
+            ranked = rank_items((_company_item(item, company) for item in by_url.values()),
+                                company, MAX_COMPANY_ITEMS, as_of=now)
+            ordered = [by_url[item['url']] for item in ranked]
             state = ('stale' if any(source['state'] == 'stale' for source in sources) else
                      'fresh' if ordered else 'unavailable' if all(source['state'] == 'unavailable' for source in sources) else 'empty')
             self._company_cache[key] = {'time': now, 'checked_at': stamp, 'cache_state': state,
@@ -602,7 +620,7 @@ class NewsService:
                     self._seen.popitem(last=False)
                 item['first_seen_at'] = first
                 unique[item['url']] = item
-        ordered = sorted(unique.values(), key=lambda x: x['published_at'] or x['first_seen_at'] or '', reverse=True)[:MAX_ITEMS]
+        ordered = list(unique.values())
         state = 'fresh' if ordered or fx else ('unavailable' if all(x['state'] == 'unavailable' for x in sources) else 'empty')
         return {'checked_at': stamp, 'cache_state': state, 'sources': sources, 'items': ordered, 'fx': fx}
 
@@ -616,6 +634,7 @@ class NewsService:
         return {'checked_at': snapshot['checked_at'], 'cache_state': snapshot['cache_state'],
                 'sources': [{**x, 'state': 'cached' if snapshot['cache_state'] == 'cached' and x['state'] == 'fresh' else x['state']}
                             for x in snapshot['sources']],
-                'items': [_company_item(item, company) for item in snapshot['items']],
+                'items': rank_items((_company_item(item, company) for item in snapshot['items']),
+                                    company, as_of=_now(self.clock)),
                 'fx': [dict(rate) for rate in snapshot['fx'] if rate['quote'] in company.get('currencies', [])],
                 'limitations': limitations}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
 import { AssistantOrb } from './demo-activity';
@@ -143,7 +143,17 @@ export function releaseLiveVoice(current: ActiveVoice): void {
   current.socket.close();
 }
 
-export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown }: { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void }) {
+export function endActiveVoice(active: { current: ActiveVoice | null }): boolean {
+  const current = active.current;
+  if (!current) return false;
+  active.current = null;
+  releaseLiveVoice(current);
+  return true;
+}
+
+export type LiveVoiceHandle = { start: () => void; end: () => void };
+type LiveVoiceProps = { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void; onExit?: () => void };
+export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown, onExit }, ref) {
   const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [error, setError] = useState('');
@@ -166,14 +176,12 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
   }
   function end() {
     generation.current += 1;
-    const current = active.current;
     thinking.current = false;
     setMicrophoneMuted(false);
-    if (!current) { setStatus('idle'); return; }
-    active.current = null;
-    releaseLiveVoice(current);
+    endActiveVoice(active);
     setStatus('idle');
   }
+  useImperativeHandle(ref, () => ({ start: () => { void start(); }, end }));
   useEffect(() => () => { end(); setCaptions([]); setCaptionScope(null); setError(''); }, [scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch]);
   useEffect(() => { if (disabled) end(); }, [disabled]);
 
@@ -317,12 +325,11 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
     visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';
   const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
   return <div className="demo-operator-voice">
-    <strong>Live conversation · Google speech</strong>
-    <p>Talk naturally and interrupt by speaking. For web research, hear the public query, then say “confirmed” or “confirm research”. Business changes still need review and Apply.</p>
+    <p>Speak naturally. You can interrupt an answer by speaking.</p>
     <div className="demo-voice-orb"><AssistantOrb state={orbState} size={64} theme="dark" /></div>
     <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
-    <div className="demo-voice-controls"><button type="button" className="demo-button" disabled={disabled || visible.status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={end}>End conversation</button></div>
+    <div className="demo-voice-controls"><button type="button" className="demo-button" disabled={disabled || visible.status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" onClick={() => { end(); onExit?.(); }}>End conversation</button></div>
     {visible.error && <p className="demo-alert" role="alert">{visible.error}</p>}
     {shownCaptions.length > 0 && <ol className="demo-live-captions" aria-label="Live transcript">{shownCaptions.map((caption, index) => <li className={`demo-caption ${caption.direction === 'input' ? 'is-user' : 'is-assistant'}`} key={index}><strong>{caption.direction === 'input' ? 'You' : 'Operator'}:</strong> {caption.text}</li>)}</ol>}
   </div>;
-}
+});

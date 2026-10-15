@@ -318,7 +318,7 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
   const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
   return <div className="demo-operator-voice">
     <strong>Live conversation · Google speech</strong>
-    <p>Start a hands-free conversation. Speech pauses automatically; interrupt by speaking. Proposals still require review and Apply.</p>
+    <p>Talk naturally and interrupt by speaking. For web research, hear the public query, then say “confirmed” or “confirm research”. Business changes still need review and Apply.</p>
     <div className="demo-voice-orb"><AssistantOrb state={orbState} size={64} theme="dark" /></div>
     <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
     <div className="demo-voice-controls"><button type="button" className="demo-button" disabled={disabled || visible.status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={end}>End conversation</button></div>

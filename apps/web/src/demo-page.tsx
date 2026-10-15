@@ -131,6 +131,11 @@ export function canonicalBuyerState(session: DemoSession, preferredMaterial?: st
   };
 }
 export const sampleBuyerInputs = () => ({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
+
+export function restoreOperatorFocus(saved: { isConnected: boolean; disabled?: boolean; focus: () => void } | null, fallback: { isConnected: boolean; focus: () => void } | null) {
+  if (saved?.isConnected && !saved.disabled) saved.focus();
+  else if (fallback?.isConnected) fallback.focus();
+}
 const words = (s: string) => s.replace(/^items\[(\d+)\]\./, (_, i) => `Item ${Number(i) + 1} · `).replaceAll('_', ' ');
 const message = (error: unknown) => error instanceof DemoApiError ? error.message : 'Something went wrong. Please try again.';
 export const isSessionExpired = (error: unknown) => error instanceof DemoApiError && (error.code === 'session_expired' || [401, 403, 410].includes(error.status));
@@ -388,7 +393,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   }, []);
   useLayoutEffect(() => {
     if (operatorOpen) (operatorDockRef.current?.querySelector<HTMLElement>('textarea:not(:disabled)') ?? operatorDockRef.current)?.focus();
-    else if (restoreOperatorFocusRef.current) { restoreOperatorFocusRef.current = false; operatorToggleRef.current?.focus(); }
+    else if (restoreOperatorFocusRef.current) { restoreOperatorFocusRef.current = false; restoreOperatorFocus(operatorToggleRef.current, contentRef.current); }
   }, [operatorOpen]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 999px)');
@@ -670,7 +675,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   }
 
   const progress = workspaceActivity(busy, mode);
-  return <div className="demo-page zoorq-page"><a className="zoorq-skip-link" href="#zoorq-workspace-content">Skip to workspace</a><WorkspaceNavigation company={view === 'hub' ? undefined : company} view={view} onView={navigate} disabled={busy === 'company'} /><main><WorkspaceHeader company={view === 'hub' ? undefined : company} view={view} onTalk={requestLiveVoice} onChat={openOperatorChat} onHub={() => navigate('hub')} disabled={!!busy || !riskScope} /><div id="zoorq-workspace-content" className="zoorq-workspace-content" ref={contentRef}>{company && view !== 'hub' && <h1 className="sr-only">{company.name} workspace</h1>}
+  return <div className="demo-page zoorq-page"><a className="zoorq-skip-link" href="#zoorq-workspace-content">Skip to workspace</a><WorkspaceNavigation company={view === 'hub' ? undefined : company} view={view} onView={navigate} disabled={busy === 'company'} /><main><WorkspaceHeader company={view === 'hub' ? undefined : company} view={view} onTalk={requestLiveVoice} onChat={openOperatorChat} onHub={() => navigate('hub')} disabled={!!busy || !riskScope} /><div id="zoorq-workspace-content" className="zoorq-workspace-content" ref={contentRef} tabIndex={-1}>{company && view !== 'hub' && <h1 className="sr-only">{company.name} workspace</h1>}
     {view === 'hub' && <CompanyHub companies={companyOptions} current={company} busy={busy === 'company' || !state.session?.company || state.session.context_version === undefined} onOpen={id => { if (id === company?.company_id) navigate('overview'); else void switchCompany(id); }} />}
     {company && view !== 'hub' && <>
 

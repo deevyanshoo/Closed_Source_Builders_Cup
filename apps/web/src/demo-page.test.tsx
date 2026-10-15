@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
@@ -46,6 +46,23 @@ const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', 
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('ZOORQ workspace routes', () => {
+  it('restores focus to hub content when the prior operator trigger is disabled', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="hub" />);
+    expect(html).toMatch(/id="zoorq-workspace-content"[^>]*tabindex="-1"/);
+
+    let focused = '';
+    const trigger = { isConnected: true, disabled: true, focus: () => { focused = 'trigger'; } };
+    const hubContent = { isConnected: true, focus: () => { focused = 'hub'; } };
+    restoreOperatorFocus(trigger, hubContent);
+    expect(focused).toBe('hub');
+    trigger.disabled = false;
+    restoreOperatorFocus(trigger, hubContent);
+    expect(focused).toBe('trigger');
+    trigger.isConnected = false;
+    restoreOperatorFocus(trigger, hubContent);
+    expect(focused).toBe('hub');
+  });
   it('exposes the primary live voice entry before opening operator chat', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="overview" />);

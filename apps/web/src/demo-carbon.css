@@ -1,0 +1,12 @@
+.demo-carbon-legs{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:18px 0}
+.demo-carbon-leg{display:flex;flex-direction:column;gap:8px;min-width:0;padding:14px;border:1px solid #aaa;background:#f7f6f1}
+.demo-carbon-leg strong{font-size:13px;overflow-wrap:anywhere}
+.demo-carbon-leg label{display:flex;flex-direction:column;gap:6px}
+.demo-carbon-leg label>span{font:800 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em}
+.demo-carbon-results{margin-top:20px;display:grid;gap:10px}
+.demo-carbon-results details{border:1px solid #aaa;background:#fff;padding:12px 14px;font-size:12px;line-height:1.5}
+.demo-carbon-results summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px 14px}
+.demo-carbon-results h3{font-size:11px;text-transform:uppercase;margin:14px 0 4px}
+.demo-carbon-results p{margin:4px 0;overflow-wrap:anywhere}
+.demo-carbon-results code{font-size:11px;color:#a5211b}
+.demo-carbon-missing{color:#a5211b}

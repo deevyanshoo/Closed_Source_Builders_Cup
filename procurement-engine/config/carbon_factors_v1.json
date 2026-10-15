@@ -1,0 +1,110 @@
+{
+  "registry_version": "carbon-factors-v1",
+  "checked_on": "2026-10-15",
+  "label": "estimate, not a certified footprint",
+  "scope": "Cradle-to-gate primary material production for materials with a published category factor, plus the transport legs the buyer enters. The material factors already include transport to the point of sale, so entered legs may overlap them. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+  "sources": {
+    "desnz-2026-full-set": {
+      "publisher": "Department for Energy Security and Net Zero (UK government)",
+      "title": "Greenhouse gas reporting: conversion factors 2026, full set (version 1)",
+      "page_url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026",
+      "file_url": "https://assets.publishing.service.gov.uk/media/6a29392bade52dc0882218a8/ghg-conversion-factors-2026-full-set.xlsx",
+      "file_sha256": "b5c4f2f86cdc74707337b2fb013b44ded189a1b528f5e29ea99856ba65ae0205",
+      "licence": "Open Government Licence v3.0",
+      "licence_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Crown copyright.",
+      "published_on": "2026-06-11",
+      "factor_year": 2026,
+      "checked_on": "2026-10-15"
+    }
+  },
+  "transport_modes": {
+    "road_hgv": {
+      "label": "Road, average HGV (diesel, average laden)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "HGV (non-refrigerated, all diesel) / Average non-refrigerated HGVs / Average laden / kg CO2e",
+      "factor": "0.10356",
+      "unit": "kg CO2e per tonne.km"
+    },
+    "rail_freight": {
+      "label": "Rail freight train",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Rail / Freight train / kg CO2e",
+      "factor": "0.02583",
+      "unit": "kg CO2e per tonne.km"
+    },
+    "sea_container": {
+      "label": "Sea, average container ship",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Cargo ship / Container ship / Average / kg CO2e",
+      "factor": "0.01612",
+      "unit": "kg CO2e per tonne.km"
+    },
+    "sea_bulk": {
+      "label": "Sea, average bulk carrier",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Cargo ship / Bulk carrier / Average / kg CO2e",
+      "factor": "0.00353",
+      "unit": "kg CO2e per tonne.km"
+    },
+    "air_freight": {
+      "label": "Air freight, international (with radiative forcing)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Freight flights / International, to/from non-UK / With RF / kg CO2e",
+      "factor": "0.89939",
+      "unit": "kg CO2e per tonne.km"
+    }
+  },
+  "materials": {
+    "pet-resin": {
+      "category": "Plastics: PET (incl. forming)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Plastic / Plastics: PET (incl. forming) / Primary material production",
+      "factor": "3861.58251",
+      "unit": "kg CO2e per tonne",
+      "note": "Closest published category. It includes forming, which resin has not had yet, so it may overstate resin."
+    },
+    "aggregate": {
+      "category": "Construction: Aggregates",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Construction / Aggregates / Primary material production",
+      "factor": "7.80307",
+      "unit": "kg CO2e per tonne",
+      "note": "Published category for primary aggregates."
+    },
+    "vials": {
+      "category": "Other: Glass",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Other / Glass / Primary material production",
+      "factor": "1402.76667",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic glass category. Needs the mass of the vials; a count of units cannot be used."
+    },
+    "cartons": {
+      "category": "Paper and board: board",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Paper / Paper and board: board / Primary material production",
+      "factor": "1198.23866",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic board category. Needs the mass of the cartons; a count of units cannot be used."
+    },
+    "aluminium-foil": {
+      "category": "Metal: aluminium cans and foil (excl. forming)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Metal / Metal: aluminium cans and foil (excl. forming) / Primary material production",
+      "factor": "9113.58251",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic aluminium foil category. Needs the mass of the rolls; a roll count cannot be used."
+    }
+  }
+}

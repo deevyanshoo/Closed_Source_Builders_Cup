@@ -11,6 +11,8 @@ import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { CarbonPanel, carbonCell } from './demo-carbon';
+import type { CarbonComparison } from './demo-carbon';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
 export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
@@ -238,12 +240,13 @@ const planReason: Record<string, string> = {
 };
 const reasonText = (reason: string) => planReason[reason] ?? words(reason);
 
-export function PlanResults({ plan, offers }: { plan: PlanView; offers: OfferView[] }) {
+export function PlanResults({ plan, offers, carbon = null }: { plan: PlanView; offers: OfferView[]; carbon?: CarbonComparison | null }) {
+  const emissions = carbon?.plan_id === plan.plan_id ? carbon : null;
   const selected = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
   const stockCoversNeed = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
   return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">04 / Comparison</span><h2>{stockCoversNeed ? 'Stock covers this need' : selected ? `${supplierDisplayName(selected.supplier)} is feasible` : 'No feasible quote for these inputs'}</h2><p>{displaySupplierMentions(plan.explanation, plan.alternatives.map(item => item.supplier))}</p>
     <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{requiredPurchase(plan)} {planUnit(plan)}</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
-    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
+    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th>{emissions && <th>Emissions<small>estimate, not certified</small></th>}<th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td>{emissions && <td>{carbonCell(emissions, a.offer_id)}</td>}<td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
     <p className="demo-muted">Total includes your extra cost per {planUnit(plan)}. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
   </section>;
 }
@@ -286,6 +289,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
+  const [carbon, setCarbon] = useState<CarbonComparison | null>(null);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);
   const [companyError, setCompanyError] = useState('');
@@ -653,7 +657,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <label className={highlightFields.includes('material') ? 'demo-agent-filled' : ''}><span>Material</span><select required disabled={!state.session || !coveredMaterials.length} value={selectedMaterialId} onChange={e => selectMaterial(e.target.value)}>{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name} className={highlightFields.includes(name) ? 'demo-agent-filled' : ''}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; setHighlightFields([]); invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>
-    {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
+    {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} carbon={carbon} />}
+    {state.plan && !state.recovery && state.session && <CarbonPanel plan={state.plan} csrf={state.session.csrf_token} contextVersion={state.session.context_version} result={carbon} onResult={setCarbon} />}
     {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
       <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. A delay changes only the selected supplier arrival assumption.</p>
       {busy === 'recovery' && progress && <ActivityIndicator {...progress} />}

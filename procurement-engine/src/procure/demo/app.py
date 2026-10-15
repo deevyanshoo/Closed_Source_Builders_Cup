@@ -26,6 +26,7 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
+from .carbon_api import carbon_export, register_carbon_routes
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -2120,7 +2121,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'selected_material_id': value.selected_material_id,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
                                  'drafts': deepcopy(value.drafts),
-                                 'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq)},
+                                 'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq),
+                                 'carbon': carbon_export(value, active_plan)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 
     @app.post('/api/demo/reset')
@@ -2132,6 +2134,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             context(value, data)
         store.invalidate(value)
         return session_response(store.create())
+
+    register_carbon_routes(app, session=session, mutate=mutate, body=body, shape=shape,
+                           context=context, active_plan=active_plan)
 
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()

@@ -46,6 +46,37 @@ def test_financial_catalyst_metaphors_do_not_outrank_physical_material_news():
     assert ranked[1]['title'] == titles[3]
 
 
+@pytest.mark.parametrize(('company_id', 'title'), [
+    ('meridian-pharma', 'Takeda Pharmaceutical Company Limited Stock 12‑Month Price Target Raised to $20.74, Implies 9% Upside - TradingView'),
+    ('circuitpeak-systems', 'Taiwan Semiconductor Manufacturing (NYSE:TSM) Given New $560.00 Price Target at Needham & Company LLC - MarketBeat'),
+    ('circuitpeak-systems', 'Analyst raises semiconductor stock rating and price target - MarketBeat'),
+    ('circuitpeak-systems', 'Semiconductor maker analyst rating raised as price outlook improves - MarketBeat'),
+])
+def test_sector_only_stock_targets_have_no_procurement_relevance(company_id, title):
+    company = get_company(company_id)
+    source = {'title': title, 'url': 'https://example.org/analyst-story',
+              'provider': 'Google News RSS', 'published_at': '2026-10-15T09:00:00+00:00',
+              'first_seen_at': '2026-10-15T09:10:00+00:00',
+              'retrieved_at': '2026-10-15T09:10:00+00:00'}
+    [item] = rank_items([_company_item(source, company)], company, as_of=NOW)
+    assert item['relevance_kind'] == 'unmatched'
+    assert item['relevance_strength'] == 'unmatched'
+    assert item['matched_materials'] == item['matched_routes'] == item['matched_currencies'] == []
+    assert {key: item[key] for key in ('provider', 'published_at', 'first_seen_at', 'retrieved_at')} == {
+        key: source[key] for key in ('provider', 'published_at', 'first_seen_at', 'retrieved_at')}
+
+
+@pytest.mark.parametrize(('company_id', 'title', 'expected_strength'), [
+    ('solara-cables', 'Copper price rises as supply tightens', 'related'),
+    ('circuitpeak-systems', 'Semiconductor supplier announces production expansion after analyst price target', 'related'),
+])
+def test_physical_price_and_supplier_operations_keep_company_relevance(company_id, title, expected_strength):
+    company = get_company(company_id)
+    [item] = rank_items([_company_item({'title': title, 'url': 'https://example.org/operations'}, company)],
+                        company, as_of=NOW)
+    assert item['relevance_strength'] == expected_strength
+
+
 def test_unknown_publication_date_does_not_become_new_from_first_seen():
     rows = [_company_item({'title': 'Naphtha cracker shutdown delays production',
                            'published_at': published, 'first_seen_at': seen,
@@ -225,6 +256,49 @@ def test_old_snapshot_is_reranked_at_read_without_collection_clock_change():
     assert view['items'][0]['title'].startswith('Naphtha')
     assert view['collection']['news_success_at'] == stamp
     assert 'relevance_strength' not in bundle['views']['atlas-petrochem']['items'][0]
+
+
+def test_saved_analyst_headline_is_remapped_at_read_without_mutating_snapshot_or_clocks():
+    profiles = list_companies()
+    stamp = NOW.isoformat()
+    collection = {'attempted_at': stamp, 'news_success_at': stamp,
+                  'fx_success_at': None, 'status': 'partial'}
+    bundle = {'schema_version': 1, 'slot': stamp, 'started_at': stamp, 'completed_at': stamp,
+              'catalog_version': catalog_version(profiles),
+              'company_ids': [profile['company_id'] for profile in profiles],
+              'views': {profile['company_id']: {
+                  'checked_at': stamp, 'cache_state': 'fresh', 'sources': [], 'items': [], 'fx': []}
+                  for profile in profiles}, 'collection': collection}
+    stored = {'item_id': 'saved-analyst',
+              'title': 'Taiwan Semiconductor Manufacturing (NYSE:TSM) Given New $560.00 Price Target at Needham & Company LLC - MarketBeat',
+              'url': 'https://example.org/saved-analyst', 'provider': 'Google News RSS',
+              'publisher': 'MarketBeat', 'source_id': 'google_news_1',
+              'published_at': '2026-10-15T08:00:00+00:00',
+              'first_seen_at': '2026-10-15T08:05:00+00:00',
+              'retrieved_at': '2026-10-15T08:05:00+00:00',
+              'relevance_kind': 'sector', 'relevance_strength': 'related',
+              'ranking_reason': 'Sector and operating context appear together.'}
+    bundle['views']['circuitpeak-systems']['items'] = [stored]
+    bundle['views']['circuitpeak-systems']['sources'] = [{
+        'source_id': 'google_news_1', 'name': 'Google News RSS', 'state': 'fresh',
+        'last_checked_at': stamp, 'reason': 'Public headline metadata received.'}]
+    validate_bundle(bundle, profiles)
+    class Store:
+        def read(self, slot): return bundle
+    class Live:
+        def get(self, *args, **kwargs): raise AssertionError('live fetch')
+    result = SnapshotNewsService(live=Live(), store=Store(), clock=lambda: NOW).get(
+        get_company('circuitpeak-systems'))
+    [shown] = result['items']
+    assert shown['relevance_strength'] == shown['relevance_kind'] == 'unmatched'
+    assert {key: shown[key] for key in ('item_id', 'url', 'provider', 'published_at',
+                                       'first_seen_at', 'retrieved_at')} == {
+        key: stored[key] for key in ('item_id', 'url', 'provider', 'published_at',
+                                    'first_seen_at', 'retrieved_at')}
+    assert result['sources'] == bundle['views']['circuitpeak-systems']['sources']
+    assert result['collection']['news_success_at'] == stamp
+    assert result['collection']['mode'] == 'scheduled'
+    assert bundle['views']['circuitpeak-systems']['items'] == [stored]
 
 
 def test_snapshot_nested_article_validation_rejects_unbounded_excerpt():

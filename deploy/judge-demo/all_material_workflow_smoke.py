@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from urllib.parse import urlsplit
@@ -121,11 +122,13 @@ def corrected_field(offer, field):
     return offer['fields'][field]
 
 
-def _run(base, client, receipt):
+def _run(base, client, receipt, checkpoint, expected_revision):
     health = client.json('health', '/-/health')
     require(health.get('ready') is True and isinstance(health.get('revision'), str)
-            and health['revision'] and health['revision'] != 'local', 'health', 'not_ready')
+            and health['revision'] == expected_revision
+            and health.get('persistence') == 'firestore', 'health', 'unexpected_revision_or_storage')
     receipt['deployed_revision'] = health['revision']
+    checkpoint(receipt)
     profiles = client.json('catalogue', '/api/demo/companies').get('companies')
     require(isinstance(profiles, list) and len(profiles) == 10, 'catalogue', 'company_count')
     listed = client.json('fixtures', '/api/demo/fixtures')
@@ -141,12 +144,14 @@ def _run(base, client, receipt):
     require(len(scenarios) == 52 and len(fixture_ids) == 156
             and len(set(fixture_ids)) == 156 and set(fixture_ids) == set(fixture_by_id),
             'catalogue', 'scenario_coverage')
-
     session = client.json('session', '/api/demo/session')
     csrf = session.get('csrf_token')
     require(isinstance(csrf, str) and csrf and session.get('synthetic') is True
-            and session.get('persistence') == 'ephemeral' and session.get('offers') == [],
+            and session.get('persistence') == 'firestore' and session.get('offers') == []
+            and session.get('plan') is None and session.get('rfq') is None,
             'session', 'not_fresh')
+    receipt['fresh_session_verified'] = True
+    checkpoint(receipt)
     context = session['context_version']
     require(type(context) is int and context >= 1, 'session', 'bad_context')
     rows = receipt['scenarios']
@@ -188,6 +193,9 @@ def _run(base, client, receipt):
 
             offers = []
             for fixture_id in scenario['fixture_ids']:
+                receipt['in_flight'] = {'company_id': cid, 'material': material,
+                                        'fixture_index': len(offers) + 1, 'step': 'extract_review_save'}
+                checkpoint(receipt)
                 filename, original_bytes = fixture_bytes(fixture_id)
                 expected_hash = 'sha256:' + hashlib.sha256(original_bytes).hexdigest()
                 listing = fixture_by_id[fixture_id]
@@ -218,8 +226,13 @@ def _run(base, client, receipt):
                 offers.append(offer)
                 checked_fixtures += 1
                 receipt['fixture_count'] = checked_fixtures
+                receipt['in_flight'] = None
+                checkpoint(receipt)
 
             maximum_active_offers = max(maximum_active_offers, 3 * scenario_index)
+            receipt['in_flight'] = {'company_id': cid, 'material': material,
+                                    'step': 'plan_recovery_rfq'}
+            checkpoint(receipt)
             versions = {offer['offer_id']: offer['version'] for offer in offers}
             request = {**defaults, 'offer_ids': list(versions), 'expected_versions': versions}
             plan = post(stage, '/api/demo/plan', request)
@@ -289,6 +302,8 @@ def _run(base, client, receipt):
                          'wrong_unit_rejected': True, 'recovery_changed': True,
                          'rfq_unsent_replayed_downloaded': True})
             receipt['scenario_count'] = len(rows)
+            receipt['in_flight'] = None
+            checkpoint(receipt)
             print(f'{stage} verified', flush=True)
 
         current = client.json(cid, '/api/demo/session')
@@ -307,7 +322,7 @@ def _run(base, client, receipt):
             and final_export['rfq'] == final_session['rfq']
             and final_export['rfq']['status'] == 'draft_unsent'
             and final_export['plan']['material'] == rows[-1]['material']
-            and final_export['synthetic'] is True and final_export['persistence'] == 'ephemeral',
+            and final_export['synthetic'] is True and final_export['persistence'] == 'firestore',
             'final_export', 'single_visit_state_wrong')
     idempotency_keys = checked_fixtures * 2 + corrections + company_switches + len(rows) * 2
     require(checked_fixtures == 156 and len(rows) == 52 and maximum_active_offers <= 48
@@ -320,32 +335,54 @@ def _run(base, client, receipt):
             'maximum_active_offers': maximum_active_offers,
             'idempotency_keys_used': idempotency_keys, 'http_requests': client.calls,
             'transport_retries': client.transport_retries,
-            'final_export_ephemeral': True, 'scenarios': rows}
+            'persistence': 'firestore', 'final_export_persistent': True, 'scenarios': rows}
 
 
-def run(base, receipt):
+def run(base, receipt, checkpoint=lambda _receipt: None, *, expected_revision):
     client = PooledClient(base)  # One cookie jar for the browser-equivalent visit.
     try:
-        return _run(base, client, receipt)
+        return _run(base, client, receipt, checkpoint, expected_revision)
     finally:
         receipt['http_requests'] = client.calls
         receipt['transport_retries'] = client.transport_retries
         client.close()
 
 
+def checkpoint_file(path: Path, result: dict) -> None:
+    """Replace only this run's pre-created receipt; never persist cookies or IDs."""
+    temporary = path.with_name(path.name + '.tmp')
+    payload = json.dumps(result, indent=2) + '\n'
+    with temporary.open('x', encoding='utf-8') as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--base', required=True)
     parser.add_argument('--output', required=True)
+    parser.add_argument('--expected-revision', required=True)
     args = parser.parse_args()
-    result = {'ok': False, 'scenario_count': 0, 'fixture_count': 0, 'scenarios': []}
+    path = Path(args.output)
+    result = {'ok': False, 'state': 'running', 'started_at': datetime.now(timezone.utc).isoformat(),
+              'expected_revision': args.expected_revision, 'scenario_count': 0,
+              'fixture_count': 0, 'scenarios': [], 'in_flight': None}
+    with path.open('x', encoding='utf-8') as handle:
+        handle.write(json.dumps(result, indent=2) + '\n')
     try:
-        result.update(run(base_url(args.base), result))
+        result.update(run(base_url(args.base), result,
+                          lambda value: checkpoint_file(path, value),
+                          expected_revision=args.expected_revision))
+        result['state'] = 'passed'
     except AcceptanceError as exc:
-        result.update({'stage': exc.stage, 'code': exc.code, 'status': exc.status})
+        result.update({'state': 'failed', 'stage': exc.stage, 'code': exc.code,
+                       'status': exc.status})
     except (KeyError, TypeError, IndexError, StopIteration):
-        result.update({'stage': 'response', 'code': 'invalid_response', 'status': None})
-    Path(args.output).write_text(json.dumps(result, indent=2) + '\n')
+        result.update({'state': 'failed', 'stage': 'response',
+                       'code': 'invalid_response', 'status': None})
+    checkpoint_file(path, result)
     print(json.dumps({key: value for key, value in result.items() if key != 'scenarios'}))
     if not result['ok']:
         sys.exit(1)

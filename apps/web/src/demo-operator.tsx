@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory, OperatorOverview, OperatorTurn, PlanView, PreparedDraft, ResearchResult } from './demo-api';
+import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory, OperatorOverview, OperatorTurn, PlanView, PreparedDraft, RecoveryView, ResearchResult } from './demo-api';
 import { LiveVoice } from './demo-live-voice';
 import type { LiveVoiceHandle } from './demo-live-voice';
 import { ActivityIndicator } from './demo-activity';
@@ -123,21 +123,27 @@ export function applyOperatorResult(state: OperatorState, action: OperatorAction
   return state;
 }
 
-export function planProposalCurrent(proposal: OperatorTurn['proposal'], plan: PlanView | null, offers: OfferView[]): boolean {
+export function planProposalCurrent(proposal: OperatorTurn['proposal'], plan: PlanView | null, offers: OfferView[], recovery: RecoveryView | null = null): boolean {
   if (proposal?.kind !== 'recovery' && proposal?.kind !== 'rfq') return true;
-  if (!proposal.plan_id || plan?.plan_id !== proposal.plan_id) return false;
+  const boundPlan = proposal.kind === 'recovery' && recovery
+    ? plan?.plan_id === recovery.scenario.plan_id &&
+      Object.keys(plan.offer_versions).length === Object.keys(recovery.scenario.offer_versions).length &&
+      Object.entries(plan.offer_versions).every(([id, version]) => recovery.scenario.offer_versions[id] === version)
+      ? recovery.baseline : null
+    : plan;
+  if (!proposal.plan_id || boundPlan?.plan_id !== proposal.plan_id) return false;
   const bound = proposal.offer_versions;
-  const current = plan.offer_versions;
+  const current = boundPlan.offer_versions;
   const ids = Object.keys(bound);
   return ids.length > 0 && ids.length === Object.keys(current).length && ids.every(id =>
     Number.isInteger(bound[id]) && bound[id] === current[id] && offers.some(offer => offer.offer_id === id && offer.version === bound[id]));
 }
 
-export function canApplyProposal(state: OperatorState, scope: OperatorScope, dirty: boolean, now: number, plan: PlanView | null = null, offers: OfferView[] = []): boolean {
+export function canApplyProposal(state: OperatorState, scope: OperatorScope, dirty: boolean, now: number, plan: PlanView | null = null, offers: OfferView[] = [], recovery: RecoveryView | null = null): boolean {
   const proposal = state.turn?.proposal;
   return !dirty && sameScope(state.scope, scope) && state.reviewed && state.turn?.status === 'proposal' && state.turn.read_only === true && !!proposal &&
     proposal.context_version === scope.contextVersion && Number.isFinite(Date.parse(proposal.expires_at)) && Date.parse(proposal.expires_at) > now &&
-    planProposalCurrent(proposal, plan, offers) &&
+    planProposalCurrent(proposal, plan, offers, recovery) &&
     (proposal.kind !== 'research' || typeof proposal.parameters.query === 'string' && !!proposal.parameters.query.trim() && proposal.parameters.query.length <= 400 && proposal.parameters.destination === 'Google Search via Vertex AI');
 }
 
@@ -248,8 +254,8 @@ export function VoiceConversationSurface({ open, onClose, voice, proposal, resea
     <div className="demo-voice-screen-body" data-has-proposal={!!proposal || !!research}>{proposal}{research && <div className="demo-voice-research-result"><span className="demo-kicker">Public research completed</span><ResearchOutcome result={research} /><p>You can ask a follow-up by voice. This result was returned by the confirmed web request.</p></div>}{voice}</div>
   </div>;
 }
-export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, materials = [], seed, riskSummary, beforeTurn, onClose, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
-  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onClose?: () => void; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
+export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, recovery = null, materials = [], seed, riskSummary, beforeTurn, onClose, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
+  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; recovery?: RecoveryView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onClose?: () => void; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
 }) {
   const [rawState, dispatch] = useReducer(applyOperatorResult, initialState ?? { ...initialOperatorState, scope });
   const state = sameScope(rawState.scope, scope) ? rawState : {
@@ -389,7 +395,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
   }
 
   async function apply() {
-    if (!canApplyProposal(state, scope, dirty || blocked, Date.now(), plan, offers) || !reviewCurrent || busy) return;
+    if (!canApplyProposal(state, scope, dirty || blocked, Date.now(), plan, offers, recovery) || !reviewCurrent || busy) return;
     const proposal = state.turn!.proposal!;
     const captured = scope, generation = ++generationRef.current;
     confirmVoiceTransition(proposal.kind, voiceOpen, () => closeVoice(false), () => setVoiceRevision(value => value + 1));
@@ -446,11 +452,11 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
   const reviewPreview = quotePreviews(state.turn);
   const preparedPreview = draftPreview(state.turn);
   const researchCurrent = proposal?.kind !== 'research' || typeof proposal.parameters.query === 'string' && !!proposal.parameters.query.trim() && proposal.parameters.query.length <= 400 && proposal.parameters.destination === 'Google Search via Vertex AI';
-  const planCurrent = planProposalCurrent(proposal ?? null, plan, offers);
+  const planCurrent = planProposalCurrent(proposal ?? null, plan, offers, recovery);
   const reviewCurrent = researchCurrent && planCurrent && (proposal?.kind !== 'review_quotes' || !!reviewPreview && reviewPreview.rows.every(row =>
     offers.some(offer => offer.offer_id === row.offer_id && offer.version === row.expected_version && offer.fixture_id === row.fixture_id && offer.document.filename === row.source_filename)));
 
-  const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now(), plan, offers) && reviewCurrent && !busy;
+  const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now(), plan, offers, recovery) && reviewCurrent && !busy;
   const proposalCard = proposal ? (<div ref={proposalRef} className="demo-operator-proposal demo-current-proposal" role="region" aria-label="Current proposal requiring review" tabIndex={-1}><span className="demo-kicker">Reviewable {proposal.kind} proposal</span><h3>{displaySupplierMentions(proposal.summary, supplierNames)}</h3><p>Review this request before it expires.</p>{!planCurrent && <p className="demo-alert">The comparison or quote versions changed. Request a new proposal.</p>}{proposal.kind === 'research' && <div className="demo-research-consent"><p><strong>Public query to share:</strong> {typeof proposal.parameters.query === 'string' ? proposal.parameters.query : 'Unavailable'}</p><p><strong>Destination:</strong> {typeof proposal.parameters.destination === 'string' ? proposal.parameters.destination : 'Unavailable'}</p><p>Only the exact public query shown above is shared with Google Search via Vertex AI after your confirmation.</p>{!researchCurrent && <p className="demo-alert">The query or destination is invalid. Request a new proposal.</p>}</div>}{proposal.kind === 'review_quotes' && <div className="demo-quote-preview"><h4>Review sample quotes</h4>{reviewPreview ? <><p>Material: {reviewPreview.materialId} · Offer IDs: {reviewPreview.offerIds.join(', ')}</p>{reviewPreview.rows.map(row => {
       const original = offers.find(offer => offer.offer_id === row.offer_id);
       return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Fixture: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested synthetic document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;

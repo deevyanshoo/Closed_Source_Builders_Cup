@@ -29,9 +29,12 @@ CURRENT_STATES = {'fresh', 'cached'}
 class PooledClient:
     """One cookie jar with fixed-origin, bounded HTTPS requests."""
 
-    def __init__(self, base):
+    def __init__(self, base, *, max_transport_attempts=2):
+        if type(max_transport_attempts) is not int or max_transport_attempts not in (1, 2):
+            raise ValueError('max_transport_attempts must be 1 or 2')
         self.base = base
         self.origin = origin_of(base)
+        self.max_transport_attempts = max_transport_attempts
         self.session = requests.Session()
         self.session.trust_env = False
         self.calls = 0
@@ -52,7 +55,7 @@ class PooledClient:
             headers.update({'Content-Type': 'application/json', 'Origin': self.base})
             if csrf is not None:
                 headers['X-CSRF-Token'] = csrf
-        for attempt in range(2):
+        for attempt in range(self.max_transport_attempts):
             self.calls += 1
             try:
                 with self.session.request('POST' if payload is not None else 'GET', url,
@@ -65,7 +68,7 @@ class PooledClient:
                     status = response.status_code
                     break
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                if attempt == 0:
+                if attempt + 1 < self.max_transport_attempts:
                     self.transport_retries += 1
                     continue
                 raise AcceptanceError(stage, 'transport_error') from None

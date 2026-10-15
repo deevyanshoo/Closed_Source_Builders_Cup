@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView } from './demo-api';
+import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView, RecoveryView } from './demo-api';
 import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, confirmVoiceTransition, focusValidOperatorSeed, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
@@ -394,6 +394,27 @@ describe('operator response boundary', () => {
         expect(html).toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
       }
     }
+  });
+  it('uses the authoritative original baseline for a second recovery while RFQ stays bound to the active scenario', () => {
+    const baseline = { plan_id: 'baseline', offer_versions: { q1: 2 } } as unknown as PlanView;
+    const active = { plan_id: 'scenario', offer_versions: { q1: 2 } } as unknown as PlanView;
+    const recovery = { baseline, scenario: active } as RecoveryView;
+    const nextRecovery = { ...proposal, kind: 'recovery' as const, plan_id: 'baseline', offer_versions: { q1: 2 } };
+    const recoveryState = { ...initialOperatorState, scope, turn: { ...turn, proposal: nextRecovery }, reviewed: true };
+    expect(canApplyProposal(recoveryState, scope, false, Date.now(), active, [quote], recovery)).toBe(true);
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={recoveryState}
+      plan={active} recovery={recovery} offers={[quote]} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).not.toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
+    expect(canApplyProposal(recoveryState, scope, true, Date.now(), active, [quote], recovery)).toBe(false);
+    expect(canApplyProposal(recoveryState, scope, false, Date.now(), active, [quote], null)).toBe(false);
+    expect(canApplyProposal(recoveryState, scope, false, Date.now(), active, [quote],
+      { ...recovery, scenario: { ...active, plan_id: 'stale-scenario' } })).toBe(false);
+    expect(canApplyProposal(recoveryState, scope, false, Date.now(), active, [quote],
+      { ...recovery, baseline: { ...baseline, offer_versions: { q1: 3 } } })).toBe(false);
+    const rfqState = { ...initialOperatorState, scope, turn: { ...turn, proposal: {
+      ...proposal, kind: 'rfq' as const, plan_id: 'scenario', offer_versions: { q1: 2 } } }, reviewed: true };
+    expect(canApplyProposal(rfqState, scope, false, Date.now(), active, [quote], recovery)).toBe(true);
+    expect(canApplyProposal(rfqState, scope, false, Date.now(), baseline, [quote], recovery)).toBe(false);
   });
   it('accepts a same-scope server utility session and keeps dirty Q&A available while blocking stale proposal apply', () => {
     const canonical = { session_id: 's1', csrf_token: 'csrf', expires_at: '2026-10-15T12:00:00Z', synthetic: true as const, persistence: 'ephemeral' as const, offers: [], provider: { model: 'test', available: true }, company: { company_id: 'solara-cables' }, context_version: 1 };

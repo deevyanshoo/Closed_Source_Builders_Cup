@@ -53,6 +53,7 @@ OPERATIONS = {
 AMBIGUOUS_MATERIAL_TERMS = {'oil', 'gas', 'cell', 'glass', 'packaging', 'chemical', 'polymer', 'film', 'sand', 'steel', 'resin', 'grain', 'fibre', 'electronics', 'battery', 'aluminium', 'inks'}
 FINANCIAL_ONLY_TERMS = ('shares', 'share price', 'stock price', 'stock gets', 'buy rating',
                         'sell rating', 'target price', 'fair value', 'dividend', 'earnings')
+FINANCIAL_RATING_TERMS = ('price target', 'analyst rating', 'stock rating')
 SOURCES = (
     ('eia', 'U.S. Energy Information Administration', 'https://www.eia.gov/rss/todayinenergy.xml'),
     ('ecb', 'European Central Bank', 'https://www.ecb.europa.eu/rss/press.html'),
@@ -288,16 +289,23 @@ def _company_item(raw, company):
     item['matched_materials'], item['matched_routes'], item['matched_currencies'] = materials, routes, currencies
     title = item['title'].casefold()
     sector = company.get('sector', '').casefold()
-    sector_match = not financial_only and any(_term_in(title, term) for term in SECTOR_TERMS.get(sector, ()))
+    operations = [name for name, terms in OPERATIONS.items() if any(_term_in(title, term) for term in terms)]
+    # Analyst price targets describe securities, even when the issuer's sector
+    # and the generic word "price" appear, unless the headline also names a
+    # recorded exposure or a physical supply/logistics operation.
+    # A geographic mention alone does not establish a route disruption.
+    route_match = bool(routes and 'logistics' in operations)
+    sector_only_rating = (any(_term_in(title, term) for term in FINANCIAL_RATING_TERMS)
+                          and not (materials or route_match or currencies)
+                          and not any(name in operations for name in ('supply', 'logistics')))
+    sector_match = (not financial_only and not sector_only_rating
+                    and any(_term_in(title, term) for term in SECTOR_TERMS.get(sector, ())))
     # Semiconductor package assembly is a different business from flexible films.
     # Retain explicit physical material matches, but reject the ambiguous sector word.
     if sector == 'flexible packaging' and not materials and any(_term_in(title, term) for term in
             ('chip', 'chips', 'semiconductor', 'wafer', 'silicon interposer',
              'tsmc', 'globalfoundries', 'amat', 'avgo')):
         sector_match = False
-    operations = [name for name, terms in OPERATIONS.items() if any(_term_in(title, term) for term in terms)]
-    # A geographic mention alone does not establish a route disruption.
-    route_match = bool(routes and 'logistics' in operations)
     item['matched_operations'] = operations if materials or route_match or sector_match else []
     item['relevance_kind'] = ('direct_material' if materials else 'route' if route_match else
                               'sector' if sector_match and operations else 'currency' if currencies else 'unmatched')

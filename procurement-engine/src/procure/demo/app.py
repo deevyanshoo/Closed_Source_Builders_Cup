@@ -400,6 +400,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         if previous:
             if previous['digest'] != digest:
                 raise SessionError('idempotency_conflict', 'Retry key was already used for another request.', 409)
+            if previous.get('result_retired') or previous.get('result') == {'_retry_result_expired': True}:
+                raise SessionError('retry_result_expired', 'Exact retry response is no longer retained. Start a new action with a new key.', 409)
             if previous['result'] is None:
                 if previous['pending']:
                     raise SessionError('request_in_progress', 'This request is still processing.', 409)
@@ -421,6 +423,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     def complete(value, key, result):
         active(value)
         value.idempotency[key]['result'] = deepcopy(result)
+        value.idempotency[key]['pending'] = False
         return result
 
     def remember(value, entry, *, company_id=None):
@@ -2035,7 +2038,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def export(request: Request):
         value = session(request)
         with value.lock:
-            return JSONResponse({'synthetic': True, 'persistence': 'ephemeral',
+            return JSONResponse({'synthetic': True, 'persistence': store.persistence,
                                  'exported_at': store.now().isoformat(),
                                  'company': get_company(value.company_id),
                                  'context_version': value.context_version,

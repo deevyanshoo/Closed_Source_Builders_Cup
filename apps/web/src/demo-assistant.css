@@ -100,7 +100,7 @@
 .demo-assistant-panel .demo-voice-orb { display: grid; place-items: center; min-height: 70px; }
 .demo-assistant-panel .demo-voice-state { color: #f1ded0; font-weight: 700; }
 .demo-assistant-panel .demo-voice-controls,
-.demo-assistant-panel .demo-operator-voice > div {
+.demo-assistant-panel .demo-operator-voice > div:not(.demo-voice-orb) {
   justify-content: center;
   width: 100%;
   gap: 8px;

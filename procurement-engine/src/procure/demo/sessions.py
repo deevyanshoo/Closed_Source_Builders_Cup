@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import json
 import os
 import secrets
 import threading
@@ -12,6 +13,11 @@ from .company import DEFAULT_COMPANY_ID
 from .session_persistence import (FirestoreSessionPersistence, StorageConflict,
                                   StorageInvalid, StorageTooLarge, StorageUnavailable,
                                   document_id, encode_state)
+
+MAX_EXACT_REPLAY_BYTES = 2 * 1024 * 1024
+MAX_EXACT_REPLAY_RESULTS = 128
+MAX_REPLAY_KEYS = 2400  # Keep aligned with the public action limit in app.py.
+RETIRED_REPLAY_RESULT = {'_retry_result_expired': True}
 
 
 class SessionError(Exception):
@@ -213,6 +219,8 @@ class SessionStore:
 
     @classmethod
     def _snapshot(cls, session: Session) -> dict:
+        if not cls._valid_replay_journal(session.idempotency):
+            raise StorageInvalid('Invalid replay journal')
         if len(session.chat_history) > 16 or any(
                 not isinstance(items, list) or len(items) > 100 for items in session.chat_history.values()):
             raise StorageTooLarge('Conversation exceeds history limit')
@@ -227,6 +235,43 @@ class SessionStore:
                  'requests': 0}
         state.update({name: getattr(session, name) for name in cls._STATE_FIELDS})
         return state
+
+    @staticmethod
+    def _valid_replay_journal(journal: dict) -> bool:
+        if not isinstance(journal, dict) or len(journal) > MAX_REPLAY_KEYS:
+            return False
+        for key, entry in journal.items():
+            if (not isinstance(key, str) or not 1 <= len(key) <= 100 or
+                    not isinstance(entry, dict) or not isinstance(entry.get('digest'), str) or
+                    'result' not in entry or type(entry.get('pending')) is not bool):
+                return False
+            if entry.get('result_retired') and entry['result'] != RETIRED_REPLAY_RESULT:
+                return False
+        return True
+
+    @classmethod
+    def _retire_replay_results(cls, session: Session) -> None:
+        """Bound exact response copies; a retired key remains a durable no-op."""
+        if not cls._valid_replay_journal(session.idempotency):
+            raise StorageInvalid('Invalid replay journal')
+        count = used_bytes = 0
+        for entry in reversed(list(session.idempotency.values())):
+            result = entry['result']
+            if result is None or entry.get('result_retired'):
+                # In-flight and failed claims keep their retry semantics. Older
+                # completed records may still have pending=True, so result wins.
+                continue
+            try:
+                size = len(json.dumps(result, ensure_ascii=False, separators=(',', ':'),
+                                      allow_nan=False).encode('utf-8'))
+            except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
+                raise StorageInvalid('Invalid replay result') from exc
+            if count >= MAX_EXACT_REPLAY_RESULTS or used_bytes + size > MAX_EXACT_REPLAY_BYTES:
+                entry['result'] = RETIRED_REPLAY_RESULT.copy()
+                entry['result_retired'] = True
+            else:
+                count += 1
+                used_bytes += size
 
     @classmethod
     def _valid_proposal(cls, proposal: dict, session: Session) -> bool:
@@ -284,6 +329,8 @@ class SessionStore:
                          'chat_history', 'research_records'):
                 if not isinstance(values[name], dict):
                     raise ValueError()
+            if not cls._valid_replay_journal(values['idempotency']):
+                raise ValueError()
             for name in ('simulated_outbox', 'watch_items', 'drafts'):
                 if not isinstance(values[name], list):
                     raise ValueError()
@@ -326,6 +373,7 @@ class SessionStore:
                     session.expires_at <= self.now()):
                 raise SessionError('session_expired', 'Session expired. Start a new demo session.')
             try:
+                self._retire_replay_results(session)
                 state = self._snapshot(session)
                 fingerprint = encode_state(state)
                 if session.storage_version is not None and fingerprint == session.storage_fingerprint:

@@ -10,7 +10,7 @@ import { RiskMonitor, sameRiskScope } from './demo-risk-monitor';
 import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
-import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { applyDemoTitle, displaySupplierMentions, supplierDisplayName } from './demo-display';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
 export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
@@ -243,7 +243,7 @@ export function PlanResults({ plan, offers }: { plan: PlanView; offers: OfferVie
   const stockCoversNeed = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
   return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">04 / Comparison</span><h2>{stockCoversNeed ? 'Stock covers this need' : selected ? `${supplierDisplayName(selected.supplier)} is feasible` : 'No feasible quote for these inputs'}</h2><p>{displaySupplierMentions(plan.explanation, plan.alternatives.map(item => item.supplier))}</p>
     <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{requiredPurchase(plan)} {planUnit(plan)}</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
-    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
+    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Quoted unit price</th><th>Total<small>includes extra cost</small></th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
     <p className="demo-muted">Total includes your extra cost per {planUnit(plan)}. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
   </section>;
 }
@@ -285,6 +285,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 }
 
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
+  useEffect(() => { applyDemoTitle(document); }, []);
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);

@@ -276,7 +276,8 @@ for _profile_row in _PROFILES:
         'quantity': _quantity, 'current_stock': _stock, 'quantity_unit': _unit,
         'need_by': '2026-11-05', 'decision_date': AS_OF,
         'reporting_currency': _profile_row['reporting_currency'],
-        'budget': str(Decimal(_purchase) * Decimal(_SCENARIO_PRICE[_profile_row['company_id']]) * Decimal('1.5')),
+        'budget': format((Decimal(_purchase) * Decimal(_SCENARIO_PRICE[_profile_row['company_id']])
+                       * Decimal('1.5')).normalize(), 'f'),
         'additional_cost_per_unit': '0.25'}
     _profile_row['orders'].append({
         'order_id': f"{_profile_row['company_id']}-scenario-order",

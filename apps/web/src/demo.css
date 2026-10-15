@@ -52,3 +52,4 @@
 }
 
 @media(max-width:999px){.demo-operator-toggle[aria-expanded="true"]{display:none}}
+.demo-table-wrap th small{display:block;margin-top:4px;font-weight:600;text-transform:none;letter-spacing:0;color:#555}.demo-company-grid table.demo-orders-table{min-width:0}.demo-orders-table td:first-child{overflow-wrap:anywhere;min-width:110px}.demo-nowrap{white-space:nowrap}

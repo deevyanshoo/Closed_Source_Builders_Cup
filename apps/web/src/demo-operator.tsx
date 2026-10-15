@@ -5,7 +5,7 @@ import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory
 import { LiveVoice } from './demo-live-voice';
 import type { LiveVoiceHandle } from './demo-live-voice';
 import { ActivityIndicator } from './demo-activity';
-import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { displaySupplierMentions, roundDecimalText, supplierDisplayName } from './demo-display';
 import { ResearchOutcome, validatedResearchResult } from './demo-research';
 import { MarkdownAnswer } from './demo-markdown';
 import './demo-assistant.css';
@@ -210,7 +210,7 @@ export function formatOperatorAttention(value: unknown, materials: MaterialLabel
   const name = knownMaterial(item?.material_id, materials);
   if (item?.synthetic === true && name && typeof item.stock_cover_days === 'string' && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(item.stock_cover_days) &&
     typeof item.minimum_lead_time_days === 'number' && Number.isInteger(item.minimum_lead_time_days) && item.minimum_lead_time_days >= 0) {
-    return { title: name, detail: `Stock cover: ${item.stock_cover_days} days · shortest listed supplier lead: ${item.minimum_lead_time_days} days`, synthetic: true };
+    return { title: name, detail: `Stock cover: ${item.stock_cover_days.includes('.') ? roundDecimalText(item.stock_cover_days, 1) : item.stock_cover_days} days · shortest listed supplier lead: ${item.minimum_lead_time_days} days`, synthetic: true };
   }
   return { title: 'Attention details unavailable', detail: '', synthetic: false };
 }

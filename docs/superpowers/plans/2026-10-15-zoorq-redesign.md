@@ -21,7 +21,7 @@
 ## Global constraints
 
 - Preserve company/session/context-version/epoch guards, dirty-state blocking, review gates, stale-result rejection, buyer-draft synchronization and all server contracts.
-- No backend/provider, billing, IAM, schedule, private-data, real email or supplier-order change. Existing unupgraded trial credits only; verify current status before deployment.
+- No provider, billing, IAM, schedule, private-data, real email or supplier-order change. A QA-discovered voice context fix is limited to bounded workspace fields and lookup guidance; it preserves existing authorization and business contracts. Existing unupgraded trial credits only; verify current status before deployment.
 - One coordinator owns shared demo-page.tsx, global CSS, Git, browser and release. Workers have disjoint files, no commits/push/deployment/browser use.
 - Work on feature/zoorq-workspace-redesign from 066921c; preserve history and existing contributor authorship.
 - Existing Thinking Orbs remains. No decorative dependency is necessary; add libraries only if justified and tested.
@@ -36,33 +36,37 @@
 
 ### Task 1: Company hub and navigation (coordinator)
 Files: demo-page.tsx, new zoorq-workspace.tsx/.css/.test.tsx, demo.css, index.html.
-- [ ] Add tests for hub search/ten companies, navigation parse/serialization and overview links.
-- [ ] Implement hub and five destinations with persistent controller and URL navigation.
-- [ ] Gate full forms/tables to their destination; preserve old controller/session contracts.
-- [ ] Run focused and existing web tests; inspect desktop/mobile locally.
+- [x] Add tests for hub search/ten companies, navigation parse/serialization and overview links.
+- [x] Implement hub and five destinations with persistent controller and URL navigation.
+- [x] Gate full forms/tables to their destination; preserve old controller/session contracts.
+- [x] Run focused and existing web tests; inspect desktop/mobile locally.
 
 ### Task 2: News inbox (Antigravity worker news)
 Files: demo-company-news.tsx, demo-company-news.css, demo-company-news.test.tsx only.
-- [ ] Add failing company-first / Global Watch toggle and condensed actionable detail tests.
-- [ ] Implement company-first inbox, explicit global mode, compact source status, secondary actions/evidence disclosure and responsive reading behavior.
-- [ ] Preserve exports/contracts/ranking/source clocks; run focused tests and typecheck.
+- [x] Add failing company-first / Global Watch toggle and condensed actionable detail tests.
+- [x] Implement company-first inbox, explicit global mode, compact source status, secondary actions/evidence disclosure and responsive reading behavior.
+- [x] Preserve exports/contracts/ranking/source clocks; run focused tests and typecheck.
 
 ### Task 3: Procurement stages (coordinator, after Task 1)
 Files: demo-page.tsx, zoorq-workspace.* and tests.
-- [ ] Test stage gating, draft discovery and buyer/quote guards.
-- [ ] Implement guided sections and recovery from comparison with one material context.
-- [ ] Verify extraction/review/plan/recovery/RFQ on hosted acceptance later.
+- [x] Test stage gating, draft discovery and buyer/quote guards.
+- [x] Implement guided sections and recovery from comparison with one material context.
+- [x] Verify extraction/review/plan/recovery/RFQ on hosted acceptance later.
 
 ### Task 4: Operator polish (Antigravity worker operator)
 Files: demo-operator.tsx, demo-assistant.css, demo-operator.test.tsx only.
-- [ ] Add failing assertions for branded compact header, concise guidance, persistent current approval and voice controls.
-- [ ] Polish panel/composer/context actions and activity disclosure without changing voice/consent lifecycle or backend calls.
-- [ ] Keep header onClose available; coordinator owns outer drawer behavior.
-- [ ] Run focused tests and typecheck; report exact failures from concurrent edits separately.
+- [x] Add failing assertions for branded compact header, concise guidance, persistent current approval and voice controls.
+- [x] Polish panel/composer/context actions and activity disclosure without changing voice/consent lifecycle or backend calls.
+- [x] Keep header onClose available; coordinator owns outer drawer behavior.
+- [x] Run focused tests and typecheck; report exact failures from concurrent edits separately.
 
 ### Task 5: Integration, independent review and release (coordinator + read-only reviewer)
-- [ ] Review diffs for guard/state regressions; run all web tests/typecheck/build and backend demo gates.
-- [ ] Local desktop/mobile walkthrough including text and controlled voice; fix demonstrated issues.
-- [ ] Verify current trial status, freeze allowlisted package and immutable image, deploy existing service only; preserve caps and rollback image.
-- [ ] Hosted all-ten-company news/procurement/text checks plus native/browser voice and spoken approval; record exact evidence boundaries.
-- [ ] Commit verified source with correct identity; push branch/update review artifact; clean status and final deployed revision receipt.
+- [x] Review diffs for guard/state regressions; run all web tests/typecheck/build and backend demo gates.
+- [x] Local desktop/mobile walkthrough including text and controlled voice; fix demonstrated issues.
+- [x] Verify current trial status, freeze allowlisted package and immutable image, deploy existing service only; preserve caps and rollback image.
+- [x] Hosted all-ten-company news/procurement/text checks plus native/browser voice and spoken approval; record exact evidence boundaries.
+- [x] Commit verified source with correct identity; push branch/update review artifact; clean status and final deployed revision receipt.
+
+## Release evidence
+
+See [ZOORQ release record](../../ZOORQ_Redesign_Release_20261016.md) for exact deployed source, immutable image, tests, hosted acceptance boundaries and rollback.

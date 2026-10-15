@@ -11,3 +11,4 @@ requests==2.34.2
 pydantic==2.13.5
 pdfplumber==0.11.10
 scrapling==0.4.15
+curl_cffi==0.16.3

@@ -56,7 +56,7 @@ function pcm24Buffer(context: AudioContext, encoded: string): AudioBuffer {
   }
   return buffer;
 }
-type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean };
+type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean };
 type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
 type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
 const CAPTION_LIMIT = 24;
@@ -105,11 +105,16 @@ export function preflightLiveVoice(scope: LiveScope, available:
     'Live voice is unavailable in this browser. Use the text composer.' };
 }
 
-export function voiceVisualState(current: { ready: boolean; muted: boolean; playback: Set<unknown> }, thinking: boolean): VoiceVisualState {
+export function voiceVisualState(current: { ready: boolean; muted: boolean; playback: Set<unknown>; responsePending?: boolean }, thinking: boolean): VoiceVisualState {
   if (!current.ready) return 'connecting';
   if (current.playback.size) return 'speaking';
-  if (thinking) return 'thinking';
+  if (thinking || current.responsePending) return 'thinking';
   return current.muted ? 'muted' : 'listening';
+}
+
+export function voiceResponsePendingAfterEvent(previous: boolean,
+  event: 'input_transcript' | 'output_transcript' | 'tool_result' | 'audio' | 'turn_complete' | 'interrupted'): boolean {
+  return event === 'turn_complete' || event === 'interrupted' ? false : true;
 }
 
 export function voiceThinkingAfterEvent(previous: boolean,
@@ -228,7 +233,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
       const current: ActiveVoice = { socket, stream, input, output, source, processor, playback: new Set(), nextTime: 0,
         timer: setTimeout(() => { setError('This voice conversation reached its three-minute limit. Start another conversation.'); end(); }, 180000),
         startupTimer: setTimeout(() => { setError('The live voice service did not become ready. Try starting again.'); end(); }, CONNECT_TIMEOUT_MS),
-        scope: captured, ready: false, muted: false };
+        scope: captured, ready: false, muted: false, responsePending: false };
       active.current = current;
       let pending: number[] = [];
       processor.onaudioprocess = event => {
@@ -249,12 +254,14 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         else if (data.type === 'audio' && typeof data.data === 'string' && data.sample_rate_hertz === 24000) {
           try {
             thinking.current = voiceThinkingAfterEvent(thinking.current, 'audio');
+            current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'audio');
             queueLivePlayback(current, data.data, () => {
               if (active.current === current && sameLiveScope(scopeRef.current, captured)) setStatus(voiceVisualState(current, thinking.current));
             });
           } catch { setError('Received audio could not be played.'); }
         } else if (data.type === 'interrupted') {
           stopPlayback(current);
+          current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'interrupted');
           setCaptions(old => updateLiveCaptions(old, { type: 'interrupted' }));
           pendingCaptions.current = [];
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'interrupted');
@@ -264,6 +271,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           pendingCaptions.current = updateLiveCaptions(pendingCaptions.current, { type: 'transcript', direction: data.direction, text: data.text });
           setCaptions(old => updateLiveCaptions(old, { type: 'transcript', direction: data.direction as Caption['direction'], text: data.text as string }));
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'transcript');
+          current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, data.direction === 'input' ? 'input_transcript' : 'output_transcript');
           setStatus(voiceVisualState(current, thinking.current));
         } else if (data.type === 'turn_complete') {
           const complete = finalizedLiveCaptions(updateLiveCaptions(pendingCaptions.current, { type: 'turn_complete' }), 0);
@@ -277,10 +285,12 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           }
           setCaptions(old => updateLiveCaptions(old, { type: 'turn_complete' }));
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'turn_complete');
+          current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'turn_complete');
           setStatus(voiceVisualState(current, thinking.current));
         }
         else if (data.type === 'tool_result' && acceptsLiveTurn(data.result, captured, scopeRef.current)) {
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'tool_result');
+          current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'tool_result');
           setStatus(voiceVisualState(current, thinking.current));
           onTurnRef.current(data.result, captured);
         }
@@ -320,7 +330,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const visible = visibleLiveVoiceState(status, error, captionScope, scope);
   const orbState = visible.error ? 'error' : visible.status;
   const statusLabel = visible.status === 'connecting' ? 'Connecting live voice…' :
-    visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? 'Thinking' :
+    visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? active.current?.responsePending && !thinking.current ? 'Finishing response…' : 'Thinking' :
     visible.status === 'speaking' ? microphoneMuted ? 'Speaking · microphone muted' : 'Speaking' :
     visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';
   const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
@@ -328,7 +338,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     <p>Speak naturally. You can interrupt an answer by speaking.</p>
     <div className="demo-voice-orb"><AssistantOrb state={orbState} size={64} theme="dark" /></div>
     <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
-    <div className="demo-voice-controls"><button type="button" className="demo-button" disabled={disabled || visible.status !== 'idle'} onClick={start}>Start conversation</button><button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" onClick={() => { end(); onExit?.(); }}>End conversation</button></div>
+    <div className="demo-voice-controls">{visible.status === 'idle' && <button type="button" className="demo-button" disabled={disabled} onClick={start}>Start conversation</button>}<button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" onClick={() => { end(); onExit?.(); }}>End conversation</button></div>
     {visible.error && <p className="demo-alert" role="alert">{visible.error}</p>}
     {shownCaptions.length > 0 && <ol className="demo-live-captions" aria-label="Live transcript">{shownCaptions.map((caption, index) => <li className={`demo-caption ${caption.direction === 'input' ? 'is-user' : 'is-assistant'}`} key={index}><strong>{caption.direction === 'input' ? 'You' : 'Operator'}:</strong> {caption.text}</li>)}</ol>}
   </div>;

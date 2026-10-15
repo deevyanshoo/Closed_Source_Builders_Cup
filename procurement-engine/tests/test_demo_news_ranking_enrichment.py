@@ -140,24 +140,40 @@ def test_static_transport_stops_oversize_response_while_streaming():
         status_code = 200
         headers = {'Content-Type': 'text/html'}
         chunks = 0
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def iter_content(self, chunk_size):
-            for _ in range(100):
-                self.chunks += 1
-                yield b'x' * chunk_size
     response = Response()
     class Session:
         trust_env = True
         def __init__(self): self.options = None
-        def get(self, url, **options): self.options = options; return response
+        def get(self, url, **options):
+            self.options = options
+            for _ in range(100):
+                response.chunks += 1
+                if options['content_callback'](b'x' * 8192) != 8192:
+                    raise RuntimeError('callback aborted')
+            return response
         def close(self): pass
     session = Session()
     with pytest.raises(ValueError, match='article_too_large'):
         _static_fetch('https://www.eia.gov/todayinenergy/detail.php?id=68284', session_factory=lambda: session)
     assert response.chunks <= MAX_ARTICLE_BYTES // 8192 + 1
-    assert session.options['stream'] is True and session.options['allow_redirects'] is False
+    assert callable(session.options['content_callback']) and session.options['allow_redirects'] is False
     assert session.trust_env is False
+
+
+def test_static_transport_curl_callback_parses_bounded_html():
+    html = b'<html><title>Energy update</title><p>' + b'Energy production ' * 7 + b'</p></html>'
+    class Session:
+        def get(self, url, **options):
+            assert options['timeout'] == (3, 5)
+            assert options['impersonate'] is None
+            assert options['content_callback'](html) == len(html)
+            return SimpleNamespace(status_code=200, headers={'Content-Type': 'text/html'})
+        def close(self): pass
+    page = _static_fetch('https://www.eia.gov/todayinenergy/detail.php?id=68284',
+                         session_factory=Session)
+    assert page.status == 200
+    assert page.body == html
+    assert page.css('title::text').get() == 'Energy update'
 
 
 def test_injected_feed_transport_does_not_enable_article_network(monkeypatch):
@@ -237,3 +253,21 @@ def test_snapshot_reader_enriches_without_advancing_collection_success_clock():
     assert result['items'][0]['article']['status'] == 'enriched'
     assert result['collection']['news_success_at'] == stamp
     assert bundle['views']['atlas-petrochem']['items'][0].get('article') is None
+
+
+def test_static_transport_explicitly_disables_environment_proxy_and_ca(monkeypatch):
+    from curl_cffi import CurlOpt
+    monkeypatch.setenv('HTTPS_PROXY', 'http://127.0.0.1:9')
+    monkeypatch.setenv('REQUESTS_CA_BUNDLE', '/untrusted/environment-ca.pem')
+    class Session:
+        verify = '/untrusted/environment-ca.pem'
+        curl_options = {}
+        def get(self, url, **options):
+            assert self.curl_options.get(CurlOpt.PROXY) == ''
+            assert self.verify is True
+            html = b'<html><p>' + b'Energy production ' * 7 + b'</p></html>'
+            options['content_callback'](html)
+            return SimpleNamespace(status_code=200, headers={'Content-Type': 'text/html'})
+        def close(self): pass
+    assert _static_fetch('https://www.eia.gov/todayinenergy/detail.php?id=68284',
+                         session_factory=Session).status == 200

@@ -7,6 +7,7 @@ tool delegates to the same validated operator turn used by typed requests.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from copy import deepcopy
 import asyncio
 import base64
 import binascii
@@ -136,6 +137,9 @@ def _research_gate(session, store, context_version: int, result: dict) -> dict |
         gate = {'proposal_id': proposal.get('proposal_id'),
                 'query': proposal.get('parameters', {}).get('query'),
                 'marker': proposal.get('_marker'), 'expires_at': proposal.get('expires_at'),
+                'public_proposal': {key: deepcopy(public[key]) for key in (
+                    'proposal_id', 'kind', 'summary', 'parameters', 'plan_id',
+                    'offer_versions', 'context_version', 'expires_at') if key in public},
                 'spoken': '', 'input_spoken': '', 'input_overflow': False,
                 'prompt_audio': False, 'armed': False,
                 'audio_at_arm': 0, 'audio_bytes_at_arm': 0,
@@ -146,7 +150,9 @@ def _research_gate(session, store, context_version: int, result: dict) -> dict |
                 'consumed': False}
     if (not isinstance(gate['proposal_id'], str) or not isinstance(gate['query'], str)
             or public.get('proposal_id') != gate['proposal_id']
-            or public.get('parameters', {}).get('query') != gate['query']):
+            or public.get('parameters', {}).get('query') != gate['query']
+            or public.get('context_version') != context_version
+            or public.get('expires_at') != gate['expires_at']):
         return None
     try:
         return gate if _research_current(session, store, context_version, gate) else None
@@ -651,7 +657,7 @@ async def run_live_voice(
                                 and not research_gate['verifier_denied']
                                 and args['proposal_id'] == research_gate['proposal_id']
                                 and _research_current(session, store, context_version, research_gate))
-                            if name == 'confirm_research' and allowed_research:
+                            if name == 'confirm_research' and allowed_research and not repeated:
                                 # Consume before awaiting the durable, idempotent claim.
                                 research_gate['consumed'] = True
                             try:
@@ -660,12 +666,34 @@ async def run_live_voice(
                                     result = {k: v for k, v in cached.items()
                                               if k not in {'session', 'action_result'}}
                                     result['read_only'] = True
+                                    cached_public = result.get('proposal')
+                                    if result.get('status') == 'proposal' and isinstance(cached_public, dict):
+                                        still_current = False
+                                        if (research_gate is not None and
+                                                cached_public.get('proposal_id') == research_gate['proposal_id']):
+                                            try:
+                                                still_current = _research_current(session, store, context_version, research_gate)
+                                            except (TypeError, ValueError):
+                                                pass
+                                        if not still_current:
+                                            result['status'] = 'needs_clarification'
+                                            result['proposal'] = None
+                                            result['assistant_text'] = ('I could not verify spoken consent. This research request is no longer current. Ask me to prepare a new query.')
                                 elif name == 'confirm_research' and not allowed_research:
+                                    current_public = None
+                                    if research_gate is not None:
+                                        try:
+                                            if _research_current(session, store, context_version, research_gate):
+                                                current_public = deepcopy(research_gate['public_proposal'])
+                                        except (TypeError, ValueError):
+                                            pass
                                     result = {'turn_id': secrets.token_urlsafe(18),
                                         'company_id': session.company_id, 'context_version': context_version,
-                                        'status': 'needs_clarification',
-                                        'assistant_text': 'Read the current public query aloud, then wait for me to say confirm research.',
-                                        'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                                        'status': 'proposal' if current_public is not None else 'needs_clarification',
+                                        'assistant_text': ('I could not verify spoken consent. Research has not started. Review the current query on screen, or wait until I finish reading it and say confirm research.'
+                                            if current_public is not None else
+                                            'I could not verify spoken consent. This research request is no longer current. Ask me to prepare a new query.'),
+                                        'agent_steps': [], 'evidence_ids': [], 'proposal': current_public,
                                         'read_only': True}
                                 elif name == 'operate_workspace':
                                     result = await operate_workspace(args['message'], context_version, key)
@@ -704,14 +732,15 @@ async def run_live_voice(
                             result = present_turn(result, supplier_names)
                             if name == 'prepare_research':
                                 research_gate = _research_gate(session, store, context_version, result)
-                            elif name == 'confirm_research' and allowed_research:
+                            elif name == 'confirm_research' and allowed_research and not repeated:
                                 research_gate = None
                             elif name != 'confirm_research':
                                 research_gate = None
                             if not repeated:
                                 tool_results[call_id] = (binding, key, result)
                             await websocket.send_json({'type': 'tool_result', 'result': result})
-                            suppress_failed_speech = result['status'] in {'needs_clarification', 'unavailable'}
+                            suppress_failed_speech = (result['status'] in {'needs_clarification', 'unavailable'}
+                                or name == 'confirm_research' and result['status'] == 'proposal')
                             if suppress_failed_speech:
                                 await websocket.send_json({'type': 'interrupted'})
                                 await websocket.send_json({'type': 'transcript', 'direction': 'output',
@@ -727,8 +756,12 @@ async def run_live_voice(
                                 model_result['required_spoken_response'] = (
                                     'Give the sourced answer in two or three short sentences; offer more detail on request.')
                             if suppress_failed_speech:
+                                required_response = result['assistant_text']
+                                if name == 'confirm_research' and result['status'] == 'proposal' and research_gate is not None:
+                                    required_response = ('I could not verify spoken consent. I can search the public web for: '
+                                        + research_gate['query'] + '. Say confirm research to start.')
                                 model_result.update(tool_succeeded=False, action_applied=False,
-                                    required_spoken_response=result['assistant_text'])
+                                    required_spoken_response=required_response)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 model_result.pop('workspace', None)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:

@@ -132,6 +132,7 @@ async def prepare(socket, provider):
     result = await socket.next('tool_result')
     assert result['result']['proposal']['proposal_id'] == 'proposal-1'
     await asyncio.wait_for(provider.responses.get(), 2)
+    return result['result']['proposal']
 
 
 async def finish(socket, task):
@@ -163,7 +164,7 @@ def test_voice_research_requires_fresh_spoken_confirmation_after_query_prompt():
         _, _, socket, provider, calls, task = await scenario()
         await prepare(socket, provider)
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'too-early')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await provider.spoken('output', '', complete=True)
         await socket.next('turn_complete')
@@ -172,12 +173,12 @@ def test_voice_research_requires_fresh_spoken_confirmation_after_query_prompt():
         await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
         await socket.next('turn_complete')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'bot-words')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
         await asyncio.wait_for(provider.audio.wait(), 2)
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'old-input')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await provider.spoken('input', 'I confirm. Start the research.')
         await socket.next('transcript', 'input')
@@ -197,6 +198,50 @@ def test_voice_research_requires_fresh_spoken_confirmation_after_query_prompt():
     asyncio.run(check())
 
 
+def test_denied_confirmation_keeps_only_current_public_research_proposal():
+    async def check():
+        _, _, socket, provider, calls, task = await scenario()
+        public = await prepare(socket, provider)
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'before-arm')
+        denied = (await socket.next('tool_result'))['result']
+        assert denied['status'] == 'proposal' and denied['read_only'] is True
+        assert denied['proposal'] == public
+        assert denied['proposal']['expires_at'] == public['expires_at']
+        assert denied['proposal']['context_version'] == public['context_version']
+        assert 'session' not in denied and 'action_result' not in denied
+        model_response = await asyncio.wait_for(provider.responses.get(), 2)
+        assert model_response.response['tool_succeeded'] is False
+        assert model_response.response['action_applied'] is False
+        assert 'could not verify spoken consent' in model_response.response['required_spoken_response']
+        assert [call[0] for call in calls] == ['prepare_research']
+        await finish(socket, task)
+    asyncio.run(check())
+
+
+def test_denied_confirmation_replay_drops_expired_or_replaced_proposal():
+    async def check(stale_kind):
+        store, session, socket, provider, calls, task = await scenario()
+        public = await prepare(socket, provider)
+        await provider.call('confirm_research', {'proposal_id': public['proposal_id']}, 'denied-once')
+        first = (await socket.next('tool_result'))['result']
+        assert first['status'] == 'proposal' and first['proposal'] == public
+        if stale_kind == 'expired':
+            store.clock = lambda: datetime(2026, 10, 15, 0, 6, tzinfo=timezone.utc)
+        else:
+            with session.lock:
+                session.pending_proposal['proposal_id'] = 'replacement'
+        await provider.call('confirm_research', {'proposal_id': public['proposal_id']}, 'denied-once')
+        replay = (await socket.next('tool_result'))['result']
+        assert replay['status'] == 'needs_clarification'
+        assert replay['proposal'] is None and replay['read_only'] is True
+        assert 'session' not in replay and 'action_result' not in replay
+        assert 'prepare a new query' in replay['assistant_text']
+        assert [call[0] for call in calls] == ['prepare_research']
+        await finish(socket, task)
+    for stale_kind in ('expired', 'replaced'):
+        asyncio.run(check(stale_kind))
+
+
 def test_voice_research_rejects_negation_and_replaced_proposal():
     async def check():
         _, session, socket, provider, calls, task = await scenario()
@@ -208,13 +253,14 @@ def test_voice_research_rejects_negation_and_replaced_proposal():
         await provider.spoken('input', 'No, do not confirm research.')
         await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'negated')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         with session.lock:
             session.pending_proposal['proposal_id'] = 'proposal-2'
         await provider.spoken('input', 'confirm research')
         await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'replaced')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        replaced = (await socket.next('tool_result'))['result']
+        assert replaced['status'] == 'needs_clarification' and replaced['proposal'] is None
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check())
@@ -261,7 +307,8 @@ def test_expired_research_never_calls_confirmation():
         await socket.next('transcript', 'input')
         store.clock = lambda: datetime(2026, 10, 15, 0, 6, tzinfo=timezone.utc)
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'expired')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        expired = (await socket.next('tool_result'))['result']
+        assert expired['status'] == 'needs_clarification' and expired['proposal'] is None
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check())
@@ -325,7 +372,7 @@ def test_later_negation_or_new_turn_revokes_streamed_consent():
         for _ in range(2):
             await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'negated-fragments')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await provider.spoken('input', 'confirm research')
         await socket.next('transcript', 'input')
@@ -333,7 +380,7 @@ def test_later_negation_or_new_turn_revokes_streamed_consent():
         await socket.next('turn_complete')
         await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'old-turn')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check())
@@ -351,7 +398,7 @@ def test_unfinished_confirmation_tool_waits_for_final_negation():
         await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'premature')
         await provider.spoken('input', ' not yet', finished=True)
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         await socket.next('transcript', 'input')
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
@@ -394,7 +441,7 @@ def test_finishedless_provider_cannot_authorize_research_at_model_turn_completio
             await provider.spoken('input', ' not yet', finished=None)
             await socket.next('transcript', 'input')
         await provider.spoken('output', '', complete=True)
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check(True))
@@ -445,7 +492,7 @@ def test_finishedless_verifier_negation_and_invalid_offsets_never_search():
         await provider.activity('ACTIVITY_START', start)
         await provider.activity('ACTIVITY_END', end)
         await provider.spoken('output', '', complete=True)
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         assert len(verified) == (1 if start == '0.100s' and end == '0.600s' else 0)
         await finish(socket, task)
@@ -498,7 +545,7 @@ def test_finishedless_clip_before_prompt_or_reset_offset_after_audio_end_cannot_
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'old-clip')
         await provider.activity('ACTIVITY_START', '0.100s')
         await provider.activity('ACTIVITY_END', '0.600s')
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert not verified and [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check(True))
@@ -566,7 +613,7 @@ def test_explicit_unfinished_transcript_cannot_use_finishedless_fallback():
         await provider.activity('ACTIVITY_START', '0.100s')
         await provider.activity('ACTIVITY_END', '0.600s')
         await provider.spoken('input', ' not yet', finished=True)
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         assert attempts == []
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
@@ -589,9 +636,9 @@ def test_late_activity_grace_expires_with_one_clarification_response(monkeypatch
         await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'no-vad')
         await provider.spoken('output', '', complete=True)
-        assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
         response = await asyncio.wait_for(provider.responses.get(), 2)
-        assert response.id == 'no-vad' and response.response['status'] == 'needs_clarification'
+        assert response.id == 'no-vad' and response.response['status'] == 'proposal'
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
     asyncio.run(check())

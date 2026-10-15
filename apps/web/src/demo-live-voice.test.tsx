@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
-import { acceptsLiveTurn, appendLiveCaption, endActiveVoice, finalizedLiveCaptions, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+import { acceptsLiveTurn, appendLiveCaption, endActiveVoice, finalizedLiveCaptions, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
 
 vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
@@ -168,6 +168,27 @@ describe('live conversation boundary', () => {
     current.muted = true;
     expect(voiceVisualState(current, false)).toBe('speaking');
     playback.delete(node);
+    expect(voiceVisualState(current, false)).toBe('muted');
+  });
+  it('does not advertise Listening in an audio playback gap before the provider turn completes', () => {
+    const current = { ready: true, muted: false, playback: new Set<object>(), responsePending: false };
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'input_transcript');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'tool_result');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'audio');
+    const node = {};
+    current.playback.add(node);
+    expect(voiceVisualState(current, false)).toBe('speaking');
+    current.playback.delete(node);
+    expect(voiceVisualState(current, false)).toBe('thinking');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'output_transcript');
+    expect(voiceVisualState(current, false)).toBe('thinking');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'turn_complete');
+    expect(voiceVisualState(current, false)).toBe('listening');
+    current.muted = true;
+    expect(voiceVisualState(current, false)).toBe('muted');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'audio');
+    expect(voiceVisualState(current, false)).toBe('thinking');
+    current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'interrupted');
     expect(voiceVisualState(current, false)).toBe('muted');
   });
   it('tracks real transcript and tool activity until audio, interruption or turn completion', () => {

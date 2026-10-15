@@ -32,7 +32,7 @@
 
 /* Keep reading space usable beside the persistent operator. */
 .demo-news-panel { container-type:inline-size; }
-@container(max-width:750px) {
+@container(max-width:649px) {
   .demo-news-layout { display:block; }
   .demo-news-inbox { border-right:0; border-bottom:1px solid #e3dcd3; }
   .demo-news-detail { padding:25px 20px 35px; }
@@ -43,4 +43,10 @@
 }
 
 .demo-news-list { max-height:540px; overflow-y:auto; overscroll-behavior-y:contain; }
-@container(max-width:750px) { .demo-news-list { max-height:300px; } }
+@container(max-width:649px) { .demo-news-list { max-height:300px; } }
+
+@container(min-width:650px) and (max-width:850px) {
+  .demo-news-layout { grid-template-columns:minmax(210px,.85fr) minmax(0,1.15fr); }
+  .demo-news-detail { padding:25px 20px 35px; }
+  .demo-news-panel .demo-news-detail h3 { font-size:30px; }
+}

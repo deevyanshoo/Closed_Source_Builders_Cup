@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
-import requests
+from curl_cffi import CurlOpt, requests as curl_requests
 
 _EIA = re.compile(r'/todayinenergy/detail\.php$')
 _ECB = re.compile(r'/press/pr/date/\d{4}/html/ecb\.[a-z0-9._~-]+\.en\.html$')
@@ -67,7 +67,7 @@ def _date(page, provider, url):
     return None
 
 
-def _static_fetch(url, *, session_factory=requests.Session):
+def _static_fetch(url, *, session_factory=curl_requests.Session):
     # Reviewed 2026-10-15: eia.gov/robots.txt allows /todayinenergy/;
     # ecb.europa.eu/robots.txt does not disallow /press/pr/ and asks for a
     # five-second crawl delay. The process budget is at most two requests/hour.
@@ -76,32 +76,51 @@ def _static_fetch(url, *, session_factory=requests.Session):
     if not allowed_article(url):
         raise ValueError('publisher_or_path_not_allowlisted')
     from scrapling import Selector
-    deadline = time.monotonic() + 4
+    deadline = time.monotonic() + 8
     session = session_factory()
-    session.trust_env = False  # No ambient proxy or netrc credentials.
+    session.trust_env = False
+    # curl_cffi stores trust_env without enforcing proxy/CA isolation.
+    # Apply these explicitly before the first request; keep TLS verification on.
+    session.curl_options = {CurlOpt.PROXY: ''}
+    session.verify = True
     try:
-        with session.get(url, headers={'User-Agent': 'ProcureNewsArticleReader/1.0'},
-                         timeout=(2, 2), allow_redirects=False, stream=True) as response:
-            if response.status_code != 200:
-                return SimpleNamespace(status=response.status_code, body=b'', css=None)
-            media = response.headers.get('Content-Type', '').split(';', 1)[0].strip().lower()
-            if media and media not in ('text/html', 'application/xhtml+xml'):
-                raise ValueError('article_not_html')
-            length = response.headers.get('Content-Length')
-            if length and length.isdecimal() and int(length) > MAX_ARTICLE_BYTES:
-                raise ValueError('article_too_large')
-            body = bytearray()
-            for chunk in response.iter_content(chunk_size=8192):
-                if time.monotonic() > deadline:
-                    raise TimeoutError('article_deadline')
-                if len(body) + len(chunk) > MAX_ARTICLE_BYTES:
-                    raise ValueError('article_too_large')
-                body.extend(chunk)
+        body = bytearray()
+        abort_reason = None
+
+        def bounded_chunk(chunk):
+            nonlocal abort_reason
             if time.monotonic() > deadline:
-                raise TimeoutError('article_deadline')
-            content = bytes(body)
-            parsed = Selector(content=content)
-            return SimpleNamespace(status=200, body=content, css=parsed.css)
+                abort_reason = 'article_deadline'
+                return 0
+            if len(body) + len(chunk) > MAX_ARTICLE_BYTES:
+                abort_reason = 'article_too_large'
+                return 0
+            body.extend(chunk)
+            return len(chunk)
+
+        try:
+            response = session.get(url, headers={'User-Agent': 'ProcureNewsArticleReader/1.0'},
+                                   timeout=(3, 5), allow_redirects=False, impersonate=None,
+                                   content_callback=bounded_chunk)
+        except Exception:
+            if abort_reason == 'article_too_large':
+                raise ValueError(abort_reason) from None
+            if abort_reason == 'article_deadline':
+                raise TimeoutError(abort_reason) from None
+            raise
+        if time.monotonic() > deadline:
+            raise TimeoutError('article_deadline')
+        if response.status_code != 200:
+            return SimpleNamespace(status=response.status_code, body=b'', css=None)
+        media = response.headers.get('Content-Type', '').split(';', 1)[0].strip().lower()
+        if media and media not in ('text/html', 'application/xhtml+xml'):
+            raise ValueError('article_not_html')
+        length = response.headers.get('Content-Length')
+        if length and length.isdecimal() and int(length) > MAX_ARTICLE_BYTES:
+            raise ValueError('article_too_large')
+        content = bytes(body)
+        parsed = Selector(content=content)
+        return SimpleNamespace(status=200, body=content, css=parsed.css)
     finally:
         session.close()
 

@@ -418,3 +418,25 @@ def test_crypto_catalyst_and_chip_packaging_do_not_map_to_unrelated_industries()
     assert _company_item({'title': flex}, get_company('terrapack'))['relevance_kind'] == 'sector'
     direct = 'PET resin supply for semiconductor packaging shifts'
     assert _company_item({'title': direct}, get_company('terrapack'))['relevance_kind'] == 'direct_material'
+
+
+@pytest.mark.parametrize(('company_id', 'title', 'expected_material'), [
+    ('atlas-petrochem', 'UBS keeps AUD 9.25 target on Catalyst Metals stock', None),
+    ('atlas-petrochem', 'Home Depot Stock: One Big Catalyst', None),
+    ('atlas-petrochem', 'AMD stock catalyst after analyst upgrade', None),
+    ('atlas-petrochem', 'Catalyst Metals prices jump after quarterly report', None),
+    ('stonebridge-materials', 'Aggregate offer price rises in public offering', None),
+    ('atlas-petrochem', 'Refinery process catalyst supply disrupted after plant shutdown', 'catalyst'),
+    ('atlas-petrochem', 'Catalyst stock levels fall after refinery shipment delay', 'catalyst'),
+    ('atlas-petrochem', 'Catalyst warehouse stock falls after supply disruption', 'catalyst'),
+    ('atlas-petrochem', 'Catalyst feedstock shortage at chemical plant', 'catalyst'),
+    ('atlas-petrochem', 'Analyst reports Catalyst feedstock shortage at chemical plant', 'catalyst'),
+    ('stonebridge-materials', 'Crushed aggregate supply price rises after quarry shutdown', 'aggregate'),
+    ('stonebridge-materials', 'Crushed aggregate offer price rises after quarry shutdown', 'aggregate'),
+])
+def test_material_homonyms_require_physical_procurement_context(company_id, title, expected_material):
+    from procure.demo.company import get_company
+    from procure.demo.news import _company_item
+    item = _company_item({'title': title}, get_company(company_id))
+    assert item['matched_materials'] == ([expected_material] if expected_material else [])
+    assert (item['relevance_kind'] == 'direct_material') == bool(expected_material)

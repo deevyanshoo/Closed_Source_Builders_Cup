@@ -38,10 +38,6 @@
   .demo-news-inbox { border-right:0; border-bottom:1px solid #e3dcd3; }
   .demo-news-detail { padding:25px 20px 35px; }
 }
-@media(max-width:999px) {
-  .demo-page:has(.demo-voice-screen:not([hidden])) .demo-operator-toggle { display:none; }
-  .demo-operator-dock:has(.demo-voice-screen:not([hidden])) { display:block; z-index:42; }
-}
 
 .demo-news-list { max-height:540px; overflow-y:auto; overscroll-behavior-y:contain; }
 @container(max-width:649px) { .demo-news-list { max-height:300px; } }

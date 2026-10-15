@@ -41,7 +41,7 @@ def test_financial_catalyst_metaphors_do_not_outrank_physical_material_news():
     ranked = rank_items(rows, ATLAS, as_of=NOW)
     by_title = {row['title']: row for row in ranked}
     assert [by_title[title]['relevance_strength'] for title in titles] == [
-        'background', 'background', 'strong', 'related']
+        'unmatched', 'unmatched', 'strong', 'related']
     assert ranked[0]['title'] == titles[2]
     assert ranked[1]['title'] == titles[3]
 

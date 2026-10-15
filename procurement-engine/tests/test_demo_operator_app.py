@@ -3,12 +3,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Event
 import base64
+import hashlib
+import logging
 
 import pytest
 from fastapi.testclient import TestClient
 
 from procure.demo.app import create_app, MAX_OPERATOR_TURNS
 from procure.demo.errors import DemoError
+from procure.demo.operator import OperatorUnavailable, OperatorValidationError
 from test_demo_operator import Provider
 
 
@@ -170,6 +173,46 @@ def test_failed_evidence_specialist_returns_unavailable_without_proposal():
         assert result.json()['status'] == 'unavailable'
         assert result.json()['proposal'] is None
         assert client.get('/api/demo/operator').json()['watch_items'] == []
+
+
+@pytest.mark.parametrize(('error_type', 'category'), [
+    (OperatorUnavailable, 'provider'),
+    (OperatorValidationError, 'validation'),
+])
+def test_operator_form_failure_logs_only_category_and_exception_fingerprint(
+        monkeypatch, caplog, error_type, category):
+    secret = 'private provider token and HarvestFoods buyer payload'
+
+    def fail_turn(*args, **kwargs):
+        raise error_type(secret)
+
+    monkeypatch.setattr('procure.demo.operator.run_turn', fail_turn)
+    with demo(Provider()) as client:
+        headers = auth(client)
+        switched = client.post('/api/demo/company', headers=headers, json={
+            'company_id': 'harvest-foods', 'expected_context_version': 1,
+            'idempotency_key': 'select-harvest'})
+        assert switched.status_code == 200
+        with caplog.at_level(logging.WARNING, logger='procure.demo'):
+            response = turn(client, headers,
+                            'Fill wheat quantity to 4020 tonne for a draft; do not run a plan.',
+                            key='harvest-form', context=2)
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result['status'] == 'unavailable'
+    assert result['assistant_text'] == 'The operator could not verify this response; no action was taken.'
+    assert result['agent_steps'] == [] and result['proposal'] is None
+    fingerprint = hashlib.sha256(secret.encode()).hexdigest()[:12]
+    diagnostic = [record for record in caplog.records
+                  if record.name == 'procure.demo' and
+                  record.getMessage().startswith('operator_turn_unavailable ')]
+    assert len(diagnostic) == 1
+    assert diagnostic[0].getMessage() == (
+        f'operator_turn_unavailable category={category} fingerprint={fingerprint}')
+    assert diagnostic[0].exc_info is None
+    assert secret not in caplog.text
+    assert secret not in response.text
 
 
 class Voice:

@@ -140,3 +140,18 @@
 @media (prefers-reduced-motion: reduce) {
   .demo-news-panel *, .demo-news-panel *::before, .demo-news-panel *::after { scroll-behavior: auto; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+@media (min-width: 900px) {
+  .zoorq-page .demo-company-panel.demo-news-panel { padding: 8px 24px 24px; }
+  .zoorq-page .demo-news-panel .demo-heading { margin-bottom: 4px; }
+  .zoorq-page .demo-news-panel .demo-heading > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: end; column-gap: 18px; }
+  .zoorq-page .demo-news-panel .demo-heading .demo-kicker { grid-column: 1 / -1; }
+  .zoorq-page .demo-news-panel .demo-heading h2 { font-size: 30px; line-height: 1.08; margin: 3px 0 0; }
+  .zoorq-page .demo-news-panel .demo-news-intro { margin: 0 0 3px; max-width: none; font-size: 12px; }
+  .demo-news-panel .demo-news-status { margin-top: 2px; padding: 2px 0; }
+  .demo-news-panel .demo-news-warning { margin-bottom: 4px; padding: 4px 8px; font-size: 11px; line-height: 1.3; }
+  .demo-news-panel .demo-news-toolbar { margin-top: 0; }
+  .zoorq-page .demo-news-panel .demo-news-inbox-head { padding: 4px 0; }
+  .zoorq-page .demo-news-panel .demo-news-layout { margin-top: 4px; }
+}
+.zoorq-page .demo-news-panel .demo-news-detail h3 { font:600 clamp(20px,1.9vw,26px)/1.25 Geist,Arial,sans-serif; letter-spacing:-.035em; }
+.zoorq-page .demo-news-panel .demo-news-detail > p { font-size:14px; line-height:1.6; }

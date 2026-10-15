@@ -54,6 +54,20 @@ AMBIGUOUS_MATERIAL_TERMS = {'oil', 'gas', 'cell', 'glass', 'packaging', 'chemica
 FINANCIAL_ONLY_TERMS = ('shares', 'share price', 'stock price', 'stock gets', 'buy rating',
                         'sell rating', 'target price', 'fair value', 'dividend', 'earnings')
 FINANCIAL_RATING_TERMS = ('price target', 'analyst rating', 'stock rating')
+CATALYST_MARKET_TERMS = ('stock', 'stocks', 'shares', 'price target', 'analyst',
+                         'rating', 'ticker', 'nasdaq', 'nyse', 'crypto', 'token',
+                         'coinmarketcap',
+                         'investor', 'upgrade', 'downgrade', 'quarterly report',
+                         'earnings report')
+CATALYST_PHYSICAL_TERMS = ('process catalyst', 'industrial catalyst', 'catalytic',
+                           'reactor', 'refinery', 'petrochemical', 'catalyst supply',
+                           'catalyst shipment', 'catalyst shortage', 'catalyst inventory',
+                           'catalyst stock level', 'catalyst warehouse stock',
+                           'catalyst feedstock shortage', 'chemical plant',
+                           'catalyst production')
+AGGREGATE_PHYSICAL_TERMS = ('crushed aggregate', 'construction aggregate',
+                            'aggregate supply', 'aggregate shipment', 'aggregate quarry',
+                            'aggregate inventory', 'aggregate stock level')
 SOURCES = (
     ('eia', 'U.S. Energy Information Administration', 'https://www.eia.gov/rss/todayinenergy.xml'),
     ('ecb', 'European Central Bank', 'https://www.ecb.europa.eu/rss/press.html'),
@@ -270,12 +284,29 @@ def _matches(text, company):
     return materials, routes, currencies
 
 
+def filter_material_homonyms(title, materials):
+    """Discard recorded material words used only as securities-market language."""
+    lowered = title.casefold() if isinstance(title, str) else ''
+    result = list(materials)
+    if ('catalyst' in result and
+            any(_term_in(lowered, term) for term in CATALYST_MARKET_TERMS) and
+            not any(_term_in(lowered, term) for term in CATALYST_PHYSICAL_TERMS)):
+        result.remove('catalyst')
+    if ('aggregate' in result and
+            any(_term_in(lowered, term) for term in
+                ('aggregate offer price', 'aggregate offering price')) and
+            not any(_term_in(lowered, term) for term in AGGREGATE_PHYSICAL_TERMS)):
+        result.remove('aggregate')
+    return result
+
+
 def _company_item(raw, company):
     item = dict(raw)
     source_id = item.pop('_discovery_source_id', None)
     if source_id in {'google_news_1', 'google_news_2', 'google_news_3'}:
         item['source_id'] = source_id
     materials, routes, currencies = _matches(item['title'], company)
+    materials = filter_material_homonyms(item['title'], materials)
     if currencies and not any(_term_in(item['title'].casefold(), term) for term in
                               ('exchange', 'currency', 'forex', 'fx', 'dollar', 'rate', 'devaluation')):
         currencies = []

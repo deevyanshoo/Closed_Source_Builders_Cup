@@ -1087,7 +1087,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                                   provider_call='mocked' if operator_injected else 'real',
                                                   context_cache=context_cache,
                                                   cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest())
-            except (OperatorUnavailable, OperatorValidationError):
+            except (OperatorUnavailable, OperatorValidationError) as exc:
+                category = 'provider' if isinstance(exc, OperatorUnavailable) else 'validation'
+                fingerprint = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
+                diagnostics.warning('operator_turn_unavailable category=%s fingerprint=%s',
+                                    category, fingerprint)
                 outcome = {'status': 'unavailable',
                            'assistant_text': 'The operator could not verify this response; no action was taken.',
                            'agent_steps': [], 'evidence_ids': [], 'candidate': None}

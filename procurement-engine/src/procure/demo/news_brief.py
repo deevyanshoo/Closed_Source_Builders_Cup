@@ -10,6 +10,8 @@ import json
 import re
 from urllib.parse import urlsplit
 
+from .news import filter_material_homonyms
+
 
 MAX_BRIEF_BYTES = 24_000
 _RESEARCH = re.compile(r'\b(?:search|browse|research|google|internet|web|look\s+up)\b|'
@@ -113,16 +115,17 @@ def _company_headlines(company, rows, now):
         kind = item.get('relevance_kind')
         if kind not in _KIND_ORDER:
             continue
-        matched_materials = _owned_list(item.get('matched_materials'), materials)
+        title, url = _text(item.get('title'), 220), _url(item.get('url'))
+        if not title or not url:
+            continue
+        matched_materials = filter_material_homonyms(
+            title, _owned_list(item.get('matched_materials'), materials))
         matched_routes = _owned_list(item.get('matched_routes'), routes)
         matched_currencies = _owned_list(item.get('matched_currencies'), currencies)
         if (kind == 'direct_material' and not matched_materials or
                 kind == 'route' and not matched_routes or
                 kind == 'currency' and not matched_currencies or
                 kind == 'sector' and not isinstance(item.get('relevance_reason'), str)):
-            continue
-        title, url = _text(item.get('title'), 220), _url(item.get('url'))
-        if not title or not url:
             continue
         row = {'item_id': _text(item.get('item_id'), 128), 'title': title, 'url': url,
                'publisher': _text(item.get('publisher'), 100),

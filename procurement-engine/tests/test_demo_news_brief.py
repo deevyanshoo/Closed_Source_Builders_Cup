@@ -123,6 +123,34 @@ def test_other_company_view_is_unavailable_and_cannot_leak_headlines():
     assert result['data_gaps']
 
 
+def test_cached_financial_material_homonyms_do_not_enter_company_brief():
+    company = get_company('atlas-petrochem')
+    cached = view()
+    cached['company_id'] = company['company_id']
+    false_match = item('stock-catalyst', title='UBS keeps AUD 9.25 target on Catalyst Metals stock')
+    false_match['matched_materials'] = ['catalyst']
+    false_match['relevance_strength'] = 'background'
+    quarterly_report = item('quarterly-report', title='Catalyst Metals prices jump after quarterly report')
+    quarterly_report['matched_materials'] = ['catalyst']
+    physical = item('process-catalyst', title='Refinery process catalyst supply disrupted')
+    physical['matched_materials'] = ['catalyst']
+    physical['relevance_strength'] = 'strong'
+    cached['items'] = [false_match, quarterly_report, physical]
+    result = build_news_brief(company, cached, now=NOW)
+    assert [row['item_id'] for row in result['headlines']] == ['process-catalyst']
+    assert result['headlines'][0]['exposure']['matched_materials'] == ['catalyst']
+
+    aggregate_company = get_company('stonebridge-materials')
+    cached['company_id'] = aggregate_company['company_id']
+    offer = item('offer-price', title='Aggregate offer price rises in public offering')
+    offer['matched_materials'] = ['aggregate']
+    physical_aggregate = item('quarry-supply', title='Crushed aggregate supply price rises after quarry shutdown')
+    physical_aggregate['matched_materials'] = ['aggregate']
+    cached['items'] = [offer, physical_aggregate]
+    result = build_news_brief(aggregate_company, cached, now=NOW)
+    assert [row['item_id'] for row in result['headlines']] == ['quarry-supply']
+
+
 def test_stale_and_empty_coverage_is_explicit_without_inventing_an_event():
     stale = view()
     stale['cache_state'] = 'stale'

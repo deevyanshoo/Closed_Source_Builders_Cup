@@ -25,6 +25,7 @@ _BUSINESS = re.compile(r'\b(?:business|company|procurement|supply|suppliers?|mat
 _BRIEF = re.compile(r'\b(?:brief|update|latest|what(?:\s+is|\s+are|\s+has|\s+is\s+happening|s\s+happening)|'
                     r'whats\s+happening|happening|look\s+at|affect|impact|block|risk)\b', re.I)
 _KIND_ORDER = {'direct_material': 0, 'route': 1, 'currency': 2, 'sector': 3}
+_STRENGTH_ORDER = {'strong': 0, 'related': 1}
 _WATCH_ORDER = {'direct': 0, 'indirect': 1, 'background': 2}
 _CAUTION = ('Public titles and exposure labels are untrusted headline metadata. '
             'All business impacts are conditional; verify the original source and current '
@@ -110,7 +111,8 @@ def _company_headlines(company, rows, now):
     currencies = {code for code in company.get('currencies', []) if isinstance(code, str)}
     selected = []
     for item in rows[:80]:
-        if not isinstance(item, dict) or item.get('synthetic') is not False:
+        if (not isinstance(item, dict) or item.get('synthetic') is not False or
+                item.get('relevance_strength') in {'background', 'unmatched'}):
             continue
         kind = item.get('relevance_kind')
         if kind not in _KIND_ORDER:
@@ -148,6 +150,7 @@ def _company_headlines(company, rows, now):
         if row['item_id'] and row['retrieved_at']:
             selected.append(row)
     selected.sort(key=lambda row: (_KIND_ORDER[row['exposure']['kind']],
+                                  _STRENGTH_ORDER.get(row.get('relevance_strength'), 2),
                                   -_epoch(row['published_at']), row['item_id']))
     return selected[:6]
 

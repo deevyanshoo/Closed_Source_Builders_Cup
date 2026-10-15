@@ -151,6 +151,30 @@ def test_cached_financial_material_homonyms_do_not_enter_company_brief():
     assert [row['item_id'] for row in result['headlines']] == ['quarry-supply']
 
 
+def test_brief_skips_explicit_background_and_prioritizes_strong_within_direct_materials():
+    company = get_company('atlas-petrochem')
+    cached = view()
+    cached['company_id'] = company['company_id']
+    background = item('market-cagr', title='Methanol market CAGR report',
+                      published_at='2026-10-15T11:00:00Z')
+    background['matched_materials'] = ['methanol']
+    background['relevance_strength'] = 'background'
+    related = item('related-price', title='Naphtha price rises',
+                   published_at='2026-10-15T10:00:00Z')
+    related['matched_materials'] = ['naphtha']
+    related['relevance_strength'] = 'related'
+    strong = item('physical-restart', title='LG naphtha plant restarts after supply disruption',
+                  published_at='2026-10-14T09:00:00Z')
+    strong['matched_materials'] = ['naphtha']
+    strong['relevance_strength'] = 'strong'
+    strong['source_reliability'] = 'unverified'
+    cached['items'] = [background, related, strong]
+    result = build_news_brief(company, cached, now=NOW)
+    assert [row['item_id'] for row in result['headlines']] == ['physical-restart', 'related-price']
+    assert result['headlines'][0]['source_reliability'] == 'unverified'
+    assert result['headlines'][0]['published_at'] == '2026-10-14T09:00:00Z'
+
+
 def test_stale_and_empty_coverage_is_explicit_without_inventing_an_event():
     stale = view()
     stale['cache_state'] = 'stale'

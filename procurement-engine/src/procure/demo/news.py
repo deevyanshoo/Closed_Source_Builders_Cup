@@ -57,7 +57,7 @@ FINANCIAL_RATING_TERMS = ('price target', 'analyst rating', 'stock rating')
 CATALYST_MARKET_TERMS = ('stock', 'stocks', 'shares', 'price target', 'analyst',
                          'rating', 'ticker', 'nasdaq', 'nyse', 'crypto', 'token',
                          'coinmarketcap',
-                         'investor', 'upgrade', 'downgrade', 'quarterly report',
+                         'investor', 'investors', 'upgrade', 'downgrade', 'quarterly report',
                          'earnings report')
 CATALYST_PHYSICAL_TERMS = ('process catalyst', 'industrial catalyst', 'catalytic',
                            'reactor', 'refinery', 'petrochemical', 'catalyst supply',

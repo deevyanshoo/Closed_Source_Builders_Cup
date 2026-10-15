@@ -424,6 +424,7 @@ def test_crypto_catalyst_and_chip_packaging_do_not_map_to_unrelated_industries()
     ('atlas-petrochem', 'UBS keeps AUD 9.25 target on Catalyst Metals stock', None),
     ('atlas-petrochem', 'Home Depot Stock: One Big Catalyst', None),
     ('atlas-petrochem', 'AMD stock catalyst after analyst upgrade', None),
+    ('atlas-petrochem', 'The Real AMD Catalyst Investors Are Sleeping On Isn’t What You Think - 24/7 Wall St.', None),
     ('atlas-petrochem', 'Catalyst Metals prices jump after quarterly report', None),
     ('stonebridge-materials', 'Aggregate offer price rises in public offering', None),
     ('atlas-petrochem', 'Refinery process catalyst supply disrupted after plant shutdown', 'catalyst'),

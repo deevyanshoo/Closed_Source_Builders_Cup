@@ -1,0 +1,2646 @@
+{
+  "revision": "closed-source-quote-demo-00056-grv",
+  "rows": [
+    {
+      "company": "Solara Cables",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "TerraPack Films",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "LoomWorks Textiles",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Harvest Foods",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Meridian Pharma",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "ForgeLine Components",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "GridSpring Batteries",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "CircuitPeak Systems",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Atlas Petrochem",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "StoneBridge Materials",
+      "theme": "light",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Solara Cables",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "TerraPack Films",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "LoomWorks Textiles",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Harvest Foods",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Meridian Pharma",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "ForgeLine Components",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "GridSpring Batteries",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "CircuitPeak Systems",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Atlas Petrochem",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "StoneBridge Materials",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Solara Cables",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "TerraPack Films",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "LoomWorks Textiles",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Harvest Foods",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Meridian Pharma",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "ForgeLine Components",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "GridSpring Batteries",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "CircuitPeak Systems",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Atlas Petrochem",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "StoneBridge Materials",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Solara Cables",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "TerraPack Films",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "LoomWorks Textiles",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Harvest Foods",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Meridian Pharma",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "ForgeLine Components",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "GridSpring Batteries",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "CircuitPeak Systems",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Atlas Petrochem",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "StoneBridge Materials",
+      "theme": "dark",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [
+            {
+              "height": 18.5,
+              "text": "Inventory & supply"
+            },
+            {
+              "height": 18.5,
+              "text": "View all signals"
+            }
+          ],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    }
+  ],
+  "note": "Two 18.5px Overview card links found by this matrix are corrected in the subsequent CSS-only release."
+}

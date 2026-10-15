@@ -1,0 +1,50 @@
+{
+  "controlledAudio": true,
+  "focus": "zoorq-talk-live",
+  "metrics": {
+    "events": [
+      {
+        "duration": 3.5074375,
+        "label": "inventory",
+        "time": 1792104376104,
+        "type": "controlled_input"
+      },
+      {
+        "status": "completed",
+        "time": 1792104381271,
+        "type": "tool_result"
+      },
+      {
+        "time": 1792104381272,
+        "type": "turn_complete"
+      },
+      {
+        "time": 1792104397518,
+        "type": "turn_complete"
+      }
+    ],
+    "interrupts": 0,
+    "outputAudioBytes": 722883,
+    "socketsClosed": 1,
+    "socketsCreated": 1,
+    "streamsCreated": 1,
+    "toolResults": 1,
+    "tracksStopped": 1,
+    "turnCompletes": 2
+  },
+  "physicalMicrophoneTested": false,
+  "revision": "closed-source-quote-demo-00056-grv",
+  "seen": {
+    "inputPeak": 0.96,
+    "outputPeak": 0.99,
+    "states": [
+      "connecting",
+      "listening",
+      "thinking",
+      "speaking",
+      "idle"
+    ]
+  },
+  "remainingVisibleVoiceDialog": 0,
+  "retainedHiddenVoicePanels": 1
+}

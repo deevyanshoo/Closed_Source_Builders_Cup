@@ -61,6 +61,8 @@ class BodyLimit:
                 return
             body.extend(message.get('body', b''))
             limit = MAX_BODY if scope['path'] in ('/api/demo/extract', '/api/demo/voice/transcribe') else 16_384
+            if scope['path'] == '/api/demo/operator/history':
+                limit = 128_000  # Completed multilingual captions may use four bytes per character.
             if len(body) > limit:
                 return await failure('body_too_large', 'Request is too large.', 413)(scope, receive, send)
             if not message.get('more_body', False):
@@ -76,9 +78,10 @@ class BodyLimit:
 
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
-               news_service=None, operator_provider=None, voice_service=None, live_client_factory=None) -> FastAPI:
+               news_service=None, operator_provider=None, voice_service=None, live_client_factory=None,
+               research_provider=None, session_backend=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    store = SessionStore(clock=clock)
+    store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
     cache: OrderedDict = OrderedDict()
     cache_lock = threading.RLock()
@@ -96,6 +99,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     voice_lock = threading.RLock()
     voice_workers = threading.BoundedSemaphore(2)
     voice_process_calls = 0
+    research_workers = threading.BoundedSemaphore(2)
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(SessionError)
@@ -106,20 +110,25 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def public_errors(request, call_next):
         try:
             response = await call_next(request)
+            value = getattr(request.state, 'demo_session', None)
+            if value is not None and value.active and store.persistence != 'ephemeral':
+                # A response is never acknowledged as durable until its state is saved.
+                await run_in_threadpool(store.save, value)
         except Exception as exc:
             # Only domain errors contain reviewed public messages. Never reflect provider exceptions.
-            if isinstance(exc, DemoError):
+            if isinstance(exc, (DemoError, SessionError)):
                 response = failure(exc.code, exc.message, exc.status_code)
             else:
                 response = failure('internal_error', 'Demo could not complete this request.', 500)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         return response
 
     def session(request):
-        value = store.get(request.cookies.get(COOKIE))
+        value = store.get(request.cookies.get(COOKIE), refresh=True)
+        request.state.demo_session = value
         with value.lock:
             value.requests += 1
             if value.requests > MAX_REQUESTS:
@@ -388,6 +397,31 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         active(value)
         value.idempotency[key]['result'] = deepcopy(result)
         return result
+
+    def remember(value, entry, *, company_id=None):
+        """Only accepted, bounded exchanges; no credentials or audio enter history."""
+        company_id = company_id or value.company_id
+        entries = value.chat_history.setdefault(company_id, [])
+        if any(item['id'] == entry['id'] for item in entries):
+            return
+        entry = deepcopy(entry)
+        entry.setdefault('created_at', store.now().isoformat())
+        if isinstance(entry.get('turn'), dict):
+            entry['turn'].pop('session', None)
+        entries.append(entry)
+        del entries[:-60]
+        # Keep recent complete exchanges; retire oldest entries before a long
+        # voice session can monopolise the bounded session document.
+        while sum(len(json.dumps(items, ensure_ascii=False)) for items in value.chat_history.values()) > 240_000:
+            candidates = [items for items in value.chat_history.values() if len(items) > 1]
+            if not candidates:
+                break
+            oldest = min(candidates, key=lambda items: items[0].get('created_at', ''))
+            del oldest[0]
+
+    def remember_turn(value, message, result, *, channel='text'):
+        remember(value, {'id': result['turn_id'], 'channel': channel,
+                         'question': message, 'turn': result})
 
     def owned(value, offer_id):
         result = value.offers.get(offer_id)
@@ -694,7 +728,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         with value.lock:
             return {'session_id': value.session_id, 'csrf_token': value.csrf_token,
                     'expires_at': value.expires_at.isoformat(), 'synthetic': True,
-                    'persistence': 'ephemeral', 'offers': deepcopy(list(value.offers.values())),
+                    'persistence': store.persistence, 'offers': deepcopy(list(value.offers.values())),
                     'provider': provider(), 'plan': deepcopy(active_plan(value)),
                     'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
                     'rfq': deepcopy(value.rfq), 'company': get_company(value.company_id),
@@ -712,7 +746,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
     @app.get('/-/health')
     async def health():
-        return {'ready': True, 'revision': os.getenv('K_REVISION', 'local'), 'persistence': 'ephemeral'}
+        return {'ready': True, 'revision': os.getenv('K_REVISION', 'local'), 'persistence': store.persistence}
 
     @app.get('/api/demo/session')
     async def get_session(request: Request):
@@ -722,6 +756,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if exc.status_code != 401:
                 raise
             value = store.create()
+        request.state.demo_session = value
         return session_response(value)
 
     @app.get('/api/demo/companies')
@@ -816,7 +851,57 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         data = await body(request)
         return await execute_operator_turn(value, data)
 
-    async def execute_operator_turn(value, data):
+    @app.get('/api/demo/operator/history')
+    async def operator_history(request: Request):
+        value = session(request)
+        with value.lock:
+            return {'company_id': value.company_id, 'context_version': value.context_version,
+                    'exchanges': deepcopy(value.chat_history.get(value.company_id, []))}
+
+    @app.post('/api/demo/operator/history')
+    async def voice_history(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('text', 'speaker', 'channel', 'expected_context_version', 'idempotency_key'))
+        if (data['channel'] != 'voice' or data['speaker'] not in ('input', 'output')
+                or not isinstance(data['text'], str) or not data['text'].strip()
+                or len(data['text']) > 16000
+                or any(ord(char) < 32 and char not in '\n\t' for char in data['text'])):
+            raise SessionError('invalid_history', 'Provide one completed voice caption.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'voice_history')
+            if replay is not None:
+                replay.pop('replayed', None)
+                return replay
+            entry = {'id': secrets.token_urlsafe(18), 'channel': 'voice',
+                     'speaker': data['speaker'], 'question': data['text'].strip() if data['speaker'] == 'input' else None,
+                     'answer': data['text'].strip() if data['speaker'] == 'output' else None}
+            remember(value, entry)
+            return complete(value, key, {'status': 'saved', 'company_id': value.company_id,
+                                        'context_version': value.context_version, 'id': entry['id']})
+
+    @app.post('/api/demo/operator/cancel')
+    async def cancel_operator(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('proposal_id', 'expected_context_version', 'idempotency_key'))
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'operator_cancel')
+            if replay is not None:
+                replay.pop('replayed', None)
+                return replay
+            if (not isinstance(data['proposal_id'], str) or value.pending_proposal is None
+                    or value.pending_proposal['proposal_id'] != data['proposal_id']):
+                failed(value, key)
+                raise SessionError('proposal_not_found', 'Proposal is no longer current.', 404)
+            value.pending_proposal = None
+            value.operator_generation += 1
+            return complete(value, key, {'status': 'cancelled', 'company_id': value.company_id,
+                                        'context_version': value.context_version})
+
+    async def execute_operator_turn(value, data, *, channel='text'):
         nonlocal operator_process_calls
         from .operator import (DEFAULT_MODEL, OperatorUnavailable, OperatorValidationError,
                                run_turn)
@@ -826,6 +911,13 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
         with value.lock:
             context(value, data, explicit=True)
+            from .research import prepare_research, ResearchValidationError
+            try:
+                research_parameters = prepare_research(message, get_company(value.company_id), store.now())
+                research_invalid = None
+            except ResearchValidationError as exc:
+                research_parameters, research_invalid = None, str(exc)
+            prepared = research_parameters is not None or research_invalid is not None
             key, replay = start(value, data, 'operator_turn')
             if replay is not None:
                 if (value.idempotency[key].get('operator_generation') != value.operator_generation or
@@ -841,7 +933,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             marker = snapshot_marker(snapshot)
             adapter = operator_adapter()
             model = getattr(adapter, 'model', None) or os.getenv('GEMINI_OPERATOR_MODEL', DEFAULT_MODEL)
-            if not bool(getattr(adapter, 'available', True)):
+            if not prepared and not bool(getattr(adapter, 'available', True)):
                 value.operator_generation += 1
                 value.idempotency[key]['operator_generation'] = value.operator_generation
                 value.pending_proposal = None
@@ -850,6 +942,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                           'assistant_text': 'The Vertex operator is unavailable; no action was taken.',
                           'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
                 complete(value, key, result)
+                remember_turn(value, message, result, channel=channel)
                 value.idempotency[key]['state_marker'] = marker
                 return result
             if value.operator_turns >= MAX_OPERATOR_TURNS:
@@ -861,11 +954,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             with operator_lock:
                 cutoff = store.now() - timedelta(hours=1)
                 operator_call_times[:] = [time for time in operator_call_times if time > cutoff]
-                if len(operator_call_times) + 3 > MAX_OPERATOR_PROCESS_CALLS_PER_HOUR:
+                if not prepared and len(operator_call_times) + 3 > MAX_OPERATOR_PROCESS_CALLS_PER_HOUR:
                     operator_workers.release()
                     failed(value, key)
                     raise SessionError('operator_limit', 'Operator call limit reached. Capacity resets within one hour.', 429)
-                operator_call_times.extend([store.now()] * 3)
+                if not prepared:
+                    operator_call_times.extend([store.now()] * 3)
             value.operator_turns += 1
             value.operator_generation += 1
             generation = value.operator_generation
@@ -873,7 +967,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             value.pending_proposal = None
         try:
             try:
-                outcome = await run_in_threadpool(run_turn, snapshot, message, adapter,
+                outcome = await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
                                                   model=model,
                                                   provider_call='mocked' if operator_injected else 'real')
             except (OperatorUnavailable, OperatorValidationError):
@@ -947,7 +1041,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if outcome.get('analytics') is not None:
                     result['analytics'] = deepcopy(outcome['analytics'])
                 complete(value, key, result)
+                remember_turn(value, message, result, channel=channel)
                 value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                store.save(value)
                 return result
         except Exception:
             with value.lock:
@@ -980,9 +1076,46 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
         async def operate(message, context_version, key):
             return await execute_operator_turn(value, {'message': message,
-                'expected_context_version': context_version, 'idempotency_key': key})
+                'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
         async def workspace_tools(name, args, context_version, key):
+            if name == 'prepare_research':
+                if not isinstance(args, dict):
+                    raise SessionError('invalid_research', 'Provide a public research question.', 422)
+                shape(args, ('message',))
+                from .research import prepare_research, ResearchValidationError
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    try:
+                        parameters = prepare_research(args['message'], get_company(value.company_id), store.now())
+                    except ResearchValidationError:
+                        parameters = None
+                    if parameters is None:
+                        raise SessionError('invalid_research', 'Prepare a public research question without private workspace details.', 422)
+                return await execute_operator_turn(value, {'message': args['message'],
+                    'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
+            if name == 'read_research':
+                if not isinstance(args, dict):
+                    raise SessionError('invalid_research', 'Choose an approved research result.', 422)
+                shape(args, (), ('research_id',))
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    records = [item for item in value.research_records.values()
+                        if item.get('company_id') == value.company_id
+                        and item.get('state') == 'completed'
+                        and item.get('result', {}).get('status') == 'completed']
+                    requested = args.get('research_id')
+                    if requested is not None:
+                        records = [item for item in records if item['result']['research_id'] == requested]
+                    result = deepcopy(records[-1]['result']) if records else None
+                    if result is None:
+                        raise SessionError('research_not_found',
+                            'No completed approved research is available for this company. Prepare a search and review its consent card first.', 404)
+                    return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': value.context_version, 'status': 'completed',
+                        'assistant_text': result['answer'], 'agent_steps': [],
+                        'evidence_ids': [], 'proposal': None, 'read_only': True,
+                        'workspace': {'research': result}}
             if name == 'read_risks':
                 if not isinstance(args, dict):
                     raise SessionError('invalid_utility', 'Risk scope must be an object.', 422)
@@ -1164,9 +1297,131 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     failed(value, token)
                     raise
 
+        async def saved_workspace_tools(name, args, context_version, key):
+            result = await workspace_tools(name, args, context_version, key)
+            with value.lock:
+                store.save(value)
+            return result
+
         await run_live_voice(websocket, session=value, store=store,
-                             operate_workspace=operate, workspace_tools=workspace_tools,
+                             operate_workspace=operate, workspace_tools=saved_workspace_tools,
                              client_factory=live_client_factory)
+
+    async def confirm_research(value, data):
+        from .research import VertexResearchProvider
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'operator_confirm')
+            if replay is not None:
+                if replay.get('kind') != 'research':
+                    raise SessionError('stale_proposal', 'This approval belongs to another operation.', 409)
+                replay.pop('replayed', None)
+                replay['session'] = view(value)
+                return replay
+            proposal = value.pending_proposal
+            if (proposal is None or proposal['kind'] != 'research'
+                    or proposal['proposal_id'] != data['proposal_id']
+                    or proposal['_session_id'] != value.session_id
+                    or proposal['_company_id'] != value.company_id):
+                failed(value, key)
+                raise SessionError('proposal_not_found', 'Research consent is no longer current.', 404)
+            marker = snapshot_marker(operator_snapshot(value))
+            if (proposal['context_version'] != value.context_version or proposal['_marker'] != marker
+                    or store.now() >= datetime.fromisoformat(proposal['expires_at'])):
+                value.pending_proposal = None
+                failed(value, key)
+                raise SessionError('stale_proposal', 'Research consent expired or the workspace changed.', 409)
+            proposal_id = proposal['proposal_id']
+            if proposal_id in value.research_records:
+                failed(value, key)
+                raise SessionError('research_claimed', 'This approved search was already attempted. Read its result or prepare a new request.', 409)
+            for record in value.research_records.values():
+                if record.get('state') != 'running':
+                    continue
+                try:
+                    started = datetime.fromisoformat(record['started_at'])
+                    fresh = store.now() < started + timedelta(minutes=5)
+                except (KeyError, TypeError, ValueError):
+                    fresh = True
+                if fresh:
+                    failed(value, key)
+                    raise SessionError('research_busy',
+                        'This session already has an approved search in progress. Wait for its result; after an interrupted connection, allow five minutes before approving a new request.', 429)
+                # Completion is unknown after a restart, not permission to retry
+                # the consumed approval. Only a newly reviewed query can proceed.
+                record['state'] = 'interrupted'
+            if value.research_attempts >= 6:
+                failed(value, key)
+                raise SessionError('research_limit', 'This session reached six public research attempts.', 429)
+            if not research_workers.acquire(blocking=False):
+                failed(value, key)
+                raise SessionError('research_busy', 'Public research is busy. Try again shortly.', 429)
+            query = proposal['parameters']['query']
+            company_id, version = value.company_id, value.context_version
+            # This durable claim precedes the paid provider call. Unknown completion
+            # after a crash is never automatically retried with the same consent.
+            value.research_attempts += 1
+            value.research_records[proposal_id] = {'state': 'running', 'query': query,
+                'company_id': company_id, 'context_version': version,
+                'idempotency_key': key, 'started_at': store.now().isoformat()}
+            value.pending_proposal = None
+            try:
+                store.save(value)
+            except Exception:
+                research_workers.release()
+                raise
+        try:
+            allowed = await run_in_threadpool(store.reserve_research_budget, store.now().date().isoformat(), 30)
+            if not allowed:
+                raise SessionError('research_limit', 'The shared daily research allowance is used. Try again tomorrow.', 429)
+            try:
+                adapter = research_provider or VertexResearchProvider(clock=store.now)
+                result = await run_in_threadpool(adapter.research, query)
+            except Exception:
+                result = None
+            if not isinstance(result, dict) or result.get('status') not in ('completed', 'unavailable'):
+                result = {'status': 'unavailable', 'answer': '', 'sources': [],
+                          'search_suggestions_html': None, 'checked_at': store.now().isoformat()}
+            result = {**deepcopy(result), 'research_id': secrets.token_urlsafe(18), 'query': query}
+            # Google permits the grounded answer in the requesting user's chat
+            # history. Attribution markup stays request-local, never in history,
+            # research records or idempotency copies.
+            suggestions_html = result.pop('search_suggestions_html', None)
+            result['search_suggestions_html'] = None
+            if result['status'] == 'unavailable':
+                result['answer'] = 'Public research could not verify a sourced answer. No business action was taken. Prepare a new request to try again.'
+                result['sources'] = []
+                result['search_suggestions_html'] = None
+                suggestions_html = None
+            with value.lock:
+                active(value)
+                record = value.research_records[proposal_id]
+                record.update(state='completed', result=deepcopy(result))
+                if (value.company_id != company_id or value.context_version != version
+                        or snapshot_marker(operator_snapshot(value)) != marker):
+                    record['state'] = 'discarded'
+                    failed(value, key)
+                    store.save(value)
+                    raise SessionError('stale_context', 'Workspace changed while researching. The result was not applied.', 409)
+                remember(value, {'id': result['research_id'], 'channel': 'text', 'question': None,
+                                  'answer': result['answer'], 'research': result})
+                response = {'status': 'applied', 'company_id': company_id,
+                    'context_version': version, 'kind': 'research', 'result': result, 'session': view(value)}
+                complete(value, key, response)
+                store.save(value)
+                initial_response = deepcopy(response)
+                initial_response['result']['search_suggestions_html'] = suggestions_html
+                return initial_response
+        except Exception:
+            with value.lock:
+                failed(value, key)
+                record = value.research_records.get(proposal_id)
+                if record and record['state'] == 'running':
+                    record['state'] = 'interrupted'
+                    store.save(value)
+            raise
+        finally:
+            research_workers.release()
 
     @app.post('/api/demo/operator/confirm')
     async def operator_confirm(request: Request):
@@ -1177,6 +1432,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             raise SessionError('review_required', 'Review the exact proposal before applying it.', 422)
         if not isinstance(data['proposal_id'], str) or not data['proposal_id']:
             raise SessionError('invalid_proposal', 'A proposal ID is required.', 422)
+        if not isinstance(data['idempotency_key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', data['idempotency_key']):
+            raise SessionError('invalid_idempotency', 'A short alphanumeric retry key is required.', 422)
+        with value.lock:
+            previous = value.idempotency.get(data['idempotency_key'], {}).get('result')
+            is_research = (value.pending_proposal is not None and value.pending_proposal['kind'] == 'research'
+                           and value.pending_proposal['proposal_id'] == data['proposal_id']
+                           or data['proposal_id'] in value.research_records
+                           or isinstance(previous, dict) and previous.get('kind') == 'research')
+        if is_research:
+            return await confirm_research(value, data)
         with value.lock:
             context(value, data, explicit=True)
             key, replay = start(value, data, 'operator_confirm')

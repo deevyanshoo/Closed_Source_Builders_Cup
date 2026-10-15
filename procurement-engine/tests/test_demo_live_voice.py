@@ -127,6 +127,48 @@ def test_live_audio_tool_result_and_transcriptions():
     asyncio.run(scenario())
 
 
+def test_live_research_preparation_delegates_without_search_or_voice_approval():
+    class ResearchProvider(Provider):
+        async def send_realtime_input(self, **kwargs):
+            if kwargs.get('audio'):
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                    name='prepare_research',
+                    args={'message': 'How would a Hormuz blockage affect petrochemicals today?'},
+                    id='research-call')]), server_content=None))
+
+    async def scenario():
+        store, session = setup()
+        socket, provider = Socket(start(session)), ResearchProvider()
+        calls = []
+        result = {'turn_id': 'research-turn', 'company_id': session.company_id,
+                  'context_version': 1, 'status': 'proposal',
+                  'assistant_text': 'Review the exact public query before searching.',
+                  'agent_steps': [], 'evidence_ids': [],
+                  'proposal': {'proposal_id': 'research-proposal', 'kind': 'research'},
+                  'read_only': True}
+
+        async def workspace_tool(name, args, version, key):
+            calls.append((name, args, version, key))
+            return result
+
+        async def forbidden_operate(*_):
+            raise AssertionError('operator model should not handle research preparation')
+
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store, operate_workspace=forbidden_operate,
+            workspace_tools=workspace_tool, client_factory=connection(provider)))
+        await next_type(socket, 'ready')
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        assert (await next_type(socket, 'tool_result'))['result'] == result
+        assert calls[0][0] == 'prepare_research'
+        assert calls[0][1] == {'message': 'How would a Hormuz blockage affect petrochemicals today?'}
+        assert provider.tool_response.response['status'] == 'proposal'
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
 def test_invalid_csrf_denies_provider_connection():
     async def scenario():
         store, session = setup()
@@ -410,5 +452,5 @@ def test_sdk_config_contains_one_bounded_workspace_tool_and_transcriptions():
     assert config.output_audio_transcription is not None
     assert config.speech_config.voice_config.prebuilt_voice_config.voice_name == 'Charon'
     assert len(config.tools) == 1
-    assert len(config.tools[0].function_declarations) == 10
+    assert len(config.tools[0].function_declarations) == 12
     assert config.tools[0].function_declarations[0].name == 'operate_workspace'

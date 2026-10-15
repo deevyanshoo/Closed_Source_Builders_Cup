@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 import json
 import os
@@ -12,6 +13,7 @@ from time import monotonic
 
 from .agent_tools import ToolValidationError, inventory_analytics, prepare_form
 from .presentation import present_answer, supplier_display_name
+from .research import ResearchValidationError, prepare_research
 
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 _ID = {'type': 'string', 'minLength': 1, 'maxLength': 128}
@@ -531,6 +533,22 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
     """Call each specialist once; return only server-checkable suggestions."""
     if not isinstance(message, str) or not message.strip() or len(message) > 1200:
         raise OperatorValidationError('Short message required.')
+    try:
+        research = prepare_research(message, snapshot['company'], datetime.now(timezone.utc))
+    except ResearchValidationError as exc:
+        return {'status': 'needs_clarification', 'assistant_text': str(exc),
+                'agent_steps': [], 'evidence_ids': [], 'candidate': None,
+                'proposal_kind': None, 'parameters': None, 'utility': None}
+    if research is not None:
+        candidate = {'kind': 'research', 'parameters': research}
+        return {'status': 'proposal',
+                'assistant_text': 'Review the exact public query and destination before searching.',
+                'agent_steps': [{'agent': 'verifier', 'role': 'Deterministic public query validation.',
+                                 'status': 'completed', 'model': 'deterministic',
+                                 'provider_call': 'none', 'tool': 'prepare_research',
+                                 'summary': 'Prepared a public research query for human consent.'}],
+                'evidence_ids': [], 'candidate': candidate, 'proposal_kind': 'research',
+                'parameters': deepcopy(research), 'utility': None}
     compact = _compact(snapshot)
     facts = _facts(snapshot, compact)
     encoded = json.dumps(compact, sort_keys=True, separators=(',', ':'), ensure_ascii=True, default=str)

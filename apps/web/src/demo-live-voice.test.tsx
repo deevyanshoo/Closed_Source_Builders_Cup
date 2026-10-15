@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
-import { acceptsLiveTurn, appendLiveCaption, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+import { acceptsLiveTurn, appendLiveCaption, finalizedLiveCaptions, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
 
 vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
@@ -8,6 +8,14 @@ const scope = { sessionId: 's1', companyId: 'solara', contextVersion: 1, epoch: 
 const turn = { turn_id: 't1', company_id: 'solara', context_version: 1, status: 'proposal', assistant_text: 'Review this first.', agent_steps: [], evidence_ids: [], proposal: { proposal_id: 'p1', kind: 'watch', summary: 'Watch', parameters: {}, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-01-01T00:00:00Z' }, read_only: true } satisfies OperatorTurn;
 
 describe('live conversation boundary', () => {
+  it('persists only completed voice captions once at the turn boundary', () => {
+    let captions = updateLiveCaptions([], { type: 'transcript', direction: 'input', text: 'What changed' });
+    captions = updateLiveCaptions(captions, { type: 'transcript', direction: 'input', text: ' for copper?' });
+    expect(finalizedLiveCaptions(captions, 0)).toEqual([]);
+    captions = updateLiveCaptions(captions, { type: 'turn_complete' });
+    expect(finalizedLiveCaptions(captions, 0)).toEqual([{ direction: 'input', text: 'What changed for copper?' }]);
+    expect(finalizedLiveCaptions(captions, 1)).toEqual([]);
+  });
   it('requires the current server session and CSRF before opening the microphone', () => {
     const current = { session_id: 's1', company: { company_id: 'solara' }, context_version: 1, csrf_token: 'csrf' };
     expect(matchesLiveSession(current as never, scope, 'csrf')).toBe(true);

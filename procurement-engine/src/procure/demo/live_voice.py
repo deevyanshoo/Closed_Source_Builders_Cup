@@ -60,7 +60,13 @@ INSTRUCTION = (
     "prepare a review, compare_suppliers for a saved-quote plan, and navigate_workspace "
     "to show the requested view. Use operate_workspace for complex analysis, news risks, "
     "supplier-delay recovery and RFQ drafts. Use prepare_simulated_email to prepare a "
-    "simulation proposal. Reviewable proposals require the human to review and apply in "
+    "simulation proposal. For public or current-event questions, use prepare_research "
+    "with the user's exact spoken question. It only prepares an exact public query and "
+    "never searches before the human confirms the visible card. Never confirm research "
+    "by voice or imply approval. Use read_research only to retrieve a completed, "
+    "already approved result by its research_id, or omit the ID for the latest completed "
+    "result in the current company. Preserve its dated source uncertainty. "
+    "Reviewable proposals require the human to review and apply in "
     "the interface; never confirm them by voice. Only claim an action completed when "
     "the returned server tool confirms it. A simulated message has no external delivery; "
     "an RFQ draft remains unsent. "
@@ -138,6 +144,10 @@ def _config(company=None):
     specs = [
         ('operate_workspace', 'Multi-agent grounded answer, recovery or reviewed RFQ proposal.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
+        ('prepare_research', 'Prepare an exact public query for visible human consent; never searches or approves.',
+         {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
+        ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
+         {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_workspace', 'Read current company, buyer form, news, quotes and plan facts.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
         ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
@@ -313,6 +323,7 @@ async def run_live_voice(
                         for call in calls:
                             name = getattr(call, 'name', None)
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
+                                     'prepare_research', 'read_research',
                                      'read_risks',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_simulated_email', 'navigate_workspace'}
@@ -327,6 +338,15 @@ async def run_live_voice(
                             if name == 'operate_workspace' and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
+                                raise _Invalid()
+                            if name == 'prepare_research' and (set(args) != {'message'} or
+                                    not isinstance(args['message'], str) or
+                                    not 0 < len(args['message'].strip()) <= 1200):
+                                raise _Invalid()
+                            if name == 'read_research' and (set(args) not in (set(), {'research_id'}) or
+                                    ('research_id' in args and
+                                     (not isinstance(args['research_id'], str) or
+                                      not 0 < len(args['research_id']) <= 128))):
                                 raise _Invalid()
                             binding = json.dumps([name, args], sort_keys=True)
                             repeated = call_id in tool_results

@@ -407,4 +407,17 @@ describe('demo response state', () => {
     expect(html).toContain('Run comparison');
     expect(html).toMatch(/disabled=""[^>]*>Run comparison|disabled=""[^>]*>[^<]*Run comparison/);
   });
+  it('explains saved same-browser workspace and bounded conversation only for a durable session', () => {
+    const durable = { ...session, persistence: 'firestore' as const, expires_at: '2026-10-22T12:00:00Z' };
+    const savedHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: durable, epoch: 0 })} />);
+    expect(savedHtml).toContain('same browser');
+    expect(savedHtml).toContain('saved until this seven-day session expires');
+    expect(savedHtml).toContain('Recent conversation history is limited');
+    expect(savedHtml).toContain('Raw voice audio is not stored');
+    expect(savedHtml).not.toContain('may disappear when the service restarts');
+    expect(savedHtml).not.toContain('Firestore');
+    const temporaryHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
+    expect(temporaryHtml).toContain('temporary session and may disappear when the service restarts');
+    expect(temporaryHtml).not.toContain('saved until this seven-day session expires');
+  });
 });

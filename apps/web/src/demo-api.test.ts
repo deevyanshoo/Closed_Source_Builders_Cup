@@ -116,6 +116,19 @@ describe('hosted demo API', () => {
     expect(JSON.parse(calls[4][1].body as string)).toEqual({ text: 'Verified answer', expected_context_version: 4, idempotency_key: 'key-4' });
     for (const [, options] of calls.slice(1)) expect(options.headers).toMatchObject({ 'X-CSRF-Token': 'csrf' });
   });
+  it('reads company history and sends cancellation and finalized voice text with scoped idempotent mutations', async () => {
+    const send = vi.fn(async () => json({ company_id: 'solara', context_version: 4, exchanges: [] }));
+    let sequence = 0;
+    const api = createDemoApi(send, () => `history-${++sequence}`);
+    await api.operatorHistory();
+    await api.cancelOperator('csrf', 'proposal-1', 4);
+    await api.appendOperatorVoice('csrf', 'What changed?', 'input', 4);
+    const calls = send.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.map(([path]) => path)).toEqual(['/api/demo/operator/history', '/api/demo/operator/cancel', '/api/demo/operator/history']);
+    expect(JSON.parse(calls[1][1].body as string)).toEqual({ proposal_id: 'proposal-1', expected_context_version: 4, idempotency_key: 'history-1' });
+    expect(JSON.parse(calls[2][1].body as string)).toEqual({ text: 'What changed?', speaker: 'input', channel: 'voice', expected_context_version: 4, idempotency_key: 'history-2' });
+    expect(calls[2][1].headers).toMatchObject({ 'X-CSRF-Token': 'csrf' });
+  });
   it('saves buyer draft fields with the current context and a fresh idempotency key', async () => {
     const send = vi.fn(async () => json({ session_id: 's1', buyer_draft: { material: 'copper' } }));
     const api = createDemoApi(send, () => 'draft-key');

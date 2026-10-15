@@ -75,9 +75,17 @@ export function appendLiveCaption(captions: Caption[], direction: Caption['direc
 export function updateLiveCaptions(captions: Caption[], event:
   { type: 'transcript'; direction: Caption['direction']; text: string } |
   { type: 'turn_complete' | 'interrupted' }): Caption[] {
-  if (event.type === 'transcript') return appendLiveCaption(captions, event.direction, event.text);
+  if (event.type === 'transcript') {
+    const last = captions[captions.length - 1];
+    const current = last && last.direction !== event.direction && !last.sealed ? [...captions.slice(0, -1), { ...last, sealed: true as const }] : captions;
+    return appendLiveCaption(current, event.direction, event.text);
+  }
   const last = captions[captions.length - 1];
   return last && !last.sealed ? [...captions.slice(0, -1), { ...last, sealed: true }] : captions;
+}
+
+export function finalizedLiveCaptions(captions: Caption[], after: number): { direction: Caption['direction']; text: string }[] {
+  return captions.slice(after).filter(caption => caption.sealed && caption.text.trim()).map(({ direction, text }) => ({ direction, text: text.trim() }));
 }
 
 export function visibleLiveCaptions(captions: Caption[], captured: LiveScope | null, current: LiveScope): Caption[] {
@@ -146,6 +154,8 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
   scopeRef.current = scope;
   const onTurnRef = useRef(onTurn);
   onTurnRef.current = onTurn;
+  const pendingCaptions = useRef<Caption[]>([]);
+  const historyWrites = useRef<Promise<void>>(Promise.resolve());
 
   function stopPlayback(current: ActiveVoice) {
     current.playback.forEach(node => { try { node.stop(); } catch { /* Already stopped. */ } });
@@ -178,6 +188,7 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
     thinking.current = false;
     setMicrophoneMuted(false);
     setError(''); setCaptions([]); setStatus('connecting');
+    pendingCaptions.current = [];
     let stream: MediaStream | null = null;
     let input: AudioContext | null = null;
     let output: AudioContext | null = null;
@@ -235,14 +246,25 @@ export function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSessio
         } else if (data.type === 'interrupted') {
           stopPlayback(current);
           setCaptions(old => updateLiveCaptions(old, { type: 'interrupted' }));
+          pendingCaptions.current = [];
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'interrupted');
           setStatus(voiceVisualState(current, thinking.current));
         }
         else if (data.type === 'transcript' && (data.direction === 'input' || data.direction === 'output') && typeof data.text === 'string') {
+          pendingCaptions.current = updateLiveCaptions(pendingCaptions.current, { type: 'transcript', direction: data.direction, text: data.text });
           setCaptions(old => updateLiveCaptions(old, { type: 'transcript', direction: data.direction as Caption['direction'], text: data.text as string }));
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'transcript');
           setStatus(voiceVisualState(current, thinking.current));
         } else if (data.type === 'turn_complete') {
+          const complete = finalizedLiveCaptions(updateLiveCaptions(pendingCaptions.current, { type: 'turn_complete' }), 0);
+          pendingCaptions.current = [];
+          for (const caption of complete) {
+            historyWrites.current = historyWrites.current.then(async () => {
+              await api.appendOperatorVoice(canonical.csrf_token, caption.text, caption.direction, captured.contextVersion);
+            }).catch(cause => {
+              if (active.current === current && sameLiveScope(scopeRef.current, captured)) setError(`Voice history could not be saved: ${cause instanceof Error ? cause.message : 'Unknown error'}`);
+            });
+          }
           setCaptions(old => updateLiveCaptions(old, { type: 'turn_complete' }));
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'turn_complete');
           setStatus(voiceVisualState(current, thinking.current));

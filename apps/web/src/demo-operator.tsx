@@ -1,10 +1,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorOverview, OperatorTurn, PlanView } from './demo-api';
+import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory, OperatorOverview, OperatorTurn, PlanView, ResearchResult } from './demo-api';
 import { LiveVoice } from './demo-live-voice';
 import { ActivityIndicator } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { ResearchOutcome, validatedResearchResult } from './demo-research';
 import './demo-assistant.css';
 
 export type OperatorScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
@@ -14,14 +15,15 @@ export function operatorSeedMessage(seed: OperatorSeed | null | undefined, scope
   return seed?.sessionId === scope.sessionId && seed.companyId === scope.companyId && seed.contextVersion === scope.contextVersion &&
     seed.epoch === scope.epoch && message?.trim() && message.length <= 1200 ? message : null;
 }
-type OperatorExchange = { id: number; question: string | null; turn?: OperatorTurn; error?: string };
+type OperatorExchange = { id: number | string; question: string | null; turn?: OperatorTurn; error?: string; channel?: 'text' | 'voice'; answer?: string; speaker?: 'input' | 'output'; research?: ResearchResult; created_at?: string };
 const MAX_EXCHANGES = 20;
 export type OperatorState = { scope: OperatorScope; requestId: number; overview: OperatorOverview | null; turn: OperatorTurn | null; turns: OperatorTurn[]; exchanges: OperatorExchange[]; pendingQuestion: string | null; reviewed: boolean; outcome: OperatorApplied | null };
 export const initialOperatorState: OperatorState = { scope: { sessionId: '', companyId: '', contextVersion: -1, epoch: -1 }, requestId: 0, overview: null, turn: null, turns: [], exchanges: [], pendingQuestion: null, reviewed: false, outcome: null };
 type OperatorAction = { type: 'scope'; scope: OperatorScope } | { type: 'start'; scope: OperatorScope; requestId: number; question?: string } |
   { type: 'overview'; scope: OperatorScope; overview: OperatorOverview } | { type: 'turn'; scope: OperatorScope; requestId: number; turn: OperatorTurn } |
   { type: 'failed'; scope: OperatorScope; requestId: number; error: string } |
-  { type: 'review'; value: boolean } | { type: 'cancel' } | { type: 'applied'; scope: OperatorScope; outcome: OperatorApplied };
+  { type: 'review'; value: boolean } | { type: 'cancel' } | { type: 'applied'; scope: OperatorScope; outcome: OperatorApplied } |
+  { type: 'history'; scope: OperatorScope; history: OperatorHistory };
 const sameScope = (a: OperatorScope, b: OperatorScope) => a.sessionId === b.sessionId && a.companyId === b.companyId && a.contextVersion === b.contextVersion && a.epoch === b.epoch;
 const sameConversation = (a: OperatorScope, b: OperatorScope) => a.sessionId === b.sessionId && a.companyId === b.companyId && a.contextVersion === b.contextVersion;
 export function acceptLiveOperatorRequest(current: { generation: number; requestId: number; busy: string }) {
@@ -57,27 +59,51 @@ export function resolveOperatorEvidence(id: string, scope: OperatorScope, news: 
   return { id, kind: 'unavailable', title: 'Evidence unavailable in this workspace', publisher: null, href: null, detail: '' };
 }
 
+export function researchFromTurn(turn: OperatorTurn, scope: OperatorScope): ResearchResult | null {
+  return turn.read_only && turn.status === 'completed' && turn.company_id === scope.companyId && turn.context_version === scope.contextVersion
+    ? validatedResearchResult(turn.workspace?.research) : null;
+}
+
 export function applyOperatorResult(state: OperatorState, action: OperatorAction): OperatorState {
   if (action.type === 'scope') return sameScope(state.scope, action.scope) ? state : { ...initialOperatorState, scope: action.scope, turns: sameConversation(state.scope, action.scope) ? state.turns ?? [] : [], exchanges: sameConversation(state.scope, action.scope) ? state.exchanges ?? [] : [], overview: sameConversation(state.scope, action.scope) ? state.overview : null };
   if (action.type === 'cancel') return { ...state, requestId: state.requestId + 1, pendingQuestion: null, turn: null, reviewed: false, outcome: null };
   if (action.type === 'review') return { ...state, reviewed: action.value };
   if (!sameScope(state.scope, action.scope)) return state;
+  if (action.type === 'history') {
+    if (!matches(action.scope, action.history.company_id, action.history.context_version)) return state;
+    const existing = new Set(state.exchanges.map(exchange => exchange.id));
+    const currentTurnIds = new Set(state.exchanges.flatMap(exchange => exchange.turn ? [exchange.turn.turn_id] : []));
+    const historical = action.history.exchanges.filter(exchange => !existing.has(exchange.id) && (!exchange.turn || !currentTurnIds.has(exchange.turn.turn_id))).map(exchange => ({ ...exchange, turn: exchange.turn ? { ...exchange.turn, proposal: null } : undefined }));
+    return { ...state, exchanges: [...historical, ...state.exchanges].slice(-MAX_EXCHANGES) };
+  }
   if (action.type === 'start') return { ...state, requestId: action.requestId, pendingQuestion: action.question?.trim() || null, turn: null, reviewed: false, outcome: null };
   if (action.type === 'overview') return matches(action.scope, action.overview.company_id, action.overview.context_version) ? { ...state, overview: action.overview } : state;
   if (action.type === 'turn') return action.requestId === state.requestId && acceptsOperatorTurn(action.turn, action.scope) ?
     { ...state, turn: action.turn, turns: [...(state.turns ?? []), action.turn].slice(-MAX_EXCHANGES), exchanges: [...(state.exchanges ?? []), { id: action.requestId, question: state.pendingQuestion, turn: action.turn }].slice(-MAX_EXCHANGES), pendingQuestion: null, reviewed: false } : state;
   if (action.type === 'failed') return action.requestId === state.requestId && !!state.pendingQuestion ?
     { ...state, exchanges: [...(state.exchanges ?? []), { id: action.requestId, question: state.pendingQuestion, error: action.error }].slice(-MAX_EXCHANGES), pendingQuestion: null } : state;
-  if (action.type === 'applied') return matches(action.scope, action.outcome.company_id, action.outcome.context_version) &&
-    action.outcome.session.session_id === action.scope.sessionId && action.outcome.session.company?.company_id === action.scope.companyId && action.outcome.session.context_version === action.scope.contextVersion ?
-    { ...state, turn: null, reviewed: false, outcome: action.outcome } : state;
+  if (action.type === 'applied') {
+    if (!matches(action.scope, action.outcome.company_id, action.outcome.context_version) ||
+        action.outcome.session.session_id !== action.scope.sessionId ||
+        action.outcome.session.company?.company_id !== action.scope.companyId ||
+        action.outcome.session.context_version !== action.scope.contextVersion) return state;
+    if (action.outcome.kind === 'research') {
+      const research = validatedResearchResult(action.outcome.result);
+      if (!research) return state;
+      const exchanges = state.exchanges.some(exchange => exchange.id === research.research_id) ? state.exchanges :
+        [...state.exchanges, { id: research.research_id, channel: 'text' as const, question: null, research, created_at: research.checked_at }].slice(-MAX_EXCHANGES);
+      return { ...state, turn: null, reviewed: false, outcome: null, exchanges };
+    }
+    return { ...state, turn: null, reviewed: false, outcome: action.outcome };
+  }
   return state;
 }
 
 export function canApplyProposal(state: OperatorState, scope: OperatorScope, dirty: boolean, now: number): boolean {
   const proposal = state.turn?.proposal;
   return !dirty && sameScope(state.scope, scope) && state.reviewed && state.turn?.status === 'proposal' && state.turn.read_only === true && !!proposal &&
-    proposal.context_version === scope.contextVersion && Number.isFinite(Date.parse(proposal.expires_at)) && Date.parse(proposal.expires_at) > now;
+    proposal.context_version === scope.contextVersion && Number.isFinite(Date.parse(proposal.expires_at)) && Date.parse(proposal.expires_at) > now &&
+    (proposal.kind !== 'research' || typeof proposal.parameters.query === 'string' && !!proposal.parameters.query.trim() && proposal.parameters.query.length <= 400 && proposal.parameters.destination === 'Google Search via Vertex AI');
 }
 
 export const MAX_VOICE_BYTES = 500000;
@@ -145,6 +171,10 @@ function OperatorAnalytics({ analytics }: { analytics: Record<string, unknown> }
     return <div key={name} className="demo-table-wrap"><h4>{name.replaceAll('_', ' ').replace(/^./, letter => letter.toUpperCase())}</h4>{rows.length ? <table><thead><tr>{columns.map(column => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{columns.map(column => <td key={column}>{Array.isArray(row[column]) ? (row[column] as unknown[]).map(entry => record(entry)?.name ?? detail(entry)).join(', ') || 'None listed' : detail(row[column])}</td>)}</tr>)}</tbody></table> : <p>No rows returned.</p>}</div>;
   })}</div>;
 }
+function OperatorAnswer({ turn, scope, supplierNames }: { turn: OperatorTurn; scope: OperatorScope; supplierNames: string[] }) {
+  const research = researchFromTurn(turn, scope);
+  return research ? <ResearchOutcome result={research} /> : <p className="demo-operator-answer">{displaySupplierMentions(turn.assistant_text, supplierNames)}</p>;
+}
 export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialState, news = null, offers = [], plan = null, materials = [], seed, riskSummary, beforeTurn, onSession, onNavigate, onUnknown }: {
   scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox') => void; onUnknown: () => void;
 }) {
@@ -170,6 +200,10 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   }, [seed?.id, seed?.companyId, scope.companyId, scope.sessionId, scope.contextVersion, scope.epoch]);
 
   function cancel() {
+    const proposal = state.turn?.proposal;
+    if (proposal && sameScope(state.scope, scope)) void api.cancelOperator(csrf, proposal.proposal_id, scope.contextVersion).catch(cause => {
+      if (sameScope(scopeRef.current, scope)) setError(`The proposal could not be cancelled on the server. ${errorText(cause)}`);
+    });
     generationRef.current += 1; requestRef.current += 1;
     setVoiceRevision(value => value + 1);
     setBusy(''); setError('');
@@ -185,6 +219,9 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
     api.operator().then(overview => {
       if (mountedRef.current && id === overviewRef.current && sameScope(scopeRef.current, captured)) dispatch({ type: 'overview', scope: captured, overview });
     }).catch(cause => { if (mountedRef.current && id === overviewRef.current && sameScope(scopeRef.current, captured)) setError(errorText(cause)); });
+    api.operatorHistory().then(history => {
+      if (mountedRef.current && id === overviewRef.current && sameScope(scopeRef.current, captured)) dispatch({ type: 'history', scope: captured, history });
+    }).catch(cause => { if (mountedRef.current && id === overviewRef.current && sameScope(scopeRef.current, captured)) setError(`Conversation history unavailable: ${errorText(cause)}`); });
     return () => {
       mountedRef.current = false;
       generationRef.current += 1; requestRef.current += 1; overviewRef.current += 1;
@@ -221,12 +258,13 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
     if (!canApplyProposal(state, scope, dirty || blocked, Date.now()) || !reviewCurrent || busy) return;
     const proposal = state.turn!.proposal!;
     const captured = scope, generation = ++generationRef.current;
-    setBusy('applying'); setError('');
+    setBusy(proposal.kind === 'research' ? 'researching' : 'applying'); setError('');
     setVoiceRevision(value => value + 1);
     try {
       const outcome = await api.confirmOperator(csrf, proposal.proposal_id, captured.contextVersion);
       if (!mountedRef.current || generation !== generationRef.current || !sameScope(scopeRef.current, captured)) return;
       if (outcome.status !== 'applied' || outcome.kind !== proposal.kind || outcome.session.session_id !== captured.sessionId || outcome.session.company?.company_id !== captured.companyId || outcome.session.context_version !== captured.contextVersion || outcome.company_id !== captured.companyId || outcome.context_version !== captured.contextVersion) throw new DemoApiError('The applied result did not match this workspace.');
+      if (outcome.kind === 'research' && !validatedResearchResult(outcome.result)) throw new DemoApiError('The research result could not be verified.');
       dispatch({ type: 'applied', scope: captured, outcome });
       onSession(outcome.session);
       if (outcome.kind === 'simulate_email') onNavigate?.('outbox');
@@ -264,12 +302,14 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
   const recipient = record(proposal?.parameters)?.recipient_label;
   if (typeof recipient === 'string') supplierNames.push(recipient);
   const reviewPreview = quotePreviews(state.turn);
-  const reviewCurrent = proposal?.kind !== 'review_quotes' || !!reviewPreview && reviewPreview.rows.every(row =>
-    offers.some(offer => offer.offer_id === row.offer_id && offer.version === row.expected_version && offer.fixture_id === row.fixture_id && offer.document.filename === row.source_filename));
+  const researchCurrent = proposal?.kind !== 'research' || typeof proposal.parameters.query === 'string' && !!proposal.parameters.query.trim() && proposal.parameters.query.length <= 400 && proposal.parameters.destination === 'Google Search via Vertex AI';
+  const reviewCurrent = researchCurrent && (proposal?.kind !== 'review_quotes' || !!reviewPreview && reviewPreview.rows.every(row =>
+    offers.some(offer => offer.offer_id === row.offer_id && offer.version === row.expected_version && offer.fixture_id === row.fixture_id && offer.document.filename === row.source_filename)));
+
   const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now()) && reviewCurrent && !busy;
   return <section className="demo-company-panel demo-operator-panel demo-assistant-panel" aria-label="Operator workspace">
     <div className="demo-heading demo-assistant-heading"><div><span className="demo-kicker">Reviewed tools · no automatic actions</span><h2>Operator</h2></div><span className="demo-session">{state.overview?.available ? 'Agent service available' : 'Agent availability unverified'}</span></div>
-    <div className="demo-assistant-voice"><LiveVoice key={voiceRevision} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} /></div>
+    <div className="demo-assistant-voice"><LiveVoice key={voiceRevision} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || busy === 'researching' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} /></div>
     <p className="demo-assistant-help">Ask by voice or text. Business changes need review and a separate Apply.</p>
     {riskSummary && <p className="demo-operator-risk"><strong>Current company risks:</strong> {riskSummary.high} high · {riskSummary.medium} medium · {riskSummary.low} low <small>Checked {riskSummary.checkedAt}</small></p>}
     {dirty && <p className="demo-alert">Edited buyer inputs will be saved to this temporary session before the next question or voice conversation. Run a new comparison before reviewing a recovery or RFQ proposal.</p>}
@@ -278,17 +318,18 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, initialStat
     {state.overview?.available === false && <p className="demo-alert">The agent provider is unavailable. Read the company and news panels or try again later.</p>}
     {busy === 'asking' && <ActivityIndicator state="working" label="Specialists are reviewing the current workspace…" size={20} theme="dark" />}
     {busy === 'applying' && <ActivityIndicator state="working" label="Applying the reviewed proposal…" size={20} theme="dark" />}
+    {busy === 'researching' && <ActivityIndicator state="working" label="Searching the public web with the reviewed query…" size={20} theme="dark" />}
     <div className="demo-assistant-history" role="log" aria-label="Assistant conversation" aria-live="polite" aria-relevant="additions text">
-    {(state.exchanges?.length ? state.exchanges : (state.turns?.length ? state.turns : state.turn ? [state.turn] : []).map((turn, id): OperatorExchange => ({ id, question: null, turn }))).map(exchange => <div key={exchange.id} className="demo-assistant-exchange">{exchange.question && <div className="demo-assistant-question"><span className="demo-kicker">You</span><p>{exchange.question}</p></div>}{exchange.error && <div className="demo-assistant-failure" role="status"><span className="demo-kicker">Request failed</span><p>{exchange.error}</p></div>}{exchange.turn && <div className="demo-operator-result"><span className="demo-kicker">{exchange.turn.read_only ? 'Read-only outcome' : 'Server-confirmed workspace update'} · {exchange.turn.status}</span><p className="demo-operator-answer">{displaySupplierMentions(exchange.turn.assistant_text, supplierNames)}</p>{exchange.turn.action_result && <p className="demo-alert"><strong>{exchange.turn.action_result.tool}:</strong> {exchange.turn.action_result.summary}{exchange.turn.action_result.fields_changed?.length ? ` · Filled: ${exchange.turn.action_result.fields_changed.join(', ')}` : ''}</p>}<details className="demo-assistant-trace"><summary>Evidence and specialist activity · {exchange.turn.evidence_ids.length} references · {exchange.turn.agent_steps.length} steps</summary>{exchange.turn.analytics && <OperatorAnalytics analytics={exchange.turn.analytics} />}<h3>Evidence in this workspace</h3>{exchange.turn.evidence_ids.length ? <ul className="demo-operator-evidence">{exchange.turn.evidence_ids.map(id => {
+    {(state.exchanges?.length ? state.exchanges : (state.turns?.length ? state.turns : state.turn ? [state.turn] : []).map((turn, id): OperatorExchange => ({ id, question: null, turn }))).map(exchange => <div key={exchange.id} className="demo-assistant-exchange">{exchange.question && <div className="demo-assistant-question"><span className="demo-kicker">You</span><p>{exchange.question}</p></div>}{exchange.answer && !exchange.turn && !exchange.research && <div className="demo-operator-result"><span className="demo-kicker">{exchange.channel === 'voice' ? exchange.speaker === 'input' ? 'You · voice' : 'Operator · voice' : 'Saved answer'} · {exchange.created_at ?? 'saved'}</span><p className="demo-operator-answer">{exchange.answer}</p></div>}{exchange.research && <ResearchOutcome result={exchange.research} />}{exchange.error && <div className="demo-assistant-failure" role="status"><span className="demo-kicker">Request failed</span><p>{exchange.error}</p></div>}{exchange.turn && <div className="demo-operator-result"><span className="demo-kicker">{exchange.turn.read_only ? 'Read-only outcome' : 'Server-confirmed workspace update'} · {exchange.turn.status}</span><OperatorAnswer turn={exchange.turn} scope={scope} supplierNames={supplierNames} />{exchange.turn.action_result && <p className="demo-alert"><strong>{exchange.turn.action_result.tool}:</strong> {exchange.turn.action_result.summary}{exchange.turn.action_result.fields_changed?.length ? ` · Filled: ${exchange.turn.action_result.fields_changed.join(', ')}` : ''}</p>}<details className="demo-assistant-trace"><summary>Evidence and specialist activity · {exchange.turn.evidence_ids.length} references · {exchange.turn.agent_steps.length} steps</summary>{exchange.turn.analytics && <OperatorAnalytics analytics={exchange.turn.analytics} />}<h3>Evidence in this workspace</h3>{exchange.turn.evidence_ids.length ? <ul className="demo-operator-evidence">{exchange.turn.evidence_ids.map(id => {
       const evidence = resolveOperatorEvidence(id, scope, news, offers, plan);
       return <li key={id}><code>{id}</code><span>{evidence.kind === 'news' ? 'Observed news' : evidence.kind === 'quote' ? 'Quote' : evidence.kind === 'plan' ? 'Comparison' : 'Unavailable'}</span>{evidence.href ? <a href={evidence.href} target="_blank" rel="noopener noreferrer">{evidence.title} ↗</a> : <strong>{evidence.title}</strong>}{evidence.publisher && <span>Publisher: {evidence.publisher}</span>}{evidence.detail && <small>{evidence.detail}</small>}{evidence.kind === 'news' && !evidence.href && <small>Source link unavailable</small>}</li>;
     })}</ul> : <p>No evidence IDs returned.</p>}<h3>Actual agent activity</h3>{exchange.turn.agent_steps.length ? <ol>{exchange.turn.agent_steps.map((step, index) => <li key={index}><strong>{step.agent} · {step.role}</strong><span>{step.status} · {step.model} · provider call {step.provider_call} · tool {step.tool}</span><p>{step.summary}</p></li>)}</ol> : <p>No specialist calls were recorded for this turn.</p>}</details></div>}</div>)}
     </div>
-    {proposal && <div className="demo-operator-proposal"><span className="demo-kicker">Reviewable {proposal.kind} proposal</span><h3>{displaySupplierMentions(proposal.summary, supplierNames)}</h3><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p>{proposal.kind === 'review_quotes' && <div className="demo-quote-preview"><h4>Review sample quotes</h4>{reviewPreview ? <><p>Material: {reviewPreview.materialId} · Offer IDs: {reviewPreview.offerIds.join(', ')}</p>{reviewPreview.rows.map(row => {
+    {proposal && <div className="demo-operator-proposal"><span className="demo-kicker">Reviewable {proposal.kind} proposal</span><h3>{displaySupplierMentions(proposal.summary, supplierNames)}</h3><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p>{proposal.kind === 'research' && <div className="demo-research-consent"><p><strong>Public query to share:</strong> {typeof proposal.parameters.query === 'string' ? proposal.parameters.query : 'Unavailable'}</p><p><strong>Destination:</strong> {typeof proposal.parameters.destination === 'string' ? proposal.parameters.destination : 'Unavailable'}</p><p>Only the exact public query shown above is shared with Google Search via Vertex AI after your confirmation.</p>{!researchCurrent && <p className="demo-alert">The query or destination is invalid. Request a new proposal.</p>}</div>}{proposal.kind === 'review_quotes' && <div className="demo-quote-preview"><h4>Review sample quotes</h4>{reviewPreview ? <><p>Material: {reviewPreview.materialId} · Offer IDs: {reviewPreview.offerIds.join(', ')}</p>{reviewPreview.rows.map(row => {
       const original = offers.find(offer => offer.offer_id === row.offer_id);
       return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Fixture: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested synthetic document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;
-    })}</> : <p className="demo-alert">Quote preview unavailable. Request a new proposal.</p>}{!reviewCurrent && <p className="demo-alert">A quote source or version changed. Request a new review proposal.</p>}</div>}<strong>Exact proposed arguments</strong><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy || !reviewCurrent} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />I reviewed the exact arguments and want to apply this change to the current session.</label><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>Apply reviewed proposal</button><p>{proposal.kind === 'simulate_email' ? 'No external delivery. Applying records a simulated sent message in this session only.' : proposal.kind === 'review_quotes' ? 'Only these synthetic quote values will be corrected and saved after your review. No supplier message or order is sent.' : 'No supplier message or order is sent.'}</p></div>}
-    {state.outcome && <div className="demo-operator-result"><span className="demo-kicker">Applied to server session · {state.outcome.kind}</span><p>This result is the server-confirmed workspace change. The current session and comparison below were restored from its response.</p>{state.outcome.kind === 'watch' ? (() => { const line = formatOperatorWatch(state.outcome.result, materials, scope.companyId); return <p><strong>{line.title}</strong>{line.detail && ` · ${line.detail}`}{line.synthetic && ' · Synthetic watch item'}</p>; })() : <p>{state.outcome.kind === 'recovery' ? 'The hypothetical recovery comparison is available below.' : state.outcome.kind === 'simulate_email' ? 'A simulated sent record is available in the outbox. No external delivery occurred.' : state.outcome.kind === 'review_quotes' ? 'The reviewed synthetic quotes were restored from the confirmed server session.' : 'The unsent RFQ draft is available below.'}</p>}</div>}
-    <form onSubmit={send} className="demo-operator-chat demo-assistant-composer"><label htmlFor="demo-operator-message">Your message</label><textarea id="demo-operator-message" value={message} maxLength={1200} onChange={event => setMessage(event.target.value)} placeholder="Ask what needs attention, inspect analytics, or request a reviewable action." disabled={blocked || !!busy || state.overview?.available === false} /><div><span>{message.length}/1200 characters</span><button className="demo-button" disabled={!message.trim() || blocked || !!busy || state.overview?.available === false}>Send</button><button type="button" className="demo-link" disabled={busy === 'applying'} onClick={cancel}>Cancel current turn</button></div></form>
+    })}</> : <p className="demo-alert">Quote preview unavailable. Request a new proposal.</p>}{!reviewCurrent && <p className="demo-alert">A quote source or version changed. Request a new review proposal.</p>}</div>}<strong>Exact proposed arguments</strong><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy || !reviewCurrent} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />{proposal.kind === 'research' ? 'I reviewed the public query and want to search the web.' : 'I reviewed the exact arguments and want to apply this change to the current session.'}</label><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>{proposal.kind === 'research' ? 'Research web' : 'Apply reviewed proposal'}</button><p>{proposal.kind === 'simulate_email' ? 'No external delivery. Applying records a simulated sent message in this session only.' : proposal.kind === 'review_quotes' ? 'Only these synthetic quote values will be corrected and saved after your review. No supplier message or order is sent.' : proposal.kind === 'research' ? 'Public web research starts only when you select Research web.' : 'No supplier message or order is sent.'}</p></div>}
+    {state.outcome && <div className="demo-operator-result"><span className="demo-kicker">{state.outcome.kind === 'research' ? 'Approved public research' : `Applied to server session · ${state.outcome.kind}`}</span>{state.outcome.kind !== 'research' && <p>This result is the server-confirmed workspace change. The current session and comparison below were restored from its response.</p>}{state.outcome.kind === 'research' ? <ResearchOutcome result={state.outcome.result as ResearchResult} /> : state.outcome.kind === 'watch' ? (() => { const line = formatOperatorWatch(state.outcome.result, materials, scope.companyId); return <p><strong>{line.title}</strong>{line.detail && ` · ${line.detail}`}{line.synthetic && ' · Synthetic watch item'}</p>; })() : <p>{state.outcome.kind === 'recovery' ? 'The hypothetical recovery comparison is available below.' : state.outcome.kind === 'simulate_email' ? 'A simulated sent record is available in the outbox. No external delivery occurred.' : state.outcome.kind === 'review_quotes' ? 'The reviewed synthetic quotes were restored from the confirmed server session.' : 'The unsent RFQ draft is available below.'}</p>}</div>}
+    <form onSubmit={send} className="demo-operator-chat demo-assistant-composer"><label htmlFor="demo-operator-message">Your message</label><textarea id="demo-operator-message" value={message} maxLength={1200} onChange={event => setMessage(event.target.value)} placeholder="Ask what needs attention, inspect analytics, or request a reviewable action." disabled={blocked || !!busy || state.overview?.available === false} /><div><span>{message.length}/1200 characters</span><button className="demo-button" disabled={!message.trim() || blocked || !!busy || state.overview?.available === false}>Send</button><button type="button" className="demo-link" disabled={busy === 'applying' || busy === 'researching'} onClick={cancel}>Cancel current turn</button></div></form>
   </section>;
 }

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import type { NewsView, OfferView, OperatorTurn, OperatorHistory } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, validateAudioCapture } from './demo-operator';
+import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView } from './demo-api';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, formatOperatorAttention, formatOperatorWatch, initialOperatorState, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, validateAudioCapture } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,12 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('uses only complete current-company prepared drafts to refresh the Drafts workspace', () => {
+    const full = { draft_id: 'd1', kind: 'email', status: 'draft_unsent', company_id: scope.companyId, material_id: 'copper', recipient_label: 'Supplier', subject: 'Availability', body: 'Please confirm.', created_at: '2026-10-15T10:00:00Z' };
+    expect(scopedPreparedDrafts([full], scope)).toEqual([full]);
+    expect(scopedPreparedDrafts([{ draft_id: 'summary-only', kind: 'email', status: 'draft_unsent' }], scope)).toBeNull();
+    expect(scopedPreparedDrafts([{ ...full, company_id: 'another-company' }], scope)).toBeNull();
+  });
   it('shows the exact public research query and destination, with explicit review before search', () => {
     const research = { ...turn, proposal: { ...proposal, kind: 'research' as const, parameters: { query: 'Hormuz shipping status October 2026', destination: 'Google Search via Vertex AI' } } };
     const state = { ...initialOperatorState, scope, turn: research };
@@ -83,14 +89,41 @@ describe('operator response boundary', () => {
       { ...result, answer: 'x'.repeat(8001) },
       { ...result, query: 'x'.repeat(401) },
       { ...result, research_id: 'x'.repeat(129) },
-      { ...result, sources: Array.from({ length: 9 }, (_, index) => ({ source_id: String(index), title: 'Source', url: 'https://example.org/ports' })) },
+      { ...result, sources: Array.from({ length: 25 }, (_, index) => ({ source_id: String(index), title: 'Source', url: 'https://example.org/ports' })) },
       { ...result, sources: [{ source_id: 's', title: 'x'.repeat(201), url: 'https://example.org/ports' }] },
       { ...result, sources: [{ source_id: 's', title: 'Source', url: 'http://example.org/ports' }] },
       { ...result, sources: [{ source_id: 's', title: 'Source', url: `https://example.org/${'x'.repeat(1200)}` }] },
     ]) expect(researchFromTurn({ ...recalled, workspace: { research: invalid } }, scope)).toBeNull();
+    const fullSourceSet = { ...result, sources: Array.from({ length: 24 }, (_, index) => ({ source_id: String(index), title: `Source ${index}`, url: `https://example.org/${index}` })) };
+    expect(researchFromTurn({ ...recalled, workspace: { research: fullSourceSet } }, scope)).toEqual(fullSourceSet);
     const malformed = { ...recalled, workspace: { research: { ...result, sources: [null] } } };
     expect(researchFromTurn(malformed, scope)).toBeNull();
     expect(renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: malformed }} onSession={() => {}} onUnknown={() => {}} />)).toContain('Ports remain open.');
+  });
+  it('displays confirmed mutable voice research in the conversation and current approval near voice', () => {
+    const research = { research_id: 'r-confirmed', query: 'Public port status', status: 'completed' as const, checked_at: '2026-10-15T10:00:00Z', answer: '## Status\n\n**Open** today.', sources: [] };
+    const session = { session_id: scope.sessionId, company: { company_id: scope.companyId }, context_version: scope.contextVersion };
+    const confirmed = { ...turn, status: 'completed' as const, proposal: null, read_only: false, session: session as never,
+      action_result: { tool: 'confirm_research', summary: 'Research complete' }, workspace: { research } };
+    expect(acceptsOperatorTurn(confirmed, scope)).toBe(true);
+    expect(researchFromTurn(confirmed, scope)).toEqual(research);
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: confirmed }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Public port status');
+    expect(html).toContain('<h3>Status</h3>');
+    const pending = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn, exchanges: Array.from({ length: 20 }, (_, index) => ({ id: index, question: 'Old question', answer: 'Old answer' })) }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(pending.indexOf('Reviewable watch proposal')).toBeLessThan(pending.indexOf('Old question'));
+    expect(pending).toContain('role="region" aria-label="Current proposal requiring review"');
+  });
+  it('shows the email body before Apply and a direct draft review link', () => {
+    const email = { ...turn, proposal: { ...proposal, kind: 'simulate_email' as const,
+      parameters: { material_id: 'copper', recipient_label: 'Supplier', subject: 'Availability', body: 'Please confirm lead time.' } } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: email }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Subject: Availability');
+    expect(html).toContain('Please confirm lead time.');
+    expect(html).toContain('View draft');
   });
   it('keeps approved research after the next question and deduplicates a late history read', () => {
     const research = { research_id: 'research-1', query: 'Public port status', status: 'completed' as const, checked_at: '2026-10-15T10:00:00Z', answer: 'Port is open.', sources: [{ source_id: 'source-1', title: 'Port authority', url: 'https://example.org/ports' }] };
@@ -171,7 +204,8 @@ describe('operator response boundary', () => {
     expect(html).toContain('1 signal');
     expect(html).toContain('Stock cover: 12 days');
     expect(html).toContain('Exact proposed arguments');
-    expect(html.indexOf('Exact proposed arguments')).toBeGreaterThan(html.lastIndexOf('</details>'));
+    expect(html.indexOf('Exact proposed arguments')).toBeGreaterThan(html.indexOf('Stock cover: 12 days'));
+    expect(html.indexOf('Exact proposed arguments')).toBeLessThan(html.indexOf('Assistant conversation'));
     expect(html).toContain('I reviewed the exact arguments');
     expect(html).toContain('Apply reviewed proposal');
   });
@@ -282,6 +316,24 @@ describe('operator response boundary', () => {
     expect(cleanPreview).not.toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
     const dirtyPreview = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true} initialState={reviewed} onSession={() => {}} onUnknown={() => {}} />);
     expect(dirtyPreview).toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
+  });
+  it('blocks clean recovery and RFQ proposals when the displayed comparison or quote changes', () => {
+    const boundPlan = { plan_id: 'plan-one', offer_versions: { q1: 2 } } as unknown as PlanView;
+    for (const kind of ['recovery', 'rfq'] as const) {
+      const bound = { ...proposal, kind, plan_id: 'plan-one', offer_versions: { q1: 2 } };
+      const state = { ...initialOperatorState, scope, turn: { ...turn, proposal: bound }, reviewed: true };
+      expect(canApplyProposal(state, scope, false, Date.now(), boundPlan, [quote])).toBe(true);
+      for (const [currentPlan, currentOffers] of [
+        [{ ...boundPlan, plan_id: 'plan-two' }, [quote]],
+        [boundPlan, [{ ...quote, version: 3 }]],
+        [{ ...boundPlan, offer_versions: { q1: 3 } }, [quote]],
+      ] as [PlanView, OfferView[]][]) {
+        expect(canApplyProposal(state, scope, false, Date.now(), currentPlan, currentOffers)).toBe(false);
+        const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={state} plan={currentPlan} offers={currentOffers} onSession={() => {}} onUnknown={() => {}} />);
+        expect(html).toContain('Request a new proposal');
+        expect(html).toMatch(/disabled=""[^>]*>Apply reviewed proposal</);
+      }
+    }
   });
   it('accepts a same-scope server utility session and keeps dirty Q&A available while blocking stale proposal apply', () => {
     const canonical = { session_id: 's1', csrf_token: 'csrf', expires_at: '2026-10-15T12:00:00Z', synthetic: true as const, persistence: 'ephemeral' as const, offers: [], provider: { model: 'test', available: true }, company: { company_id: 'solara-cables' }, context_version: 1 };

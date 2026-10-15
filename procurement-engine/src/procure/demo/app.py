@@ -79,7 +79,7 @@ class BodyLimit:
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                news_service=None, operator_provider=None, voice_service=None, live_client_factory=None,
-               research_provider=None, session_backend=None) -> FastAPI:
+               research_provider=None, session_backend=None, voice_consent_verifier=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
@@ -701,6 +701,24 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         validate_simulated_email(value, parameters)
         return parameters
 
+    def remember_prepared_draft(value, proposal, *, rfq_preview=None):
+        """Save readable artifacts, never an approval capability or delivery effect."""
+        parameters = proposal['parameters']
+        is_email = proposal['kind'] == 'simulate_email'
+        if not is_email and proposal['kind'] != 'rfq':
+            return
+        artifact = {'draft_id': proposal['proposal_id'], 'kind': 'email' if is_email else 'rfq',
+            'status': 'draft_unsent', 'company_id': value.company_id,
+            'material_id': parameters['material_id'] if is_email else rfq_preview['material'],
+            'recipient_label': parameters['recipient_label'] if is_email else rfq_preview['supplier'],
+            'subject': parameters['subject'] if is_email else f"Quotation request for {rfq_preview['material']}",
+            'body': parameters['body'] if is_email else rfq_preview['text'],
+            'created_at': store.now().isoformat(), 'plan_id': proposal['plan_id'],
+            'offer_versions': deepcopy(proposal['offer_versions'])}
+        value.drafts.append(artifact)
+        del value.drafts[:-24]
+        parameters['draft_preview'] = deepcopy(artifact)
+
     @app.post('/api/demo/buyer-draft')
     async def buyer_draft(request: Request):
         value = mutate(request)
@@ -736,6 +754,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     'buyer_draft': deepcopy(value.buyer_draft),
                     'selected_material_id': value.selected_material_id,
                     'simulated_outbox': deepcopy(value.simulated_outbox),
+                    'drafts': deepcopy(value.drafts),
                     'context_version': value.context_version}
 
     def session_response(value):
@@ -990,6 +1009,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if candidate is not None:
                     kind = candidate['kind']
                     parameters = deepcopy(candidate['parameters'])
+                    rfq_preview = None
                     plan = active_plan(value)
                     if kind == 'recovery':
                         from .recovery import compare
@@ -1010,8 +1030,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         chosen = next((o for o in selected if o['offer_id'] == plan['selected_offer_id']), None)
                         if chosen is None:
                             raise SessionError('draft_unavailable', 'Selected quote is unavailable.', 409)
-                        build_draft(deepcopy(plan), deepcopy(chosen),
-                                    all_offers=deepcopy(selected), created_at=store.now())
+                        rfq_preview = build_draft(deepcopy(plan), deepcopy(chosen),
+                                                  all_offers=deepcopy(selected), created_at=store.now())
                     elif kind == 'simulate_email':
                         validate_simulated_email(value, parameters)
                     elif kind == 'review_quotes':
@@ -1027,6 +1047,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
                                 '_marker': marker, '_company_id': value.company_id,
                                 '_session_id': value.session_id}
+                    remember_prepared_draft(value, proposal, rfq_preview=rfq_preview)
                     value.pending_proposal = proposal
                 result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
                           'context_version': value.context_version, 'status': outcome['status'],
@@ -1040,6 +1061,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     result['session'] = view(value)
                 if outcome.get('analytics') is not None:
                     result['analytics'] = deepcopy(outcome['analytics'])
+                if proposal is not None and proposal['kind'] in ('rfq', 'simulate_email'):
+                    result['workspace'] = {'drafts': deepcopy(value.drafts)}
                 complete(value, key, result)
                 remember_turn(value, message, result, channel=channel)
                 value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
@@ -1079,6 +1102,27 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
         async def workspace_tools(name, args, context_version, key):
+            if name == 'confirm_research':
+                shape(args, ('proposal_id',))
+                if not isinstance(args['proposal_id'], str) or not args['proposal_id']:
+                    raise SessionError('invalid_proposal', 'Choose the current research request.', 422)
+                # The live bridge admits this callback only for a fresh, explicit
+                # user transcript after reading the exact query. Reuse the same
+                # durable claim and replay checks as the visual confirmation.
+                confirmed = await confirm_research(value, {
+                    'proposal_id': args['proposal_id'], 'reviewed': True,
+                    'expected_context_version': context_version, 'idempotency_key': key})
+                research = deepcopy(confirmed['result'])
+                # Voice needs the grounded answer/citations, not transient
+                # provider markup in either model context or replay caches.
+                research['search_suggestions_html'] = None
+                summary = ('Public research completed.' if research['status'] == 'completed'
+                           else 'Public research is unavailable; no business action was taken.')
+                return {'turn_id': research['research_id'], 'company_id': value.company_id,
+                    'context_version': context_version, 'status': 'completed', 'assistant_text': research['answer'],
+                    'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': False,
+                    'session': confirmed['session'], 'action_result': {'tool': 'confirm_research', 'summary': summary},
+                    'workspace': {'research': research}}
             if name == 'prepare_research':
                 if not isinstance(args, dict):
                     raise SessionError('invalid_research', 'Provide a public research question.', 422)
@@ -1196,6 +1240,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                             result['workspace'] = {'company': deepcopy(snapshot['company']),
                                 'buyer_draft': deepcopy(value.buyer_draft),
                                 'selected_material_id': value.selected_material_id,
+                                'drafts': [{key: item[key] for key in
+                                            ('draft_id', 'kind', 'status', 'material_id', 'recipient_label', 'subject')}
+                                           for item in value.drafts[-12:]],
                                 'news': deepcopy(value.news), 'plan': deepcopy(active_plan(value)),
                                 'risks': deepcopy(snapshot.get('risk_report')),
                                 'offers': [{'offer_id': offer['offer_id'], 'version': offer['version'],
@@ -1219,10 +1266,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                     'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
                                     '_marker': marker, '_company_id': value.company_id,
                                     '_session_id': value.session_id}
+                        remember_prepared_draft(value, proposal)
                         value.pending_proposal = proposal
                         result['status'] = 'proposal'
                         result['proposal'] = public_proposal(proposal)
                         result['assistant_text'] = proposal['summary']
+                        result['workspace'] = {'drafts': deepcopy(value.drafts)}
                     elif name == 'review_sample_quotes':
                         parameters = reviewed_quote_preview(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'review_quotes',
@@ -1303,9 +1352,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 store.save(value)
             return result
 
+        from .voice_consent import verify_spoken_consent
         await run_live_voice(websocket, session=value, store=store,
                              operate_workspace=operate, workspace_tools=saved_workspace_tools,
-                             client_factory=live_client_factory)
+                             client_factory=live_client_factory,
+                             verify_spoken_consent=voice_consent_verifier or verify_spoken_consent)
 
     async def confirm_research(value, data):
         from .research import VertexResearchProvider
@@ -1499,7 +1550,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     value.recovery = deepcopy(result)
                     value.rfq = None
                 elif kind == 'simulate_email':
-                    parameters = proposal['parameters']
+                    parameters = {k: v for k, v in proposal['parameters'].items() if k != 'draft_preview'}
                     validate_simulated_email(value, parameters)
                     if len(value.simulated_outbox) >= 48:
                         raise SessionError('outbox_limit', 'Simulated outbox is full.', 429)
@@ -1522,7 +1573,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         raise SessionError('draft_unavailable', 'Current plan has no purchase to draft.', 409)
                     result = build_draft(deepcopy(plan), deepcopy(chosen),
                                          all_offers=deepcopy(selected), created_at=store.now())
-                    result['draft_id'] = secrets.token_urlsafe(18)
+                    result['draft_id'] = proposal['proposal_id']
                     value.rfq = deepcopy(result)
                 value.pending_proposal = None
                 response = {'status': 'applied', 'company_id': value.company_id,
@@ -1894,6 +1945,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 draft = build_draft(deepcopy(plan), deepcopy(chosen),
                                     all_offers=deepcopy(selected), created_at=store.now())
                 draft['draft_id'] = secrets.token_urlsafe(18)
+                remember_prepared_draft(value, {
+                    'proposal_id': draft['draft_id'], 'kind': 'rfq', 'parameters': {},
+                    'plan_id': plan['plan_id'], 'offer_versions': plan['offer_versions']}, rfq_preview=draft)
                 result = complete(value, key, draft)
                 value.rfq = deepcopy(result)
                 value.pending_proposal = None
@@ -1941,6 +1995,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'buyer_draft': deepcopy(value.buyer_draft),
                                  'selected_material_id': value.selected_material_id,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
+                                 'drafts': deepcopy(value.drafts),
                                  'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 

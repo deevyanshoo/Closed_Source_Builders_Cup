@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 
@@ -45,6 +45,24 @@ const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', 
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('demo response state', () => {
+  it('shows saved unsent email and RFQ drafts by company, plus clearly labeled simulated messages', () => {
+    const drafts = [
+      { draft_id: 'e1', kind: 'email' as const, status: 'draft_unsent' as const, company_id: company.company_id, material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Lead time request', body: 'Please confirm lead time.', created_at: '2026-10-15T10:00:00Z' },
+      { draft_id: 'other', kind: 'email' as const, status: 'draft_unsent' as const, company_id: 'other', material_id: 'copper', recipient_label: 'Other', subject: 'Wrong company', body: 'Private body', created_at: '2026-10-15T10:00:00Z' },
+    ];
+    const messages = [{ message_id: 'm1', company_id: company.company_id, material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Already simulated', body: 'Simulated body.', status: 'simulated_sent' as const, simulated: true as const, external_delivery: false as const, created_at: '2026-10-15T10:00:00Z' }];
+    const html = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={drafts} rfq={rfq} messages={messages} dirty={false} onDownloadRfq={() => {}} />);
+    expect(html).toContain('Lead time request');
+    expect(html).toContain('Please confirm lead time.');
+    expect(html).toContain('Synthetic unsent request for quotation');
+    expect(html).toContain('Unsent draft');
+    expect(html).toContain('Simulated sent');
+    expect(html).toContain('Download RFQ draft');
+    expect(html).not.toContain('Wrong company');
+    expect(html).not.toContain('Private body');
+    const sameRfq = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={[{ ...drafts[0], draft_id: rfq.draft_id, kind: 'rfq', body: rfq.text }]} rfq={rfq} messages={[]} dirty={false} onDownloadRfq={() => {}} />);
+    expect(sameRfq).toContain('Download RFQ draft');
+  });
   it('retains a recovery notice only when canonical voice preflight changes workspace identity', () => {
     expect(workspaceChanged(session, { ...session, offers: [] })).toBe(false);
     expect(workspaceChanged(session, { ...session, session_id: 'renewed' })).toBe(true);

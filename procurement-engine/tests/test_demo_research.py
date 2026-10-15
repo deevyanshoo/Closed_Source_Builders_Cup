@@ -151,6 +151,50 @@ def test_realistic_grounded_report_length_is_preserved_without_truncation():
     assert result['answer'] == answer.strip()
 
 
+def test_unreferenced_extra_chunk_does_not_hide_grounded_answer():
+    response = _response()
+    response.candidates[0].grounding_metadata.grounding_chunks.extend(
+        NS(web=NS(uri='http://127.0.0.1/private', title='Unused')) for _ in range(8))
+    result = VertexResearchProvider(client=FakeClient(response), clock=lambda: NOW).research(
+        'Latest Hormuz shipping news?')
+    assert result['status'] == 'completed'
+    assert len(result['sources']) == 1
+
+
+def test_twenty_four_referenced_public_sources_are_accepted():
+    response = _response()
+    metadata = response.candidates[0].grounding_metadata
+    metadata.grounding_chunks = [NS(web=NS(uri=f'https://example.org/report/{i}',
+                                            title=f'Report {i}')) for i in range(24)]
+    metadata.grounding_supports = [NS(grounding_chunk_indices=list(range(24)))]
+    result = VertexResearchProvider(client=FakeClient(response), clock=lambda: NOW).research(
+        'Latest Hormuz shipping news?')
+    assert result['status'] == 'completed'
+    assert len(result['sources']) == 24
+    assert result['sources'][-1]['source_id'] == 'source-24'
+
+
+@pytest.mark.parametrize('indices', [[24], [True], [-1], ['0']])
+def test_malformed_reference_still_rejected(indices):
+    response = _response()
+    response.candidates[0].grounding_metadata.grounding_supports = [
+        NS(grounding_chunk_indices=indices)]
+    result = VertexResearchProvider(client=FakeClient(response), clock=lambda: NOW).research(
+        'Latest Hormuz shipping news?')
+    assert result['status'] == 'unavailable'
+
+
+def test_too_many_referenced_sources_still_rejected():
+    response = _response()
+    metadata = response.candidates[0].grounding_metadata
+    metadata.grounding_chunks = [NS(web=NS(uri=f'https://example.org/report/{i}',
+                                            title=f'Report {i}')) for i in range(25)]
+    metadata.grounding_supports = [NS(grounding_chunk_indices=list(range(25)))]
+    result = VertexResearchProvider(client=FakeClient(response), clock=lambda: NOW).research(
+        'Latest Hormuz shipping news?')
+    assert result['status'] == 'unavailable'
+
+
 def test_safe_google_suggestions_html_is_preserved_exactly():
     html = ("<style>.x{background:url('https://www.gstatic.com/search.png')}</style>"
             '<div class="x"><a href="https://www.google.com/search?q=hormuz&amp;hl=en" '
@@ -193,12 +237,12 @@ def test_safe_google_suggestions_html_is_preserved_exactly():
     '<a href="https://example.com"',
     '<a href="https://example.com">Search',
 ])
-def test_unsafe_or_malformed_suggestions_make_research_unavailable(html):
+def test_unsafe_or_malformed_suggestions_are_omitted_without_losing_grounded_answer(html):
     result = VertexResearchProvider(client=FakeClient(_response(suggestions_html=html)),
                                     clock=lambda: NOW).research('Latest Hormuz shipping news?')
-    assert result['status'] == 'unavailable'
-    assert result['answer'] == ''
-    assert result['sources'] == []
+    assert result['status'] == 'completed'
+    assert result['answer'] == 'Reports describe shipping risks, not a confirmed closure.'
+    assert len(result['sources']) == 1
     assert result['search_suggestions_html'] is None
 
 
@@ -246,6 +290,58 @@ def test_provider_failure_is_unavailable_without_retry():
     result = VertexResearchProvider(client=client, clock=lambda: NOW).research('Latest public copper prices?')
     assert result['status'] == 'unavailable'
     assert len(client.calls) == 1
+
+
+def test_validation_failure_logs_only_bounded_reason_and_counts(caplog):
+    response = _response()
+    response.candidates[0].grounding_metadata.grounding_supports = [
+        NS(grounding_chunk_indices=[99])]
+    secret_query = 'Latest public copper prices? opaque-canary'
+    with caplog.at_level('WARNING', logger='procure.demo.research'):
+        result = VertexResearchProvider(client=FakeClient(response), clock=lambda: NOW).research(secret_query)
+    assert result['status'] == 'unavailable'
+    assert 'reason=invalid_reference' in caplog.text
+    assert 'chunks=1' in caplog.text
+    assert secret_query not in caplog.text
+
+
+def test_provider_exception_logs_class_and_status_without_message(caplog):
+    class Broken(FakeClient):
+        def generate_content(self, **kwargs):
+            self.calls.append(kwargs)
+            error = TimeoutError('private-marker from upstream')
+            error.status_code = 504
+            raise error
+
+    with caplog.at_level('WARNING', logger='procure.demo.research'):
+        result = VertexResearchProvider(client=Broken(None), clock=lambda: NOW).research(
+            'Latest public copper prices?')
+    assert result['status'] == 'unavailable'
+    assert 'reason=provider_exception' in caplog.text
+    assert 'error_class=TimeoutError' in caplog.text
+    assert 'http_status=504' in caplog.text
+    assert 'private-marker' not in caplog.text
+
+
+def test_google_client_error_code_is_logged_without_private_details(caplog):
+    from google.genai.errors import ClientError
+
+    class RateLimited(FakeClient):
+        def generate_content(self, **kwargs):
+            self.calls.append(kwargs)
+            raise ClientError(429, {'error': {'message': 'private-marker from upstream',
+                                              'status': 'RESOURCE_EXHAUSTED'}})
+
+    client = RateLimited(None)
+    query = 'Latest public copper prices? opaque-canary'
+    with caplog.at_level('WARNING', logger='procure.demo.research'):
+        result = VertexResearchProvider(client=client, clock=lambda: NOW).research(query)
+    assert result['status'] == 'unavailable'
+    assert len(client.calls) == 1
+    assert 'error_class=ClientError' in caplog.text
+    assert 'http_status=429' in caplog.text
+    assert query not in caplog.text
+    assert 'private-marker' not in caplog.text
 
 
 def test_provider_rejects_private_query_before_call():

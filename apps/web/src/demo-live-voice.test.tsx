@@ -61,6 +61,15 @@ describe('live conversation boundary', () => {
     expect(acceptsLiveTurn({ ...navigate, session: { ...canonical, context_version: 2 } }, scope, scope)).toBe(false);
     expect(acceptsLiveTurn({ ...navigate, action_result: null }, scope, scope)).toBe(false);
   });
+  it('accepts only a scoped server-confirmed research tool result with validated workspace research', () => {
+    const canonical = { session_id: 's1', company: { company_id: 'solara' }, context_version: 1, csrf_token: 'csrf' };
+    const research = { research_id: 'r1', query: 'Port status', status: 'completed', checked_at: '2026-10-15T10:00:00Z', answer: 'Open.', sources: [] };
+    const confirmed = { ...turn, status: 'completed', proposal: null, read_only: false, session: canonical,
+      action_result: { tool: 'confirm_research', summary: 'Research complete' }, workspace: { research } };
+    expect(acceptsLiveTurn(confirmed, scope, scope)).toBe(true);
+    expect(acceptsLiveTurn({ ...confirmed, workspace: null }, scope, scope)).toBe(false);
+    expect(acceptsLiveTurn({ ...confirmed, session: { ...canonical, context_version: 2 } }, scope, scope)).toBe(false);
+  });
   it('encodes mono signed PCM16 at 16 kHz with the expected resampling length', () => {
     const encoded = pcm16Base64(new Float32Array([1, 1, -1, -1]), 32000);
     const raw = atob(encoded);

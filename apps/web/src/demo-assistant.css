@@ -201,6 +201,19 @@
 .demo-assistant-panel .demo-research-outcome h4 { color: #f4f2ec; }
 .demo-assistant-panel .demo-research-outcome a { color: #f0b7a5; }
 .demo-assistant-panel .demo-research-suggestions iframe { width: 100%; min-height: 88px; border: 1px solid #5d544d; background: #fff; }
+.demo-assistant-panel .demo-research-details { margin: 12px 0; border-top: 1px solid #5d544d; padding-top: 10px; }
+.demo-assistant-panel .demo-research-details summary { cursor: pointer; color: #f0b7a5; font-weight: 700; }
+.demo-assistant-panel .demo-markdown-answer { overflow-wrap: anywhere; }
+.demo-assistant-panel .demo-markdown-answer :is(h2, h3) { color: #f4f2ec; margin: 12px 0 7px; line-height: 1.2; }
+.demo-assistant-panel .demo-markdown-answer :is(p, ul, ol) { margin: 7px 0; font-size: inherit; line-height: 1.5; }
+.demo-assistant-panel .demo-markdown-answer :is(ul, ol) { padding-left: 22px; }
+.demo-assistant-panel .demo-markdown-answer li { font-size: inherit; margin-bottom: 5px; }
+.demo-assistant-panel .demo-markdown-answer a { color: #f0b7a5; overflow-wrap: anywhere; }
+.demo-assistant-panel .demo-current-proposal { position: sticky; top: 0; z-index: 4; max-height: min(56vh, 620px); overflow: auto; overscroll-behavior: contain; border: 2px solid #e5826c; box-shadow: 0 12px 30px rgba(0, 0, 0, .45); }
+.demo-assistant-panel .demo-current-proposal:focus { outline: 3px solid #f0b7a5; outline-offset: -5px; }
+.demo-assistant-panel .demo-draft-preview { border: 1px solid #806654; padding: 12px; margin: 12px 0; background: #332923; }
+.demo-assistant-panel .demo-draft-preview p { margin: 6px 0; }
+.demo-assistant-panel .demo-draft-preview pre { max-height: 200px; overflow: auto; }
 .demo-assistant-panel .demo-quote-preview .demo-table-wrap { overflow: auto; }
 .demo-assistant-panel .demo-quote-preview table { color: #f4f2ec; }
 

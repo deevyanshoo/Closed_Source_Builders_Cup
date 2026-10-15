@@ -1,4 +1,5 @@
 import type { ResearchResult } from './demo-api';
+import { MarkdownAnswer } from './demo-markdown';
 
 export function safeResearchHref(value: string): string | null {
   try {
@@ -15,7 +16,7 @@ export function validatedResearchResult(value: unknown): ResearchResult | null {
       (result.status !== 'completed' && result.status !== 'unavailable') ||
       typeof result.checked_at !== 'string' || !Number.isFinite(Date.parse(result.checked_at)) ||
       typeof result.answer !== 'string' || result.answer.length > 8000 ||
-      !Array.isArray(result.sources) || result.sources.length > 8 ||
+      !Array.isArray(result.sources) || result.sources.length > 24 ||
       !result.sources.every(source => source && typeof source === 'object' && !Array.isArray(source) &&
         typeof source.source_id === 'string' && !!source.source_id && source.source_id.length <= 200 &&
         typeof source.title === 'string' && !!source.title && source.title.length <= 200 &&
@@ -25,13 +26,43 @@ export function validatedResearchResult(value: unknown): ResearchResult | null {
   return result as ResearchResult;
 }
 
+export function researchPreview(answer: string): string {
+  const lines = answer.trim().split(/\r?\n/);
+  const content: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^#{1,6}\s/.test(trimmed)) {
+      if (content.length) break;
+      continue;
+    }
+    if (!trimmed) {
+      if (content.length) break;
+      continue;
+    }
+    content.push(trimmed);
+  }
+  const paragraph = (content.join(' ') || answer.trim())
+    .replace(/\[([^\]\n]+)\]\([^\s)]+\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+  const sentences = paragraph.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) ?? [];
+  const firstTwo = sentences.slice(0, 2).join('').trim();
+  if (firstTwo.length <= 360) return firstTwo;
+  const prefix = firstTwo.slice(0, 361);
+  const cut = prefix.lastIndexOf(' ');
+  return `${cut > 0 ? prefix.slice(0, cut) : ''}…`;
+}
+
 export function ResearchOutcome({ result }: { result: ResearchResult }) {
   const checked = Date.parse(result.checked_at);
+  const summary = researchPreview(result.answer);
+  const hasDetails = result.answer.trim() !== summary;
   return <div className="demo-research-outcome">
     <span className="demo-kicker">Public web research · {result.status}</span>
     <h3>{result.query}</h3>
     <p className="demo-muted">Checked {Number.isFinite(checked) ? new Date(checked).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'time unavailable'}</p>
-    <p className="demo-operator-answer">{result.answer || 'A sourced answer is unavailable.'}</p>
+    <div className="demo-operator-answer"><MarkdownAnswer text={summary || 'A sourced answer is unavailable.'} /></div>
+    {hasDetails && <details className="demo-research-details"><summary>Show full research answer</summary><MarkdownAnswer text={result.answer} /></details>}
     <h4>Sources</h4>
     {result.sources.length ? <ol className="demo-operator-evidence">{result.sources.map(source => {
       const href = safeResearchHref(source.url);

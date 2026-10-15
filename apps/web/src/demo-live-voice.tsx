@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
 import { AssistantOrb } from './demo-activity';
+import { validatedResearchResult } from './demo-research';
 
 const api = createDemoApi();
 const CONNECT_TIMEOUT_MS = 15000;
@@ -26,7 +27,8 @@ export function acceptsLiveTurn(value: unknown, captured: LiveScope, current: Li
   const utility = !turn.proposal && !!turn.session && turn.session.session_id === captured.sessionId &&
     turn.session.company?.company_id === captured.companyId && turn.session.context_version === captured.contextVersion &&
     !!turn.action_result && typeof turn.action_result.tool === 'string' && typeof turn.action_result.summary === 'string';
-  return sameLiveScope(captured, current) && turn.company_id === captured.companyId && turn.context_version === captured.contextVersion && typeof turn.read_only === 'boolean' &&
+  const validResearch = turn.action_result?.tool !== 'confirm_research' || !!validatedResearchResult(turn.workspace?.research);
+  return validResearch && sameLiveScope(captured, current) && turn.company_id === captured.companyId && turn.context_version === captured.contextVersion && typeof turn.read_only === 'boolean' &&
     typeof turn.turn_id === 'string' && typeof turn.assistant_text === 'string' && Array.isArray(turn.agent_steps) && Array.isArray(turn.evidence_ids) &&
     ['completed', 'proposal', 'needs_clarification', 'unavailable'].includes(turn.status ?? '') &&
     (turn.read_only ? turn.proposal ? turn.proposal.context_version === captured.contextVersion && !turn.session && !turn.action_result :

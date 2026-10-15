@@ -32,6 +32,7 @@ class Session:
     buyer_draft: dict | None = None
     selected_material_id: str | None = None
     simulated_outbox: list = field(default_factory=list)
+    drafts: list = field(default_factory=list)
     recovery: dict | None = None
     rfq: dict | None = None
     news: dict | None = None
@@ -66,6 +67,7 @@ class Session:
             'rfq': self.rfq, 'watch_items': self.watch_items,
             'buyer_draft': self.buyer_draft, 'selected_material_id': self.selected_material_id,
             'simulated_outbox': self.simulated_outbox,
+            'drafts': self.drafts,
         }
         restored = self.workspaces.pop(company_id, None) or {}
         self.offers = restored.get('offers', {})
@@ -77,6 +79,7 @@ class Session:
         self.buyer_draft = restored.get('buyer_draft')
         self.selected_material_id = restored.get('selected_material_id')
         self.simulated_outbox = restored.get('simulated_outbox', [])
+        self.drafts = restored.get('drafts', [])
         self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
@@ -91,7 +94,7 @@ class SessionStore:
                      'risk_report', 'watch_items', 'operator_turns', 'operator_generation',
                      'voice_calls', 'live_voice_sessions', 'live_voice_starts_by_company',
                      'company_id', 'context_version', 'workspaces', 'requests', 'live_calls',
-                     'live_failed_calls', 'chat_history', 'research_attempts', 'research_records')
+                     'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts')
 
     def __init__(self, *, clock: Callable | None = None, ttl_seconds: int | None = None,
                  max_sessions: int = 256, persistence_backend=None):
@@ -227,14 +230,17 @@ class SessionStore:
             if expires_at.tzinfo is None:
                 raise ValueError()
             expires_at = expires_at.astimezone(timezone.utc)
-            values = {name: state[name] for name in cls._STATE_FIELDS}
+            values = {name: state.get(name, []) if name == 'drafts' else state[name]
+                      for name in cls._STATE_FIELDS}
             for name in ('offers', 'idempotency', 'live_voice_starts_by_company', 'workspaces',
                          'chat_history', 'research_records'):
                 if not isinstance(values[name], dict):
                     raise ValueError()
-            for name in ('simulated_outbox', 'watch_items'):
+            for name in ('simulated_outbox', 'watch_items', 'drafts'):
                 if not isinstance(values[name], list):
                     raise ValueError()
+            if len(values['drafts']) > 24:
+                raise ValueError()
             if len(values['chat_history']) > 16 or any(
                     not isinstance(items, list) or len(items) > 100 for items in values['chat_history'].values()):
                 raise ValueError()

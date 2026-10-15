@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, RecoveryView, RfqView, RiskReport } from './demo-api';
+import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
 import { CompanyOverview, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import { OperatorPanel } from './demo-operator';
 import { RiskMonitor, sameRiskScope } from './demo-risk-monitor';
@@ -260,6 +260,28 @@ export function RecoveryResults({ recovery, offers }: { recovery: RecoveryView; 
   </section>;
 }
 
+export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownloadRfq }: {
+  company: CompanyProfile; drafts: PreparedDraft[]; rfq: RfqView | null; messages: SimulatedOutboxMessage[]; dirty: boolean; onDownloadRfq: () => void;
+}) {
+  const ownDrafts = drafts.filter(draft => draft && draft.company_id === company.company_id && draft.status === 'draft_unsent' &&
+    (draft.kind === 'email' || draft.kind === 'rfq') && typeof draft.body === 'string' && typeof draft.subject === 'string').slice(-24);
+  const currentRfq = rfq && company.materials.some(material => material.material_id === rfq.material) ? rfq : null;
+  const ownMessages = messages.filter(message => message.company_id === company.company_id && message.status === 'simulated_sent' && message.simulated && !message.external_delivery);
+  return <section id="demo-drafts-workspace" className="demo-company-panel demo-drafts-workspace" aria-label="Drafts workspace">
+    <div className="demo-heading"><div><span className="demo-kicker">Reviewable writing</span><h2>Drafts</h2></div><span className="demo-session">No external delivery</span></div>
+    <p>Prepared drafts are unsent. Applying a simulated email records a separate simulated sent entry below; it never delivers a message to a supplier.</p>
+    {currentRfq && <button type="button" className="demo-button" disabled={dirty} onClick={onDownloadRfq}>Download RFQ draft</button>}
+    {ownDrafts.length ? ownDrafts.map(draft => <article key={draft.draft_id} className="demo-draft-record">
+      <span className="demo-kicker">Unsent draft · {draft.kind === 'rfq' ? 'RFQ' : 'Email'}</span>
+      <h3>{draft.subject}</h3>
+      <p>To: {supplierDisplayName(draft.recipient_label)} · Material: {draft.material_id} · Prepared {draft.created_at}</p>
+      <pre>{displaySupplierMentions(draft.body, [draft.recipient_label])}</pre>
+    </article>) : !currentRfq && <p className="demo-muted">No prepared drafts in this company workspace yet. Ask the operator to prepare an email or RFQ, or prepare an RFQ from a reviewed comparison.</p>}
+    {currentRfq && !ownDrafts.some(draft => draft.draft_id === currentRfq.draft_id) && <article className="demo-draft-record"><span className="demo-kicker">Unsent draft · RFQ · Current reviewed comparison</span><h3>Request for quotation to {supplierDisplayName(currentRfq.supplier)}</h3><pre>{displaySupplierMentions(currentRfq.text, [currentRfq.supplier])}</pre></article>}
+    {ownMessages.length > 0 && <div className="demo-drafts-simulated"><h3>Simulated sent records</h3>{ownMessages.map(message => <article key={message.message_id} className="demo-draft-record"><span className="demo-kicker">Simulated sent · No external delivery</span><h3>{message.subject}</h3><p>To: {supplierDisplayName(message.recipient_label)} · Material: {message.material_id} · Recorded {message.created_at}</p><pre>{displaySupplierMentions(message.body, [message.recipient_label])}</pre></article>)}</div>}
+  </section>;
+}
+
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
@@ -267,7 +289,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const [companyError, setCompanyError] = useState('');
   const [newsError, setNewsError] = useState('');
   const [newsBusy, setNewsBusy] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'outbox'>('company');
+  const [workspaceTab, setWorkspaceTab] = useState<'company' | 'news' | 'drafts' | 'outbox'>('company');
+  const [preparedDrafts, setPreparedDrafts] = useState<{ scope: string; drafts: PreparedDraft[] } | null>(null);
   const [highlightFields, setHighlightFields] = useState<string[]>([]);
   const [operatorOpen, setOperatorOpen] = useState(false);
   const [riskSnapshot, setRiskSnapshot] = useState<{ scope: RiskScope; report: RiskReport } | null>(null);
@@ -325,6 +348,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   }
 
   function restoreSession(session: DemoSession, epoch: number) {
+    setPreparedDrafts(null);
     const scope = `${session.session_id}:${session.company?.company_id ?? ''}:${session.context_version ?? ''}`;
     const buyer = canonicalBuyerState(session, scope === materialScopeRef.current ? selectedMaterialRef.current : undefined);
     materialScopeRef.current = scope; selectedMaterialRef.current = buyer.materialId;
@@ -365,7 +389,11 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     return promise;
   }
   function navigateOperator(view: NonNullable<NonNullable<OperatorTurn['action_result']>['view']>) {
-    if (view === 'news' || view === 'company' || view === 'outbox') setWorkspaceTab(view);
+    if (view === 'news' || view === 'company' || view === 'outbox' || view === 'drafts') setWorkspaceTab(view);
+    if (view === 'drafts') {
+      setOperatorOpen(false);
+      requestAnimationFrame(() => document.getElementById('demo-drafts-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
     if (view === 'procurement') document.getElementById('demo-procurement')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function clearUnknownOperatorSession() {
@@ -580,8 +608,8 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     {company && <section className="demo-company-shell"><div className="demo-company-picker"><label><span>Company workspace</span><select value={company.company_id} disabled={busy === 'company'} onChange={event => switchCompany(event.target.value)}>{companyOptions.map(option => <option key={option.company_id} value={option.company_id}>{option.name} · {option.sector}</option>)}</select></label><p>Fictional company profile · changes kept separately for this visit</p></div>
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
       <div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget. Select this material's quotes below.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div>
-      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button><button type="button" className={workspaceTab === 'outbox' ? 'active' : ''} aria-pressed={workspaceTab === 'outbox'} onClick={() => setWorkspaceTab('outbox')}>Simulated outbox</button></div>
-      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : <OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} />}
+      <div className="demo-workspace-tabs" role="group" aria-label="Company sections"><button type="button" className={workspaceTab === 'company' ? 'active' : ''} aria-pressed={workspaceTab === 'company'} onClick={() => setWorkspaceTab('company')}>Company overview</button><button type="button" className={workspaceTab === 'news' ? 'active' : ''} aria-pressed={workspaceTab === 'news'} onClick={() => setWorkspaceTab('news')}>News workspace</button><button type="button" className={workspaceTab === 'drafts' ? 'active' : ''} aria-pressed={workspaceTab === 'drafts'} onClick={() => setWorkspaceTab('drafts')}>Drafts</button><button type="button" className={workspaceTab === 'outbox' ? 'active' : ''} aria-pressed={workspaceTab === 'outbox'} onClick={() => setWorkspaceTab('outbox')}>Simulated outbox</button></div>
+      {workspaceTab === 'company' ? <CompanyOverview company={company} /> : workspaceTab === 'news' ? <NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} /> : workspaceTab === 'drafts' ? <DraftsWorkspace company={company} drafts={preparedDrafts?.scope === `${state.session?.session_id}:${company.company_id}:${state.session?.context_version}` ? preparedDrafts.drafts : state.session?.drafts ?? []} rfq={state.rfq} messages={state.session?.simulated_outbox ?? []} dirty={state.dirty} onDownloadRfq={downloadRfq} /> : <OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} />}
     </section>}
     {progress && !['extract', 'plan', 'recovery', 'rfq'].includes(busy) && <ActivityIndicator {...progress} />}
     {error && <div className="demo-error" role="alert"><strong>Workspace update.</strong> {error} <button type="button" className="demo-link" disabled={!!busy} onClick={() => run('refresh', () => api.session(), (session, epoch) => { newsAutoRecoveryUsedRef.current = false; restoreSession(session, epoch); })}>Refresh session</button></div>}
@@ -624,5 +652,5 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
       {state.rfq && <div className="demo-draft"><p><strong>Draft for {supplierDisplayName(state.rfq.supplier)}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{displaySupplierMentions(state.rfq.text, [state.rfq.supplier])}</pre><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button></div>}
     </section>
     <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>
-  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} seed={operatorSeed} riskSummary={currentRisks ? { high: currentRiskAlerts.filter(item => item.severity === 'high').length, medium: currentRiskAlerts.filter(item => item.severity === 'medium').length, low: currentRiskAlerts.filter(item => item.severity === 'low').length, checkedAt: currentRisks.checked_at } : null} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
+  </main>{company && state.session && state.session.context_version !== undefined && <><button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>{operatorOpen && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen ? 'dialog' : 'complementary'} aria-modal={operatorOpen ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} materials={company.materials} seed={operatorSeed} riskSummary={currentRisks ? { high: currentRiskAlerts.filter(item => item.severity === 'high').length, medium: currentRiskAlerts.filter(item => item.severity === 'medium').length, low: currentRiskAlerts.filter(item => item.severity === 'low').length, checkedAt: currentRisks.checked_at } : null} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onPreparedDrafts={(drafts, captured) => { if (state.session?.session_id === captured.sessionId && company.company_id === captured.companyId && state.session.context_version === captured.contextVersion && state.epoch === captured.epoch) setPreparedDrafts({ scope: `${captured.sessionId}:${captured.companyId}:${captured.contextVersion}`, drafts }); }} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

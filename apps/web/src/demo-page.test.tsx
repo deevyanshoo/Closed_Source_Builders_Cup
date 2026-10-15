@@ -157,13 +157,13 @@ describe('ZOORQ workspace routes', () => {
       ] };
       const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
       expect(html).toContain('Current copper headline');
-      expect(html).toContain('2026-10-15T09:00:00Z');
+      expect(html).toContain('Published ');
       expect(html).not.toContain('Old copper headline');
       expect(html).not.toContain('Background copper headline');
       expect(html).not.toContain('Undated copper headline');
     } finally { vi.useRealTimers(); }
   });
-  it.each(['stale', 'partial', 'source-stale'])('marks %s coverage as dated instead of promoting a headline', condition => {
+  it.each(['stale', 'partial', 'source-stale'])('retains an eligible headline with a separate warning for %s coverage', condition => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
     try {
@@ -171,10 +171,10 @@ describe('ZOORQ workspace routes', () => {
         { item_id: 'recent', title: 'Unconfirmed copper headline', provider: 'Public source', publisher: 'Market desk', matched_materials: ['copper'], matched_routes: [], matched_currencies: [], relevance_kind: 'direct_material', relevance_strength: 'strong', published_at: '2026-10-15T09:00:00Z' },
       ] };
       const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
-      expect(html).toContain('Coverage needs review');
+      expect(html).not.toContain('Coverage needs review');
       expect(html).toContain('Coverage may be incomplete or dated');
-      expect(html).toContain('2026-10-16T10:00:00Z');
-      expect(html).not.toContain('Unconfirmed copper headline');
+      expect(html).toContain('Published ');
+      expect(html).toContain('Unconfirmed copper headline');
     } finally { vi.useRealTimers(); }
   });
   it('guides an empty review toward quote intake and makes a prepared draft discoverable', () => {

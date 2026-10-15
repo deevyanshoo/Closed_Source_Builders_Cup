@@ -26,6 +26,7 @@ from typing import Awaitable, Callable
 from starlette.websockets import WebSocketDisconnect
 
 from .sessions import SessionError
+from .agent_tools import BUYER_FIELDS
 from .presentation import present_turn
 from .voice_cues import load_cue_pcm
 
@@ -68,6 +69,13 @@ INSTRUCTION = (
     "units, dates, confidence and cited evidence intact. Speak a supplier's clean label, "
     "but pass its exact canonical recipient name to tools. "
     "For this company's facts use read_workspace or analyze_inventory; "
+    "For a request referring to the selected procurement material, selected material "
+    "or current material, call "
+    "read_workspace without material_id before asking for clarification. Use the "
+    "returned workspace.selected_material_id as the current selected material, "
+    "and cross-check workspace.buyer_draft.material when a buyer_draft exists. "
+    "If the selection is missing or conflicts with the buyer_draft, ask for clarification. "
+    "Never use the first catalogue material or a previous company's selection for this reference. "
     "Use read_risks for proactive inventory, supplier and news signals across the current or all ten companies. "
     "Explain provenance, conditional impact and recovery options; headline exposure never confirms a shipment delay. "
     "never invent stock, prices, dates, news, or outcomes. Use fill_buyer_form to update "
@@ -282,7 +290,7 @@ def _config(company=None):
         ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
-        ('read_workspace', 'Read current company, buyer form, news, quotes and plan facts.', {'material_id': text}, []),
+        ('read_workspace', 'Read current company, buyer form, current selected material, news, quotes and plan facts. Omit material_id to resolve the current selection.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
         ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
          {'scope': {'type': 'string', 'enum': ['current', 'all']}}, []),
@@ -1215,8 +1223,21 @@ async def run_live_voice(
                                     required_spoken_response=required_response)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 workspace = model_result.pop('workspace', None)
-                                if isinstance(workspace, dict) and isinstance(workspace.get('news_brief'), dict):
-                                    model_result['workspace'] = {'news_brief': workspace['news_brief']}
+                                if isinstance(workspace, dict):
+                                    compact = {}
+                                    if isinstance(workspace.get('news_brief'), dict):
+                                        compact['news_brief'] = workspace['news_brief']
+                                    if name == 'read_workspace':
+                                        selected = workspace.get('selected_material_id')
+                                        compact['selected_material_id'] = (selected if isinstance(selected, str)
+                                            and len(selected) <= 128 else None)
+                                        buyer = workspace.get('buyer_draft')
+                                        compact['buyer_draft'] = ({field: buyer[field] for field in BUYER_FIELDS}
+                                            if isinstance(buyer, dict) and all(
+                                                isinstance(buyer.get(field), str) and len(buyer[field]) <= 128
+                                                for field in BUYER_FIELDS) else None)
+                                    if compact:
+                                        model_result['workspace'] = compact
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 model_result.pop('analytics', None)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:

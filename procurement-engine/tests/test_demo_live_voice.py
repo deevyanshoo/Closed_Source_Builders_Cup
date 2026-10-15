@@ -1,6 +1,7 @@
 """Offline contract checks for the bounded Gemini Live bridge."""
 import asyncio
 import base64
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace as NS
@@ -454,3 +455,73 @@ def test_sdk_config_contains_one_bounded_workspace_tool_and_transcriptions():
     assert len(config.tools) == 1
     assert len(config.tools[0].function_declarations) == 14
     assert config.tools[0].function_declarations[0].name == 'operate_workspace'
+
+
+def test_current_material_reference_reads_server_selection_before_clarifying():
+    from procure.demo.company import get_company
+
+    config = live_voice._config(get_company('atlas-petrochem'))
+    instruction = config.system_instruction.lower()
+    read_workspace = next(declaration for declaration in config.tools[0].function_declarations
+                          if declaration.name == 'read_workspace')
+
+    assert 'selected material' in instruction
+    assert 'read_workspace without material_id' in instruction
+    assert 'selected_material_id' in instruction
+    assert 'buyer_draft' in instruction
+    assert 'before asking for clarification' in instruction
+    assert 'never use the first catalogue material' in instruction
+    assert 'current selected material' in read_workspace.description.lower()
+
+
+def test_oversized_workspace_keeps_only_bounded_current_selection_for_voice():
+    class ReadProvider(Provider):
+        async def send_realtime_input(self, **kwargs):
+            if kwargs.get('audio'):
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                    name='read_workspace', args={}, id='read-call')]), server_content=None))
+
+    async def scenario():
+        store, session = setup()
+        socket, provider = Socket(start(session)), ReadProvider()
+        buyer = {'material': 'toluene', 'quantity': '100', 'current_stock': '20',
+                 'quantity_unit': 'tonne', 'budget': '10000',
+                 'additional_cost_per_unit': '0', 'decision_date': '2026-10-14',
+                 'need_by': '2026-11-14', 'reporting_currency': 'AED'}
+        result = {'turn_id': 'read-turn', 'company_id': session.company_id,
+                  'context_version': 1, 'status': 'completed',
+                  'assistant_text': 'Current workspace facts are ready.',
+                  'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                  'read_only': True, 'session': {'csrf_token': 'private-session-token'},
+                  'workspace': {'company': {'secret': 'private-company-data',
+                                           'large_profile': 'x' * 80_000},
+                                'selected_material_id': 'toluene',
+                                'buyer_draft': {**buyer, 'secret': 'private-buyer-data'},
+                                'news_brief': {'availability': 'unavailable'}},
+                  'analytics': {'large': 'y' * 80_000}}
+
+        async def workspace_tool(name, args, version, key):
+            assert (name, args, version) == ('read_workspace', {}, 1)
+            return result
+
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store,
+            operate_workspace=lambda *_: None, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        await next_type(socket, 'ready')
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        assert (await next_type(socket, 'tool_result'))['result'] == result
+        await next_type(socket, 'turn_complete')
+        response = provider.tool_response.response
+        assert response['workspace'] == {'selected_material_id': 'toluene',
+                                         'buyer_draft': buyer,
+                                         'news_brief': {'availability': 'unavailable'}}
+        assert 'analytics' not in response
+        assert len(json.dumps(response, ensure_ascii=True)) <= 64_000
+        assert 'private-session-token' not in json.dumps(response)
+        assert 'private-company-data' not in json.dumps(response)
+        assert 'private-buyer-data' not in json.dumps(response)
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())

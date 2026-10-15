@@ -30,40 +30,46 @@
 
 Owned files: zoorq-workspace.tsx, new zoorq-workspace.css, zoorq-lens.tsx/.css, zoorq-icons.tsx, zoorq-workspace.test.tsx and lens tests only.
 Interfaces: preserve existing exports. WorkspaceNavigation accepts optional company and disabled; add WorkspaceHeader({company?,view,onTalk,onChat,disabled}). WorkspaceOverview gains optional onTalk; preserve onView, quoteCount/news. Export ZoorqLens({state?,compact?,className?}) with accessible state handled by consumer; visual only, no microphone/provider effects. Icon exports use installed @radix-ui/react-icons.
-- [ ] Write meaningful failing tests for hub search, nav availability/active states, onTalk, and material-specific gap/unavailable states.
-- [ ] Build fixed desktop rail/mobile bottom bar, compact header, searchable company index, dominant supply attention and voice invitation. Use real company stock/lead metadata, label it profile lead (never accepted quote lead unless actually provided).
-- [ ] Build a refined cobalt/silver spatial lens using CSS 3D transforms; no bitmap screenshot as interface. GSAP entrance/transition scoped and reverted; reduced motion/static fallback.
-- [ ] Run focused tests/typecheck and report diff, exact results and risks. Do not modify demo-page integration/global CSS.
+- [x] Write meaningful failing tests for hub search, nav availability/active states, onTalk, and material-specific gap/unavailable states.
+- [x] Build fixed desktop rail/mobile bottom bar, compact header, searchable company index, dominant supply attention and voice invitation. Use real company stock/lead metadata, label it profile lead (never accepted quote lead unless actually provided).
+- [x] Build a refined cobalt/silver spatial lens using CSS 3D transforms; no bitmap screenshot as interface. GSAP entrance/transition scoped and reverted; reduced motion/static fallback.
+- [x] Run focused tests/typecheck and report diff, exact results and risks. Do not modify demo-page integration/global CSS.
 
 ## Task 2: Compact news inbox (Antigravity worker)
 
 Owned files: demo-company-news.tsx, demo-company-news.css, demo-company-news.test.tsx only.
 Interfaces: preserve exports, props, ranking/filter semantics and source clocks; consume CSS variables from shell with sensible white/ink/cobalt fallbacks.
-- [ ] Add failing behavior assertions for compact controls, useful empty recovery and accessible company/global reading.
-- [ ] Implement clean list/detail hierarchy, single toolbar and compact coverage, strong selected story, concise impact/next-check presentation and mobile Back. Never hide actual errors/staleness.
-- [ ] Run focused tests and report. No dependency edits, no common shell/voice edits.
+- [x] Add failing behavior assertions for compact controls, useful empty recovery and accessible company/global reading.
+- [x] Implement clean list/detail hierarchy, single toolbar and compact coverage, strong selected story, concise impact/next-check presentation and mobile Back. Never hide actual errors/staleness.
+- [x] Run focused tests and report. No dependency edits, no common shell/voice edits.
 
 ## Task 3: Prominent operator and scope-bound voice (Antigravity worker)
 
 Owned files: demo-operator.tsx, demo-assistant.css, demo-operator.test.tsx, demo-live-voice.tsx and demo-live-voice.test.tsx only.
 Interfaces: add exported OperatorVoiceRequest={id:number;scope:OperatorScope;returnFocusId?:string}; OperatorPanel optional voiceRequest. Consume ZoorqLens from ./zoorq-lens (provided by Task1). Root will issue scoped requests and open existing dock. Keep all old props and single mounted LiveVoice.
-- [ ] Write failing tests for valid/stale voice request handling, global-entry return focus, single instance and current-consent lifecycle.
-- [ ] Implement spacious white voice surface, readable captions/source/activity hierarchy and persistent controls; 44px touch targets. Reflect real connecting/listening/thinking/speaking/muted/error state. Voice starts once per current request and never on stale remount. Preserve native media disposal and same-socket spoken research.
-- [ ] Polish chat dock/composer and visible source rows. No extra approval for read-only analytics, no imaginary completed action. Keep current review/consent visible.
-- [ ] Run focused tests/typecheck, report exact outcomes and unresolved integration dependencies.
+- [x] Write failing tests for valid/stale voice request handling, global-entry return focus, single instance and current-consent lifecycle.
+- [x] Implement spacious white voice surface, readable captions/source/activity hierarchy and persistent controls; 44px touch targets. Reflect real connecting/listening/thinking/speaking/muted/error state. Voice starts once per current request and never on stale remount. Preserve native media disposal and same-socket spoken research.
+- [x] Polish chat dock/composer and visible source rows. No extra approval for read-only analytics, no imaginary completed action. Keep current review/consent visible.
+- [x] Run focused tests/typecheck, report exact outcomes and unresolved integration dependencies.
 
 ## Task 4: Coordinator integration and procurement craft
 
 Owned files: demo-page.tsx, demo.css, demo-page.test.tsx, index.html, package files/public fonts, local QA and release docs.
-- [ ] Reconcile fresh baseline (377 web pass/6 existing skips); capture cloud revision/caps. Reuse clean dedicated feature checkout and record ownership.
-- [ ] Add failing integration tests for direct Talk request, hub exit/company stale protection and persistent-shell/procurement semantics.
-- [ ] Integrate rail/header and scoped entry, preserve controller/hidden news state; remove duplicated masthead/heading and obsolete floating-only entry. Keep old accessible affordances where useful.
-- [ ] Replace legacy global visual layers with coherent tokens/Geist/controls/tables/procurement stepper. Keep review, comparison, recovery and draft recap accessible and visually intentional.
-- [ ] Check task diffs, run full web test/typecheck/build and appropriate demo backend suite; independently review combined diff. Fix demonstrated issues and inspect actual renders, not image references alone.
+- [x] Reconcile fresh baseline (377 web pass/6 existing skips); capture cloud revision/caps. Reuse clean dedicated feature checkout and record ownership.
+- [x] Add failing integration tests for direct Talk request, hub exit/company stale protection and persistent-shell/procurement semantics.
+- [x] Integrate rail/header and scoped entry, preserve controller/hidden news state; remove duplicated masthead/heading and obsolete floating-only entry. Keep old accessible affordances where useful.
+- [x] Replace legacy global visual layers with coherent tokens/Geist/controls/tables/procurement stepper. Keep review, comparison, recovery and draft recap accessible and visually intentional.
+- [x] Check task diffs, run full web test/typecheck/build and appropriate demo backend suite; independently review combined diff. Fix demonstrated issues and inspect actual renders, not image references alone.
 
 ## Task 5: Hosted release and all-company acceptance
 
-- [ ] Inspect local desktop/mobile hub, overview, news, procurement, chat and voice states plus keyboard/reduced motion. Check all ten company switches/routes on desktop/mobile and text/action/voice QA.
-- [ ] Verify trial remains unupgraded; freeze allowlisted source/image and deploy only existing service with unchanged caps/IAM. Confirm exact ready revision on both URLs.
-- [ ] Run all-ten-company news, procurement/text actions and controlled speech on final revision; browser direct Talk, news question, visible research consent, spoken confirmation, brief result/sources and End/focus disposal. Distinguish physical mic from controlled speech.
-- [ ] Restore original browser state, record rollback/evidence, stop own preview, commit/push with correct identity and update focused PR118. Final Git clean and exact hosted result.
+- [x] Inspect local desktop/mobile hub, overview, news, procurement, chat and voice states plus keyboard/reduced motion. Check all ten company switches/routes on desktop/mobile and text/action/voice QA.
+- [x] Verify trial remains unupgraded; freeze allowlisted source/image and deploy only existing service with unchanged caps/IAM. Confirm exact ready revision on both URLs.
+- [x] Run all-ten-company news, procurement/text actions and controlled speech through the release sequence; repeat the desktop/mobile matrix on the final CSS revision and carry forward unchanged functional-path evidence; browser direct Talk, news question, visible research consent, spoken confirmation, brief result/sources and End/focus disposal. Distinguish physical mic from controlled speech.
+- [x] Restore original browser state, record rollback/evidence, stop own preview, commit/push with correct identity and update focused PR118. Final Git clean and exact hosted result.
+
+## Acceptance refinements
+
+Hosted QA required three small additions to the original visual scope: narrow news homonym/ranking guards, a seven-day known-publication cutoff for company briefs, and safe category/hash-only provider diagnostics. No database/schema migration or new service was added. Native Antigravity news/operator workers saved patches then stopped with disk exhaustion; parallel chat workers completed and independently reviewed those patches.
+
+The all-company matrices were run on r49/r50; focused final checks cover subsequent narrow changes. This avoids claiming that earlier full-suite evidence was gathered on a later immutable image. Physical microphone hardware remains outside controlled-speech acceptance.

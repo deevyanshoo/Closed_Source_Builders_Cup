@@ -1,0 +1,925 @@
+{
+  "revision": "closed-source-quote-demo-00052-5k4",
+  "rows": [
+    {
+      "name": "Solara Cables",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "TerraPack Films",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "LoomWorks Textiles",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "Harvest Foods",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "Meridian Pharma",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "ForgeLine Components",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "GridSpring Batteries",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "CircuitPeak Systems",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "Atlas Petrochem",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "StoneBridge Materials",
+      "size": "desktop-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 1440
+        }
+      ]
+    },
+    {
+      "name": "Solara Cables",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "TerraPack Films",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "LoomWorks Textiles",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "Harvest Foods",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "Meridian Pharma",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "ForgeLine Components",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "GridSpring Batteries",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "CircuitPeak Systems",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "Atlas Petrochem",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    },
+    {
+      "name": "StoneBridge Materials",
+      "size": "mobile-r52",
+      "routes": [
+        {
+          "route": "Overview",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "News",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Procurement",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Inventory & supply",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        },
+        {
+          "route": "Drafts & activity",
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "talk": 6.5,
+          "width": 390
+        }
+      ]
+    }
+  ]
+}

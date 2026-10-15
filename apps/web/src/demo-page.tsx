@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
-import { CompanyOverview, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
+import { CompanyOverview, NewsWorkspace } from './demo-company-news';
 import { OperatorPanel } from './demo-operator';
 import type { OperatorVoiceRequest } from './demo-operator';
 import gsap from 'gsap';
@@ -682,7 +682,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
       {view === 'overview' && <WorkspaceOverview company={company} news={state.news} quoteCount={state.offers.length} onView={navigate} onTalk={requestLiveVoice} />}
       {view === 'inventory' && <><CompanyOverview company={company} /><section className="zoorq-risk-disclosure"><button type="button" className="demo-link" aria-expanded={riskOpen} onClick={() => setRiskOpen(value => !value)}>{riskOpen ? 'Hide portfolio risk monitor' : 'Show portfolio risk monitor'}</button></section></>}
-      {view === 'drafts' && <><DraftsWorkspace company={company} drafts={preparedDrafts?.scope === `${state.session?.session_id}:${company.company_id}:${state.session?.context_version}` ? preparedDrafts.drafts : state.session?.drafts ?? []} rfq={state.rfq} messages={state.session?.simulated_outbox ?? []} dirty={state.dirty} onDownloadRfq={downloadRfq} /><OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} /></>}
+      {view === 'drafts' && <><DraftsWorkspace company={company} drafts={preparedDrafts?.scope === `${state.session?.session_id}:${company.company_id}:${state.session?.context_version}` ? preparedDrafts.drafts : state.session?.drafts ?? []} rfq={state.rfq} messages={state.session?.simulated_outbox ?? []} dirty={state.dirty} onDownloadRfq={downloadRfq} /></>}
       {view === 'procurement' && <><div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div><ProcurementNavigation stage={stage} onStage={next => navigate('procurement', next)} /></>}
     </>}
     {company && <section hidden={view !== 'news'} className="zoorq-news-destination"><NewsWorkspace key={company.company_id} company={company} view={state.news} loading={newsBusy} error={newsError} onRefresh={refreshNews} onAction={seedNewsAction} /></section>}

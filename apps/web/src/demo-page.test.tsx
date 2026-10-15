@@ -237,8 +237,8 @@ describe('demo response state', () => {
     expect(stalePlan.plan).toBeNull();
     expect(stalePlan.rfq).toBeNull();
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 })} initialView="drafts" />);
-    expect(html).toContain('Simulated outbox');
-    expect(html).toContain('Review availability');
+    expect(html).toContain('Simulated sent records');
+    expect((html.match(/Please review 410 barrels\./g) ?? []).length).toBe(1);
   });
   it('syncs initially displayed defaults before agent turns but preserves a current computed comparison', () => {
     const defaults = materialInputs(multiCompany, 'naphtha')!;

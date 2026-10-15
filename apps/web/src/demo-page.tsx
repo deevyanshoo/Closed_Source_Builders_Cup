@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
@@ -343,14 +343,18 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
   const coveredMaterial = !company || coveredMaterials.some(item => item.material_id === selectedMaterialId && item.material_id === inputs.material && item.quantity_unit === inputs.quantity_unit);
   const currentDefaults = company ? materialInputs(company, selectedMaterialId) : null;
   const companyOptions = companies.length ? companies : company ? [company] : [];
-  useEffect(() => { if (operatorOpen) (operatorDockRef.current?.querySelector<HTMLElement>('textarea:not(:disabled)') ?? operatorDockRef.current)?.focus(); }, [operatorOpen]);
+  const restoreOperatorFocusRef = useRef(false);
+  useLayoutEffect(() => {
+    if (operatorOpen) (operatorDockRef.current?.querySelector<HTMLElement>('textarea:not(:disabled)') ?? operatorDockRef.current)?.focus();
+    else if (restoreOperatorFocusRef.current) { restoreOperatorFocusRef.current = false; operatorToggleRef.current?.focus(); }
+  }, [operatorOpen]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 999px)');
     const sync = () => setCompactViewport(media.matches);
     sync(); media.addEventListener('change', sync);
     return () => media.removeEventListener('change', sync);
   }, []);
-  function closeOperator() { setOperatorCloseSignal(value => value + 1); setOperatorOpen(false); operatorToggleRef.current?.focus(); }
+  function closeOperator() { setOperatorCloseSignal(value => value + 1); restoreOperatorFocusRef.current = true; setOperatorOpen(false); }
   function operatorKeys(event: KeyboardEvent<HTMLElement>) {
     if (!operatorOpen || !compactViewport) return;
     if (event.key === 'Escape') { closeOperator(); return; }

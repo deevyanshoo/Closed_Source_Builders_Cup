@@ -417,3 +417,13 @@
 @media (max-width:999px) { .demo-assistant-panel .demo-assistant-composer, .demo-operator-dock .demo-assistant-panel .demo-assistant-composer { margin-inline:-18px; padding-inline:18px; } .demo-assistant-panel .demo-assistant-close { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:7px 10px; border:1px solid #d7cec4; border-radius:7px; background:#fffdf9; color:#51463e; font-size:11px; font-weight:700; } }
 @media (max-width:430px) { .demo-assistant-panel .demo-assistant-heading h2 { font-size:22px; } .demo-assistant-panel .demo-assistant-question { margin-left:8%; } .demo-assistant-panel .demo-voice-screen-header { padding:13px 16px; } .demo-assistant-panel .demo-voice-screen-body { padding:12px 12px max(17px,env(safe-area-inset-bottom)); gap:8px; } .demo-assistant-panel .demo-voice-screen-body > .demo-current-proposal, .demo-assistant-panel .demo-voice-research-result { max-height:47dvh; } .demo-assistant-panel .demo-voice-orb { width:120px; height:120px; margin:4px auto 8px; } .demo-assistant-panel .demo-voice-orb .demo-orb { transform:scale(1.6); } .demo-assistant-panel .demo-voice-state { font-size:19px; } .demo-assistant-panel .demo-operator-voice { padding:8px 5px 15px; } .demo-assistant-panel .demo-voice-controls { margin-top:12px; } .demo-assistant-panel .demo-voice-controls .demo-button { width:auto; } }
 @media (prefers-reduced-motion:reduce) { .demo-assistant-panel .demo-current-proposal { scroll-behavior:auto; } .demo-assistant-panel .demo-voice-orb { box-shadow:none; } }
+
+/* Preserve the composer when a short viewport has multiple review panels open. */
+.demo-operator-dock .demo-operator-panel.demo-assistant-panel { overflow-y:auto; overscroll-behavior:contain; }
+.demo-operator-dock .demo-assistant-panel .demo-assistant-heading,
+.demo-operator-dock .demo-assistant-panel .demo-assistant-composer { flex:none; }
+@media(max-width:999px){
+  .demo-operator-dock .demo-assistant-panel .demo-assistant-heading { flex-direction:row; flex-wrap:wrap; align-items:center; }
+  .demo-operator-dock .demo-assistant-panel .demo-assistant-attention[open] { max-height:14dvh; flex:0 1 auto; min-height:40px; }
+  .demo-operator-dock .demo-assistant-panel > .demo-current-proposal { max-height:25dvh; flex:0 1 auto; min-height:64px; }
+}

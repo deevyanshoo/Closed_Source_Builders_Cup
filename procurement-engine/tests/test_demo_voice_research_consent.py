@@ -145,10 +145,12 @@ async def finish(socket, task):
     await asyncio.wait_for(task, 2)
 
 
-async def send_pcm(socket, provider, size=32_000):
+async def send_pcm(socket, provider, size=32_000, pcm=None):
+    pcm = b'\0' * size if pcm is None else pcm
+    assert len(pcm) == size
     before = provider.audio_bytes
     await socket.frames.put(json.dumps({'type': 'audio',
-        'data': base64.b64encode(b'\0' * size).decode('ascii')}))
+        'data': base64.b64encode(pcm).decode('ascii')}))
     async def wait_sent():
         while provider.audio_bytes < before + size:
             await asyncio.sleep(0)
@@ -472,10 +474,44 @@ def test_finishedless_confirmation_uses_only_fresh_completed_audio_clip():
         await provider.activity('ACTIVITY_START', '0.100s')
         await provider.activity('ACTIVITY_END', '0.600s')
         assert (await socket.next('tool_result'))['result']['status'] == 'completed'
-        assert len(verified) == 1 and len(verified[0]) == 16_000
+        assert len(verified) == 1 and len(verified[0]) == 19_200
         assert [c[0] for c in calls] == ['prepare_research', 'confirm_research']
         await finish(socket, task)
     asyncio.run(check())
+
+
+def test_consent_clip_includes_bounded_leading_speech_without_prearm_audio():
+    async def check():
+        verified = []
+
+        async def verify(clip):
+            verified.append(clip)
+            return 'confirmed'
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify)
+        await prepare(socket, provider)
+        await send_pcm(socket, provider, pcm=b'A' * 32_000)  # before readout/arm
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        # Onset is 100 ms after arm; the first syllable may precede VAD start.
+        await send_pcm(socket, provider, pcm=b'P' * 3_200 + b'S' * 28_800)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'with-preroll')
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.activity('ACTIVITY_END', '1.600s')
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert verified == [b'P' * 3_200 + b'S' * 16_000]
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_consent_preroll_never_trims_full_vad_or_crosses_prior_boundary():
+    assert live_voice._consent_clip_start(40_000, 56_000, 0, 38_000, 0) == 38_000
+    assert live_voice._consent_clip_start(40_000, 56_000, 0, 0, 39_000) == 39_000
+    assert live_voice._consent_clip_start(40_000, 40_000 + live_voice.MAX_CONSENT_CLIP_BYTES,
+                                          0, 0, 0) == 40_000
 
 
 def test_finishedless_verifier_negation_and_invalid_offsets_never_search():
@@ -587,7 +623,7 @@ def test_finishedless_audio_offsets_continue_after_audio_end():
         await provider.activity('ACTIVITY_START', '1.640750s')
         await provider.activity('ACTIVITY_END', '2.561500s')
         assert (await socket.next('tool_result'))['result']['status'] == 'completed'
-        assert len(verified) == 1 and len(verified[0]) == 29_464
+        assert len(verified) == 1 and len(verified[0]) == 37_464
         assert [c[0] for c in calls] == ['prepare_research', 'confirm_research']
         await finish(socket, task)
     asyncio.run(check())
@@ -764,6 +800,7 @@ def test_continuous_silence_and_duplicate_caption_do_not_supersede_clip(caplog):
     lines = [record.message for record in caplog.records
              if 'research_consent_stage stage=verifier_result' in record.message]
     assert len(lines) == 1
+    assert 'clip_bytes=19200 clip_ms=600' in lines[0]
     assert 'generation_match=True accepted=True reason=accepted' in lines[0]
     for sensitive in (QUERY, 'confirmed', 'proposal-1', 'session_id', 'audio'):
         assert sensitive not in lines[0]

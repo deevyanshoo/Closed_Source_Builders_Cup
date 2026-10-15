@@ -43,6 +43,7 @@ MAX_FRAMES = 18_000
 MAX_TOOLS = 12
 MAX_TRANSCRIPT_CHARS = 1200
 MAX_CONSENT_CLIP_BYTES = 8 * 32_000
+CONSENT_PRE_ROLL_BYTES = 8_000  # At most 250 ms before VAD onset.
 CONSENT_RING_BYTES = 10 * 32_000
 MAX_CONSENT_VERIFICATIONS = 3
 CONSENT_ACTIVITY_GRACE_SECONDS = 5
@@ -149,6 +150,7 @@ def _research_gate(session, store, context_version: int, result: dict) -> dict |
                 'confirmed': False, 'finalized': False,
                 'consent_generation': 0, 'verification_generation': None,
                 'verification_activity_end': None, 'verification_started_at': None,
+                'verification_clip_bytes': 0,
                 'consumed': False}
     if (not isinstance(gate['proposal_id'], str) or not isinstance(gate['query'], str)
             or public.get('proposal_id') != gate['proposal_id']
@@ -204,6 +206,12 @@ def _audio_offset_bytes(value: str | None) -> int | None:
     except InvalidOperation:
         return None
     return int(byte_offset) if byte_offset == int(byte_offset) and int(byte_offset) % 2 == 0 else None
+
+
+def _consent_clip_start(start: int, end: int, armed: int, prior_end: int, ring_start: int) -> int:
+    """Include leading speech without crossing the prompt, prior VAD, or 8-second cap."""
+    headroom = MAX_CONSENT_CLIP_BYTES - (end - start)
+    return max(start - min(CONSENT_PRE_ROLL_BYTES, headroom), armed, prior_end, ring_start)
 
 
 def _current(session, store, context_version: int) -> None:
@@ -569,6 +577,7 @@ async def run_live_voice(
                     gate['verification_generation'] = generation
                     gate['verification_activity_end'] = accepted_activity_end
                     gate['verification_started_at'] = monotonic()
+                    gate['verification_clip_bytes'] = len(clip)
                     gate['voice_clip'] = None
                     gate['finalized'] = True
                     gate['confirmed'] = False
@@ -703,8 +712,10 @@ async def run_live_voice(
                                       'current_invalid' if not current else
                                       'accepted' if accepted else 'denied')
                             logging.getLogger(__name__).info(
-                                'research_consent_stage stage=verifier_result elapsed_ms=%d generation_match=%s accepted=%s reason=%s',
+                                'research_consent_stage stage=verifier_result elapsed_ms=%d clip_bytes=%d clip_ms=%d generation_match=%s accepted=%s reason=%s',
                                 max(0, round((monotonic() - gate['verification_started_at']) * 1000)),
+                                gate['verification_clip_bytes'],
+                                round(gate['verification_clip_bytes'] / 32),
                                 generation_match, accepted, reason)
                             if same_gate and not generation_match:
                                 await progress('awaiting_consent', gate)
@@ -882,8 +893,11 @@ async def run_live_voice(
                                         start < consent_ring_start):
                                     gate['voice_invalid'] = True
                                 else:
+                                    clip_start = _consent_clip_start(start, offset,
+                                        gate['audio_bytes_at_arm'], previous_activity_end,
+                                        consent_ring_start)
                                     gate['voice_clip'] = bytes(consent_ring[
-                                        start - consent_ring_start:offset - consent_ring_start])
+                                        clip_start - consent_ring_start:offset - consent_ring_start])
                             else:
                                 gate['voice_invalid'] = True
                         calls = list(getattr(getattr(event, 'tool_call', None), 'function_calls', None) or [])

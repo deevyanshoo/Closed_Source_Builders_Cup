@@ -720,6 +720,214 @@ def test_provider_turn_complete_during_verifier_preserves_fresh_approval():
     asyncio.run(check())
 
 
+def test_continuous_silence_and_duplicate_caption_do_not_supersede_clip(caplog):
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(args, version, key, on_progress):
+            searches.append((args, version))
+            await on_progress('started')
+            return turn(session, 'completed', text='Sourced answer ready.')
+
+        _, session, socket, provider, _, task = await scenario(
+            verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)  # getUserMedia keeps streaming silence.
+        await provider.spoken('input', 'confirmed', finished=None)
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirmed'
+        await provider.spoken('output', '', complete=True)
+        await socket.next('turn_complete')
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'started'
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert searches == [({'proposal_id': 'proposal-1'}, 1)]
+        await finish(socket, task)
+
+    with caplog.at_level('INFO', logger='procure.demo.live_voice'):
+        asyncio.run(check())
+    lines = [record.message for record in caplog.records
+             if 'research_consent_stage stage=verifier_result' in record.message]
+    assert len(lines) == 1
+    assert 'generation_match=True accepted=True reason=accepted' in lines[0]
+    for sensitive in (QUERY, 'confirmed', 'proposal-1', 'session_id', 'audio'):
+        assert sensitive not in lines[0]
+
+
+def test_invalid_vad_supersedes_pending_verifier_before_duplicate_caption():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(*args):
+            searches.append(args)
+            raise AssertionError('invalid intervening VAD must retire old clip')
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)  # continuous microphone silence
+        await provider.activity('ACTIVITY_START', '99.000s')  # beyond received PCM
+        await provider.spoken('input', 'confirmed', finished=None)
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirmed'
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'awaiting_consent'
+        assert searches == []
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_empty_or_punctuation_finalization_keeps_same_verified_clip():
+    async def check(fragment, finished):
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(args, version, key, on_progress):
+            searches.append(args)
+            await on_progress('started')
+            return turn(session, 'completed', text='Sourced answer ready.')
+
+        _, session, socket, provider, _, task = await scenario(
+            verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)  # still streaming silence
+        await provider.spoken('input', fragment, finished=finished)
+        assert searches == []  # marker alone is never approval
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'started'
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert searches == [{'proposal_id': 'proposal-1'}]
+        await finish(socket, task)
+
+    asyncio.run(check('', True))
+    asyncio.run(check('.', None))
+    asyncio.run(check(None, True))
+
+
+def test_late_negative_caption_after_silence_supersedes_pending_verifier():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(*args):
+            searches.append(args)
+            raise AssertionError('negative caption must not search')
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed, no, do not search', finished=True)
+        assert (await socket.next('research_progress'))['phase'] == 'awaiting_consent'
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirmed, no, do not search'
+        release.set()
+        await provider.spoken('output', '', complete=True)
+        await socket.next('turn_complete')
+        assert searches == []
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_new_vad_and_finalized_negation_cannot_reuse_old_verified_clip():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(*args):
+            searches.append(args)
+            raise AssertionError('new utterance needs its own verified clip')
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.spoken('input', 'no, do not search', finished=True)
+        assert (await socket.next('research_progress'))['phase'] == 'awaiting_consent'
+        assert (await socket.next('transcript', 'input'))['text'] == 'no, do not search'
+        release.set()
+        await provider.spoken('output', '', complete=True)
+        await socket.next('turn_complete')
+        assert searches == []
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
 def test_finalized_consent_starts_one_research_without_model_call_and_drains_events():
     async def check():
         started = asyncio.Event()

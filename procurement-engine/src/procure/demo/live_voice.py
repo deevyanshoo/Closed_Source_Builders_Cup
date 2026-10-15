@@ -148,7 +148,7 @@ def _research_gate(session, store, context_version: int, result: dict) -> dict |
                 'input_waiting_for_finished': False,
                 'confirmed': False, 'finalized': False,
                 'consent_generation': 0, 'verification_generation': None,
-                'verification_audio_bytes': None,
+                'verification_activity_end': None, 'verification_started_at': None,
                 'consumed': False}
     if (not isinstance(gate['proposal_id'], str) or not isinstance(gate['query'], str)
             or public.get('proposal_id') != gate['proposal_id']
@@ -567,7 +567,8 @@ async def run_live_voice(
                     clip = gate['voice_clip']
                     generation = gate['consent_generation']
                     gate['verification_generation'] = generation
-                    gate['verification_audio_bytes'] = input_bytes
+                    gate['verification_activity_end'] = accepted_activity_end
+                    gate['verification_started_at'] = monotonic()
                     gate['voice_clip'] = None
                     gate['finalized'] = True
                     gate['confirmed'] = False
@@ -692,16 +693,27 @@ async def run_live_voice(
                         if isinstance(event, tuple) and event[0] == 'consent_done':
                             _, gate, generation, verified = event
                             consent_task = None
-                            if (gate is research_gate and generation != gate['consent_generation']):
+                            same_gate = gate is research_gate
+                            generation_match = same_gate and generation == gate['consent_generation']
+                            current = generation_match and _research_current(session, store, context_version, gate)
+                            accepted = (current and isinstance(verified, str) and len(verified) <= 256
+                                and _spoken_confirmation(verified) and
+                                not _spoken_negation(gate['input_spoken']))
+                            reason = ('superseded' if not generation_match else
+                                      'current_invalid' if not current else
+                                      'accepted' if accepted else 'denied')
+                            logging.getLogger(__name__).info(
+                                'research_consent_stage stage=verifier_result elapsed_ms=%d generation_match=%s accepted=%s reason=%s',
+                                max(0, round((monotonic() - gate['verification_started_at']) * 1000)),
+                                generation_match, accepted, reason)
+                            if same_gate and not generation_match:
                                 await progress('awaiting_consent', gate)
                                 await deny_waiting_calls(gate)
                                 if gate['voice_clip'] is not None:
                                     await start_verification(gate)
                                 continue
-                            if gate is research_gate and _research_current(session, store, context_version, gate):
-                                gate['confirmed'] = (isinstance(verified, str) and len(verified) <= 256
-                                    and _spoken_confirmation(verified) and
-                                    not _spoken_negation(gate['input_spoken']))
+                            if same_gate and current:
+                                gate['confirmed'] = accepted
                                 gate['verifier_denied'] = not gate['confirmed']
                                 if gate['confirmed']:
                                     await start_research(gate)
@@ -760,41 +772,49 @@ async def run_live_voice(
                             heard = getattr(transcript, 'text', None)
                             finished = getattr(transcript, 'finished', None)
                             if input_frames > research_gate['audio_at_arm'] and transcript is not None:
+                                duplicate_pending_caption = False
                                 if research_gate['finalized']:
                                     if research_tools is not None and consent_task is not None:
                                         old = research_gate['input_spoken']
-                                        same_audio = input_bytes == research_gate['verification_audio_bytes']
-                                        cumulative = (isinstance(heard, str) and bool(old) and
-                                            heard.casefold().startswith(old.casefold()))
-                                        if not same_audio or not cumulative:
+                                        duplicate_pending_caption = (
+                                            bool(old) and (heard is None or isinstance(heard, str) and
+                                                (not re.sub(r'\W+', '', heard.casefold()) or
+                                                 re.sub(r'\W+', '', heard.casefold()) ==
+                                                 re.sub(r'\W+', '', old.casefold()))) and
+                                            activity_start_global is None and
+                                            accepted_activity_end == research_gate['verification_activity_end'] and
+                                            getattr(event, 'voice_activity', None) is None)
+                                        if not duplicate_pending_caption:
                                             research_gate['consent_generation'] += 1
-                                    research_gate['input_spoken'] = ''
-                                    research_gate['input_overflow'] = False
-                                    research_gate['confirmed'] = False
-                                    research_gate['finalized'] = False
-                                    research_gate['input_waiting_for_finished'] = False
-                                if isinstance(heard, str) and heard:
-                                    combined = _append_transcription(research_gate['input_spoken'], heard)
-                                    research_gate['input_overflow'] |= len(combined) > 256
-                                    research_gate['input_spoken'] = combined[-256:]
-                                if finished is True:
-                                    research_gate['input_waiting_for_finished'] = False
-                                    research_gate['finalized'] = True
-                                    research_gate['confirmed'] = (not research_gate['input_overflow']
-                                        and _spoken_confirmation(research_gate['input_spoken']))
-                                    if research_tools is not None:
-                                        if (consent_task is not None and research_gate['consent_generation'] !=
-                                                research_gate['verification_generation']):
-                                            consent_task.cancel()
-                                            research_gate['verifier_denied'] = False
-                                        if research_gate['confirmed']:
-                                            await progress('checking_consent', research_gate)
-                                            await start_research(research_gate)
-                                        else:
-                                            await progress('awaiting_consent', research_gate)
-                                            await deny_waiting_calls(research_gate)
-                                elif finished is False:
-                                    research_gate['input_waiting_for_finished'] = True
+                                    if not duplicate_pending_caption:
+                                        research_gate['input_spoken'] = ''
+                                        research_gate['input_overflow'] = False
+                                        research_gate['confirmed'] = False
+                                        research_gate['finalized'] = False
+                                        research_gate['input_waiting_for_finished'] = False
+                                if not duplicate_pending_caption:
+                                    if isinstance(heard, str) and heard:
+                                        combined = _append_transcription(research_gate['input_spoken'], heard)
+                                        research_gate['input_overflow'] |= len(combined) > 256
+                                        research_gate['input_spoken'] = combined[-256:]
+                                    if finished is True:
+                                        research_gate['input_waiting_for_finished'] = False
+                                        research_gate['finalized'] = True
+                                        research_gate['confirmed'] = (not research_gate['input_overflow']
+                                            and _spoken_confirmation(research_gate['input_spoken']))
+                                        if research_tools is not None:
+                                            if (consent_task is not None and research_gate['consent_generation'] !=
+                                                    research_gate['verification_generation']):
+                                                consent_task.cancel()
+                                                research_gate['verifier_denied'] = False
+                                            if research_gate['confirmed']:
+                                                await progress('checking_consent', research_gate)
+                                                await start_research(research_gate)
+                                            else:
+                                                await progress('awaiting_consent', research_gate)
+                                                await deny_waiting_calls(research_gate)
+                                    elif finished is False:
+                                        research_gate['input_waiting_for_finished'] = True
                         activity = getattr(event, 'voice_activity', None)
                         activity_valid = True
                         kind = str(getattr(activity, 'voice_activity_type', ''))
@@ -819,6 +839,19 @@ async def run_live_voice(
                                 activity_start_global = None
                             else:
                                 activity_valid = False
+                        if (research_tools is not None and activity is not None and not activity_valid
+                                and consent_task is not None and research_gate is not None
+                                and research_gate['armed'] and not research_gate['consumed']):
+                            # A rejected VAD signal is still intervening voice
+                            # activity. It cannot leave the old clip eligible
+                            # for a later duplicate-caption match.
+                            if research_gate['consent_generation'] == research_gate['verification_generation']:
+                                research_gate['consent_generation'] += 1
+                            research_gate['finalized'] = False
+                            research_gate['confirmed'] = False
+                            research_gate['verifier_denied'] = True
+                            research_gate['input_spoken'] = ''
+                            research_gate['input_overflow'] = False
                         if (research_tools is not None and activity_valid and
                                 kind.endswith('ACTIVITY_START') and consent_task is not None and
                                 research_gate is not None and research_gate['armed'] and

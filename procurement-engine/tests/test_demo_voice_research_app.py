@@ -1,5 +1,6 @@
 """The hosted Live route uses the durable public-research consent claim."""
 import asyncio
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace as NS
@@ -22,6 +23,8 @@ class LiveProvider:
         self.auto_replay = auto_replay
         self.audio_count = 0
         self.responses = []
+        self.response_condition = threading.Condition()
+        self.client_content = []
         self.proposal_id = None
         self.prompted_query = None
         self.replayed = False
@@ -49,7 +52,9 @@ class LiveProvider:
                 server_content=None))
 
     async def send_tool_response(self, *, function_responses):
-        self.responses.append(function_responses)
+        with self.response_condition:
+            self.responses.append(function_responses)
+            self.response_condition.notify_all()
         if function_responses.name == 'prepare_research':
             proposal = function_responses.response['proposal']
             self.proposal_id = proposal['proposal_id']
@@ -66,6 +71,18 @@ class LiveProvider:
                 name='confirm_research', args={'proposal_id': self.proposal_id}, id='consent'),
                 NS(name='confirm_research', args={'proposal_id': self.proposal_id}, id='new-attempt')]),
                 server_content=None))
+        elif function_responses.id == 'new-attempt':
+            await self.events.put(NS(tool_call=None, server_content=NS(
+                input_transcription=None,
+                output_transcription=NS(text='The existing research result is ready.'),
+                interrupted=False, model_turn=None, turn_complete=False)))
+
+    async def send_client_content(self, *, turns, turn_complete):
+        self.client_content.append((turns, turn_complete))
+
+    def wait_responses(self, count, timeout=2):
+        with self.response_condition:
+            return self.response_condition.wait_for(lambda: len(self.responses) >= count, timeout)
 
 
 def setup(*, auto_replay=True):
@@ -79,9 +96,11 @@ def setup(*, auto_replay=True):
     return app, research, live
 
 
-def next_event(socket, kind):
+def next_event(socket, kind, *, reject=()):
     while True:
         event = socket.receive_json()
+        if event['type'] in reject:
+            raise AssertionError(f'Unexpected {event["type"]} before {kind}')
         if event['type'] == kind:
             return event
 
@@ -119,12 +138,18 @@ def test_spoken_consent_claims_once_and_returns_authoritative_research_result():
             assert applied['workspace']['research']['query'] == live.prompted_query
             assert research.calls == [live.prompted_query]
 
-            replay = next_event(socket, 'tool_result')['result']
-            denied = next_event(socket, 'tool_result')['result']
-            assert replay['status'] == 'completed' and replay['read_only'] is True
-            assert replay['workspace'] == applied['workspace']
-            assert 'session' not in replay and 'action_result' not in replay
-            assert denied['status'] == 'needs_clarification'
+            assert live.wait_responses(4, timeout=2)
+            first, replay, later = live.responses[1:4]
+            assert first.id == 'consent' and first.response['read_only'] is False
+            assert replay.id == 'consent' and replay.response['read_only'] is True
+            assert later.id == 'new-attempt' and later.response['read_only'] is True
+            for reused in (replay, later):
+                assert reused.response['workspace'] == applied['workspace']
+                assert reused.response['action_applied'] is False
+                assert reused.response['tool_succeeded'] is True
+                assert 'session' not in reused.response and 'action_result' not in reused.response
+            marker = next_event(socket, 'transcript', reject={'tool_result', 'error'})
+            assert marker['text'] == 'The existing research result is ready.'
             assert research.calls == [live.prompted_query]
             assert 'session' not in live.responses[1].response
             socket.send_json({'type': 'stop'})
@@ -199,9 +224,11 @@ def test_cached_confirmation_replay_cannot_restore_older_buyer_form():
             assert saved.json()['buyer_draft']['material'] == 'polymer'
 
             socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
-            replay = next_event(socket, 'tool_result')['result']
-            assert replay['status'] == 'completed' and replay['read_only'] is True
-            assert 'session' not in replay and 'action_result' not in replay
+            assert live.wait_responses(3, timeout=2)
+            replay = live.responses[2]
+            assert replay.id == 'consent' and replay.response['read_only'] is True
+            assert replay.response['action_applied'] is False
+            assert 'session' not in replay.response and 'action_result' not in replay.response
             assert client.get('/api/demo/session').json()['buyer_draft']['material'] == 'polymer'
             assert research.calls == [live.prompted_query]
             socket.send_json({'type': 'stop'})

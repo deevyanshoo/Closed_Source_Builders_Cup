@@ -6,14 +6,18 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, localcontext
 import json
+import logging
 import os
 import re
 import threading
 from time import monotonic
 
 from .agent_tools import ToolValidationError, inventory_analytics, prepare_form
+from .context_cache import without_derived_check_times
 from .presentation import present_answer, supplier_display_name
 from .research import ResearchValidationError, prepare_research
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 _ID = {'type': 'string', 'minLength': 1, 'maxLength': 128}
@@ -130,6 +134,7 @@ def _risk_news(snapshot):
 
 
 def _compact(snapshot):
+    snapshot = without_derived_check_times(snapshot)
     company = snapshot['company']
     news = snapshot.get('news') or {}
     return {'company_id': snapshot['company_id'], 'context_version': snapshot['context_version'],
@@ -529,7 +534,18 @@ def _grounded_answer(snapshot, message, material_id, evidence, facts, cited):
     return _render_answer(raw, facts, cited)
 
 
-def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_call: str) -> dict:
+def _prepare_context(snapshot):
+    compact = _compact(snapshot)
+    facts = _facts(snapshot, compact)
+    return {'compact': compact, 'facts': facts,
+            'encoded': json.dumps(compact, sort_keys=True, separators=(',', ':'),
+                                  ensure_ascii=True, default=str),
+            'encoded_facts': json.dumps(facts, sort_keys=True, separators=(',', ':'),
+                                        ensure_ascii=True)}
+
+
+def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_call: str,
+             context_cache=None, cache_scope=None) -> dict:
     """Call each specialist once; return only server-checkable suggestions."""
     if not isinstance(message, str) or not message.strip() or len(message) > 1200:
         raise OperatorValidationError('Short message required.')
@@ -549,10 +565,10 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                                  'summary': 'Prepared a public research query for human consent.'}],
                 'evidence_ids': [], 'candidate': candidate, 'proposal_kind': 'research',
                 'parameters': deepcopy(research), 'utility': None}
-    compact = _compact(snapshot)
-    facts = _facts(snapshot, compact)
-    encoded = json.dumps(compact, sort_keys=True, separators=(',', ':'), ensure_ascii=True, default=str)
-    encoded_facts = json.dumps(facts, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+    prepared = (context_cache.get_or_build(cache_scope, snapshot, lambda: _prepare_context(snapshot))
+                if context_cache is not None else _prepare_context(snapshot))
+    compact, facts = prepared['compact'], prepared['facts']
+    encoded, encoded_facts = prepared['encoded'], prepared['encoded_facts']
     materials = {m['material_id'] for m in snapshot['company']['materials']}
     offers = {o['offer_id'] for o in snapshot.get('offers', [])}
     news = {n.get('item_id'): n for n in _risk_news(snapshot)
@@ -985,7 +1001,9 @@ class VertexOperatorProvider:
                 temperature=0, max_output_tokens=1024, response_mime_type='application/json',
                 response_json_schema=response_schema,
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
+            started = monotonic()
             response = client.models.generate_content(model=self.model, contents=prompt, config=config)
+            elapsed_ms = int((monotonic() - started) * 1000)
             candidates = getattr(response, 'candidates', None)
             if not candidates or len(candidates) != 1:
                 raise OperatorUnavailable('No single completed model candidate.')
@@ -1001,6 +1019,13 @@ class VertexOperatorProvider:
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
                 raise OperatorUnavailable('Model JSON was not an object.')
+            usage = getattr(response, 'usage_metadata', None)
+            prompt_tokens = getattr(usage, 'prompt_token_count', None)
+            cached_tokens = getattr(usage, 'cached_content_token_count', None)
+            logger.info('vertex_operator role=%s elapsed_ms=%d prompt_tokens=%s cached_tokens=%s',
+                        role, elapsed_ms,
+                        prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else 'unknown',
+                        cached_tokens if type(cached_tokens) is int and cached_tokens >= 0 else 'unknown')
             return parsed
         except OperatorUnavailable:
             raise

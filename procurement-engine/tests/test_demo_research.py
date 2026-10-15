@@ -1,10 +1,11 @@
 """Public-only preparation and bounded Google Search response contracts."""
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace as NS
 
 import pytest
 
-from procure.demo.company import get_company
+from procure.demo.company import get_company, list_companies
 from procure.demo.operator import run_turn
 from procure.demo import live_voice
 from procure.demo.research import (ResearchValidationError, VertexResearchProvider,
@@ -46,6 +47,79 @@ def test_company_framed_public_event_gets_visible_public_reformulation(company_i
     result = run_turn({'company': company}, message, lambda *_: pytest.fail('model called'),
                       model='unused', provider_call='mocked')
     assert result['candidate']['parameters']['query'] == expected
+
+
+def test_full_event_name_reformulates_company_reference():
+    proposal = prepare_research('How would Strait of Hormuz disruption affect our company?',
+                                get_company('meridian-pharma'), NOW)
+    assert proposal['query'] == ('Strait of Hormuz shipping status and potential impacts on '
+                                 'the pharmaceutical manufacturing industry')
+
+
+def test_event_alias_with_extra_spaces_still_reformulates():
+    proposal = prepare_research('How would Strait  of Hormuz affect our company?',
+                                get_company('meridian-pharma'), NOW)
+    assert proposal['query'].startswith('Strait of Hormuz shipping status')
+
+
+@pytest.mark.parametrize('profile', list_companies(), ids=lambda row: row['company_id'])
+@pytest.mark.parametrize('message', ['Latest Hormuz disruption?', 'Current public shipping news?'])
+def test_generic_public_question_shows_selected_industry_context(profile, message):
+    proposal = prepare_research(message, profile, NOW)
+    sector = 'petrochemicals' if profile['company_id'] == 'atlas-petrochem' else profile['sector'].lower()
+    assert proposal['query'].startswith(message)
+    assert sector in proposal['query'].lower()
+    assert profile['name'] not in proposal['query']
+    assert len(proposal['query']) <= 400
+    assert prepare_research(proposal['query'], profile, NOW) == proposal
+
+
+def test_explicit_other_industry_preserves_user_topic():
+    message = 'How would a Hormuz blockage affect petrochemical supply today?'
+    assert prepare_research(message, COMPANY, NOW)['query'] == message
+
+
+def test_private_detail_rejected_before_industry_context_can_mask_it():
+    with pytest.raises(ResearchValidationError):
+        prepare_research('Latest Hormuz disruption and our 12,345 kg stock?', COMPANY, NOW)
+
+
+def test_explicit_industry_cannot_bypass_private_figure_check():
+    with pytest.raises(ResearchValidationError):
+        prepare_research('Latest Hormuz impact on pharma with 12,345 kg?',
+                         get_company('meridian-pharma'), NOW)
+
+
+@pytest.mark.parametrize('message', [
+    'Latest Strait of Hormuz shipping status in 2026',
+    'Latest Strait of Hormuz shipping status on 2026-10-15',
+    'Current public shipping news for the X500 model?',
+])
+def test_public_date_or_model_number_keeps_approved_text_and_adds_industry(message):
+    proposal = prepare_research(message, get_company('meridian-pharma'), NOW)
+    assert proposal['query'].startswith(message)
+    assert 'pharmaceutical manufacturing industry' in proposal['query']
+    assert prepare_research(proposal['query'], None, NOW)['query'] == proposal['query']
+
+
+@pytest.mark.parametrize('message', [
+    'How would Strait of Hormuz affect our company with 500 kg inventory?',
+    'Latest Hormuz impact on pharma with 12,345 kg?',
+    'Latest Hormuz news from alice@example.com',
+    'Latest Hormuz news with API key sk-abcdefghijklmnop',
+])
+def test_company_quantities_credentials_and_contacts_still_reject(message):
+    with pytest.raises(ResearchValidationError):
+        prepare_research(message, get_company('meridian-pharma'), NOW)
+
+
+def test_revalidated_visible_query_reaches_provider_exactly_once():
+    proposal = prepare_research('Latest Hormuz disruption?', get_company('meridian-pharma'), NOW)
+    client = FakeClient(_response())
+    result = VertexResearchProvider(client=client, clock=lambda: NOW).research(proposal['query'])
+    assert result['status'] == 'completed'
+    assert len(client.calls) == 1
+    assert client.calls[0]['contents'] == proposal['query']
 
 
 @pytest.mark.parametrize('message', [
@@ -140,6 +214,61 @@ def test_grounded_result_uses_one_search_tool_and_preserves_suggestions():
     assert all(term in instruction.lower() for term in
                ('reported facts', 'business implications', 'qualitative confidence',
                 'recommended next steps', 'calibrated probabilities'))
+    assert 'named industry' in instruction.lower()
+    assert 'direct' in instruction.lower() and 'indirect' in instruction.lower()
+    assert 'two short sentences' in instruction.lower()
+    assert 'generic lpg' in instruction.lower()
+
+
+def test_sdk_client_is_reused_per_adapter_and_logs_only_success_counts(monkeypatch, caplog):
+    from google import genai
+    response = _response()
+    response.usage_metadata = NS(prompt_token_count=120, cached_content_token_count=30,
+                                 candidates_token_count=80)
+    made = []
+
+    def client_factory(**kwargs):
+        client = FakeClient(response)
+        made.append(client)
+        return client
+
+    monkeypatch.setattr(genai, 'Client', client_factory)
+    monkeypatch.setenv('OFFLINE', '0')
+    monkeypatch.setenv('GOOGLE_CLOUD_PROJECT', 'synthetic-test-project')
+    provider = VertexResearchProvider(clock=lambda: NOW)
+    with caplog.at_level('INFO', logger='procure.demo.research'):
+        first = provider.research('Latest Hormuz shipping news? opaque-canary')
+        second = provider.research('Latest public copper prices?')
+    assert first['status'] == second['status'] == 'completed'
+    assert len(made) == 1
+    assert len(made[0].calls) == 2
+    assert 'prompt_token_count=120' in caplog.text
+    assert 'cached_content_token_count=30' in caplog.text
+    assert 'output_token_count=80' in caplog.text
+    assert 'elapsed_ms=' in caplog.text
+    assert 'opaque-canary' not in caplog.text
+
+
+def test_concurrent_calls_initialize_one_sdk_client(monkeypatch):
+    from google import genai
+    from time import sleep
+    made = []
+
+    def client_factory(**kwargs):
+        sleep(0.01)
+        client = FakeClient(_response())
+        made.append(client)
+        return client
+
+    monkeypatch.setattr(genai, 'Client', client_factory)
+    monkeypatch.setenv('OFFLINE', '0')
+    monkeypatch.setenv('GOOGLE_CLOUD_PROJECT', 'synthetic-test-project')
+    provider = VertexResearchProvider(clock=lambda: NOW)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(provider.research, ['Latest Hormuz news?'] * 6))
+    assert len(made) == 1
+    assert len(made[0].calls) == 6
+    assert all(row['status'] == 'completed' for row in results)
 
 
 def test_realistic_grounded_report_length_is_preserved_without_truncation():

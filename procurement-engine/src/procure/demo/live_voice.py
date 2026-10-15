@@ -147,6 +147,8 @@ def _research_gate(session, store, context_version: int, result: dict) -> dict |
                 'verifier_denied': False,
                 'input_waiting_for_finished': False,
                 'confirmed': False, 'finalized': False,
+                'consent_generation': 0, 'verification_generation': None,
+                'verification_audio_bytes': None,
                 'consumed': False}
     if (not isinstance(gate['proposal_id'], str) or not isinstance(gate['query'], str)
             or public.get('proposal_id') != gate['proposal_id']
@@ -332,6 +334,7 @@ async def run_live_voice(
     client_factory=None,
     workspace_tools: Callable[[str, dict, int, str], Awaitable[dict]] | None = None,
     verify_spoken_consent: Callable[[bytes], Awaitable[str | None]] | None = None,
+    research_tools: Callable[[dict, int, str, Callable[[str], Awaitable[None]]], Awaitable[dict]] | None = None,
 ) -> None:
     """Accept a pre-Origin/cookie-checked socket and bridge one bounded session.
 
@@ -341,6 +344,12 @@ async def run_live_voice(
     """
     global _PROCESS_STARTS, _PROCESS_WINDOW_STARTED
     await websocket.accept()
+    send_lock = asyncio.Lock()
+
+    async def send_frame(frame: dict) -> None:
+        async with send_lock:
+            await websocket.send_json(frame)
+
     started = monotonic()
     input_bytes = output_bytes = produced_output_bytes = input_frames = tool_calls = 0
     tool_results: dict[str, tuple[str, str, dict]] = {}
@@ -394,11 +403,12 @@ async def run_live_voice(
         supplier_names = [supplier['name'] for supplier in company['suppliers']]
         factory = client_factory or (lambda: _vertex_connection(company))
         async with asyncio.timeout(max(0, MAX_SECONDS - (monotonic() - started))), factory() as provider:
-            await websocket.send_json({'type': 'ready', 'input_mime_type': 'audio/pcm;rate=16000',
+            await send_frame({'type': 'ready', 'input_mime_type': 'audio/pcm;rate=16000',
                                        'output_mime_type': 'audio/pcm;rate=24000',
                                        'context_version': context_version})
             provider_ready = True
             provider_events = asyncio.Queue(maxsize=16)
+            background_tasks = set()
 
             async def read_provider():
                 while True:
@@ -423,7 +433,7 @@ async def run_live_voice(
                     if kind == 'interrupt' and set(data) == {'type'}:
                         # Clear browser playback immediately; Google VAD handles
                         # interruption once the following input audio arrives.
-                        await websocket.send_json({'type': 'interrupted'})
+                        await send_frame({'type': 'interrupted'})
                         continue
                     if kind != 'audio':
                         raise _Invalid()
@@ -447,6 +457,183 @@ async def run_live_voice(
                 pending_deadline = None
                 consent_verifications = 0
                 activity_start_global = None
+                consent_task = None
+                research_operation = None
+                waiting_research_calls = []
+
+                async def progress(phase: str, gate: dict) -> None:
+                    if research_tools is None or phase not in {
+                            'checking_consent', 'awaiting_consent', 'started', 'completed', 'unavailable'}:
+                        return
+                    _current(session, store, context_version)
+                    if gate is not research_gate or (research_operation is not None and
+                            research_operation['gate'] is not gate):
+                        return
+                    await send_frame({'type': 'research_progress', 'phase': phase,
+                        'company_id': session.company_id, 'context_version': context_version,
+                        'proposal_id': gate['proposal_id']})
+
+                def research_result(result: dict) -> dict:
+                    _current(session, store, context_version)
+                    required = {'turn_id', 'company_id', 'context_version', 'status',
+                                'assistant_text', 'agent_steps', 'evidence_ids', 'proposal', 'read_only'}
+                    if (not isinstance(result, dict) or not required <= set(result) or
+                            set(result) - required - {'session', 'action_result', 'analytics', 'workspace'} or
+                            result.get('context_version') != context_version or
+                            result.get('company_id') != session.company_id or
+                            type(result.get('read_only')) is not bool or
+                            result.get('status') not in {'completed', 'proposal', 'needs_clarification', 'unavailable'} or
+                            len(json.dumps(result, ensure_ascii=True)) > 1_500_000):
+                        raise _Invalid()
+                    if result['read_only'] is False:
+                        canonical = result.get('session') or {}
+                        if (not isinstance(result.get('action_result'), dict) or
+                                canonical.get('session_id') != session.session_id or
+                                canonical.get('company_id') != session.company_id or
+                                canonical.get('context_version') != context_version):
+                            raise _Invalid()
+                    return present_turn(result, supplier_names)
+
+                def research_succeeded(result: dict) -> bool:
+                    research = result.get('workspace', {}).get('research') if isinstance(
+                        result.get('workspace'), dict) else None
+                    return (result['status'] == 'completed' and
+                            (not isinstance(research, dict) or research.get('status') == 'completed'))
+
+                def reusable_research(gate: dict) -> bool:
+                    if gate is not research_gate:
+                        return False
+                    try:
+                        if store.now() >= datetime.fromisoformat(gate['expires_at']):
+                            return False
+                    except (TypeError, ValueError):
+                        return False
+                    with session.lock:
+                        proposal = session.pending_proposal
+                        return (proposal is None or isinstance(proposal, dict) and
+                                proposal.get('proposal_id') == gate['proposal_id'] and
+                                proposal.get('_marker') == gate['marker'])
+
+                def denied_research_result() -> dict:
+                    return {'turn_id': secrets.token_urlsafe(18),
+                        'company_id': session.company_id, 'context_version': context_version,
+                        'status': 'needs_clarification',
+                        'assistant_text': 'This research approval is no longer current. Ask me to prepare a new query.',
+                        'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+                async def start_research(gate: dict) -> None:
+                    nonlocal research_operation
+                    if (research_tools is None or research_operation is not None or
+                            gate is not research_gate or gate['consumed'] or not gate['armed'] or
+                            not gate['finalized'] or not gate['confirmed'] or gate['verifier_denied'] or
+                            not _research_current(session, store, context_version, gate)):
+                        return
+                    gate['consumed'] = True
+                    operation = {'gate': gate, 'result': None, 'calls': [], 'primary_call_sent': False,
+                                 'had_model_call': bool(waiting_research_calls)}
+                    research_operation = operation
+                    operation['calls'].extend(waiting_research_calls)
+                    waiting_research_calls.clear()
+                    key = 'live-' + secrets.token_urlsafe(24)
+
+                    async def run():
+                        try:
+                            async def on_progress(phase: str) -> None:
+                                # Only the durable research callback can claim a start.
+                                if phase == 'started' and operation is research_operation:
+                                    await progress('started', gate)
+                            result = await research_tools(
+                                {'proposal_id': gate['proposal_id']}, context_version, key, on_progress)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            logging.getLogger(__name__).warning(
+                                'Live research unavailable: %s', type(exc).__name__)
+                            result = {'turn_id': secrets.token_urlsafe(18),
+                                'company_id': session.company_id, 'context_version': context_version,
+                                'status': 'unavailable', 'assistant_text': 'Public research is unavailable. Please try again later.',
+                                'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+                        await provider_events.put(('research_done', operation, result))
+
+                    operation['task'] = asyncio.create_task(run())
+                    background_tasks.add(operation['task'])
+
+                async def start_verification(gate: dict) -> None:
+                    nonlocal consent_verifications, consent_task
+                    if (research_tools is None or consent_task is not None or
+                            gate['finalized'] or gate['voice_clip'] is None or
+                            gate['input_waiting_for_finished']):
+                        return
+                    clip = gate['voice_clip']
+                    generation = gate['consent_generation']
+                    gate['verification_generation'] = generation
+                    gate['verification_audio_bytes'] = input_bytes
+                    gate['voice_clip'] = None
+                    gate['finalized'] = True
+                    gate['confirmed'] = False
+                    gate['verifier_denied'] = True
+                    await progress('checking_consent', gate)
+                    if (verify_spoken_consent is None or consent_verifications >= MAX_CONSENT_VERIFICATIONS or
+                            not _research_current(session, store, context_version, gate)):
+                        await progress('awaiting_consent', gate)
+                        return
+                    consent_verifications += 1
+
+                    async def run():
+                        try:
+                            verified = await verify_spoken_consent(clip)
+                        except asyncio.CancelledError:
+                            try:
+                                provider_events.put_nowait(
+                                    ('consent_cancelled', gate, asyncio.current_task()))
+                            except asyncio.QueueFull:
+                                pass
+                            raise
+                        except Exception:
+                            logging.getLogger(__name__).warning('Voice consent verification unavailable')
+                            verified = None
+                        await provider_events.put(('consent_done', gate, generation, verified))
+
+                    consent_task = asyncio.create_task(run())
+                    background_tasks.add(consent_task)
+
+                async def answer_research_call(
+                        call, binding: str, key: str, result: dict, *, reused: bool = False) -> None:
+                    tool_results[call.id] = (binding, key, result)
+                    model_result = {field: value for field, value in result.items()
+                                    if field != 'session' and (not reused or field != 'action_result')}
+                    if reused:
+                        model_result.update(read_only=True, action_applied=False,
+                                            tool_succeeded=research_succeeded(result))
+                    if research_succeeded(result):
+                        model_result['required_spoken_response'] = (
+                            'Give the sourced answer in two or three short sentences; offer more detail on request.')
+                    else:
+                        model_result.update(tool_succeeded=False, action_applied=False,
+                            required_spoken_response=result['assistant_text'])
+                    if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
+                        model_result.pop('workspace', None)
+                    if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
+                        model_result.pop('analytics', None)
+                    if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
+                        raise _Invalid()
+                    await provider.send_tool_response(function_responses=types.FunctionResponse(
+                        name='confirm_research', id=call.id, response=model_result))
+
+                async def deny_waiting_calls(gate: dict) -> None:
+                    if not waiting_research_calls:
+                        return
+                    current_public = (deepcopy(gate['public_proposal']) if
+                        _research_current(session, store, context_version, gate) else None)
+                    result = {'turn_id': secrets.token_urlsafe(18),
+                        'company_id': session.company_id, 'context_version': context_version,
+                        'status': 'proposal' if current_public is not None else 'needs_clarification',
+                        'assistant_text': 'I could not verify spoken consent. Research has not started.',
+                        'agent_steps': [], 'evidence_ids': [], 'proposal': current_public,
+                        'read_only': True}
+                    for call, binding, key in waiting_research_calls:
+                        await answer_research_call(call, binding, key, result)
+                    waiting_research_calls.clear()
 
                 async def received():
                     while True:
@@ -491,13 +678,80 @@ async def run_live_voice(
                 while True:
                     async for event in received():
                         _current(session, store, context_version)
+                        if consent_task is not None and consent_task.done() and consent_task.cancelled():
+                            consent_task = None
+                            if research_gate is not None and research_gate['voice_clip'] is not None:
+                                await start_verification(research_gate)
+                        if isinstance(event, tuple) and event[0] == 'consent_cancelled':
+                            _, gate, cancelled_task = event
+                            if consent_task is cancelled_task:
+                                consent_task = None
+                                if gate is research_gate and gate['voice_clip'] is not None:
+                                    await start_verification(gate)
+                            continue
+                        if isinstance(event, tuple) and event[0] == 'consent_done':
+                            _, gate, generation, verified = event
+                            consent_task = None
+                            if (gate is research_gate and generation != gate['consent_generation']):
+                                await progress('awaiting_consent', gate)
+                                await deny_waiting_calls(gate)
+                                if gate['voice_clip'] is not None:
+                                    await start_verification(gate)
+                                continue
+                            if gate is research_gate and _research_current(session, store, context_version, gate):
+                                gate['confirmed'] = (isinstance(verified, str) and len(verified) <= 256
+                                    and _spoken_confirmation(verified) and
+                                    not _spoken_negation(gate['input_spoken']))
+                                gate['verifier_denied'] = not gate['confirmed']
+                                if gate['confirmed']:
+                                    await start_research(gate)
+                                else:
+                                    await progress('awaiting_consent', gate)
+                                    await deny_waiting_calls(gate)
+                            continue
+                        if isinstance(event, tuple) and event[0] == 'research_done':
+                            _, operation, raw_result = event
+                            if operation is not research_operation:
+                                continue
+                            if operation['gate'] is not research_gate:
+                                research_operation = None
+                                if research_gate is not None and research_gate['confirmed']:
+                                    await start_research(research_gate)
+                                continue
+                            result = research_result(raw_result)
+                            operation['result'] = result
+                            await send_frame({'type': 'tool_result', 'result': result})
+                            await progress('completed' if research_succeeded(result) else 'unavailable',
+                                           operation['gate'])
+                            for call, binding, key in operation['calls']:
+                                await answer_research_call(call, binding, key, result,
+                                    reused=operation['primary_call_sent'])
+                                operation['primary_call_sent'] = True
+                            operation['calls'].clear()
+                            if not operation['had_model_call']:
+                                model_result = {field: value for field, value in result.items()
+                                                if field != 'session'}
+                                brief = json.dumps({'trusted_research_result': model_result,
+                                    'instruction': ('Answer in two or three short sourced sentences. Offer more detail on request.'
+                                        if research_succeeded(result) else
+                                        'Explain that public research was unavailable; do not claim sourced findings.')},
+                                    ensure_ascii=True)
+                                if len(brief) > 64_000:
+                                    brief = json.dumps({'trusted_research_result': {
+                                        'status': result['status'], 'assistant_text': result['assistant_text'][:4000]},
+                                        'instruction': 'Summarize this server result faithfully.'})
+                                await provider.send_client_content(turns=[types.Content(
+                                    role='user', parts=[types.Part(text=brief)])], turn_complete=True)
+                            continue
                         content = getattr(event, 'server_content', None)
                         interrupted_frame = bool(getattr(content, 'interrupted', False))
                         # A Live event may carry both the user's transcription
                         # and the model's function call. Authenticate that input
                         # before considering the call, exactly once per event.
                         if interrupted_frame:
-                            research_gate = None
+                            if (research_operation is None or
+                                    research_operation['gate'] is not research_gate):
+                                research_gate = None
                             pending_confirm = None
                             pending_deadline = None
                             activity_start_global = None
@@ -507,6 +761,13 @@ async def run_live_voice(
                             finished = getattr(transcript, 'finished', None)
                             if input_frames > research_gate['audio_at_arm'] and transcript is not None:
                                 if research_gate['finalized']:
+                                    if research_tools is not None and consent_task is not None:
+                                        old = research_gate['input_spoken']
+                                        same_audio = input_bytes == research_gate['verification_audio_bytes']
+                                        cumulative = (isinstance(heard, str) and bool(old) and
+                                            heard.casefold().startswith(old.casefold()))
+                                        if not same_audio or not cumulative:
+                                            research_gate['consent_generation'] += 1
                                     research_gate['input_spoken'] = ''
                                     research_gate['input_overflow'] = False
                                     research_gate['confirmed'] = False
@@ -521,6 +782,17 @@ async def run_live_voice(
                                     research_gate['finalized'] = True
                                     research_gate['confirmed'] = (not research_gate['input_overflow']
                                         and _spoken_confirmation(research_gate['input_spoken']))
+                                    if research_tools is not None:
+                                        if (consent_task is not None and research_gate['consent_generation'] !=
+                                                research_gate['verification_generation']):
+                                            consent_task.cancel()
+                                            research_gate['verifier_denied'] = False
+                                        if research_gate['confirmed']:
+                                            await progress('checking_consent', research_gate)
+                                            await start_research(research_gate)
+                                        else:
+                                            await progress('awaiting_consent', research_gate)
+                                            await deny_waiting_calls(research_gate)
                                 elif finished is False:
                                     research_gate['input_waiting_for_finished'] = True
                         activity = getattr(event, 'voice_activity', None)
@@ -547,6 +819,16 @@ async def run_live_voice(
                                 activity_start_global = None
                             else:
                                 activity_valid = False
+                        if (research_tools is not None and activity_valid and
+                                kind.endswith('ACTIVITY_START') and consent_task is not None and
+                                research_gate is not None and research_gate['armed'] and
+                                research_gate['finalized'] and not research_gate['consumed']):
+                            if research_gate['consent_generation'] == research_gate['verification_generation']:
+                                research_gate['consent_generation'] += 1
+                            research_gate['finalized'] = False
+                            research_gate['confirmed'] = False
+                            research_gate['input_spoken'] = ''
+                            research_gate['input_overflow'] = False
                         if (activity is not None and research_gate is not None
                                 and research_gate['armed'] and not research_gate['finalized']):
                             gate = research_gate
@@ -573,8 +855,12 @@ async def run_live_voice(
                                 gate['voice_invalid'] = True
                         calls = list(getattr(getattr(event, 'tool_call', None), 'function_calls', None) or [])
                         released_confirm = None
-                        if pending_confirm is not None and research_gate is not None and research_gate['voice_clip'] is not None:
+                        if (research_tools is None and pending_confirm is not None and research_gate is not None
+                                and research_gate['voice_clip'] is not None):
                             await finalize_voice_clip()
+                        if (research_tools is not None and research_gate is not None and
+                                research_gate['voice_clip'] is not None):
+                            await start_verification(research_gate)
                         # A model may request the tool before the independent
                         # transcription stream marks its last fragment. Hold
                         # one request until that final marker, then answer it.
@@ -626,11 +912,11 @@ async def run_live_voice(
                                 if binding != pending_confirm[1]:
                                     raise _Invalid()
                                 continue
-                            if (name == 'confirm_research' and research_gate is not None
+                            if (research_tools is None and name == 'confirm_research' and research_gate is not None
                                     and research_gate['voice_clip'] is not None
                                     and not research_gate['finalized']):
                                 await finalize_voice_clip()
-                            if (name == 'confirm_research' and call is not released_confirm
+                            if (research_tools is None and name == 'confirm_research' and call is not released_confirm
                                     and research_gate is not None
                                     and research_gate['armed'] and not research_gate['finalized']
                                     and (bool(research_gate['input_spoken'])
@@ -641,13 +927,61 @@ async def run_live_voice(
                                 pending_confirm = (call, binding)
                                 pending_deadline = monotonic() + CONSENT_ACTIVITY_GRACE_SECONDS
                                 continue
+                            new_call_counted = False
+                            if name == 'confirm_research' and research_tools is not None:
+                                repeated = call_id in tool_results
+                                if repeated:
+                                    prior_binding, key, result = tool_results[call_id]
+                                    if prior_binding != binding:
+                                        raise _Invalid()
+                                    if (research_operation is None or
+                                            args['proposal_id'] != research_operation['gate']['proposal_id'] or
+                                            not reusable_research(research_operation['gate'])):
+                                        result = denied_research_result()
+                                    await answer_research_call(call, binding, key, result, reused=True)
+                                    continue
+                                queued_calls = (research_operation['calls'] if research_operation is not None
+                                                else waiting_research_calls)
+                                queued = next((item for item in queued_calls if item[0].id == call_id), None)
+                                if queued is not None:
+                                    if queued[1] != binding:
+                                        raise _Invalid()
+                                    continue
+                                tool_calls += 1
+                                new_call_counted = True
+                                if tool_calls > MAX_TOOLS:
+                                    raise _Invalid()
+                                key = 'live-' + secrets.token_urlsafe(24)
+                                gate = research_gate
+                                if (research_operation is not None and
+                                        args['proposal_id'] == research_operation['gate']['proposal_id'] and
+                                        not reusable_research(research_operation['gate'])):
+                                    await answer_research_call(
+                                        call, binding, key, denied_research_result(), reused=True)
+                                    continue
+                                if (research_operation is not None and
+                                        reusable_research(research_operation['gate']) and
+                                        args['proposal_id'] == research_operation['gate']['proposal_id']):
+                                    research_operation['had_model_call'] = True
+                                    if research_operation['result'] is None:
+                                        research_operation['calls'].append((call, binding, key))
+                                    else:
+                                        await answer_research_call(
+                                            call, binding, key, research_operation['result'], reused=True)
+                                    continue
+                                if (gate is not None and args['proposal_id'] == gate['proposal_id'] and
+                                        gate['armed'] and consent_task is not None):
+                                    waiting_research_calls.append((call, binding, key))
+                                    continue
+                                # Existing no-consent response below remains authoritative.
                             repeated = call_id in tool_results
                             if repeated:
                                 prior_binding, key, _ = tool_results[call_id]
                                 if prior_binding != binding:
                                     raise _Invalid()
                             else:
-                                tool_calls += 1
+                                if not new_call_counted:
+                                    tool_calls += 1
                                 if tool_calls > MAX_TOOLS:
                                     raise _Invalid()
                                 key = 'live-' + secrets.token_urlsafe(24)
@@ -681,7 +1015,8 @@ async def run_live_voice(
                                             result['assistant_text'] = ('I could not verify spoken consent. This research request is no longer current. Ask me to prepare a new query.')
                                 elif name == 'confirm_research' and not allowed_research:
                                     current_public = None
-                                    if research_gate is not None:
+                                    if (research_gate is not None and
+                                            args['proposal_id'] == research_gate['proposal_id']):
                                         try:
                                             if _research_current(session, store, context_version, research_gate):
                                                 current_public = deepcopy(research_gate['public_proposal'])
@@ -732,18 +1067,20 @@ async def run_live_voice(
                             result = present_turn(result, supplier_names)
                             if name == 'prepare_research':
                                 research_gate = _research_gate(session, store, context_version, result)
+                                if research_operation is not None and research_operation['result'] is not None:
+                                    research_operation = None
                             elif name == 'confirm_research' and allowed_research and not repeated:
                                 research_gate = None
                             elif name != 'confirm_research':
                                 research_gate = None
                             if not repeated:
                                 tool_results[call_id] = (binding, key, result)
-                            await websocket.send_json({'type': 'tool_result', 'result': result})
+                            await send_frame({'type': 'tool_result', 'result': result})
                             suppress_failed_speech = (result['status'] in {'needs_clarification', 'unavailable'}
                                 or name == 'confirm_research' and result['status'] == 'proposal')
                             if suppress_failed_speech:
-                                await websocket.send_json({'type': 'interrupted'})
-                                await websocket.send_json({'type': 'transcript', 'direction': 'output',
+                                await send_frame({'type': 'interrupted'})
+                                await send_frame({'type': 'transcript', 'direction': 'output',
                                     'text': result['assistant_text'][:MAX_TRANSCRIPT_CHARS]})
                             # The browser needs its authoritative session. The model never
                             # receives session identifiers, CSRF tokens or document payloads.
@@ -774,15 +1111,17 @@ async def run_live_voice(
                             continue
                         if interrupted_frame:
                             suppress_failed_speech = False
-                            research_gate = None
-                            await websocket.send_json({'type': 'interrupted'})
+                            if (research_operation is None or
+                                    research_operation['gate'] is not research_gate):
+                                research_gate = None
+                            await send_frame({'type': 'interrupted'})
                             # Discard delivery below, but validate/count every audio byte.
                         for speaker, field in (('input', 'input_transcription'),
                                                ('output', 'output_transcription')):
                             transcription = getattr(content, field, None)
                             value = getattr(transcription, 'text', None)
                             if isinstance(value, str) and value and not interrupted_frame and (speaker == 'input' or not suppress_failed_speech):
-                                await websocket.send_json({'type': 'transcript', 'direction': speaker,
+                                await send_frame({'type': 'transcript', 'direction': speaker,
                                                            'text': value[:MAX_TRANSCRIPT_CHARS]})
                                 if research_gate is not None:
                                     if speaker == 'output' and not research_gate['armed']:
@@ -807,15 +1146,17 @@ async def run_live_voice(
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['prompt_audio'] = True
                             output_bytes += len(audio)
-                            await websocket.send_json({'type': 'audio', 'sample_rate_hertz': 24000,
+                            await send_frame({'type': 'audio', 'sample_rate_hertz': 24000,
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['armed'] = _spoken_prompt(research_gate)
                                 research_gate['audio_at_arm'] = input_frames
                                 research_gate['audio_bytes_at_arm'] = input_bytes
+                                if research_gate['armed']:
+                                    await progress('awaiting_consent', research_gate)
                             elif research_gate is not None:
-                                if pending_confirm is None:
+                                if pending_confirm is None and not research_gate['consumed']:
                                     research_gate['input_spoken'] = ''
                                     research_gate['input_overflow'] = False
                                     research_gate['confirmed'] = False
@@ -823,7 +1164,7 @@ async def run_live_voice(
                                     research_gate['input_waiting_for_finished'] = False
                                     research_gate['audio_at_arm'] = input_frames
                                     research_gate['audio_bytes_at_arm'] = input_bytes
-                            await websocket.send_json({'type': 'turn_complete'})
+                            await send_frame({'type': 'turn_complete'})
                             suppress_failed_speech = False
 
             async def watch_context():
@@ -842,9 +1183,9 @@ async def run_live_voice(
                     task.result()
                 raise RuntimeError('Live provider ended')
             finally:
-                for task in tasks:
+                for task in tasks | background_tasks:
                     task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(*(tasks | background_tasks), return_exceptions=True)
     except _End:
         pass
     except WebSocketDisconnect:
@@ -864,7 +1205,7 @@ async def run_live_voice(
                    'This voice conversation reached its three-minute limit. Start another conversation.' if isinstance(exc, TimeoutError) else
                    'Invalid live voice request.')
         try:
-            await websocket.send_json({'type': 'error', 'code': code, 'message': message})
+            await send_frame({'type': 'error', 'code': code, 'message': message})
         except (RuntimeError, WebSocketDisconnect):
             pass
     finally:
@@ -885,7 +1226,7 @@ async def run_live_voice(
                     del session.live_voice_starts_by_company[counted_company]
         if accepted:
             try:
-                await websocket.send_json({'type': 'metrics',
+                await send_frame({'type': 'metrics',
                                            'duration_ms': round((monotonic() - started) * 1000),
                                            'input_audio_bytes': input_bytes,
                                            'output_audio_bytes': output_bytes,

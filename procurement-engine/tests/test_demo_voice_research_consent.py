@@ -48,6 +48,7 @@ class Provider:
         self.audio = asyncio.Event()
         self.audio_bytes = 0
         self.ends = 0
+        self.client_content = asyncio.Queue()
 
     async def receive(self):
         yield await self.events.get()
@@ -61,6 +62,9 @@ class Provider:
 
     async def send_tool_response(self, *, function_responses):
         await self.responses.put(function_responses)
+
+    async def send_client_content(self, *, turns, turn_complete):
+        await self.client_content.put((turns, turn_complete))
 
     async def call(self, name, args, call_id):
         await self.events.put(NS(tool_call=NS(function_calls=[NS(name=name, args=args, id=call_id)]),
@@ -84,7 +88,7 @@ async def connection(provider):
     yield provider
 
 
-async def scenario(callback=None, verifier=None):
+async def scenario(callback=None, verifier=None, research=None):
     now = datetime(2026, 10, 15, tzinfo=timezone.utc)
     store = SessionStore(clock=lambda: now)
     session = store.create()
@@ -113,7 +117,8 @@ async def scenario(callback=None, verifier=None):
 
     task = asyncio.create_task(live_voice.run_live_voice(socket, session=session, store=store,
         operate_workspace=forbidden, workspace_tools=workspace,
-        client_factory=lambda: connection(provider), verify_spoken_consent=verifier))
+        client_factory=lambda: connection(provider), verify_spoken_consent=verifier,
+        research_tools=research))
     await socket.next('ready')
     return store, session, socket, provider, calls, task
 
@@ -671,4 +676,386 @@ def test_proposal_replaced_during_independent_verification_never_searches():
         assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
         assert [c[0] for c in calls] == ['prepare_research']
         await finish(socket, task)
+    asyncio.run(check())
+
+
+def test_finalized_consent_starts_one_research_without_model_call_and_drains_events():
+    async def check():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        research_calls = []
+
+        async def research(args, version, key, on_progress):
+            research_calls.append((args, version, key))
+            started.set()
+            await release.wait()
+            await on_progress('started')
+            return turn(session, 'completed', text='Three sourced findings are available.')
+
+        _, session, socket, provider, calls, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        progress = await socket.next('research_progress')
+        assert progress == {'type': 'research_progress', 'phase': 'checking_consent',
+                            'company_id': session.company_id, 'context_version': 1,
+                            'proposal_id': 'proposal-1'}
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirm research'
+        await asyncio.wait_for(started.wait(), 2)
+        await provider.spoken('input', 'confirmed', finished=False)
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirmed'
+        assert [name for name, *_ in calls] == ['prepare_research']
+        assert len(research_calls) == 1
+        assert research_calls[0][0] == {'proposal_id': 'proposal-1'}
+        assert research_calls[0][1] == 1
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'started'
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert (await socket.next('research_progress'))['phase'] == 'completed'
+        turns, complete = await asyncio.wait_for(provider.client_content.get(), 2)
+        assert complete and 'Three sourced findings' in turns[0].parts[0].text
+        assert len(research_calls) == 1
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_model_confirm_during_server_research_attaches_to_same_result():
+    async def check():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        research_calls = []
+
+        async def research(args, version, key, on_progress):
+            research_calls.append(args)
+            started.set()
+            await release.wait()
+            await on_progress('started')
+            result = turn(session, 'completed', text='Current sourced answer.')
+            result.update(read_only=False, session={'session_id': session.session_id,
+                'company_id': session.company_id, 'context_version': 1},
+                action_result={'tool': 'confirm_research', 'summary': 'Public research completed.'})
+            return result
+
+        _, session, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        await asyncio.wait_for(started.wait(), 2)
+        assert (await socket.next('transcript', 'input'))['text'] == 'confirm research'
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'late-real-call')
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'late-real-call')
+        await provider.spoken('input', 'not a second approval', finished=False)
+        assert (await socket.next('transcript', 'input'))['text'] == 'not a second approval'
+        release.set()
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        response = await asyncio.wait_for(provider.responses.get(), 2)
+        assert response.id == 'late-real-call' and response.response['status'] == 'completed'
+        assert response.response['read_only'] is False
+        assert provider.responses.empty()
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'new-attempt')
+        reused = await asyncio.wait_for(provider.responses.get(), 2)
+        assert reused.id == 'new-attempt' and reused.response['read_only'] is True
+        assert reused.response['action_applied'] is False
+        assert reused.response['tool_succeeded'] is True
+        assert 'action_result' not in reused.response and 'session' not in reused.response
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'late-real-call')
+        replay = await asyncio.wait_for(provider.responses.get(), 2)
+        assert replay.id == 'late-real-call' and replay.response['read_only'] is True
+        assert replay.response['action_applied'] is False
+        assert research_calls == [{'proposal_id': 'proposal-1'}]
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_late_model_call_after_proposal_expiry_cannot_reuse_result():
+    async def check():
+        searches = []
+
+        async def research(args, version, key, on_progress):
+            searches.append(args)
+            await on_progress('started')
+            return turn(session, 'completed', text='Earlier sourced answer.')
+
+        store, session, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        await asyncio.wait_for(provider.client_content.get(), 2)
+        store.clock = lambda: datetime(2026, 10, 15, 0, 6, tzinfo=timezone.utc)
+        await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'expired-late-call')
+        response = await asyncio.wait_for(provider.responses.get(), 2)
+        assert response.id == 'expired-late-call'
+        assert response.response['status'] == 'needs_clarification'
+        assert response.response['read_only'] is True
+        assert response.response['action_applied'] is False
+        assert searches == [{'proposal_id': 'proposal-1'}]
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_model_interruption_during_claimed_research_keeps_terminal_result():
+    async def check():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def research(args, version, key, on_progress):
+            await on_progress('started')
+            started.set()
+            await release.wait()
+            return turn(session, 'completed', text='The sourced result is ready.')
+
+        _, session, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        await asyncio.wait_for(started.wait(), 2)
+        await provider.events.put(NS(tool_call=None, server_content=NS(
+            interrupted=True, input_transcription=None, output_transcription=None,
+            model_turn=None, turn_complete=False)))
+        assert (await socket.next('interrupted'))['type'] == 'interrupted'
+        release.set()
+        assert (await socket.next('tool_result'))['result']['assistant_text'] == 'The sourced result is ready.'
+        assert (await socket.next('research_progress'))['phase'] == 'completed'
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_delayed_independent_verifier_keeps_voice_responsive_and_starts_one_search():
+    async def check():
+        verification_started = asyncio.Event()
+        release = asyncio.Event()
+        research_calls = []
+
+        async def verify(_):
+            verification_started.set()
+            await release.wait()
+            return 'confirmed'
+
+        async def research(args, version, key, on_progress):
+            research_calls.append(args)
+            await on_progress('started')
+            return turn(session, 'completed', text='Verified public result.')
+
+        _, session, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        await asyncio.wait_for(verification_started.wait(), 2)
+        await provider.spoken('output', 'I am checking that confirmation.')
+        assert (await socket.next('transcript', 'output'))['text'] == 'I am checking that confirmation.'
+        assert research_calls == []
+        release.set()
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert research_calls == [{'proposal_id': 'proposal-1'}]
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_negated_finalized_utterance_never_calls_research_callback():
+    async def check():
+        research_calls = []
+
+        async def research(*args):
+            research_calls.append(args)
+            raise AssertionError('negation must not search')
+
+        _, _, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research not yet', finished=True)
+        assert (await socket.next('research_progress'))['phase'] == 'awaiting_consent'
+        assert research_calls == []
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_replaced_proposal_drops_late_research_completion():
+    async def check():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        completed = asyncio.Event()
+
+        async def research(args, version, key, on_progress):
+            started.set()
+            await release.wait()
+            completed.set()
+            return turn(session, 'completed', text='Stale answer must not appear.')
+
+        _, session, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        await asyncio.wait_for(started.wait(), 2)
+        with session.lock:
+            session.pending_proposal = None
+        # A later prepare replaces the in-memory voice gate while the search runs.
+        await provider.call('prepare_research', {'message': QUERY}, 'prepare-2')
+        assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
+        release.set()
+        await asyncio.wait_for(completed.wait(), 2)
+        await provider.spoken('output', 'Current proposal remains available.')
+        await socket.next('transcript', 'output')
+        assert all('Stale answer' not in json.dumps(frame) for frame in socket.history)
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_nested_unavailable_research_emits_unavailable_progress():
+    async def check():
+        async def research(args, version, key, on_progress):
+            await on_progress('started')
+            return turn(session, 'completed', text='Public research could not verify a sourced answer.',
+                        workspace={'research': {'status': 'unavailable', 'answer': ''}})
+
+        _, session, socket, provider, _, task = await scenario(research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        assert (await socket.next('tool_result'))['result']['workspace']['research']['status'] == 'unavailable'
+        assert (await socket.next('research_progress'))['phase'] == 'unavailable'
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_late_verifier_cannot_approve_a_new_unconfirmed_utterance():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        cancelled = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            try:
+                await release.wait()
+                return 'confirmed'
+            finally:
+                cancelled.set()
+
+        async def research(*args):
+            searches.append(args)
+            raise AssertionError('old clip must not approve new utterance')
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'maybe later', finished=True)
+        assert (await socket.next('transcript', 'input'))['text'] == 'maybe later'
+        await asyncio.wait_for(cancelled.wait(), 2)
+        await provider.spoken('output', 'Confirmation still needed.')
+        await socket.next('transcript', 'output')
+        assert searches == []
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_only_one_independent_verifier_runs_while_prior_clip_is_pending():
+    async def check():
+        verifying = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def verify(clip):
+            calls.append(clip)
+            verifying.set()
+            await release.wait()
+            return None
+
+        async def research(*args):
+            raise AssertionError('no verified consent')
+
+        _, _, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'maybe later', finished=None)
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.activity('ACTIVITY_END', '1.600s')
+        await provider.spoken('output', 'Still listening.')
+        await socket.next('transcript', 'output')
+        await asyncio.sleep(0.02)
+        assert len(calls) == 1
+        release.set()
+        assert (await socket.next('research_progress'))['phase'] == 'awaiting_consent'
+        await finish(socket, task)
+
+    asyncio.run(check())
+
+
+def test_new_finalized_confirmation_supersedes_pending_old_verifier():
+    async def check():
+        verifying = asyncio.Event()
+        blocker = asyncio.Event()
+        searches = []
+
+        async def verify(_):
+            verifying.set()
+            await blocker.wait()
+            return None
+
+        async def research(args, version, key, on_progress):
+            searches.append(args)
+            await on_progress('started')
+            return turn(session, 'completed', text='New approval result.')
+
+        _, session, socket, provider, _, task = await scenario(verifier=verify, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirmed', finished=None)
+        await socket.next('transcript', 'input')
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        await asyncio.wait_for(verifying.wait(), 2)
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        assert (await socket.next('tool_result'))['result']['assistant_text'] == 'New approval result.'
+        assert searches == [{'proposal_id': 'proposal-1'}]
+        await finish(socket, task)
+
     asyncio.run(check())

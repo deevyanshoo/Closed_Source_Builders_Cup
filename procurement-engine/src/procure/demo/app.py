@@ -9,11 +9,13 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import math
+import logging
 import os
 from pathlib import Path
 import re
 import secrets
 import threading
+from time import monotonic
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, WebSocket
@@ -83,6 +85,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
+    from .context_cache import BoundedContextCache
+    context_cache = BoundedContextCache()
+    app.state.operator_context_cache = context_cache
+    # Enable only reviewed demo diagnostics; never turn on SDK request/body logging.
+    diagnostics = logging.getLogger('procure.demo')
+    if not diagnostics.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter('%(message)s'))
+        diagnostics.addHandler(handler)
+    diagnostics.setLevel(logging.INFO)
     cache: OrderedDict = OrderedDict()
     cache_lock = threading.RLock()
     workers = threading.BoundedSemaphore(2)
@@ -100,6 +112,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     voice_workers = threading.BoundedSemaphore(2)
     voice_process_calls = 0
     research_workers = threading.BoundedSemaphore(2)
+    research_lock = threading.RLock()
     app.add_middleware(BodyLimit)
 
     @app.exception_handler(SessionError)
@@ -219,6 +232,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 from .operator import VertexOperatorProvider
                 operator_provider = VertexOperatorProvider()
             return operator_provider
+
+    def research_adapter():
+        nonlocal research_provider
+        with research_lock:
+            if research_provider is None:
+                from .research import VertexResearchProvider
+                research_provider = VertexResearchProvider(clock=store.now)
+            return research_provider
 
     def voice_adapter():
         nonlocal voice_service
@@ -988,7 +1009,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             try:
                 outcome = await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
                                                   model=model,
-                                                  provider_call='mocked' if operator_injected else 'real')
+                                                  provider_call='mocked' if operator_injected else 'real',
+                                                  context_cache=context_cache,
+                                                  cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest())
             except (OperatorUnavailable, OperatorValidationError):
                 outcome = {'status': 'unavailable',
                            'assistant_text': 'The operator could not verify this response; no action was taken.',
@@ -1101,7 +1124,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             return await execute_operator_turn(value, {'message': message,
                 'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
-        async def workspace_tools(name, args, context_version, key):
+        async def workspace_tools(name, args, context_version, key, *, on_research_progress=None):
             if name == 'confirm_research':
                 shape(args, ('proposal_id',))
                 if not isinstance(args['proposal_id'], str) or not args['proposal_id']:
@@ -1111,7 +1134,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 # durable claim and replay checks as the visual confirmation.
                 confirmed = await confirm_research(value, {
                     'proposal_id': args['proposal_id'], 'reviewed': True,
-                    'expected_context_version': context_version, 'idempotency_key': key})
+                    'expected_context_version': context_version, 'idempotency_key': key},
+                    on_progress=on_research_progress)
                 research = deepcopy(confirmed['result'])
                 # Voice needs the grounded answer/citations, not transient
                 # provider markup in either model context or replay caches.
@@ -1352,14 +1376,21 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 store.save(value)
             return result
 
+        async def research_tools(args, context_version, key, on_progress):
+            # confirm_research persists the claim and terminal record itself.
+            return await workspace_tools('confirm_research', args, context_version, key,
+                                         on_research_progress=on_progress)
+
         from .voice_consent import verify_spoken_consent
         await run_live_voice(websocket, session=value, store=store,
                              operate_workspace=operate, workspace_tools=saved_workspace_tools,
+                             research_tools=research_tools,
                              client_factory=live_client_factory,
                              verify_spoken_consent=voice_consent_verifier or verify_spoken_consent)
 
-    async def confirm_research(value, data):
-        from .research import VertexResearchProvider
+    async def confirm_research(value, data, *, on_progress=None):
+        started_at = monotonic()
+        logger = logging.getLogger(__name__)
         with value.lock:
             context(value, data, explicit=True)
             key, replay = start(value, data, 'operator_confirm')
@@ -1421,12 +1452,20 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             except Exception:
                 research_workers.release()
                 raise
+        logger.info('research_stage stage=claimed elapsed_ms=%d', int((monotonic() - started_at) * 1000))
         try:
             allowed = await run_in_threadpool(store.reserve_research_budget, store.now().date().isoformat(), 30)
             if not allowed:
                 raise SessionError('research_limit', 'The shared daily research allowance is used. Try again tomorrow.', 429)
+            with value.lock:
+                context(value, data, explicit=True)
+                if snapshot_marker(operator_snapshot(value)) != marker:
+                    raise SessionError('stale_context', 'Workspace changed before researching. Prepare a new request.', 409)
+            if on_progress is not None:
+                await on_progress('started')
+            logger.info('research_stage stage=provider_started elapsed_ms=%d', int((monotonic() - started_at) * 1000))
             try:
-                adapter = research_provider or VertexResearchProvider(clock=store.now)
+                adapter = research_adapter()
                 result = await run_in_threadpool(adapter.research, query)
             except Exception:
                 result = None
@@ -1462,6 +1501,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 store.save(value)
                 initial_response = deepcopy(response)
                 initial_response['result']['search_suggestions_html'] = suggestions_html
+                logger.info('research_stage stage=completed status=%s elapsed_ms=%d', result['status'], int((monotonic() - started_at) * 1000))
                 return initial_response
         except Exception:
             with value.lock:

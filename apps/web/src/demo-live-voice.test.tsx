@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
-import { acceptsLiveTurn, appendLiveCaption, endActiveVoice, finalizedLiveCaptions, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+import { acceptedResearchProgress, settleLiveResearch, voiceResearchLabel, acceptsLiveTurn, appendLiveCaption, endActiveVoice, finalizedLiveCaptions, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
 
 vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
@@ -222,5 +222,53 @@ describe('live conversation boundary', () => {
     expect(voiceVisualState(current, false)).toBe('speaking');
     nodes[1].onended?.();
     expect(states).toEqual(['speaking', 'speaking', 'speaking', 'listening']);
+  });
+});
+
+
+describe('authoritative research progress', () => {
+  const event = { type: 'research_progress', phase: 'started', proposal_id: 'p1', company_id: 'solara', context_version: 1 };
+  it('accepts progress only on the captured current company and session epoch', () => {
+    expect(acceptedResearchProgress(event, scope, scope, 'p1')).toBe('started');
+    expect(acceptedResearchProgress({ ...event, company_id: 'meridian' }, scope, scope, 'p1')).toBeNull();
+    expect(acceptedResearchProgress({ ...event, context_version: 2 }, scope, scope, 'p1')).toBeNull();
+    expect(acceptedResearchProgress(event, scope, { ...scope, epoch: 3 }, 'p1')).toBeNull();
+    expect(acceptedResearchProgress({ ...event, phase: 'anything' }, scope, scope, 'p1')).toBeNull();
+  });
+  it('keeps the orb thinking while verification or research outlives a provider turn', () => {
+    for (const researchPhase of ['checking_consent', 'started'] as const) {
+      expect(voiceVisualState({ ready: true, muted: false, playback: new Set(), responsePending: false, researchPhase }, false)).toBe('thinking');
+    }
+    expect(voiceVisualState({ ready: true, muted: false, playback: new Set(), responsePending: false, researchPhase: 'awaiting_consent' }, false)).toBe('listening');
+  });
+  it('distinguishes checking consent from an authoritatively started search', () => {
+    expect(voiceResearchLabel('checking_consent')).toBe('Checking your confirmation…');
+    expect(voiceResearchLabel('started')).toBe('Researching the public web…');
+    expect(voiceResearchLabel('awaiting_consent')).toBe('Ready for “confirm research”');
+    expect(voiceResearchLabel(null)).toBeNull();
+  });
+});
+
+
+describe('delayed research completion', () => {
+  const research = { research_id: 'r1', query: 'Public shipping status', status: 'completed', checked_at: '2026-10-15T10:00:00Z', answer: 'Sources are ready.', sources: [] };
+  const result = { ...turn, status: 'completed', proposal: null, action_result: { tool: 'confirm_research', summary: 'Done' }, workspace: { research } } as OperatorTurn;
+  it('settles a result after the provider turn without requiring another audio frame', () => {
+    const current = { ready: true, muted: false, playback: new Set(), responsePending: false, researchPhase: 'started' as const };
+    expect(settleLiveResearch(current, result)).toBe(true);
+    expect(current.responsePending).toBe(false);
+    expect(current.researchPhase).toBe('completed');
+    expect(voiceVisualState(current, false)).toBe('listening');
+    expect(settleLiveResearch(current, result)).toBe(true);
+    expect(voiceVisualState(current, false)).toBe('listening');
+  });
+  it('settles unavailable research and rejects superseded or regressive progress', () => {
+    const current = { ready: true, muted: false, playback: new Set(), responsePending: true, researchPhase: 'started' as const };
+    expect(settleLiveResearch(current, { ...result, workspace: { research: { ...research, status: 'unavailable' } } } as OperatorTurn)).toBe(true);
+    expect(current.researchPhase).toBe('unavailable');
+    expect(voiceVisualState(current, false)).toBe('listening');
+    const event = { type: 'research_progress', phase: 'started', proposal_id: 'old', company_id: 'solara', context_version: 1 };
+    expect(acceptedResearchProgress(event, scope, scope, 'new')).toBeNull();
+    expect(acceptedResearchProgress({ ...event, proposal_id: 'new' }, scope, scope, 'new', 'completed')).toBeNull();
   });
 });

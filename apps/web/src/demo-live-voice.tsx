@@ -56,7 +56,33 @@ function pcm24Buffer(context: AudioContext, encoded: string): AudioBuffer {
   }
   return buffer;
 }
-type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean };
+export type VoiceResearchPhase = 'awaiting_consent' | 'checking_consent' | 'started' | 'completed' | 'unavailable';
+const RESEARCH_PHASES = new Set<VoiceResearchPhase>(['awaiting_consent', 'checking_consent', 'started', 'completed', 'unavailable']);
+export function acceptedResearchProgress(event: Record<string, unknown>, captured: LiveScope, current: LiveScope,
+  proposalId: string | null, currentPhase?: VoiceResearchPhase | null): VoiceResearchPhase | null {
+  if (!sameLiveScope(captured, current) || event.type !== 'research_progress' || event.company_id !== captured.companyId ||
+      event.context_version !== captured.contextVersion || !proposalId || event.proposal_id !== proposalId ||
+      typeof event.phase !== 'string' || !RESEARCH_PHASES.has(event.phase as VoiceResearchPhase)) return null;
+  const phase = event.phase as VoiceResearchPhase;
+  if ((currentPhase === 'completed' || currentPhase === 'unavailable') && phase !== currentPhase) return null;
+  if (currentPhase === 'started' && (phase === 'awaiting_consent' || phase === 'checking_consent')) return null;
+  return phase;
+}
+export function settleLiveResearch(current: { responsePending: boolean; researchPhase?: VoiceResearchPhase | null }, result: OperatorTurn): boolean {
+  if (result.action_result?.tool !== 'confirm_research') return false;
+  const research = validatedResearchResult(result.workspace?.research);
+  if (!research) return false;
+  current.responsePending = false;
+  current.researchPhase = research.status;
+  return true;
+}
+export function voiceResearchLabel(phase: VoiceResearchPhase | null | undefined): string | null {
+  return phase === 'checking_consent' ? 'Checking your confirmation…' : phase === 'started' ? 'Researching the public web…' :
+    phase === 'awaiting_consent' ? 'Ready for “confirm research”' : phase === 'completed' ? 'Research complete' :
+    phase === 'unavailable' ? 'Research unavailable' : null;
+}
+
+type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null };
 type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
 type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
 const CAPTION_LIMIT = 24;
@@ -105,10 +131,10 @@ export function preflightLiveVoice(scope: LiveScope, available:
     'Live voice is unavailable in this browser. Use the text composer.' };
 }
 
-export function voiceVisualState(current: { ready: boolean; muted: boolean; playback: Set<unknown>; responsePending?: boolean }, thinking: boolean): VoiceVisualState {
+export function voiceVisualState(current: { ready: boolean; muted: boolean; playback: Set<unknown>; responsePending?: boolean; researchPhase?: VoiceResearchPhase | null }, thinking: boolean): VoiceVisualState {
   if (!current.ready) return 'connecting';
   if (current.playback.size) return 'speaking';
-  if (thinking || current.responsePending) return 'thinking';
+  if (thinking || current.responsePending || current.researchPhase === 'checking_consent' || current.researchPhase === 'started') return 'thinking';
   return current.muted ? 'muted' : 'listening';
 }
 
@@ -161,6 +187,7 @@ type LiveVoiceProps = { scope: LiveScope; csrf: string; disabled: boolean; befor
 export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown, onExit }, ref) {
   const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [researchPhase, setResearchPhase] = useState<VoiceResearchPhase | null>(null);
   const [error, setError] = useState('');
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [captionScope, setCaptionScope] = useState<LiveScope | null>(null);
@@ -183,6 +210,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     generation.current += 1;
     thinking.current = false;
     setMicrophoneMuted(false);
+    setResearchPhase(null);
     endActiveVoice(active);
     setStatus('idle');
   }
@@ -202,6 +230,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     const attempt = ++generation.current;
     thinking.current = false;
     setMicrophoneMuted(false);
+    setResearchPhase(null);
     setError(''); setCaptions([]); setStatus('connecting');
     pendingCaptions.current = [];
     let stream: MediaStream | null = null;
@@ -251,6 +280,14 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         let data: Record<string, unknown>;
         try { data = JSON.parse(String(event.data)); } catch { setError('Live voice returned an unreadable event.'); end(); return; }
         if (data.type === 'ready') { clearTimeout(current.startupTimer); current.ready = true; setStatus(voiceVisualState(current, thinking.current)); }
+        else if (data.type === 'research_progress') {
+          const phase = acceptedResearchProgress(data, captured, scopeRef.current, current.researchProposalId ?? null, current.researchPhase);
+          if (phase) {
+            current.researchPhase = phase; setResearchPhase(phase);
+            if (phase === 'completed' || phase === 'unavailable') { current.responsePending = false; thinking.current = false; }
+            setStatus(voiceVisualState(current, thinking.current));
+          }
+        }
         else if (data.type === 'audio' && typeof data.data === 'string' && data.sample_rate_hertz === 24000) {
           try {
             thinking.current = voiceThinkingAfterEvent(thinking.current, 'audio');
@@ -261,6 +298,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           } catch { setError('Received audio could not be played.'); }
         } else if (data.type === 'interrupted') {
           stopPlayback(current);
+          if (current.researchPhase === 'checking_consent' || current.researchPhase === 'awaiting_consent') { current.researchPhase = null; setResearchPhase(null); }
           current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'interrupted');
           setCaptions(old => updateLiveCaptions(old, { type: 'interrupted' }));
           pendingCaptions.current = [];
@@ -268,6 +306,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           setStatus(voiceVisualState(current, thinking.current));
         }
         else if (data.type === 'transcript' && (data.direction === 'input' || data.direction === 'output') && typeof data.text === 'string') {
+          if (data.direction === 'input' && (current.researchPhase === 'completed' || current.researchPhase === 'unavailable')) { current.researchPhase = null; current.researchProposalId = null; setResearchPhase(null); }
           pendingCaptions.current = updateLiveCaptions(pendingCaptions.current, { type: 'transcript', direction: data.direction, text: data.text });
           setCaptions(old => updateLiveCaptions(old, { type: 'transcript', direction: data.direction as Caption['direction'], text: data.text as string }));
           thinking.current = voiceThinkingAfterEvent(thinking.current, 'transcript');
@@ -289,8 +328,17 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           setStatus(voiceVisualState(current, thinking.current));
         }
         else if (data.type === 'tool_result' && acceptsLiveTurn(data.result, captured, scopeRef.current)) {
-          thinking.current = voiceThinkingAfterEvent(thinking.current, 'tool_result');
-          current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'tool_result');
+          if (data.result.proposal?.kind === 'research') {
+            if (current.researchProposalId !== data.result.proposal.proposal_id) { current.researchPhase = null; setResearchPhase(null); }
+            current.researchProposalId = data.result.proposal.proposal_id;
+          }
+          if (settleLiveResearch(current, data.result)) {
+            thinking.current = false;
+            setResearchPhase(current.researchPhase ?? null);
+          } else {
+            thinking.current = voiceThinkingAfterEvent(thinking.current, 'tool_result');
+            current.responsePending = voiceResponsePendingAfterEvent(current.responsePending, 'tool_result');
+          }
           setStatus(voiceVisualState(current, thinking.current));
           onTurnRef.current(data.result, captured);
         }
@@ -329,7 +377,8 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   }
   const visible = visibleLiveVoiceState(status, error, captionScope, scope);
   const orbState = visible.error ? 'error' : visible.status;
-  const statusLabel = visible.status === 'connecting' ? 'Connecting live voice…' :
+  const researchLabel = captionScope && sameLiveScope(captionScope, scope) ? voiceResearchLabel(researchPhase) : null;
+  const statusLabel = researchLabel && visible.status !== 'idle' && visible.status !== 'connecting' && visible.status !== 'speaking' && visible.status !== 'muted' ? researchLabel : visible.status === 'connecting' ? 'Connecting live voice…' :
     visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? active.current?.responsePending && !thinking.current ? 'Finishing response…' : 'Thinking' :
     visible.status === 'speaking' ? microphoneMuted ? 'Speaking · microphone muted' : 'Speaking' :
     visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';

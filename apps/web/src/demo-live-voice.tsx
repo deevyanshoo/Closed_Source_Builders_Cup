@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
-import { AssistantOrb } from './demo-activity';
+import { ZoorqLens } from './zoorq-lens';
 import { validatedResearchResult } from './demo-research';
 
 const api = createDemoApi();
@@ -183,6 +183,11 @@ export function endActiveVoice(active: { current: ActiveVoice | null }): boolean
 }
 
 export type LiveVoiceHandle = { start: () => void; end: () => void };
+export function claimLiveVoiceStart(starting: { current: boolean }, active: boolean, disabled: boolean): boolean {
+  if (starting.current || active || disabled) return false;
+  starting.current = true;
+  return true;
+}
 type LiveVoiceProps = { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void; onExit?: () => void };
 export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown, onExit }, ref) {
   const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
@@ -192,6 +197,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [captionScope, setCaptionScope] = useState<LiveScope | null>(null);
   const active = useRef<ActiveVoice | null>(null);
+  const starting = useRef(false);
   const thinking = useRef(false);
   const generation = useRef(0);
   const scopeRef = useRef(scope);
@@ -208,6 +214,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   }
   function end() {
     generation.current += 1;
+    starting.current = false;
     thinking.current = false;
     setMicrophoneMuted(false);
     setResearchPhase(null);
@@ -219,13 +226,13 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   useEffect(() => { if (disabled) end(); }, [disabled]);
 
   async function start() {
-    if (disabled || active.current) return;
+    if (!claimLiveVoiceStart(starting, !!active.current, disabled)) return;
     const preflight = preflightLiveVoice(scope, {
       microphone: typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia,
       audioContext: typeof AudioContext !== 'undefined', webSocket: typeof WebSocket !== 'undefined',
     });
     setCaptionScope(preflight.scope);
-    if (preflight.error) { setError(preflight.error); setStatus('idle'); return; }
+    if (preflight.error) { starting.current = false; setError(preflight.error); setStatus('idle'); return; }
     const captured = scope;
     const attempt = ++generation.current;
     thinking.current = false;
@@ -365,6 +372,8 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           else setError('The microphone or demo session could not be opened. Check your device and connection, then try again.');
         } else setError('The microphone audio connection could not start. Try again.');
       }
+    } finally {
+      if (attempt === generation.current) starting.current = false;
     }
   }
   function mute() {
@@ -385,7 +394,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
   return <div className="demo-operator-voice">
     <p>Speak naturally. You can interrupt an answer by speaking.</p>
-    <div className="demo-voice-orb"><AssistantOrb state={orbState} size={64} theme="dark" /></div>
+    <div className="demo-voice-orb"><ZoorqLens state={orbState} /></div>
     <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
     <div className="demo-voice-controls">{visible.status === 'idle' && <button type="button" className="demo-button" disabled={disabled} onClick={start}>Start conversation</button>}<button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" onClick={() => { end(); onExit?.(); }}>End conversation</button></div>
     {visible.error && <p className="demo-alert" role="alert">{visible.error}</p>}

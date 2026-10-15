@@ -46,6 +46,24 @@ const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', 
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('ZOORQ workspace routes', () => {
+  it('exposes the primary live voice entry before opening operator chat', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="overview" />);
+    expect(html).toContain('id="zoorq-talk-live"');
+    expect(html).toContain('Talk to ZOORQ');
+    expect(html).toContain('aria-label="Workspace destinations"');
+  });
+  it('disables company opening until the canonical session is available', () => {
+    const html = renderToStaticMarkup(<DemoPage initialCompanies={[company, emptyCompany]} />);
+    expect(html).toMatch(/aria-label="Open Solara Cables workspace"[^>]*disabled=""/);
+  });
+  it('keeps the application navigation present at the company hub without quote controls', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    expect(html).toContain('aria-label="Workspace destinations"');
+    expect(html).toContain('Choose a company');
+    expect(html).not.toContain('demo-extract-form');
+  });
   const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
   it('opens at the company hub and keeps the saved company as a continuation', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialCompanies={[company, emptyCompany]} />);
@@ -290,7 +308,7 @@ describe('demo response state', () => {
     expect(html).toContain('order-1');
     expect(html).toContain('No runnable quote coverage.');
     expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />)).toMatch(/disabled=""[^>]*>Run comparison/);
-    expect(html).toContain('>News</button>');
+    expect(html).toContain('aria-label="News"');
   });
   it('uses generic units and covered company defaults for a runnable tonne workflow', () => {
     const generic = { ...request, quantity: '20', current_stock: '3', additional_cost_per_unit: '2', quantity_unit: 'tonne' };
@@ -341,15 +359,15 @@ describe('demo response state', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="overview" />);
     expect(html).toContain('Company overview');
-    expect(html).toContain('>News</button>');
+    expect(html).toContain('aria-label="News"');
     expect(html).toContain('Operator');
     expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toContain('current reviewed comparison');
-    expect(html).toContain('Read the signals. Review the impact. Choose your next action.');
-    expect(html).toContain('<h1>Solara Cables</h1>');
-    expect(html).toContain('Fictional company profile');
+    expect(html).toContain('Your procurement, in focus.');
+    expect(html).toContain('Solara Cables workspace</h1>');
+    expect(html).toContain('Company profiles, quotes and buyer inputs are synthetic');
     expect(html).not.toContain('context v1');
     expect(html).toContain('demo-operator-dock');
-    expect(html).toContain('Open operator chat');
+    expect(html).toContain('Type to ZOORQ');
     expect(html).toContain('Start conversation');
     expect(html).not.toContain('Stop and transcribe');
   });

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { feedPublicationLabel, filterNewsItems, rankNewsItems, selectNewsItem, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
+import { feedPublicationLabel, filterNewsItems, focusNewsTransition, rankNewsItems, selectNewsItem, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import type { CompanyProfile, NewsView } from './demo-api';
 
 const company: CompanyProfile = {
@@ -23,6 +23,54 @@ const news: NewsView = {
 describe('company news workspace', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T10:00:00Z')); });
   afterEach(() => vi.useRealTimers());
+  it('moves focus to Back on mobile open and restores the selected row on return, without moving desktop focus', () => {
+    const focused: string[] = [];
+    const back = { focus: () => focused.push('back') };
+    const row = { focus: () => focused.push('row') };
+    focusNewsTransition('detail', true, back, row);
+    focusNewsTransition('list', true, back, row);
+    expect(focused).toEqual(['back', 'row']);
+    focusNewsTransition('detail', false, back, row);
+    focusNewsTransition('list', false, back, row);
+    expect(focused).toEqual(['back', 'row']);
+  });
+  it('offers a direct background-match recovery when background headlines alone are hidden', () => {
+    const background = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', relevance_strength: 'background' as const };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [background] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toMatch(/<button[^>]*>Show background matches<\/button>/);
+    expect(html).toContain('Background headlines are hidden by the current filter');
+  });
+  it('explains when all observed dated stories exceed the maximum selectable age', () => {
+    const old = { ...news.items[0], published_at: '2026-08-01T09:00:00Z' };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [old] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('outside the past 30 days');
+    expect(html).not.toContain('Show past 30 days');
+  });
+  it('puts view switching and ranking controls in one toolbar before the first story', () => {
+    const dated = { ...news.items[0], published_at: '2026-10-14T09:00:00Z' };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [dated] }} loading={false} error="" onRefresh={() => {}} />);
+    const toolbar = html.slice(html.indexOf('<div class="demo-news-toolbar">'), html.indexOf('role="tabpanel"'));
+    expect(toolbar).toContain('For your company');
+    expect(toolbar).toContain('Global Watch');
+    expect(toolbar).toContain('Sort stories');
+    expect(toolbar).toContain('Material relevance');
+    expect(toolbar).toContain('Refresh sources');
+    expect(html.indexOf('Coverage: stale')).toBeLessThan(html.indexOf('Copper lane update'));
+  });
+  it('offers recovery for dated stories excluded by the default window without claiming no coverage', () => {
+    const old = { ...news.items[0], published_at: '2026-10-01T09:00:00Z' };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [old] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('No stories match these controls');
+    expect(html).toContain('Show past 30 days');
+    expect(html).toContain('1 company-relevant of 1 observed items');
+    expect(html).not.toContain('No observed headlines were returned');
+  });
+  it('offers an unknown-date recovery while keeping publication uncertainty explicit', () => {
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [news.items[0]] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('Include undated stories');
+    expect(html).toContain('Publication time unavailable');
+    expect(html).toContain('Coverage: stale');
+  });
   it('opens with company stories before an adjacent, inactive Global Watch tab', () => {
     const dated = { ...news.items[0], published_at: '2026-10-14T09:00:00Z' };
     const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [dated] }} loading={false} error="" onRefresh={() => {}} />);

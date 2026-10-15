@@ -11,6 +11,32 @@ import { MarkdownAnswer } from './demo-markdown';
 import './demo-assistant.css';
 
 export type OperatorScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
+export type OperatorVoiceRequest = { id: number; scope: OperatorScope; returnFocusId?: string };
+export function voiceRequestIsCurrent(request: OperatorVoiceRequest | null | undefined, scope: OperatorScope, lastId: number): boolean {
+  return !!request && Number.isSafeInteger(request.id) && request.id > lastId && sameScope(request.scope, scope);
+}
+export function claimOperatorVoiceRequest(request: OperatorVoiceRequest | null | undefined, scope: OperatorScope, handled: { current: number }): boolean {
+  if (!voiceRequestIsCurrent(request, scope, handled.current)) return false;
+  handled.current = request!.id;
+  return true;
+}
+export function routeVoiceExit(external: boolean, closeVoice: () => void, closeExternal?: () => void): void {
+  closeVoice();
+  if (external) closeExternal?.();
+}
+export function focusVoiceReturn(returnFocusId: string | undefined, find: (id: string) => Pick<HTMLElement, 'focus' | 'isConnected'> | null,
+  mic: Pick<HTMLButtonElement, 'focus' | 'disabled'> | null, text: Pick<HTMLTextAreaElement, 'focus'> | null): void {
+  const target = returnFocusId ? find(returnFocusId) : null;
+  if (target?.isConnected) target.focus();
+  else if (mic && !mic.disabled) mic.focus();
+  else text?.focus();
+}
+export function focusCurrentProposal(card: { getClientRects: () => { length: number }; focus: (options?: FocusOptions) => void } | null,
+  voiceOpen: boolean, mobile: boolean): void {
+  if (!card?.getClientRects().length) return;
+  if (voiceOpen && mobile) card.focus();
+  else card.focus({ preventScroll: true });
+}
 export type OperatorSeed = { id: number; sessionId: string; companyId: string; contextVersion: number; epoch: number; message: string };
 export function operatorSeedMessage(seed: OperatorSeed | null | undefined, scope: OperatorScope): string | null {
   const message = seed?.message;
@@ -235,12 +261,12 @@ function OperatorAnswer({ turn, scope, supplierNames }: { turn: OperatorTurn; sc
   const research = researchFromTurn(turn, scope);
   return research ? <ResearchOutcome result={research} /> : <div className="demo-operator-answer"><MarkdownAnswer text={displaySupplierMentions(turn.assistant_text, supplierNames)} /></div>;
 }
-export function VoiceConversationSurface({ open, onClose, voice, proposal, research, surfaceRef }: {
-  open: boolean; onClose: () => void; voice: ReactNode; proposal?: ReactNode; research?: ResearchResult | null; surfaceRef?: Ref<HTMLDivElement>;
+export function VoiceConversationSurface({ open, onClose, onEscape, voice, activity, proposal, research, companyLabel, surfaceRef }: {
+  open: boolean; onClose: () => void; onEscape?: () => void; voice: ReactNode; activity?: ReactNode; proposal?: ReactNode; research?: ResearchResult | null; companyLabel?: string; surfaceRef?: Ref<HTMLDivElement>;
 }) {
   function keys(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (!open) return;
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (onEscape) onEscape(); else onClose(); return; }
     if (event.key !== 'Tab') return;
     event.stopPropagation();
     const buttons = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], textarea:not(:disabled)')].filter(item => item.offsetParent !== null);
@@ -250,12 +276,12 @@ export function VoiceConversationSurface({ open, onClose, voice, proposal, resea
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   }
   return <div className="demo-voice-screen" hidden={!open} role={open ? 'dialog' : undefined} aria-modal={open ? true : undefined} aria-label={open ? 'Voice conversation' : undefined} tabIndex={-1} ref={surfaceRef} onKeyDown={keys}>
-    <div className="demo-voice-screen-header"><div><span className="demo-kicker">Live conversation</span><h2>Voice</h2></div><button type="button" className="demo-voice-back" onClick={onClose}>Back to chat</button></div>
-    <div className="demo-voice-screen-body" data-has-proposal={!!proposal || !!research}>{proposal}{research && <div className="demo-voice-research-result"><span className="demo-kicker">Public research completed</span><ResearchOutcome result={research} /><p>You can ask a follow-up by voice. This result was returned by the confirmed web request.</p></div>}{voice}</div>
+    <div className="demo-voice-screen-header"><div><span className="demo-kicker">ZOORQ operator</span><h2>Live operator</h2></div><button type="button" className="demo-voice-back" onClick={onClose}>Switch to text</button></div>
+    <div className="demo-voice-screen-body" data-has-proposal={!!proposal || !!research}><div className="demo-voice-main">{voice}</div><div className="demo-voice-context"><div className="demo-voice-context-heading"><span className="demo-kicker">{companyLabel ?? 'Current company'}</span><h3>Conversation</h3><p>Live transcript and verified workspace evidence.</p></div>{proposal}{activity}{research && <div className="demo-voice-research-result"><span className="demo-kicker">Public research completed</span><ResearchOutcome result={research} /><p>You can ask a follow-up by voice. This result was returned by the confirmed web request.</p></div>}</div></div>
   </div>;
 }
-export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, recovery = null, materials = [], seed, riskSummary, beforeTurn, onClose, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
-  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; recovery?: RecoveryView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onClose?: () => void; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
+export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, recovery = null, materials = [], seed, voiceRequest, companyName, riskSummary, beforeTurn, onClose, onExternalVoiceClose, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
+  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; recovery?: RecoveryView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; voiceRequest?: OperatorVoiceRequest | null; companyName?: string; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onClose?: () => void; onExternalVoiceClose?: () => void; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
 }) {
   const [rawState, dispatch] = useReducer(applyOperatorResult, initialState ?? { ...initialOperatorState, scope });
   const state = sameScope(rawState.scope, scope) ? rawState : {
@@ -283,16 +309,34 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
   const forceHistoryScrollRef = useRef(false);
   const historyScopeRef = useRef(`${scope.sessionId}:${scope.companyId}:${scope.contextVersion}`);
   const restoreVoiceFocusRef = useRef(false);
+  const restoreComposerFocusRef = useRef(false);
+  const voiceReturnFocusIdRef = useRef<string | undefined>(undefined);
+  const externalVoiceRef = useRef(false);
+  const lastHandledVoiceRequestId = useRef(0);
   const lastCloseSignal = useRef(closeSignal);
   const voiceScopeRef = useRef(scope);
   scopeRef.current = scope;
   function closeVoice(restoreFocus = true) {
     voiceRef.current?.end();
     restoreVoiceFocusRef.current = restoreFocus;
+    if (!restoreFocus) { voiceReturnFocusIdRef.current = undefined; restoreComposerFocusRef.current = false; }
     setVoiceOpen(false);
+  }
+  function switchToText() {
+    externalVoiceRef.current = false;
+    voiceReturnFocusIdRef.current = undefined;
+    restoreComposerFocusRef.current = true;
+    closeVoice();
+  }
+  function exitVoice() {
+    const external = externalVoiceRef.current;
+    externalVoiceRef.current = false;
+    routeVoiceExit(external, () => closeVoice(!external || !onExternalVoiceClose), onExternalVoiceClose);
   }
   function openVoice() {
     if (blocked || busy || state.overview?.available === false || voiceOpen) return;
+    externalVoiceRef.current = false;
+    voiceReturnFocusIdRef.current = undefined;
     setVoiceOpen(true);
     voiceRef.current?.start();
   }
@@ -300,19 +344,38 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     if (voiceOpen) voiceSurfaceRef.current?.focus();
     else if (restoreVoiceFocusRef.current) {
       restoreVoiceFocusRef.current = false;
-      if (micRef.current && !micRef.current.disabled) micRef.current.focus();
-      else messageRef.current?.focus();
+      const returnFocusId = voiceReturnFocusIdRef.current;
+      voiceReturnFocusIdRef.current = undefined;
+      if (restoreComposerFocusRef.current) { restoreComposerFocusRef.current = false; messageRef.current?.focus(); }
+      else focusVoiceReturn(returnFocusId, id => document.getElementById(id), micRef.current, messageRef.current);
     }
   }, [voiceOpen]);
   useEffect(() => {
+    if (!voiceRequest || blocked || busy || state.overview?.available === false) return;
+    let cancelled = false;
+    // Defer until StrictMode's effect replay has cleaned up; the mounted LiveVoice remains the sole owner.
+    queueMicrotask(() => {
+      if (cancelled || !claimOperatorVoiceRequest(voiceRequest, scopeRef.current, lastHandledVoiceRequestId)) return;
+      externalVoiceRef.current = true;
+      voiceReturnFocusIdRef.current = voiceRequest.returnFocusId;
+      setVoiceOpen(true);
+      voiceSurfaceRef.current?.focus();
+      if (!voiceOpen) voiceRef.current?.start();
+    });
+    return () => { cancelled = true; };
+  }, [voiceRequest?.id, voiceRequest?.scope.sessionId, voiceRequest?.scope.companyId, voiceRequest?.scope.contextVersion, voiceRequest?.scope.epoch,
+    scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch, blocked, busy, state.overview?.available, voiceOpen]);
+  useEffect(() => {
     if (lastCloseSignal.current !== closeSignal) {
       lastCloseSignal.current = closeSignal;
+      externalVoiceRef.current = false;
       closeVoice(false);
     }
   }, [closeSignal]);
   useEffect(() => {
     if (!sameScope(voiceScopeRef.current, scope)) {
       voiceScopeRef.current = scope;
+      externalVoiceRef.current = false;
       closeVoice(false);
     }
   }, [scope.sessionId, scope.companyId, scope.contextVersion, scope.epoch]);
@@ -438,11 +501,8 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
 
   const proposal = state.turn?.proposal;
   useEffect(() => {
-    const card = proposalRef.current;
-    if (proposal?.proposal_id && card?.getClientRects().length) {
-      card.focus({ preventScroll: true });
-    }
-  }, [proposal?.proposal_id]);
+    if (proposal?.proposal_id) focusCurrentProposal(proposalRef.current, voiceOpen, typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  }, [proposal?.proposal_id, voiceOpen]);
   const supplierNames = offers.flatMap(offer => {
     const field = offer.fields.supplier_name;
     return field && ['extracted', 'corrected'].includes(field.status) && typeof field.value === 'string' ? [field.value] : [];
@@ -457,15 +517,22 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     offers.some(offer => offer.offer_id === row.offer_id && offer.version === row.expected_version && offer.fixture_id === row.fixture_id && offer.document.filename === row.source_filename)));
 
   const mayApply = canApplyProposal(state, scope, dirty || blocked, Date.now(), plan, offers, recovery) && reviewCurrent && !busy;
-  const companyLabel = scope.companyId.split(/[-_]+/).filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') || 'Current company';
+  const companyLabel = companyName?.trim() || scope.companyId.split(/[-_]+/).filter(Boolean).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ') || 'Current company';
+  const voiceExchange = state.exchanges.at(-1);
+  const voiceActivity = voiceExchange && (voiceExchange.question || voiceExchange.answer || voiceExchange.turn) ? <article className="demo-voice-activity" aria-label="Latest operator exchange">
+    {voiceExchange.question && <div className="demo-voice-activity-question"><span className="demo-kicker">You</span><p>{voiceExchange.question}</p></div>}
+    {(voiceExchange.answer || voiceExchange.turn) && <div className="demo-voice-activity-answer"><span className="demo-kicker">ZOORQ operator</span>{voiceExchange.turn ? <OperatorAnswer turn={voiceExchange.turn} scope={scope} supplierNames={supplierNames} /> : <MarkdownAnswer text={voiceExchange.answer ?? ''} />}
+      {!!voiceExchange.turn?.evidence_ids.length && <div className="demo-voice-activity-evidence"><strong>Workspace evidence</strong><ul>{voiceExchange.turn.evidence_ids.map(id => { const evidence = resolveOperatorEvidence(id, scope, news, offers, plan); return <li key={id}>{evidence.href ? <a href={evidence.href} target="_blank" rel="noopener noreferrer">{evidence.title} ↗</a> : <span>{evidence.title}</span>}{evidence.publisher && <small>{evidence.publisher}</small>}{evidence.detail && <small>{evidence.detail}</small>}</li>; })}</ul></div>}
+    </div>}
+  </article> : null;
   const proposalCard = proposal ? (<div ref={proposalRef} className="demo-operator-proposal demo-current-proposal" role="region" aria-label="Current proposal requiring review" tabIndex={-1}><span className="demo-kicker">CURRENT proposal · Reviewable {proposal.kind} proposal</span><h3>{displaySupplierMentions(proposal.summary, supplierNames)}</h3>{!planCurrent && <p className="demo-alert">The comparison or quote versions changed. Request a new proposal.</p>}{proposal.kind === 'research' && <div className="demo-research-consent"><p><strong>Public query to share:</strong> {typeof proposal.parameters.query === 'string' ? proposal.parameters.query : 'Unavailable'}</p><p><strong>Destination:</strong> {typeof proposal.parameters.destination === 'string' ? proposal.parameters.destination : 'Unavailable'}</p><p>Only the exact public query shown above is shared with Google Search via Vertex AI after your confirmation.</p>{!researchCurrent && <p className="demo-alert">The query or destination is invalid. Request a new proposal.</p>}</div>}{proposal.kind === 'review_quotes' && <div className="demo-quote-preview"><h4>Review sample quotes</h4>{reviewPreview ? <><p>Material: {reviewPreview.materialId} · Offer IDs: {reviewPreview.offerIds.join(', ')}</p>{reviewPreview.rows.map(row => {
       const original = offers.find(offer => offer.offer_id === row.offer_id);
       return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Fixture: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested synthetic document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;
     })}</> : <p className="demo-alert">Quote preview unavailable. Request a new proposal.</p>}{!reviewCurrent && <p className="demo-alert">A quote source or version changed. Request a new review proposal.</p>}</div>}{preparedPreview && <div className="demo-draft-preview" id="demo-current-draft"><span className="demo-kicker">Prepared unsent draft · review before Apply</span><p><strong>To:</strong> {displaySupplierMentions(preparedPreview.recipient, supplierNames)}</p><p><strong>Subject: {preparedPreview.subject}</strong></p><pre>{displaySupplierMentions(preparedPreview.body, supplierNames)}</pre><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></div>}<details className="demo-assistant-trace"><summary>Exact proposed arguments</summary><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre></details><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy || !reviewCurrent} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />{proposal.kind === 'research' ? 'I reviewed the public query and want to search the web.' : 'I reviewed the exact arguments and want to apply this change to the current session.'}</label><div className="demo-proposal-actions"><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>{proposal.kind === 'research' ? 'Research web' : 'Apply reviewed proposal'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={cancel}>Cancel proposal</button></div><details className="demo-proposal-explanation"><summary>What happens next</summary><p>{proposal.kind === 'simulate_email' ? 'No external delivery. Applying records a simulated sent message in this session only.' : proposal.kind === 'review_quotes' ? 'Only these synthetic quote values will be corrected and saved after your review. No supplier message or order is sent.' : proposal.kind === 'research' ? 'Select Research web to confirm this query. Voice requests can instead be confirmed aloud after the query is read.' : 'No supplier message or order is sent.'}</p></details></div>) : null;
   return <section className="demo-company-panel demo-operator-panel demo-assistant-panel" aria-label="Operator workspace">
     <div className="demo-heading demo-assistant-heading"><div><span className="demo-kicker">Company conversation</span><h2>ZOORQ operator</h2><p><strong>{companyLabel}</strong> · Ask about this company. Review actions before they run.</p></div><div className="demo-assistant-header-actions"><span className="demo-session">{state.overview?.available === false ? 'Unavailable' : 'Ready to help'}</span>{onClose && <button type="button" className="demo-assistant-close" aria-label="Close operator chat" onClick={onClose}>Close</button>}</div></div>
-    <VoiceConversationSurface open={voiceOpen} onClose={() => closeVoice()} surfaceRef={voiceSurfaceRef} proposal={voiceOpen ? proposalCard : null} research={voiceOpen && !proposal ? latestVoiceResearch(state, scope) : null}
-      voice={<LiveVoice key={voiceRevision} ref={voiceRef} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} onExit={() => closeVoice()} />} />
+    <VoiceConversationSurface open={voiceOpen} onClose={switchToText} onEscape={exitVoice} surfaceRef={voiceSurfaceRef} companyLabel={companyLabel} activity={voiceOpen ? voiceActivity : null} proposal={voiceOpen ? proposalCard : null} research={voiceOpen && !proposal ? latestVoiceResearch(state, scope) : null}
+      voice={<LiveVoice key={voiceRevision} ref={voiceRef} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} onExit={exitVoice} />} />
     {riskSummary && <p className="demo-operator-risk"><strong>Current company risks:</strong> {riskSummary.high} high · {riskSummary.medium} medium · {riskSummary.low} low <small>Checked {riskSummary.checkedAt}</small></p>}
     {dirty && <p className="demo-alert">Edited buyer inputs will be saved to this temporary session before the next question or voice conversation. Run a new comparison before reviewing a recovery or RFQ proposal.</p>}
     {error && <p className="demo-alert" role="alert">Operator unavailable: {error}</p>}

@@ -4,6 +4,8 @@ import { createDemoApi, DemoApiError } from './demo-api';
 import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
 import { CompanyOverview, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import { OperatorPanel } from './demo-operator';
+import type { OperatorVoiceRequest } from './demo-operator';
+import gsap from 'gsap';
 import { newsActionMessage } from './demo-news-actions';
 import type { NewsAction } from './demo-news-actions';
 import { RiskMonitor, sameRiskScope } from './demo-risk-monitor';
@@ -11,7 +13,7 @@ import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
-import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
+import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceHeader, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
 import type { ProcurementStage, WorkspaceView } from './zoorq-workspace';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -299,6 +301,9 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const [preparedDrafts, setPreparedDrafts] = useState<{ scope: string; drafts: PreparedDraft[] } | null>(null);
   const [highlightFields, setHighlightFields] = useState<string[]>([]);
   const [operatorOpen, setOperatorOpen] = useState(false);
+  const [voiceRequest, setVoiceRequest] = useState<OperatorVoiceRequest | null>(null);
+  const voiceRequestIdRef = useRef(0);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const [compactViewport, setCompactViewport] = useState(false);
   const [operatorCloseSignal, setOperatorCloseSignal] = useState(0);
   const [riskSnapshot, setRiskSnapshot] = useState<{ scope: RiskScope; report: RiskReport } | null>(null);
@@ -350,6 +355,23 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const currentDefaults = company ? materialInputs(company, selectedMaterialId) : null;
   const companyOptions = companies.length ? companies : company ? [company] : [];
   const restoreOperatorFocusRef = useRef(false);
+  function rememberOperatorEntry() {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLButtonElement) operatorToggleRef.current = document.activeElement;
+  }
+  function openOperatorChat() { if (!riskScope || view === 'hub') return; rememberOperatorEntry(); setOperatorOpen(true); }
+  function requestLiveVoice() {
+    if (!riskScope || view === 'hub' || busy || riskScope.epoch !== epochRef.current) return;
+    rememberOperatorEntry();
+    setVoiceRequest({ id: ++voiceRequestIdRef.current, scope: { ...riskScope }, returnFocusId: 'zoorq-talk-live' });
+    setOperatorOpen(true);
+  }
+  useLayoutEffect(() => {
+    if (!contentRef.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const context = gsap.context(() => {
+      gsap.fromTo(contentRef.current, { opacity: .85, y: 6 }, { opacity: 1, y: 0, duration: .24, ease: 'power2.out' });
+    }, contentRef);
+    return () => context.revert();
+  }, [view, stage]);
   function navigate(nextView: WorkspaceView, nextStage: ProcurementStage = stage) {
     if (nextView === 'hub' && operatorOpen) closeOperator();
     setView(nextView); setStage(nextStage);
@@ -374,7 +396,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     sync(); media.addEventListener('change', sync);
     return () => media.removeEventListener('change', sync);
   }, []);
-  function closeOperator() { setOperatorCloseSignal(value => value + 1); restoreOperatorFocusRef.current = true; setOperatorOpen(false); }
+  function closeOperator() { setVoiceRequest(null); setOperatorCloseSignal(value => value + 1); restoreOperatorFocusRef.current = true; setOperatorOpen(false); }
   function operatorKeys(event: KeyboardEvent<HTMLElement>) {
     if (!operatorOpen) return;
     if (event.key === 'Escape') { closeOperator(); return; }
@@ -405,7 +427,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     if (changed) {
       // The operator remounts on a session change, so its local voice notice
       // would disappear. Keep recovery guidance in the persistent page.
-      setOperatorOpen(false);
+      setVoiceRequest(null); setOperatorOpen(false);
       setError('The session expired or changed. The current workspace was restored. Review the company and buyer inputs, then start conversation again.');
     }
   }
@@ -434,7 +456,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     if (view === 'outbox' || view === 'drafts') navigate('drafts');
     if (view === 'drafts') {
       closeOperator();
-      requestAnimationFrame(() => document.getElementById('demo-drafts-workspace')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      requestAnimationFrame(() => document.getElementById('demo-drafts-workspace')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }));
     }
     if (view === 'procurement') navigate('procurement', 'compare');
   }
@@ -648,12 +670,12 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   }
 
   const progress = workspaceActivity(busy, mode);
-  return <div className="demo-page zoorq-page"><header className="demo-masthead"><a className="demo-brand" href="/demo" onClick={event => { event.preventDefault(); navigate('hub'); }}>ZOORQ <span>- A product by ClosedSource</span></a><span>An ecosystem of resilience intelligence.</span></header><main>
-    {view === 'hub' && <CompanyHub companies={companyOptions} current={company} busy={busy === 'company'} onOpen={id => { if (id === company?.company_id) navigate('overview'); else void switchCompany(id); }} />}
-    {company && view !== 'hub' && <><WorkspaceNavigation company={company} view={view} onView={navigate} />{view === 'overview' && <section className="demo-workspace-heading"><div><p className="demo-kicker">{company.sector} · Fictional company profile</p><h1>{company.name}</h1></div><p>Read the signals. Review the impact. Choose your next action.</p></section>}
-      <details className="demo-boundary"><summary>Demo data and session details</summary><p>Company profiles, quotes and buyer inputs are synthetic; news is observed public data. {state.session?.persistence === 'firestore' ? 'In the same browser, your workspace and recent conversation are saved until this seven-day session expires. Recent conversation history is limited; older exchanges may be removed. Raw voice audio is not stored.' : 'Your work stays in a temporary session and may disappear when the service restarts.'} No order or supplier message is sent.</p></details>
+  return <div className="demo-page zoorq-page"><a className="zoorq-skip-link" href="#zoorq-workspace-content">Skip to workspace</a><WorkspaceNavigation company={view === 'hub' ? undefined : company} view={view} onView={navigate} disabled={busy === 'company'} /><main><WorkspaceHeader company={view === 'hub' ? undefined : company} view={view} onTalk={requestLiveVoice} onChat={openOperatorChat} onHub={() => navigate('hub')} disabled={!!busy || !riskScope} /><div id="zoorq-workspace-content" className="zoorq-workspace-content" ref={contentRef}>{company && view !== 'hub' && <h1 className="sr-only">{company.name} workspace</h1>}
+    {view === 'hub' && <CompanyHub companies={companyOptions} current={company} busy={busy === 'company' || !state.session?.company || state.session.context_version === undefined} onOpen={id => { if (id === company?.company_id) navigate('overview'); else void switchCompany(id); }} />}
+    {company && view !== 'hub' && <>
+
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
-      {view === 'overview' && <WorkspaceOverview company={company} news={state.news} quoteCount={state.offers.length} onView={navigate} />}
+      {view === 'overview' && <WorkspaceOverview company={company} news={state.news} quoteCount={state.offers.length} onView={navigate} onTalk={requestLiveVoice} />}
       {view === 'inventory' && <><CompanyOverview company={company} /><section className="zoorq-risk-disclosure"><button type="button" className="demo-link" aria-expanded={riskOpen} onClick={() => setRiskOpen(value => !value)}>{riskOpen ? 'Hide portfolio risk monitor' : 'Show portfolio risk monitor'}</button></section></>}
       {view === 'drafts' && <><DraftsWorkspace company={company} drafts={preparedDrafts?.scope === `${state.session?.session_id}:${company.company_id}:${state.session?.context_version}` ? preparedDrafts.drafts : state.session?.drafts ?? []} rfq={state.rfq} messages={state.session?.simulated_outbox ?? []} dirty={state.dirty} onDownloadRfq={downloadRfq} /><OutboxWorkspace company={company} messages={state.session?.simulated_outbox ?? []} /></>}
       {view === 'procurement' && <><div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div><ProcurementNavigation stage={stage} onStage={next => navigate('procurement', next)} /></>}
@@ -704,5 +726,5 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       {state.rfq && <div className="demo-draft"><p><strong>Draft for {supplierDisplayName(state.rfq.supplier)}</strong> · {state.rfq.status.replace('_', ' ')} · {(state.rfq.quantity ?? state.rfq.quantity_kg) && `${state.rfq.quantity ?? state.rfq.quantity_kg} ${state.rfq.quantity_unit ?? 'kg'} · `}current reviewed comparison</p><pre>{displaySupplierMentions(state.rfq.text, [state.rfq.supplier])}</pre><div className="demo-actions"><button type="button" className="demo-button" disabled={state.dirty || !!busy} onClick={downloadRfq}>Download RFQ draft</button><button type="button" className="demo-link" onClick={() => navigate('drafts')}>View saved draft →</button></div></div>}
     </section>}
     {view === 'inventory' && <section className="demo-end"><div><span className="demo-kicker">Your session</span><h2>Keep the evidence.</h2><p>Download the quote, corrections, assumptions and comparison as JSON. Starting over clears this session only.</p>{state.dirty && <p>Run a new comparison before exporting the report for these inputs.</p>}</div><div className="demo-end-actions"><button className="demo-button" type="button" disabled={!state.session || state.dirty || !!busy} onClick={exportReport}>Download JSON report</button><button className="demo-link" type="button" disabled={!state.session || busy === 'reset'} onClick={reset}>Start a new session</button></div></section>}
-  </main>{company && state.session && state.session.context_version !== undefined && <>{view !== 'hub' && <button ref={operatorToggleRef} type="button" className="demo-operator-toggle" aria-expanded={operatorOpen} aria-controls="demo-operator-dock" onClick={() => operatorOpen ? closeOperator() : setOperatorOpen(true)}>{operatorOpen ? 'Close operator' : 'Open operator chat'}</button>}{operatorOpen && view !== 'hub' && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} hidden={view === 'hub'} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen && compactViewport ? 'dialog' : 'complementary'} aria-modal={operatorOpen && compactViewport ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel onClose={closeOperator} closeSignal={operatorCloseSignal} key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} recovery={state.recovery} materials={company.materials} seed={operatorSeed} riskSummary={currentRisks ? { high: currentRiskAlerts.filter(item => item.severity === 'high').length, medium: currentRiskAlerts.filter(item => item.severity === 'medium').length, low: currentRiskAlerts.filter(item => item.severity === 'low').length, checkedAt: currentRisks.checked_at } : null} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onPreparedDrafts={(drafts, captured) => { if (state.session?.session_id === captured.sessionId && company.company_id === captured.companyId && state.session.context_version === captured.contextVersion && state.epoch === captured.epoch) setPreparedDrafts({ scope: `${captured.sessionId}:${captured.companyId}:${captured.contextVersion}`, drafts }); }} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
+  </div>{company && view !== 'hub' && <><details className="demo-boundary"><summary>Demo data and session details</summary><p>Company profiles, quotes and buyer inputs are synthetic; news is observed public data. {state.session?.persistence === 'firestore' ? 'In the same browser, your workspace and recent conversation are saved until this seven-day session expires. Recent conversation history is limited; older exchanges may be removed. Raw voice audio is not stored.' : 'Your work stays in a temporary session and may disappear when the service restarts.'} No order or supplier message is sent.</p></details></>}</main>{company && state.session && state.session.context_version !== undefined && <>{operatorOpen && view !== 'hub' && <button type="button" className="demo-operator-scrim" aria-label="Close operator chat" onClick={closeOperator} />}<aside ref={operatorDockRef} hidden={view === 'hub'} id="demo-operator-dock" className={`demo-operator-dock ${operatorOpen ? 'is-open' : ''}`} role={operatorOpen && compactViewport ? 'dialog' : 'complementary'} aria-modal={operatorOpen && compactViewport ? true : undefined} aria-label="Operator chat" tabIndex={-1} onKeyDown={operatorKeys}><OperatorPanel companyName={company.name} onExternalVoiceClose={closeOperator} voiceRequest={voiceRequest ?? undefined} onClose={closeOperator} closeSignal={operatorCloseSignal} key={`${state.session.session_id}:${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch }} csrf={state.session.csrf_token} news={state.news} offers={state.offers} plan={state.plan} recovery={state.recovery} materials={company.materials} seed={operatorSeed} riskSummary={currentRisks ? { high: currentRiskAlerts.filter(item => item.severity === 'high').length, medium: currentRiskAlerts.filter(item => item.severity === 'medium').length, low: currentRiskAlerts.filter(item => item.severity === 'low').length, checkedAt: currentRisks.checked_at } : null} dirty={state.dirty} blocked={!!busy} beforeTurn={beforeOperatorTurn} onSession={restoreOperatorSession} onNavigate={navigateOperator} onPreparedDrafts={(drafts, captured) => { if (state.session?.session_id === captured.sessionId && company.company_id === captured.companyId && state.session.context_version === captured.contextVersion && state.epoch === captured.epoch) setPreparedDrafts({ scope: `${captured.sessionId}:${captured.companyId}:${captured.contextVersion}`, drafts }); }} onUnknown={clearUnknownOperatorSession} /></aside></> }<footer className="demo-footer"><span>Closed Source / AI Builder Cup</span><span>Synthetic decisions · No forecast recommendation · No customer savings claim</span></footer></div>;
 }

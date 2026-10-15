@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView, RecoveryView } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, confirmVoiceTransition, focusValidOperatorSeed, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, claimOperatorVoiceRequest, confirmVoiceTransition, focusCurrentProposal, focusValidOperatorSeed, focusVoiceReturn, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, routeVoiceExit, scopedPreparedDrafts, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface, voiceRequestIsCurrent } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,72 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('places a current voice proposal before earlier activity and scrolls mobile focus to consent', () => {
+    const html = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>}
+      activity={<article aria-label="Latest operator exchange">Earlier answer</article>}
+      proposal={<div role="region" aria-label="Current proposal requiring review">Public query to share: port status</div>} />);
+    expect(html.indexOf('Current proposal requiring review')).toBeLessThan(html.indexOf('Latest operator exchange'));
+    const focus = vi.fn();
+    const card = { getClientRects: () => ({ length: 1 }), focus };
+    focusCurrentProposal(card, true, true);
+    expect(focus).toHaveBeenCalledWith();
+    focus.mockClear();
+    focusCurrentProposal(card, true, false);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+  it('starts only a newer request for the exact session, company, context and epoch', () => {
+    const request = { id: 12, scope, returnFocusId: 'talk-button' };
+    expect(voiceRequestIsCurrent(request, scope, 11)).toBe(true);
+    expect(voiceRequestIsCurrent(request, scope, 12)).toBe(false);
+    expect(voiceRequestIsCurrent({ ...request, id: 0 }, scope, 0)).toBe(false);
+    for (const changed of [
+      { ...scope, sessionId: 's2' }, { ...scope, companyId: 'other' },
+      { ...scope, contextVersion: 2 }, { ...scope, epoch: 1 },
+    ]) expect(voiceRequestIsCurrent(request, changed, 11)).toBe(false);
+  });
+  it('claims a request once per mounted panel and permits the same ID after a real remount', () => {
+    const request = { id: 12, scope, returnFocusId: 'zoorq-talk-live' };
+    const firstMount = { current: 0 }, secondMount = { current: 0 };
+    expect(claimOperatorVoiceRequest(request, scope, firstMount)).toBe(true);
+    expect(claimOperatorVoiceRequest(request, scope, firstMount)).toBe(false);
+    expect(claimOperatorVoiceRequest(request, scope, secondMount)).toBe(true);
+    expect(claimOperatorVoiceRequest(request, { ...scope, epoch: 1 }, secondMount)).toBe(false);
+  });
+  it('routes only external End or Escape to the outer dock close', () => {
+    const closeVoice = vi.fn(), closeDock = vi.fn();
+    routeVoiceExit(false, closeVoice, closeDock);
+    expect(closeVoice).toHaveBeenCalledOnce();
+    expect(closeDock).not.toHaveBeenCalled();
+    routeVoiceExit(true, closeVoice, closeDock);
+    expect(closeVoice).toHaveBeenCalledTimes(2);
+    expect(closeDock).toHaveBeenCalledOnce();
+    const switchToText = vi.fn(), escape = vi.fn();
+    const surface = VoiceConversationSurface({ open: true, onClose: switchToText, onEscape: escape, voice: <p>Listening</p>, companyLabel: 'Solara Cables' });
+    surface.props.children[0].props.children[1].props.onClick();
+    surface.props.onKeyDown({ key: 'Escape', preventDefault: () => {}, stopPropagation: () => {} });
+    expect(switchToText).toHaveBeenCalledOnce();
+    expect(escape).toHaveBeenCalledOnce();
+    expect(renderToStaticMarkup(surface)).toContain('Solara Cables');
+  });
+  it('shows a server-backed answer and its source once while voice is closed', () => {
+    const answered = { ...turn, status: 'completed' as const, proposal: null, assistant_text: 'Copper needs review.' };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} news={news}
+      initialState={{ ...initialOperatorState, scope, exchanges: [{ id: 1, question: 'What needs review?', turn: answered }] }}
+      onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Copper needs review.');
+    expect(html).toContain('href="https://example.org/article"');
+    expect(html).toContain('Example News');
+    expect(html.match(/Copper needs review\./g)).toHaveLength(1);
+  });
+  it('returns focus to the global Talk trigger after external voice closes, with a local fallback', () => {
+    const calls: string[] = [];
+    const target = { isConnected: true, focus: () => { calls.push('global'); } };
+    const mic = { disabled: false, focus: () => { calls.push('mic'); } };
+    const text = { focus: () => { calls.push('text'); } };
+    focusVoiceReturn('global-talk', () => target, mic, text);
+    focusVoiceReturn('removed-talk', () => null, mic, text);
+    expect(calls).toEqual(['global', 'mic']);
+  });
   it('names the selected company in a compact branded header and keeps close available', () => {
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
       onClose={() => {}} onSession={() => {}} onUnknown={() => {}} />);

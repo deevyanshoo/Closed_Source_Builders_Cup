@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { CompanyProfile, GlobalWatch, NewsItem, NewsView, SimulatedOutboxMessage } from './demo-api';
 import { ActivityIndicator } from './demo-activity';
 import { supplierDisplayName } from './demo-display';
@@ -57,6 +57,9 @@ export const filterNewsItems = (items: NewsItem[], material: string, category: s
     return stamp <= now && stamp >= now - ageMs[options.age ?? '7d'];
   });
 export const selectNewsItem = (id: string | null, items: NewsItem[]): NewsItem | null => items.find(item => item.item_id === id) ?? items[0] ?? null;
+export const focusNewsTransition = (destination: 'detail' | 'list', mobileBackVisible: boolean, back: { focus: () => void } | null, row: { focus: () => void } | null) => {
+  if (mobileBackVisible) (destination === 'detail' ? back : row)?.focus();
+};
 const briefAge = (item: NewsItem, now: number) => {
   const stamp = publishedTime(item);
   if (stamp === null) return 'Publication time unavailable';
@@ -71,6 +74,14 @@ function GlobalWatchPanel({ watch }: { watch?: GlobalWatch }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readingEvent, setReadingEvent] = useState(false);
   const selected = watch?.events.find(event => event.item_id === selectedId) ?? watch?.events[0];
+  const backRef = useRef<HTMLButtonElement>(null);
+  const selectedRowRef = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef<'detail' | 'list' | null>(null);
+  useLayoutEffect(() => {
+    if (!pendingFocus.current) return;
+    focusNewsTransition(pendingFocus.current, backRef.current !== null && window.getComputedStyle(backRef.current).display !== 'none', backRef.current, selectedRowRef.current);
+    pendingFocus.current = null;
+  }, [readingEvent, selectedId]);
   return <section className="demo-global-watch" aria-label="Global Watch">
     <div className="demo-global-watch-head"><div><span className="demo-kicker">Shared public event discovery</span><h3>Global Watch</h3></div><span className="demo-global-watch-state">{watch?.status ?? 'unavailable'}</span></div>
     <p>Conflict, chokepoint, port and trade restriction headlines are context for review. A headline alone does not confirm a route closure, supplier delay or price change.</p>
@@ -80,11 +91,11 @@ function GlobalWatchPanel({ watch }: { watch?: GlobalWatch }) {
         <p key={source.source_id}><strong>{source.name}: {source.state}</strong> · checked {dateLabel(source.last_checked_at)}{source.reason ? ` · ${source.reason}` : ''}</p>)}</div></details>}
       <div className="demo-global-watch-layout" data-reading={readingEvent}>{watch.events.length ? <>
         <div className="demo-global-watch-events" aria-label="Global events">{watch.events.map(event =>
-          <button key={event.item_id} type="button" className="demo-global-watch-row" aria-current={selected?.item_id === event.item_id ? 'true' : undefined} onClick={() => { setSelectedId(event.item_id); setReadingEvent(true); }}>
+          <button key={event.item_id} ref={selected?.item_id === event.item_id ? selectedRowRef : undefined} type="button" className="demo-global-watch-row" aria-current={selected?.item_id === event.item_id ? 'true' : undefined} onClick={() => { pendingFocus.current = 'detail'; setSelectedId(event.item_id); setReadingEvent(true); }}>
             <span className="demo-global-watch-meta"><span>{event.topic}</span><span>{event.exposure.kind === 'background' ? 'background context' : `${event.exposure.kind} exposure to check`}</span></span>
             <strong>{event.title}</strong><span>{event.publisher ?? event.provider} · {feedPublicationLabel(event.published_at)}</span>
           </button>)}</div>
-        {selected && <article className="demo-global-watch-event" aria-label="Selected global event"><button type="button" className="demo-news-back" onClick={() => setReadingEvent(false)}>← Back to events</button>
+        {selected && <article className="demo-global-watch-event" aria-label="Selected global event"><button ref={backRef} type="button" className="demo-news-back" onClick={() => { pendingFocus.current = 'list'; setReadingEvent(false); }}>← Back to events</button>
           <div className="demo-global-watch-meta"><span>{selected.topic}</span><span>{selected.exposure.kind === 'background' ? 'background context' : `${selected.exposure.kind} exposure to check`}</span></div>
           <h4>{selected.title}</h4><p>{selected.exposure.reason}</p><p><strong>Next check:</strong> {selected.exposure.next_action}</p>
           <p className="demo-global-watch-clock">Publisher listed: {selected.publisher ?? 'Unavailable'} · Discovered via: {selected.provider} · Published: {feedPublicationLabel(selected.published_at)} · First seen: {dateLabel(selected.first_seen_at)} · Retrieved: {dateLabel(selected.retrieved_at)}</p>
@@ -108,6 +119,9 @@ export function CompanyOverview({ company }: { company: CompanyProfile }) {
 
 export function NewsWorkspace({ company, view, loading, error, onRefresh, onAction }: { company: CompanyProfile; view: NewsView | null; loading: boolean; error: string; onRefresh: () => void; onAction?: (action: 'ask' | 'inventory' | 'draft' | 'watch' | 'research', item: NewsItem) => void }) {
   const tabsId = useId();
+  const backRef = useRef<HTMLButtonElement>(null);
+  const selectedRowRef = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef<'detail' | 'list' | null>(null);
   const [newsView, setNewsView] = useState<'company' | 'global'>('company');
   const [readingStory, setReadingStory] = useState(false);
   const [material, setMaterial] = useState('all');
@@ -118,6 +132,11 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh, onActi
   const [includeBackground, setIncludeBackground] = useState(false);
   const [showUnmatched, setShowUnmatched] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!pendingFocus.current) return;
+    focusNewsTransition(pendingFocus.current, backRef.current !== null && window.getComputedStyle(backRef.current).display !== 'none', backRef.current, selectedRowRef.current);
+    pendingFocus.current = null;
+  }, [readingStory, selectedId]);
   useEffect(() => { setNewsView('company'); setReadingStory(false); setSelectedId(null); setMaterial('all'); setCategory('all'); setAge('7d'); setSort('relevant'); setIncludeUnknown(false); setIncludeBackground(false); setShowUnmatched(false); }, [company.company_id, view?.context_version]);
   const categories = [...new Set(view?.items.map(item => item.category) ?? [])].sort();
   const relevant = (view?.items ?? []).filter(item => newsFit(item) !== 'unmatched');
@@ -125,6 +144,11 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh, onActi
   const now = Date.now();
   const visible = rankNewsItems(filterNewsItems(view?.items ?? [], material, category, showUnmatched, { age, now, includeUnknown, includeBackground }), sort);
   const selected = selectNewsItem(selectedId, visible) as EnrichedNewsItem | null;
+  const matchingScope = (view?.items ?? []).filter(item => (material === 'all' || item.matched_materials.includes(material)) && (category === 'all' || item.category === category) && (showUnmatched || newsFit(item) !== 'unmatched'));
+  const hasOlderStories = matchingScope.some(item => { const stamp = publishedTime(item); return stamp !== null && stamp <= now && stamp < now - ageMs[age] && stamp >= now - ageMs['30d']; });
+  const hasUndatedStories = matchingScope.some(item => publishedTime(item) === null);
+  const hasBackgroundStories = !includeBackground && matchingScope.some(item => newsFit(item) === 'background');
+  const olderThanThirtyOnly = matchingScope.length > 0 && matchingScope.every(item => { const stamp = publishedTime(item); return stamp !== null && stamp < now - ageMs['30d']; });
   const collectionLabel = view?.collection?.mode === 'manual' || view?.collection?.status === 'manual' ? 'Manual source check' : view?.collection?.mode === 'live_fallback' || view?.collection?.status === 'live_fallback' ? 'Live source check' : 'Hourly background collection';
   const sourceProblem = view?.sources.some(source => source.state === 'stale' || source.state === 'unavailable');
   const chooseView = (next: 'company' | 'global') => { setNewsView(next); setReadingStory(false); };
@@ -136,30 +160,33 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh, onActi
     event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-news-view="${next}"]`)?.focus();
   };
   return <section className="demo-company-panel demo-news-panel" aria-label="Live news workspace">
-    <div className="demo-heading"><div><span className="demo-kicker">Observed public signals · {company.name}</span><h2>News inbox</h2></div><button type="button" className="demo-button" disabled={loading} onClick={onRefresh}>{loading ? 'Checking sources…' : 'Refresh sources'}</button></div>
+    <div className="demo-heading"><div><span className="demo-kicker">Observed public signals · {company.name}</span><h2>News inbox</h2><p className="demo-news-intro">Review signals for your materials and supply routes. Sources may provide headline metadata only.</p></div></div>
     {error && <div className="demo-alert" role="alert">Source check unavailable: {error}. Previously displayed results, if any, keep their recorded check time.</div>}
+    {loading && <ActivityIndicator state="searching" label="Checking public news sources" detail={view ? `The items below are from the previous check at ${dateLabel(view.checked_at)}.` : 'Fetching observed headline metadata and source health for this company.'} />}
+    {view && <><div className="demo-news-status"><strong>Coverage: {view.cache_state}</strong><span>Checked {dateLabel(view.checked_at)}</span><span>{relevant.length} company-relevant of {view.items.length} observed items · {directCount} direct material {directCount === 1 ? 'match' : 'matches'} · {relevant.length - directCount} indirect {relevant.length - directCount === 1 ? 'match' : 'matches'}</span></div>
+      {(view.cache_state === 'stale' || sourceProblem || view.collection?.status === 'partial') && <p className="demo-news-warning" role="status">Coverage may be incomplete or dated. Read source and collection times before acting.</p>}</>}
+    <div className="demo-news-toolbar">
     <div className="demo-news-tabs" role="tablist" aria-label="News views">
       <button type="button" role="tab" id={`${tabsId}-company-tab`} data-news-view="company" aria-controls={`${tabsId}-company-panel`} aria-selected={newsView === 'company'} tabIndex={newsView === 'company' ? 0 : -1} onClick={() => chooseView('company')} onKeyDown={onTabKeyDown}>For your company</button>
       <button type="button" role="tab" id={`${tabsId}-global-tab`} data-news-view="global" aria-controls={`${tabsId}-global-panel`} aria-selected={newsView === 'global'} tabIndex={newsView === 'global' ? 0 : -1} onClick={() => chooseView('global')} onKeyDown={onTabKeyDown}>Global Watch</button>
     </div>
+    <div className="demo-news-toolbar-actions"><button type="button" className="demo-button demo-news-refresh" disabled={loading} onClick={onRefresh}>{loading ? 'Checking sources…' : 'Refresh sources'}</button></div>
+    {newsView === 'company' && view && <div className="demo-news-inbox-head" data-reading={readingStory}>
+      <div className="demo-news-filters"><label><span>Sort stories</span><select aria-label="Sort stories" value={sort} onChange={event => setSort(event.target.value as NewsSort)}><option value="relevant">Most relevant</option><option value="newest">Newest published</option></select></label><label><span>Story age</span><select aria-label="Story age" value={age} onChange={event => setAge(event.target.value as NewsAge)}><option value="24h">Past 24 hours</option><option value="7d">Past 7 days</option><option value="30d">Past 30 days</option></select></label><label><span>Material</span><select aria-label="Material relevance" value={material} onChange={event => setMaterial(event.target.value)}><option value="all">All materials</option>{company.materials.map(item => <option key={item.material_id} value={item.material_id}>{item.name}</option>)}</select></label></div>
+      <details className="demo-news-filter-options"><summary>More filters</summary><div className="demo-news-coverage-toggles"><label><span>Category</span><select aria-label="Story category" value={category} onChange={event => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map(item => <option key={item} value={item}>{item}</option>)}</select></label><label><input type="checkbox" checked={includeUnknown} onChange={event => setIncludeUnknown(event.target.checked)} />Include unknown publication dates</label><label><input type="checkbox" checked={includeBackground} onChange={event => setIncludeBackground(event.target.checked)} />Show background matches</label><label><input type="checkbox" checked={showUnmatched} onChange={event => setShowUnmatched(event.target.checked)} />Show unmatched headlines</label></div></details>
+      <p className="demo-news-result-count">{visible.length} stories shown · {age === '24h' ? 'past 24 hours' : age === '7d' ? 'past 7 days' : 'past 30 days'}</p></div>}
+    </div>
     <div role="tabpanel" id={`${tabsId}-company-panel`} aria-labelledby={`${tabsId}-company-tab`} aria-label="For your company" hidden={newsView !== 'company'}>
-    <p className="demo-news-intro">Company signals ranked by relevance and publication time.</p>
-    {loading && <ActivityIndicator state="searching" label="Checking public news sources" detail={view ? `The items below are from the previous check at ${dateLabel(view.checked_at)}.` : 'Fetching observed headline metadata and source health for this company.'} />}
     {!view ? <p className="demo-alert">{loading ? 'Checking reviewed public sources…' : 'News coverage unavailable. No synthetic articles are substituted.'}</p> : <>
-      <div className="demo-news-status"><strong>Coverage: {view.cache_state}</strong><span>Checked {dateLabel(view.checked_at)}</span><span>{relevant.length} company-relevant of {view.items.length} observed items · {directCount} direct material {directCount === 1 ? 'match' : 'matches'} · {relevant.length - directCount} indirect {relevant.length - directCount === 1 ? 'match' : 'matches'}</span></div>
-      {(view.cache_state === 'stale' || sourceProblem || view.collection?.status === 'partial') && <p className="demo-news-warning">Coverage may be incomplete or dated. Read source and collection times before acting.</p>}
-        <div className="demo-news-inbox-head" data-reading={readingStory}><div className="demo-news-age" role="group" aria-label="Story age">{(['24h', '7d', '30d'] as NewsAge[]).map(value => <button key={value} type="button" aria-pressed={age === value} onClick={() => setAge(value)}>{value === '24h' ? '24 hours' : value === '7d' ? '7 days' : '30 days'}</button>)}</div>
-          <div className="demo-news-filters"><label><span>Sort stories</span><select aria-label="Sort stories" value={sort} onChange={event => setSort(event.target.value as NewsSort)}><option value="relevant">Most relevant</option><option value="newest">Newest published</option></select></label><label><span>Material</span><select aria-label="Material relevance" value={material} onChange={event => setMaterial(event.target.value)}><option value="all">All materials</option>{company.materials.map(item => <option key={item.material_id} value={item.material_id}>{item.name}</option>)}</select></label><label><span>Category</span><select value={category} onChange={event => setCategory(event.target.value)}><option value="all">All categories</option>{categories.map(item => <option key={item} value={item}>{item}</option>)}</select></label></div>
-          <details className="demo-news-filter-options"><summary>More filters</summary><div className="demo-news-coverage-toggles"><label><input type="checkbox" checked={includeUnknown} onChange={event => setIncludeUnknown(event.target.checked)} />Include unknown publication dates</label><label><input type="checkbox" checked={includeBackground} onChange={event => setIncludeBackground(event.target.checked)} />Show background matches</label><label><input type="checkbox" checked={showUnmatched} onChange={event => setShowUnmatched(event.target.checked)} />Show unmatched headlines</label></div></details>
-          <p className="demo-news-result-count">{visible.length} stories shown · {age === '24h' ? 'past 24 hours' : age === '7d' ? 'past 7 days' : 'past 30 days'}</p></div>
       <div className="demo-news-layout" data-reading={readingStory}><div className="demo-news-inbox">
 
         {relevant.length === 0 && view.items.length > 0 && <p className="demo-news-note">{view.items.length} observed headlines have no recorded company match. Show unmatched headlines to inspect them without implying relevance.</p>}
-        <div className="demo-news-list" aria-label="Ranked news stories">{visible.length ? visible.map(item => <button key={item.item_id} type="button" className="demo-news-row" aria-current={selected?.item_id === item.item_id ? 'true' : undefined} onClick={() => { setSelectedId(item.item_id); setReadingStory(true); }}><span className="demo-news-row-top"><span className={`demo-news-fit demo-news-fit-${newsFit(item)}`}>{newsFit(item)} fit</span><span>{briefAge(item, now)}</span></span><strong>{item.title}</strong><span className="demo-news-row-meta">{item.publisher ?? item.provider} · {item.category} · {item.matched_materials.join(', ') || item.matched_routes.join(', ') || 'Company context'}</span></button>) : <p className="demo-news-empty">{view.items.length === 0 ? 'No observed headlines were returned by the checked sources.' : 'No stories match these controls. Try 30 days, include unknown dates, or inspect broader coverage.'}</p>}</div>
+        <div className="demo-news-list" aria-label="Ranked news stories">{visible.length ? visible.map(item => <button key={item.item_id} ref={selected?.item_id === item.item_id ? selectedRowRef : undefined} type="button" className="demo-news-row" aria-current={selected?.item_id === item.item_id ? 'true' : undefined} onClick={() => { pendingFocus.current = 'detail'; setSelectedId(item.item_id); setReadingStory(true); }}><span className="demo-news-row-top"><span className={`demo-news-fit demo-news-fit-${newsFit(item)}`}>{newsFit(item)} fit</span><span>{briefAge(item, now)}</span></span><strong>{item.title}</strong><span className="demo-news-row-meta">{item.publisher ?? item.provider} · {item.category} · {item.matched_materials.join(', ') || item.matched_routes.join(', ') || 'Company context'}</span></button>) : <div className="demo-news-empty"><p>{view.items.length === 0 ? 'No observed headlines were returned by the checked sources.' : olderThanThirtyOnly ? 'Observed matching headlines are outside the past 30 days. Review source health and collection times below.' : 'No stories match these controls. Use the recovery actions or More filters to inspect broader coverage.'}</p>{view.items.length > 0 && <div className="demo-news-empty-actions">{hasOlderStories && age !== '30d' && <button type="button" onClick={() => setAge('30d')}>Show past 30 days</button>}{hasUndatedStories && !includeUnknown && <button type="button" onClick={() => setIncludeUnknown(true)}>Include undated stories</button>}{hasBackgroundStories && <button type="button" onClick={() => setIncludeBackground(true)}>Show background matches</button>}{material !== 'all' || category !== 'all' ? <button type="button" onClick={() => { setMaterial('all'); setCategory('all'); }}>Clear material and category</button> : null}{relevant.length === 0 && !showUnmatched && <button type="button" onClick={() => setShowUnmatched(true)}>Inspect unmatched headlines</button>}</div>}{hasUndatedStories && !includeUnknown && <p>Publication time unavailable for some collected headlines.</p>}{hasBackgroundStories && <p>Background headlines are hidden by the current filter.</p>}</div>}</div>
       </div><article className="demo-news-detail" aria-label="Selected story">{selected ? <>
-        <button type="button" className="demo-news-back" onClick={() => setReadingStory(false)}>← Back to stories</button>
+        <button ref={backRef} type="button" className="demo-news-back" onClick={() => { pendingFocus.current = 'list'; setReadingStory(false); }}>← Back to stories</button>
         <div className="demo-news-detail-kicker"><span>{newsFit(selected)} fit</span><span>{selected.category}</span><span>{selected.provider}</span></div><h3>{selected.title}</h3><p className="demo-news-lead">{selected.summary || selected.implication}</p>
-        <div className="demo-news-detail-meta"><span>{selected.publisher ?? 'Publisher unavailable'}</span><span>{briefAge(selected, now)}</span><span>First seen {dateLabel(selected.first_seen_at)}</span></div>
+        <div className="demo-news-detail-meta"><span>{selected.publisher ?? 'Publisher unavailable'}</span><span>{briefAge(selected, now)}</span><span>{selected.article?.status === 'enriched' && selected.article.excerpt ? 'Bounded article excerpt' : 'Headline metadata only'}</span><span>First seen {dateLabel(selected.first_seen_at)}</span></div>
+        {sourceHref(selected.url) && <p className="demo-news-original"><a href={sourceHref(selected.url)!} target="_blank" rel="noopener noreferrer">Read original source ↗</a></p>}
         {onAction && <><div className="demo-news-actions"><button type="button" className="demo-button" onClick={() => onAction('ask', selected)}>Ask operator</button></div><details className="demo-news-secondary"><summary>More actions</summary><div className="demo-news-actions">{(newsFit(selected) === 'strong' || newsFit(selected) === 'related') && selected.matched_materials.some(id => company.materials.some(materialItem => materialItem.material_id === id)) && <><button type="button" onClick={() => onAction('inventory', selected)}>Check inventory</button><button type="button" onClick={() => onAction('draft', selected)}>Prepare unsent draft</button></>}{newsFit(selected) !== 'unmatched' && <button type="button" onClick={() => onAction('watch', selected)}>Watch topic</button>}<button type="button" onClick={() => onAction('research', selected)}>Research source</button></div></details></>}
         <section><h4>What happened</h4><p>{selected.article?.status === 'enriched' && selected.article.excerpt ? selected.article.excerpt : selected.summary || 'Only headline metadata is available. Read the original source before drawing conclusions.'}</p>{selected.article && <p className="demo-news-evidence-state">Article evidence: {selected.article.status}{selected.article.status === 'enriched' ? <>{selected.article.published_at && <> · Article page date: {dateLabel(selected.article.published_at)}</>} · Article retrieved: {dateLabel(selected.article.fetched_at)} via {selected.article.method}</> : selected.article.reason ? ` · ${selected.article.reason}` : ''}</p>}</section>
         <section><h4>Why it may matter</h4><p>{selected.implication}</p><p>Conditional implication ({selected.implication_confidence}). This is not a verified company impact.</p></section>

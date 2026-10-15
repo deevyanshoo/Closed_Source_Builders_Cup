@@ -1,7 +1,7 @@
 """News brief uses the same observed view as the News Workspace."""
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 
 import pytest
@@ -168,11 +168,30 @@ def test_brief_skips_explicit_background_and_prioritizes_strong_within_direct_ma
     strong['matched_materials'] = ['naphtha']
     strong['relevance_strength'] = 'strong'
     strong['source_reliability'] = 'unverified'
-    cached['items'] = [background, related, strong]
+    ancient = item('march-shortage', title='March 17 2026 shortage of naphtha',
+                   published_at='2026-03-17T09:00:00Z')
+    ancient['matched_materials'] = ['naphtha']
+    ancient['relevance_strength'] = 'strong'
+    cached['items'] = [background, related, strong, ancient]
     result = build_news_brief(company, cached, now=NOW)
     assert [row['item_id'] for row in result['headlines']] == ['physical-restart', 'related-price']
     assert result['headlines'][0]['source_reliability'] == 'unverified'
     assert result['headlines'][0]['published_at'] == '2026-10-14T09:00:00Z'
+
+
+def test_company_brief_seven_day_boundary_keeps_unknown_dates_and_future_guard():
+    current = view()
+    boundary = item('at-boundary', published_at=(NOW - timedelta(days=7)).isoformat())
+    too_old = item('one-second-old', published_at=(NOW - timedelta(days=7, seconds=1)).isoformat())
+    unknown = item('unknown-date', published_at=None)
+    future = item('future-date', published_at=(NOW + timedelta(seconds=1)).isoformat())
+    current['items'] = [boundary, too_old, unknown, future]
+    result = build_news_brief(COMPANY, current, now=NOW)
+    by_id = {row['item_id']: row for row in result['headlines']}
+    assert set(by_id) == {'at-boundary', 'unknown-date', 'future-date'}
+    assert by_id['at-boundary']['published_at'] == boundary['published_at']
+    assert by_id['unknown-date']['published_at'] is None
+    assert by_id['future-date']['published_at'] is None
 
 
 def test_stale_and_empty_coverage_is_explicit_without_inventing_an_event():

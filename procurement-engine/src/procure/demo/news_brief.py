@@ -5,7 +5,7 @@ Headlines are untrusted metadata, and this module never fetches or executes them
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 from urllib.parse import urlsplit
@@ -109,6 +109,7 @@ def _company_headlines(company, rows, now):
     materials = _owned_ids(company.get('materials', []), 'material_id')
     routes = _owned_ids(company.get('routes', []), 'route_id')
     currencies = {code for code in company.get('currencies', []) if isinstance(code, str)}
+    cutoff = (now.astimezone(timezone.utc) - timedelta(days=7)).timestamp()
     selected = []
     for item in rows[:80]:
         if (not isinstance(item, dict) or item.get('synthetic') is not False or
@@ -119,6 +120,9 @@ def _company_headlines(company, rows, now):
             continue
         title, url = _text(item.get('title'), 220), _url(item.get('url'))
         if not title or not url:
+            continue
+        published_at = _stamp(item.get('published_at'), now)
+        if published_at and _epoch(published_at) < cutoff:
             continue
         matched_materials = filter_material_homonyms(
             title, _owned_list(item.get('matched_materials'), materials))
@@ -133,7 +137,7 @@ def _company_headlines(company, rows, now):
                'publisher': _text(item.get('publisher'), 100),
                'provider': _text(item.get('provider'), 100),
                'source_id': _text(item.get('source_id'), 80),
-               'published_at': _stamp(item.get('published_at'), now),
+               'published_at': published_at,
                'retrieved_at': _stamp(item.get('retrieved_at'), now),
                'first_seen_at': _stamp(item.get('first_seen_at'), now),
                'exposure': {'kind': kind, 'matched_materials': matched_materials,

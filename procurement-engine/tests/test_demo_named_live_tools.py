@@ -41,7 +41,7 @@ def test_named_tools_declared_with_bounded_arguments():
     names={d.name for d in live_voice._config().tools[0].function_declarations}
     assert {'read_workspace','analyze_inventory','fill_buyer_form','load_sample_quotes',
             'review_sample_quotes','compare_suppliers','prepare_simulated_email',
-            'navigate_workspace','operate_workspace','read_risks',
+            'navigate_workspace','operate_workspace','read_risks','read_news',
             'prepare_research','confirm_research','read_research'}==names
     assert not any(('confirm' in name or 'approve' in name) and name != 'confirm_research'
                    for name in names)

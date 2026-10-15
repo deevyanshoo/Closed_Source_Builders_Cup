@@ -75,7 +75,12 @@ INSTRUCTION = (
     "prepare a review, compare_suppliers for a saved-quote plan, and navigate_workspace "
     "to show the requested view. Use operate_workspace for complex analysis, news risks, "
     "supplier-delay recovery and RFQ drafts. Use prepare_simulated_email to prepare a "
-    "simulation proposal. For public or current-event questions, use prepare_research "
+    "simulation proposal. For news, headlines, world events or what could affect this business, "
+    "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
+    "Summarize two relevant developments with publication dates, named sources, conditional company impact "
+    "and a practical next step in three or four short sentences. Never just report the number of signals. "
+    "Describe missing or stale coverage honestly. Only when the user explicitly requests additional "
+    "external web research, use prepare_research "
     "with the user's exact spoken question. It prepares an exact public query. "
     "When the tool returns a research proposal, read its exact public query aloud, then say "
     "Say confirm research to start. Wait for the user's new spoken confirmation before "
@@ -276,6 +281,7 @@ def _config(company=None):
          {'proposal_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, ['proposal_id']),
         ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
+        ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
         ('read_workspace', 'Read current company, buyer form, news, quotes and plan facts.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
         ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
@@ -987,7 +993,7 @@ async def run_live_voice(
                             name = getattr(call, 'name', None)
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
                                      'prepare_research', 'confirm_research', 'read_research',
-                                     'read_risks',
+                                     'read_risks', 'read_news',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_simulated_email', 'navigate_workspace'}
                             if name not in known:
@@ -1208,11 +1214,22 @@ async def run_live_voice(
                                 model_result.update(tool_succeeded=False, action_applied=False,
                                     required_spoken_response=required_response)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
-                                model_result.pop('workspace', None)
+                                workspace = model_result.pop('workspace', None)
+                                if isinstance(workspace, dict) and isinstance(workspace.get('news_brief'), dict):
+                                    model_result['workspace'] = {'news_brief': workspace['news_brief']}
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 model_result.pop('analytics', None)
                             if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
                                 raise _Invalid()
+                            brief = (model_result.get('workspace') or {}).get('news_brief') or {}
+                            logging.getLogger('procure.demo').info(json.dumps({
+                                'event': 'voice_tool_result', 'tool': name,
+                                'status': result['status'],
+                                'model_result_bytes': len(json.dumps(model_result, ensure_ascii=True)),
+                                'news_headlines': len(brief.get('headlines') or []),
+                                'global_watch_events': len((brief.get('global_watch') or {}).get('events') or []),
+                                'news_availability': brief.get('availability') if brief.get('availability') in
+                                    {'available', 'partial', 'unavailable'} else 'none'}, separators=(',', ':')))
                             await provider.send_tool_response(function_responses=types.FunctionResponse(
                                 name=name, id=call_id, response=model_result))
                         output_text = getattr(getattr(content, 'output_transcription', None), 'text', None)

@@ -26,6 +26,7 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
+from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
 COOKIE = 'demo_session'
@@ -837,6 +838,61 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 failed(value, key)
                 raise
 
+    async def current_news(value, expected_version):
+        """Read the same cached feed as News Workspace, bound to the current company."""
+        with value.lock:
+            context(value, {'expected_context_version': expected_version}, explicit=True)
+            company_id = value.company_id
+            company = get_company(company_id)
+        try:
+            payload = await run_in_threadpool(news_adapter().get, company)
+        except Exception:
+            # Retain dated company-owned facts, while exposing failed freshness.
+            with value.lock:
+                context(value, {'expected_context_version': expected_version}, explicit=True)
+                previous = deepcopy(value.news)
+                if not isinstance(previous, dict) or previous.get('company_id') != company_id:
+                    return None
+                previous['cache_state'] = 'stale'
+                value.news = deepcopy(previous)
+                return previous
+        with value.lock:
+            context(value, {'expected_context_version': expected_version}, explicit=True)
+            if value.company_id != company_id:
+                raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
+            result = news_view(value, payload, company_id, expected_version)
+            value.news = deepcopy(result)
+            return result
+
+    async def voice_news(value, expected_version):
+        view = await current_news(value, expected_version)
+        with value.lock:
+            context(value, {'expected_context_version': expected_version}, explicit=True)
+            brief = build_news_brief(get_company(value.company_id), view, now=store.now())
+            items = brief['headlines'][:2]
+            if items:
+                lines = [f"{row['title']} ({row['publisher'] or row['provider'] or 'Source unverified'}, "
+                         f"published {row['published_at'][:10] if row['published_at'] else 'date unavailable'})"
+                         for row in items]
+                summary = (f"For {brief['company_name']}, watch: " + '; '.join(lines) +
+                    '. These are potential procurement exposures, not confirmed shipment delays. '
+                    'Check current supplier and route evidence before changing your plan.')
+            elif brief['global_watch']['events']:
+                summary = (f"No company-matched headline is available for {brief['company_name']}. "
+                    'Global Watch has public events, but company exposure needs verification against its recorded materials and routes.')
+            else:
+                summary = 'Connected news coverage is unavailable for this company right now; no current business impact can be verified.'
+            if brief['availability'] != 'available':
+                summary += ' Coverage is partial or stale; check the source dates.'
+            return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                'context_version': expected_version, 'status': 'completed',
+                'assistant_text': summary,
+                'agent_steps': [{'agent': 'news_reader', 'role': 'Read company-owned public news.',
+                    'status': 'completed', 'model': 'none', 'provider_call': 'none',
+                    'tool': 'read_news', 'summary': 'Read bounded connected news with source dates and conditional exposure.'}],
+                'evidence_ids': [row['item_id'] for row in brief['headlines']],
+                'proposal': None, 'read_only': True, 'workspace': {'news_brief': brief}}
+
     @app.get('/api/demo/news')
     async def get_news(request: Request):
         value = session(request)
@@ -964,11 +1020,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         message = data['message']
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
             raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
+        briefing = is_workspace_news_question(message)
+        if briefing:
+            await current_news(value, data['expected_context_version'])
         with value.lock:
             context(value, data, explicit=True)
             from .research import prepare_research, ResearchValidationError
             try:
-                research_parameters = prepare_research(message, get_company(value.company_id), store.now())
+                research_parameters = (None if briefing else
+                    prepare_research(message, get_company(value.company_id), store.now()))
                 research_invalid = None
             except ResearchValidationError as exc:
                 research_parameters, research_invalid = None, str(exc)
@@ -1136,10 +1196,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         from .live_voice import run_live_voice
 
         async def operate(message, context_version, key):
+            if is_workspace_news_question(message):
+                return await voice_news(value, context_version)
             return await execute_operator_turn(value, {'message': message,
                 'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
         async def workspace_tools(name, args, context_version, key, *, on_research_progress=None):
+            if name == 'read_news':
+                shape(args, ())
+                return await voice_news(value, context_version)
             if name == 'confirm_research':
                 shape(args, ('proposal_id',))
                 if not isinstance(args['proposal_id'], str) or not args['proposal_id']:
@@ -1166,6 +1231,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if not isinstance(args, dict):
                     raise SessionError('invalid_research', 'Provide a public research question.', 422)
                 shape(args, ('message',))
+                if is_workspace_news_question(args['message']):
+                    return await voice_news(value, context_version)
                 from .research import prepare_research, ResearchValidationError
                 with value.lock:
                     context(value, {'expected_context_version': context_version}, explicit=True)
@@ -1282,7 +1349,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 'drafts': [{key: item[key] for key in
                                             ('draft_id', 'kind', 'status', 'material_id', 'recipient_label', 'subject')}
                                            for item in value.drafts[-12:]],
-                                'news': deepcopy(value.news), 'plan': deepcopy(active_plan(value)),
+                                'news_brief': build_news_brief(
+                                    snapshot['company'], value.news, now=store.now()),
+                                'plan': deepcopy(active_plan(value)),
                                 'risks': deepcopy(snapshot.get('risk_report')),
                                 'offers': [{'offer_id': offer['offer_id'], 'version': offer['version'],
                                             'status': offer['status'], 'fixture_id': offer.get('fixture_id'),

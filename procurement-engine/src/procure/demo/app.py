@@ -2139,6 +2139,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             app.mount('/assets', StaticFiles(directory=web_dir / 'assets'), name='assets')
         @app.get('/demo')
         @app.get('/demo/{path:path}')
+        @app.get('/dispatch')
         async def spa(path: str = ''):
             index = web_dir / 'index.html'
             if not index.is_file():

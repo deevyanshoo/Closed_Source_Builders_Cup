@@ -52,3 +52,4 @@
 }
 
 @media(max-width:999px){.demo-operator-toggle[aria-expanded="true"]{display:none}}
+.demo-masthead-links a{color:#f6f5f0;text-decoration:underline;text-underline-offset:4px;display:inline-block;padding:6px 2px}

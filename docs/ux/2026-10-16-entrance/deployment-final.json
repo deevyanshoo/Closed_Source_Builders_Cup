@@ -1,0 +1,42 @@
+{
+  "source_revision": "00badd13f5068d5d733c80e1364251dc6d982e5f",
+  "build_id": "caced313-2d05-46a3-9e45-53525c6d39bc",
+  "image": "asia-south1-docker.pkg.dev/closed-source-builder-261007/closed-source-demo/quote-to-plan@sha256:cde6a98b7fd191767c1023f18c171cb1fcbadd7452f5d846540c3a37ea86ef67",
+  "ready_revision": "closed-source-quote-demo-00055-59s",
+  "traffic": [
+    {
+      "latestRevision": true,
+      "percent": 100,
+      "revisionName": "closed-source-quote-demo-00055-59s"
+    }
+  ],
+  "unchanged_configuration": {
+    "serviceAccountName": true,
+    "containerConcurrency": true,
+    "timeoutSeconds": true,
+    "env": true,
+    "resources": true,
+    "maxScale": true
+  },
+  "health": [
+    {
+      "url": "https://closed-source-quote-demo-ryoeyuqvta-el.a.run.app",
+      "status": 200,
+      "response": {
+        "ready": true,
+        "revision": "closed-source-quote-demo-00055-59s",
+        "persistence": "firestore"
+      }
+    },
+    {
+      "url": "https://closed-source-quote-demo-963802031195.asia-south1.run.app",
+      "status": 200,
+      "response": {
+        "ready": true,
+        "revision": "closed-source-quote-demo-00055-59s",
+        "persistence": "firestore"
+      }
+    }
+  ],
+  "theme_init_status": 200
+}

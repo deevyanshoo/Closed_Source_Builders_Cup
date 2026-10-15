@@ -11,7 +11,7 @@ from typing import Callable
 from .company import DEFAULT_COMPANY_ID
 from .session_persistence import (FirestoreSessionPersistence, StorageConflict,
                                   StorageInvalid, StorageTooLarge, StorageUnavailable,
-                                  document_id)
+                                  document_id, encode_state)
 
 
 class SessionError(Exception):
@@ -56,6 +56,7 @@ class Session:
     live_failed_calls: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
     storage_version: str | int | None = field(default=None, repr=False)
+    storage_fingerprint: str | None = field(default=None, repr=False)
 
     def select_company(self, company_id: str) -> None:
         """Move the active workspace; retained state never crosses company IDs."""
@@ -93,8 +94,9 @@ class SessionStore:
                      'selected_material_id', 'simulated_outbox', 'recovery', 'rfq', 'news',
                      'risk_report', 'watch_items', 'operator_turns', 'operator_generation',
                      'voice_calls', 'live_voice_sessions', 'live_voice_starts_by_company',
-                     'company_id', 'context_version', 'workspaces', 'requests', 'live_calls',
-                     'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts')
+                     'company_id', 'context_version', 'workspaces', 'live_calls',
+                     'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts',
+                     'pending_proposal')
 
     def __init__(self, *, clock: Callable | None = None, ttl_seconds: int | None = None,
                  max_sessions: int = 256, persistence_backend=None):
@@ -120,82 +122,86 @@ class SessionStore:
 
     def create(self) -> Session:
         with self._lock:
-            self._prune_expired()
+            expired = self._prune_expired()
             if len(self._sessions) >= self.max_sessions:
                 raise SessionError('session_capacity', 'Demo is busy. Please try later.', 503)
             session = Session(secrets.token_urlsafe(32), secrets.token_urlsafe(32),
                               self.now() + timedelta(seconds=self.ttl_seconds))
             self._sessions[session.session_id] = session
-            if self.backend is not None:
-                self.save(session)
-                # Bounded explicit cleanup; expiration checks also run on every restore.
-                try:
-                    self.backend.cleanup(self.now(), limit=8)
-                except (StorageConflict, StorageUnavailable, StorageInvalid):
-                    pass
-            return session
+        for stale in expired:
+            self.invalidate(stale, delete_remote=False)
+        if self.backend is not None:
+            self.save(session)
+            # Bounded explicit cleanup; expiration checks also run on every restore.
+            try:
+                self.backend.cleanup(self.now(), limit=8)
+            except (StorageConflict, StorageUnavailable, StorageInvalid):
+                pass
+        return session
 
-    def _prune_expired(self) -> None:
+    def _prune_expired(self) -> list[Session]:
         """Caller holds the store lock; expired cache entries never count toward capacity."""
         now = self.now()
+        expired = []
         for value in list(self._sessions.values()):
             if not value.active or value.expires_at <= now:
-                self.invalidate(value, delete_remote=False)
+                self._sessions.pop(value.session_id, None)
+                expired.append(value)
+        return expired
 
     def get(self, session_id: str | None, *, refresh: bool = False) -> Session:
         with self._lock:
             session = self._sessions.get(session_id or '')
-            if self.backend is not None and session_id and (session is None or refresh):
-                try:
-                    document_id(session_id)
-                except StorageInvalid:
-                    raise SessionError('session_expired', 'Session expired. Start a new demo session.') from None
-                try:
-                    # A cached refresh holds the same lock as save. The remote
-                    # read cannot race with this process's conditional write.
-                    if session is not None:
-                        with session.lock:
-                            loaded = self.backend.load(session_id)
-                            if loaded is None:
-                                self.invalidate(session, delete_remote=False)
-                                session = None
-                            elif loaded[1] != session.storage_version:
-                                replacement = self._restore(session_id, *loaded)
-                                self.invalidate(session, delete_remote=False)
-                                session = replacement
-                                if replacement.expires_at > self.now():
-                                    self._sessions[session_id] = replacement
-                    else:
+        if self.backend is not None and session_id and (session is None or refresh):
+            try:
+                document_id(session_id)
+            except StorageInvalid:
+                raise SessionError('session_expired', 'Session expired. Start a new demo session.') from None
+            try:
+                if session is not None:
+                    # Only this session is serialized with a remote read/write.
+                    with session.lock:
                         loaded = self.backend.load(session_id)
-                    if loaded is not None:
-                        if session is None:
-                            replacement = self._restore(session_id, *loaded)
-                            if replacement.expires_at > self.now():
-                                self._prune_expired()
-                                if len(self._sessions) >= self.max_sessions:
-                                    raise SessionError('session_capacity', 'Demo is busy. Please try later.', 503)
-                                self._sessions[session_id] = replacement
-                                session = replacement
-                            else:
-                                try:
-                                    self.backend.delete(session_id, replacement.storage_version)
-                                except (StorageConflict, StorageUnavailable):
-                                    pass
-                        elif session.expires_at <= self.now():
+                        if loaded is None:
                             self.invalidate(session, delete_remote=False)
+                            session = None
+                        elif loaded[1] != session.storage_version:
+                            replacement = self._restore(session_id, *loaded, now=self.now())
+                            self.invalidate(session, delete_remote=False)
+                            session = None
+                            if replacement.expires_at > self.now():
+                                with self._lock:
+                                    self._sessions[session_id] = replacement
+                                session = replacement
+                else:
+                    loaded = self.backend.load(session_id)
+                    if loaded is not None:
+                        replacement = self._restore(session_id, *loaded, now=self.now())
+                        if replacement.expires_at > self.now():
+                            with self._lock:
+                                expired = self._prune_expired()
+                                existing = self._sessions.get(session_id)
+                                if existing is None and len(self._sessions) >= self.max_sessions:
+                                    raise SessionError('session_capacity', 'Demo is busy. Please try later.', 503)
+                                session = self._sessions.setdefault(session_id, replacement)
+                            for stale in expired:
+                                self.invalidate(stale, delete_remote=False)
                         else:
-                            pass
-                except (StorageUnavailable, StorageInvalid) as exc:
-                    if session is not None:
-                        self.invalidate(session, delete_remote=False)
-                    raise self._storage_error(exc) from exc
-            if session is None:
-                raise SessionError('session_expired', 'Session expired. Start a new demo session.')
-            with session.lock:
-                if not session.active or session.expires_at <= self.now():
+                            try:
+                                self.backend.delete(session_id, replacement.storage_version)
+                            except (StorageConflict, StorageUnavailable):
+                                pass
+            except (StorageUnavailable, StorageInvalid) as exc:
+                if session is not None:
                     self.invalidate(session, delete_remote=False)
-                    raise SessionError('session_expired', 'Session expired. Start a new demo session.')
-            return session
+                raise self._storage_error(exc) from exc
+        if session is None:
+            raise SessionError('session_expired', 'Session expired. Start a new demo session.')
+        with session.lock:
+            if not session.active or session.expires_at <= self.now():
+                self.invalidate(session, delete_remote=False)
+                raise SessionError('session_expired', 'Session expired. Start a new demo session.')
+        return session
 
     @staticmethod
     def _storage_error(exc):
@@ -214,13 +220,54 @@ class SessionStore:
             raise StorageTooLarge('Research records exceed limit')
         if type(session.research_attempts) is not int or not 0 <= session.research_attempts <= 6:
             raise StorageInvalid('Invalid research attempt count')
+        if session.pending_proposal is not None and not cls._valid_proposal(session.pending_proposal, session):
+            raise StorageInvalid('Invalid pending proposal')
         state = {'schema_version': 1, 'session_id': session.session_id,
-                 'csrf_token': session.csrf_token, 'expires_at': session.expires_at.isoformat()}
+                 'csrf_token': session.csrf_token, 'expires_at': session.expires_at.isoformat(),
+                 'requests': 0}
         state.update({name: getattr(session, name) for name in cls._STATE_FIELDS})
         return state
 
     @classmethod
-    def _restore(cls, session_id: str, state: dict, version):
+    def _valid_proposal(cls, proposal: dict, session: Session) -> bool:
+        if not isinstance(proposal, dict):
+            return False
+        required = ('proposal_id', 'kind', 'summary', 'parameters', 'plan_id',
+                    'offer_versions', 'context_version', 'expires_at', '_marker',
+                    '_company_id', '_session_id')
+        if any(name not in proposal for name in required):
+            return False
+        if (not isinstance(proposal['proposal_id'], str) or not 1 <= len(proposal['proposal_id']) <= 128 or
+                proposal['kind'] not in ('research', 'watch', 'recovery', 'rfq', 'simulate_email', 'review_quotes') or
+                not isinstance(proposal['summary'], str) or len(proposal['summary']) > 2000 or
+                not isinstance(proposal['parameters'], dict) or
+                not isinstance(proposal['offer_versions'], dict) or
+                not isinstance(proposal['_marker'], str) or not 1 <= len(proposal['_marker']) <= 256 or
+                proposal['_session_id'] != session.session_id or
+                proposal['_company_id'] != session.company_id or
+                type(proposal['context_version']) is not int or
+                proposal['context_version'] != session.context_version):
+            return False
+        try:
+            expiry = datetime.fromisoformat(proposal['expires_at'])
+            if expiry.tzinfo is None:
+                return False
+        except (TypeError, ValueError):
+            return False
+        if proposal['kind'] == 'research':
+            from .research import DESTINATION, SHARED_DATA, MAX_QUERY, _unsafe
+            params = proposal['parameters']
+            if (set(params) != {'query', 'destination', 'shared_data'} or
+                    not isinstance(params['query'], str) or
+                    not 1 <= len(params['query']) <= MAX_QUERY or
+                    any(ord(char) < 32 for char in params['query']) or
+                    _unsafe(params['query'], None) or
+                    params['destination'] != DESTINATION or params['shared_data'] != SHARED_DATA):
+                return False
+        return True
+
+    @classmethod
+    def _restore(cls, session_id: str, state: dict, version, *, now: datetime | None = None):
         if (not isinstance(state, dict) or state.get('schema_version') != 1 or
                 state.get('session_id') != session_id or not isinstance(state.get('csrf_token'), str) or
                 len(state['csrf_token']) != 43):
@@ -230,7 +277,8 @@ class SessionStore:
             if expires_at.tzinfo is None:
                 raise ValueError()
             expires_at = expires_at.astimezone(timezone.utc)
-            values = {name: state.get(name, []) if name == 'drafts' else state[name]
+            values = {name: state.get(name, []) if name == 'drafts' else
+                      state.get(name) if name == 'pending_proposal' else state[name]
                       for name in cls._STATE_FIELDS}
             for name in ('offers', 'idempotency', 'live_voice_starts_by_company', 'workspaces',
                          'chat_history', 'research_records'):
@@ -250,12 +298,22 @@ class SessionStore:
                 raise ValueError()
             if type(values['context_version']) is not int or values['context_version'] < 1:
                 raise ValueError()
-            for name in ('requests', 'operator_turns', 'operator_generation', 'voice_calls',
+            for name in ('operator_turns', 'operator_generation', 'voice_calls',
                          'live_voice_sessions', 'live_calls', 'live_failed_calls'):
                 if type(values[name]) is not int or values[name] < 0:
                     raise ValueError()
             restored = Session(session_id, state['csrf_token'], expires_at, **values)
+            requests = state.get('requests', 0)
+            if type(requests) is not int or requests < 0:
+                raise ValueError()
+            restored.requests = requests
+            if (restored.pending_proposal is not None and
+                    (not cls._valid_proposal(restored.pending_proposal, restored) or
+                     (now or datetime.now(timezone.utc)) >= datetime.fromisoformat(
+                         restored.pending_proposal['expires_at']).astimezone(timezone.utc))):
+                restored.pending_proposal = None
             restored.storage_version = version
+            restored.storage_fingerprint = encode_state(cls._snapshot(restored))
             return restored
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise StorageInvalid('Invalid session document') from exc
@@ -268,11 +326,36 @@ class SessionStore:
                     session.expires_at <= self.now()):
                 raise SessionError('session_expired', 'Session expired. Start a new demo session.')
             try:
+                state = self._snapshot(session)
+                fingerprint = encode_state(state)
+                if session.storage_version is not None and fingerprint == session.storage_fingerprint:
+                    return
                 session.storage_version = self.backend.save(
-                    session.session_id, self._snapshot(session), session.storage_version)
+                    session.session_id, state, session.storage_version)
+                session.storage_fingerprint = fingerprint
             except (StorageConflict, StorageUnavailable, StorageInvalid, StorageTooLarge) as exc:
                 self.invalidate(session, delete_remote=False)
                 raise self._storage_error(exc) from exc
+
+    def reserve_request(self, session: Session, limit: int) -> int:
+        with session.lock:
+            if not session.active or session.expires_at <= self.now():
+                raise SessionError('session_expired', 'Session expired. Start a new demo session.')
+            if self.backend is None:
+                count = session.requests + 1
+            else:
+                try:
+                    admitted = self.backend.reserve_session_request(
+                        session.session_id, limit, session.requests, session.storage_version)
+                except (StorageConflict, StorageUnavailable, StorageInvalid) as exc:
+                    raise self._storage_error(exc) from exc
+                if admitted is None:
+                    raise SessionError('request_limit', 'Session request limit reached. Start a new session later.', 429)
+                count, session.storage_version = admitted
+            if count is None or count > limit:
+                raise SessionError('request_limit', 'Session request limit reached. Start a new session later.', 429)
+            session.requests = count
+            return count
 
     def reserve_research_budget(self, day: str, limit: int) -> bool:
         if self.backend is None:
@@ -311,7 +394,9 @@ class SessionStore:
             session.chat_history.clear()
             session.research_attempts = 0
             session.research_records.clear()
-            self._sessions.pop(session.session_id, None)
+            with self._lock:
+                if self._sessions.get(session.session_id) is session:
+                    self._sessions.pop(session.session_id, None)
 
 
 _budget_lock = threading.RLock()

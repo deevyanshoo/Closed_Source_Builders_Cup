@@ -28,6 +28,26 @@ def test_reader_validates_and_memoizes():
         assert service.get(profile)['collection']['slot'] == NOW.isoformat()
     assert store.reads == 1
 
+
+def test_older_immutable_snapshot_gets_shared_read_time_global_watch():
+    from procure.demo.global_watch import GlobalWatch
+    calls = []
+    def transport(url, **limits):
+        calls.append(url)
+        return b'<rss><channel><item><title>Suez Canal shipping update</title><link>https://example.org/suez</link></item></channel></rss>'
+    class WatchLive(Live):
+        global_watch = GlobalWatch(clock=lambda: NOW, transport=transport, offline=False)
+    old = bundle()
+    service = SnapshotNewsService(live=WatchLive(), store=Store(old), clock=lambda: NOW)
+    profiles = list_companies()
+    first, second = service.get(profiles[0]), service.get(profiles[1])
+    assert len(calls) == 4
+    assert first['global_watch']['events']
+    assert second['global_watch']['events']
+    assert first['collection']['mode'] == 'scheduled'
+    assert first['collection']['news_success_at'] == old['collection']['news_success_at']
+    assert 'global_watch' not in old['views'][profiles[0]['company_id']]
+
 def test_rejects_private_oversize_and_catalog_incompatible():
     profiles = list_companies()
     for kind in ('private', 'oversize', 'catalog'):
@@ -146,6 +166,27 @@ def test_old_provider_is_stale_despite_recent_company_news_success():
     assert result['sources'][0]['last_checked_at'] == old
     assert result['sources'][1]['state'] == 'fresh'
     assert result['cache_state'] == 'stale'
+
+
+def test_old_global_watch_source_is_stale_without_changing_evidence_clocks():
+    from datetime import timedelta
+    row = bundle()
+    old = (NOW - timedelta(hours=3)).isoformat()
+    row['views']['solara-cables']['global_watch'] = {
+        'attempted_at': old, 'success_at': old, 'status': 'fresh',
+        'sources': [{'source_id': 'global_conflict', 'name': 'Global conflict',
+                     'state': 'fresh', 'last_checked_at': old}],
+        'events': [{'item_id': 'one', 'title': 'Global headline', 'url': 'https://example.org/one',
+                    'publisher': 'Example', 'provider': 'Google News RSS', 'published_at': None,
+                    'first_seen_at': old, 'retrieved_at': old, 'source_id': 'global_conflict',
+                    'topic': 'conflict', 'exposure': {'kind': 'background', 'reason': 'Context only.',
+                    'matched_materials': [], 'matched_routes': [], 'next_action': 'Read source.'}}]}
+    result = SnapshotNewsService(live=Live(), store=Store(row), clock=lambda: NOW).get(list_companies()[0])
+    watch = result['global_watch']
+    assert watch['status'] == 'stale'
+    assert watch['success_at'] == old
+    assert watch['sources'][0]['last_checked_at'] == old
+    assert watch['events'][0]['retrieved_at'] == old
 
 
 def test_adc_failure_falls_back_to_live_without_crashing():
@@ -300,6 +341,115 @@ def test_attempt_receipt_is_deterministic_generation_zero_and_bounded():
     with pytest.raises(ValueError): validate_attempt_receipt({**receipt, 'private_email': 'secret'})
     with pytest.raises(ValueError): validate_attempt_receipt({**receipt, 'news_success': 'false'})
     with pytest.raises(ValueError): validate_attempt_receipt({**receipt, 'status': 'fresh'})
+
+
+def test_watch_receipt_extension_is_strict_and_legacy_receipt_still_reads():
+    from procure.demo.news_snapshots import validate_attempt_receipt
+    receipt = {'slot': NOW.isoformat(), 'attempted_at': NOW.isoformat(),
+               'completed_at': NOW.replace(minute=2).isoformat(),
+               'status': 'news_unavailable', 'news_success': False, 'fx_success': False}
+    assert validate_attempt_receipt(receipt)
+    extended = {**receipt, 'watch_attempted_at': NOW.replace(minute=1).isoformat(),
+                'watch_success': False}
+    assert validate_attempt_receipt(extended)
+    for invalid in (
+        {**extended, 'watch_success': 'false'},
+        {**extended, 'watch_attempted_at': '2026-10-15T09:59:00Z'},
+        {**extended, 'watch_attempted_at': '2026-10-15T10:03:00Z'},
+        {key: value for key, value in extended.items() if key != 'watch_success'},
+    ):
+        with pytest.raises(ValueError):
+            validate_attempt_receipt(invalid)
+
+
+def test_total_outage_receipt_marks_previous_watch_stale_without_advancing_evidence():
+    from copy import deepcopy
+    from datetime import timedelta
+    from procure.demo.news_refresh import refresh_portfolio
+
+    prior_at = NOW - timedelta(hours=1)
+    old = bundle()
+    old.update(slot=prior_at.isoformat(), started_at=prior_at.isoformat(),
+               completed_at=prior_at.isoformat())
+    old['collection'].update(attempted_at=prior_at.isoformat(), news_success_at=prior_at.isoformat())
+    old_watch = {'attempted_at': prior_at.isoformat(), 'success_at': prior_at.isoformat(),
+                 'status': 'fresh', 'sources': [{'source_id': 'global_conflict',
+                 'name': 'Conflict discovery', 'state': 'fresh',
+                 'last_checked_at': prior_at.isoformat(), 'reason': 'Metadata received'}],
+                 'events': [{'item_id': 'old', 'title': 'Shipping risk reported',
+                 'url': 'https://example.org/old', 'publisher': 'Example',
+                 'provider': 'Google News RSS', 'published_at': prior_at.isoformat(),
+                 'first_seen_at': prior_at.isoformat(), 'retrieved_at': prior_at.isoformat(),
+                 'source_id': 'global_conflict', 'topic': 'conflict',
+                 'exposure': {'kind': 'background', 'reason': 'Context only.',
+                 'matched_materials': [], 'matched_routes': [], 'next_action': 'Verify source.'}}]}
+    for view in old['views'].values():
+        view['global_watch'] = deepcopy(old_watch)
+    class OutageStore:
+        def __init__(self): self.receipt = None
+        def read(self, slot): return old if slot == prior_at else None
+        def create_attempt(self, slot, receipt): self.receipt = receipt
+        def create(self, slot, row): raise AssertionError('total outage must not publish')
+        def read_attempt(self, slot): return self.receipt if slot == NOW else None
+    class FailedWatch:
+        def get(self, company, force=False):
+            return {'attempted_at': NOW.isoformat(), 'success_at': None,
+                    'status': 'unavailable', 'sources': [{'source_id': 'global_conflict',
+                    'name': 'Conflict discovery', 'state': 'unavailable',
+                    'last_checked_at': NOW.isoformat(), 'reason': 'Connection failed'}],
+                    'events': []}
+    class OutageLive:
+        global_watch = FailedWatch()
+        def get(self, company, force=False):
+            return {'checked_at': NOW.isoformat(), 'cache_state': 'unavailable',
+                    'sources': [{'source_id': 'eia', 'name': 'EIA', 'state': 'unavailable',
+                                 'last_checked_at': NOW.isoformat()}],
+                    'items': [], 'fx': [], 'limitations': []}
+    store = OutageStore()
+    collected = refresh_portfolio(live=OutageLive(), store=store, clock=lambda: NOW)
+    assert collected['collection']['published'] is False
+    assert store.receipt['watch_attempted_at'] == NOW.isoformat()
+    assert store.receipt['watch_success'] is False
+    shown = SnapshotNewsService(live=OutageLive(), store=store,
+                                clock=lambda: NOW + timedelta(minutes=1)).get(list_companies()[0])
+    watch = shown['global_watch']
+    assert shown['collection']['status'] == 'news_unavailable'
+    assert watch['attempted_at'] == NOW.isoformat()
+    assert watch['status'] == 'stale'
+    assert watch['success_at'] == prior_at.isoformat()
+    assert watch['sources'][0]['state'] == 'stale'
+    assert watch['sources'][0]['last_checked_at'] == prior_at.isoformat()
+    assert (watch['events'][0]['published_at'], watch['events'][0]['first_seen_at'],
+            watch['events'][0]['retrieved_at']) == (prior_at.isoformat(),) * 3
+
+
+@pytest.mark.parametrize('watch_fields', [
+    {},
+    {'watch_attempted_at': NOW.isoformat(), 'watch_success': True},
+])
+def test_news_failed_receipt_does_not_imply_watch_failed(watch_fields):
+    from copy import deepcopy
+    from datetime import timedelta
+    prior_at = NOW - timedelta(hours=1)
+    old = bundle()
+    old.update(slot=prior_at.isoformat(), started_at=prior_at.isoformat(),
+               completed_at=prior_at.isoformat())
+    old['collection'].update(attempted_at=prior_at.isoformat(), news_success_at=prior_at.isoformat())
+    prior_watch = {'attempted_at': prior_at.isoformat(), 'success_at': prior_at.isoformat(),
+                   'status': 'fresh', 'sources': [{'source_id': 'global_port', 'name': 'Port discovery',
+                   'state': 'fresh', 'last_checked_at': prior_at.isoformat()}], 'events': []}
+    old['views']['solara-cables']['global_watch'] = deepcopy(prior_watch)
+    receipt = {'slot': NOW.isoformat(), 'attempted_at': NOW.isoformat(),
+               'completed_at': NOW.isoformat(), 'status': 'news_unavailable',
+               'news_success': False, 'fx_success': False, **watch_fields}
+    class StoreWithReceipt:
+        def read(self, slot): return old if slot == prior_at else None
+        def read_attempt(self, slot): return receipt if slot == NOW else None
+    shown = SnapshotNewsService(live=Live(), store=StoreWithReceipt(),
+                                clock=lambda: NOW.replace(minute=1)).get(list_companies()[0])
+    assert shown['global_watch']['status'] == 'fresh'
+    assert shown['global_watch']['sources'][0]['state'] == 'fresh'
+    assert shown['global_watch']['success_at'] == prior_at.isoformat()
 
 
 def test_attempt_read_rejects_oversize_and_wrong_slot():

@@ -152,7 +152,7 @@ def test_history_and_accepted_research_survive_a_new_application_instance():
     assert replay.status_code == 200 and len(provider.calls) == 1
 
 
-def test_restored_pending_consent_cannot_start_a_search():
+def test_restored_pending_consent_requires_the_same_reviewed_proposal_and_claims_once():
     from procure.demo.session_persistence import MemorySessionPersistence
     backend = MemorySessionPersistence()
     client, headers, provider, _ = setup(session_backend=backend)
@@ -161,14 +161,11 @@ def test_restored_pending_consent_cannot_start_a_search():
     session_id = client.get('/api/demo/session').json()['session_id']
     restored = TestClient(create_app(session_backend=backend, research_provider=provider), base_url='https://demo.test')
     restored.cookies.set('demo_session', session_id)
-    assert approve(restored, headers, proposal).status_code in (404, 409)
-    assert provider.calls == []
-    # Even replaying the old preparation request cannot revive its consent card.
-    old_turn = propose(restored, headers)
-    assert old_turn.status_code in (200, 409)
-    if old_turn.status_code == 200 and old_turn.json().get('proposal'):
-        assert approve(restored, headers, old_turn.json()['proposal']).status_code in (404, 409)
-    assert provider.calls == []
+    accepted = approve(restored, headers, proposal)
+    assert accepted.status_code == 200, accepted.text
+    assert len(provider.calls) == 1
+    assert approve(restored, headers, proposal).status_code == 200
+    assert len(provider.calls) == 1
 
 
 def test_storage_failure_before_claim_prevents_external_search():

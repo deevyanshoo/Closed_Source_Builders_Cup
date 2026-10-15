@@ -19,6 +19,7 @@ MAX_UNCOMPRESSED_BYTES = 8 * 1024 * 1024
 MAX_ENCODED_BYTES = 700_000  # Firestore document limit is 1 MiB, including field overhead.
 _ID = re.compile(r'[A-Za-z0-9_-]{43}\Z')
 _DAY = re.compile(r'\d{4}-\d{2}-\d{2}\Z')
+_READINESS_PROBE_ID = '0' * 43  # Reserved anonymous ID; never created by the probe.
 
 
 class StorageConflict(Exception):
@@ -93,7 +94,16 @@ class MemorySessionPersistence:
         with self._lock:
             self._available()
             value = self._documents.get(key)
-            return (decode_state(value[0]), value[1]) if value else None
+            if value is None:
+                return None
+            state = decode_state(value[0])
+            if len(value) > 2:
+                state['requests'] = value[2]
+            return state, value[1]
+
+    def probe_readiness(self) -> bool:
+        self.load(_READINESS_PROBE_ID)
+        return True
 
     def save(self, session_id: str, state: dict, expected_version):
         key = document_id(session_id)
@@ -104,7 +114,8 @@ class MemorySessionPersistence:
             if (old is None and expected_version is not None) or (old is not None and old[1] != expected_version):
                 raise StorageConflict('Session version changed')
             version = (old[1] + 1) if old else 1
-            self._documents[key] = (payload, version)
+            count = old[2] if old and len(old) > 2 else state.get('requests', 0)
+            self._documents[key] = (payload, version, count)
             return version
 
     def delete(self, session_id: str, expected_version):
@@ -120,11 +131,11 @@ class MemorySessionPersistence:
         with self._lock:
             self._available()
             removed = 0
-            for key, (payload, _) in list(self._documents.items()):
+            for key, document in list(self._documents.items()):
                 if removed >= limit:
                     break
                 try:
-                    expires = datetime.fromisoformat(decode_state(payload)['expires_at'])
+                    expires = datetime.fromisoformat(decode_state(document[0])['expires_at'])
                 except (KeyError, ValueError, StorageInvalid):
                     continue
                 if expires <= now:
@@ -142,6 +153,21 @@ class MemorySessionPersistence:
             self._budgets[day] = current + 1
             return True
 
+    def reserve_session_request(self, session_id: str, limit: int, initial_count: int,
+                                expected_version):
+        key = document_id(session_id)
+        _validate_request_budget(limit, initial_count)
+        with self._lock:
+            self._available()
+            old = self._documents.get(key)
+            if old is None or old[1] != expected_version:
+                raise StorageConflict('Session version changed')
+            count = old[2] if len(old) > 2 else initial_count
+            if count >= limit:
+                return None
+            self._documents[key] = (old[0], old[1] + 1, count + 1)
+            return count + 1, old[1] + 1
+
 
 def _validate_budget(day: str, limit: int):
     if not isinstance(day, str) or not _DAY.fullmatch(day):
@@ -155,6 +181,12 @@ def _validate_budget(day: str, limit: int):
         raise StorageInvalid('Invalid budget limit')
 
 
+def _validate_request_budget(limit: int, initial_count: int):
+    if (type(limit) is not int or not 1 <= limit <= 100_000 or
+            type(initial_count) is not int or initial_count < 0):
+        raise StorageInvalid('Invalid session request budget')
+
+
 class FirestoreSessionPersistence:
     """Firestore REST with ADC, hashed document IDs and preconditioned writes."""
     def __init__(self, project: str, database: str = '(default)'):
@@ -162,17 +194,19 @@ class FirestoreSessionPersistence:
             raise StorageInvalid('Invalid Google Cloud project')
         if database != '(default)':
             raise StorageInvalid('Only the default Firestore database is supported')
-        self.base = f'https://firestore.googleapis.com/v1/projects/{project}/databases/{database}/documents'
+        self.database_name = f'projects/{project}/databases/{database}'
+        self.base = f'https://firestore.googleapis.com/v1/{self.database_name}/documents'
         self._client = None
-        self._lock = threading.RLock()
+        self._clients = threading.local()
 
     def _request(self, method, path, **kwargs):
         try:
-            with self._lock:
-                if self._client is None:
-                    credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/datastore'])
-                    self._client = AuthorizedSession(credentials)
-                return self._client.request(method, self.base + path, timeout=(2, 8), **kwargs)
+            client = self._client or getattr(self._clients, 'client', None)
+            if client is None:
+                credentials, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/datastore'])
+                client = AuthorizedSession(credentials)
+                self._clients.client = client
+            return client.request(method, self.base + path, timeout=(2, 8), **kwargs)
         except (GoogleAuthError, requests.RequestException, OSError) as exc:
             raise StorageUnavailable('Session storage unavailable') from exc
 
@@ -215,9 +249,46 @@ class FirestoreSessionPersistence:
         document = self._document(response)
         try:
             fields = document['fields']
-            return decode_state(fields['payload']['stringValue']), document['updateTime']
-        except (KeyError, TypeError) as exc:
+            state = decode_state(fields['payload']['stringValue'])
+            if 'requestCount' in fields:
+                count = int(fields['requestCount']['integerValue'])
+                if count < 0:
+                    raise ValueError()
+                state['requests'] = count
+            return state, document['updateTime']
+        except (KeyError, TypeError, ValueError) as exc:
             raise StorageInvalid('Invalid Firestore session document') from exc
+
+    def probe_readiness(self) -> bool:
+        """Check the database through one projected read; document absence is healthy."""
+        name = (f'{self.database_name}/documents/demo_sessions/'
+                f'{document_id(_READINESS_PROBE_ID)}')
+        response = self._request('POST', ':batchGet', json={
+            'documents': [name], 'mask': {'fieldPaths': ['expiresAt']}})
+        # A missing database returns HTTP 404. An existing empty database returns
+        # HTTP 200 with a named `missing` result for this document.
+        self._status(response)
+        try:
+            result = response.json()
+        except (ValueError, TypeError) as exc:
+            raise StorageInvalid('Invalid Firestore readiness response') from exc
+        if isinstance(result, list):
+            if len(result) != 1:
+                raise StorageInvalid('Invalid Firestore readiness response')
+            result = result[0]
+        if (not isinstance(result, dict) or
+                set(result) - {'missing', 'found', 'readTime'} or
+                ('readTime' in result and not isinstance(result['readTime'], str)) or
+                ('missing' in result) == ('found' in result)):
+            raise StorageInvalid('Invalid Firestore readiness response')
+        if 'missing' in result:
+            valid = result['missing'] == name
+        else:
+            found = result['found']
+            valid = isinstance(found, dict) and found.get('name') == name
+        if not valid:
+            raise StorageInvalid('Invalid Firestore readiness response')
+        return True
 
     def save(self, session_id: str, state: dict, expected_version):
         key = document_id(session_id)
@@ -233,11 +304,13 @@ class FirestoreSessionPersistence:
         body = {'fields': {'payload': {'stringValue': encoded},
                            'expiresAt': {'timestampValue': expires}}}
         if expected_version is None:
+            body['fields']['requestCount'] = {'integerValue': str(state.get('requests', 0))}
             response = self._request('POST', '/demo_sessions',
                                      params={'documentId': key}, json=body)
         else:
             response = self._request('PATCH', '/demo_sessions/' + key,
-                                     params={'currentDocument.updateTime': expected_version}, json=body)
+                                     params={'currentDocument.updateTime': expected_version,
+                                             'updateMask.fieldPaths': ['payload', 'expiresAt']}, json=body)
         self._status(response, conflict=(404, 409, 412))
         return self._document(response)['updateTime']
 
@@ -316,3 +389,16 @@ class FirestoreSessionPersistence:
             self._document(result)
             return True
         raise StorageConflict('Budget reservation conflicted')
+
+    def reserve_session_request(self, session_id: str, limit: int, initial_count: int,
+                                expected_version):
+        key = document_id(session_id)
+        _validate_request_budget(limit, initial_count)
+        if initial_count >= limit:
+            return None
+        body = {'fields': {'requestCount': {'integerValue': str(initial_count + 1)}}}
+        response = self._request('PATCH', '/demo_sessions/' + key,
+                                 params={'currentDocument.updateTime': expected_version,
+                                         'updateMask.fieldPaths': ['requestCount']}, json=body)
+        self._status(response, conflict=(404, 409, 412))
+        return initial_count + 1, self._document(response)['updateTime']

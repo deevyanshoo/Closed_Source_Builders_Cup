@@ -1,6 +1,7 @@
 """Durable anonymous sessions recover only their own bounded workspace state."""
 from datetime import datetime, timedelta, timezone
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import secrets
 import threading
 import zlib
@@ -22,6 +23,141 @@ def stores(now=None):
     return backend, clock, lambda: SessionStore(clock=lambda: clock[0], persistence_backend=backend)
 
 
+def pending(session, now=NOW):
+    return {'proposal_id': 'reviewed-1', 'kind': 'research',
+            'summary': 'Review public search',
+            'parameters': {'query': 'public port news', 'destination': 'Google Search via Vertex AI',
+                           'shared_data': 'Only this public query is sent to Google Search via Vertex AI.'},
+            'plan_id': None, 'offer_versions': {}, 'context_version': session.context_version,
+            'expires_at': (now + timedelta(minutes=5)).isoformat(),
+            '_marker': 'snapshot-1', '_company_id': session.company_id,
+            '_session_id': session.session_id}
+
+
+def test_reviewed_proposal_survives_an_independent_store_until_expiry():
+    _, clock, make = stores()
+    first = make()
+    session = first.create()
+    session.pending_proposal = pending(session)
+    first.save(session)
+    assert make().get(session.session_id).pending_proposal == session.pending_proposal
+    clock[0] += timedelta(minutes=6)
+    assert make().get(session.session_id).pending_proposal is None
+
+
+def test_proposal_prepared_near_session_expiry_does_not_invalidate_session():
+    clock = [NOW]
+    backend = MemorySessionPersistence()
+    store = SessionStore(clock=lambda: clock[0], ttl_seconds=60, persistence_backend=backend)
+    session = store.create()
+    clock[0] += timedelta(seconds=40)
+    session.pending_proposal = pending(session, clock[0])
+    store.save(session)
+    assert SessionStore(clock=lambda: clock[0], persistence_backend=backend).get(session.session_id).pending_proposal
+
+
+def test_restored_proposal_with_wrong_company_or_context_is_discarded():
+    backend, _, make = stores()
+    store = make()
+    session = store.create()
+    session.pending_proposal = pending(session)
+    store.save(session)
+    state, version = backend.load(session.session_id)
+    state['pending_proposal']['_company_id'] = 'another-company'
+    backend.save(session.session_id, state, version)
+    assert make().get(session.session_id).pending_proposal is None
+    state, version = backend.load(session.session_id)
+    state['pending_proposal']['_company_id'] = session.company_id
+    state['pending_proposal']['context_version'] += 1
+    backend.save(session.session_id, state, version)
+    assert make().get(session.session_id).pending_proposal is None
+
+
+def test_private_or_control_character_research_query_is_not_persisted_as_consent():
+    _, _, make = stores()
+    store = make()
+    session = store.create()
+    session.pending_proposal = pending(session)
+    session.pending_proposal['parameters']['query'] = 'Search for alice@example.com\n'
+    with pytest.raises(SessionError) as exc:
+        store.save(session)
+    assert exc.value.code == 'session_storage_unavailable'
+    assert not session.active
+
+
+def test_unchanged_save_does_not_write_and_shared_request_budget_remains_atomic():
+    backend, _, make = stores()
+    first = make()
+    session = first.create()
+    assert first.reserve_request(session, 2) == 1
+    admitted_version = session.storage_version
+    first.save(session)
+    assert backend.load(session.session_id)[1] == admitted_version
+    second = make()
+    restored = second.get(session.session_id)
+    assert second.reserve_request(restored, 2) == 2
+    with pytest.raises(SessionError) as exc:
+        first.reserve_request(session, 2)
+    assert exc.value.code == 'session_conflict'
+    refreshed = first.get(session.session_id, refresh=True)
+    with pytest.raises(SessionError) as full:
+        first.reserve_request(refreshed, 2)
+    assert full.value.code == 'request_limit'
+    assert backend.load(session.session_id)[1] == restored.storage_version
+
+
+def test_request_count_survives_mutation_save_reload_and_next_admission():
+    backend, _, make = stores()
+    first = make()
+    session = first.create()
+    assert first.reserve_request(session, 3) == 1
+    admitted_version = session.storage_version
+    session.chat_history[session.company_id] = [{'text': 'durable mutation'}]
+    first.save(session)
+    assert session.storage_version > admitted_version
+    second = make()
+    recovered = second.get(session.session_id)
+    assert recovered.requests == 1
+    assert recovered.chat_history[session.company_id] == [{'text': 'durable mutation'}]
+    assert second.reserve_request(recovered, 3) == 2
+    assert make().get(session.session_id).requests == 2
+
+
+def test_legacy_document_request_count_seeds_new_atomic_field():
+    backend, _, make = stores()
+    store = make()
+    session = store.create()
+    state, version = backend.load(session.session_id)
+    state['requests'] = 7
+    backend.save(session.session_id, state, version)
+    key = document_id(session.session_id)
+    payload, updated_version, _ = backend._documents[key]
+    backend._documents[key] = (payload, updated_version)
+    recovered_store = make()
+    recovered = recovered_store.get(session.session_id)
+    assert recovered.requests == 7
+    assert recovered_store.reserve_request(recovered, 8) == 8
+    assert make().get(session.session_id).requests == 8
+
+
+def test_concurrent_independent_request_admissions_do_not_exceed_limit():
+    _, _, make = stores()
+    first = make()
+    session = first.create()
+    second = make()
+    restored = second.get(session.session_id)
+    def admit(pair):
+        store, value = pair
+        try:
+            return store.reserve_request(value, 1)
+        except SessionError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(admit, ((first, session), (second, restored))))
+    assert sorted(results, key=str) == [1, 'session_conflict']
+    assert make().get(session.session_id).requests == 1
+
+
 def test_cold_store_recovers_private_workspace_and_finalized_history():
     backend, now, make = stores()
     original = make()
@@ -31,7 +167,7 @@ def test_cold_store_recovers_private_workspace_and_finalized_history():
     session.chat_history['atlas-petrochem'] = [{'speaker': 'user', 'text': 'Review copper', 'channel': 'text'}]
     session.research_attempts = 1
     session.research_records['claim-1'] = {'status': 'claimed', 'query': 'public port news'}
-    session.pending_proposal = {'proposal_id': 'unsafe-to-replay'}
+    session.pending_proposal = pending(session)
     original.save(session)
 
     restored_store = make()
@@ -44,7 +180,7 @@ def test_cold_store_recovers_private_workspace_and_finalized_history():
     assert restored.chat_history['atlas-petrochem'][0]['text'] == 'Review copper'
     assert restored.research_records['claim-1']['status'] == 'claimed'
     assert restored.research_attempts == 1
-    assert restored.pending_proposal is None
+    assert restored.pending_proposal == session.pending_proposal
     assert restored_store.persistence == 'firestore'
 
 
@@ -126,19 +262,21 @@ def test_refresh_rejects_remote_revocation_of_cached_session():
     assert not cached.active and cached.chat_history == {}
 
 
-def test_refresh_replaces_stale_cached_state_without_actionable_proposal():
+def test_refresh_replaces_stale_cached_state_with_valid_proposal():
     _, _, make = stores()
     first = make()
     session = first.create()
     second = make()
     stale = second.get(session.session_id)
     session.chat_history[session.company_id] = [{'text': 'accepted'}]
-    session.pending_proposal = {'proposal_id': 'not-restorable'}
+    session.pending_proposal = pending(session)
     first.save(session)
     refreshed = second.get(session.session_id, refresh=True)
     assert refreshed is not stale and not stale.active
     assert refreshed.chat_history[session.company_id] == [{'text': 'accepted'}]
-    assert refreshed.pending_proposal is None
+    assert refreshed.pending_proposal == session.pending_proposal
+    assert second.get(session.session_id) is refreshed
+    second.invalidate(stale, delete_remote=False)
     assert second.get(session.session_id) is refreshed
 
 
@@ -202,6 +340,53 @@ def test_refresh_serializes_remote_read_with_local_save():
     assert not errors and saved.is_set()
     backend.pause = False
     assert SessionStore(clock=lambda: NOW, persistence_backend=backend).get(session.session_id).chat_history[session.company_id] == [{'text': 'durable'}]
+
+
+def test_remote_read_for_one_session_does_not_block_another_session_save():
+    class PausingPersistence(MemorySessionPersistence):
+        paused_id = None
+        def __init__(self):
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+        def load(self, session_id):
+            if session_id == self.paused_id:
+                self.entered.set()
+                assert self.release.wait(3)
+            return super().load(session_id)
+
+    backend = PausingPersistence()
+    store = SessionStore(clock=lambda: NOW, persistence_backend=backend)
+    slow, fast = store.create(), store.create()
+    backend.paused_id = slow.session_id
+    reader = threading.Thread(target=lambda: store.get(slow.session_id, refresh=True), daemon=True)
+    reader.start()
+    assert backend.entered.wait(2)
+    try:
+        fast.chat_history[fast.company_id] = [{'text': 'unblocked'}]
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(store.save, fast).result(timeout=1)
+    finally:
+        backend.release.set()
+        reader.join(timeout=3)
+    assert backend.load(fast.session_id)[0]['chat_history'][fast.company_id] == [{'text': 'unblocked'}]
+
+
+def test_concurrent_cold_restores_of_same_session_use_one_capacity_slot():
+    backend = MemorySessionPersistence()
+    creator = SessionStore(clock=lambda: NOW, persistence_backend=backend)
+    session = creator.create()
+    gate = threading.Barrier(2)
+    original_load = backend.load
+    def aligned_load(session_id):
+        result = original_load(session_id)
+        gate.wait(timeout=3)
+        return result
+    backend.load = aligned_load
+    cold = SessionStore(clock=lambda: NOW, max_sessions=1, persistence_backend=backend)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(cold.get, (session.session_id, session.session_id)))
+    assert results[0] is results[1]
 
 
 def test_cold_restore_respects_capacity_and_prunes_expired_cache():
@@ -338,7 +523,150 @@ def test_firestore_writes_use_hashed_ids_and_expected_update_time():
     assert session_id not in str(create) + str(update)
     assert create[2]['params']['documentId'] == document_id(session_id)
     assert update[2]['params']['currentDocument.updateTime'] == version
+    assert update[2]['params']['updateMask.fieldPaths'] == ['payload', 'expiresAt']
     assert decode_state(create[2]['json']['fields']['payload']['stringValue']) == state
+
+
+def test_firestore_request_admission_updates_only_counter_with_document_precondition():
+    class Response:
+        status_code = 200
+        def json(self):
+            return {'updateTime': 'v2'}
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def request(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return Response()
+    backend = FirestoreSessionPersistence('public-demo-project')
+    backend._client = Client()
+    session_id = secrets.token_urlsafe(32)
+    assert backend.reserve_session_request(session_id, 2, 1, 'v1') == (2, 'v2')
+    assert backend.reserve_session_request(session_id, 2, 2, 'v2') is None
+    assert len(backend._client.calls) == 1
+    method, url, kwargs = backend._client.calls[0]
+    assert method == 'PATCH' and url.endswith('/demo_sessions/' + document_id(session_id))
+    assert kwargs['params'] == {'currentDocument.updateTime': 'v1',
+                                'updateMask.fieldPaths': ['requestCount']}
+    assert kwargs['json'] == {'fields': {'requestCount': {'integerValue': '2'}}}
+
+
+def test_firestore_readiness_probes_one_masked_document_without_writes():
+    expected = ('projects/public-demo-project/databases/(default)/documents/'
+                'demo_sessions/' + document_id('0' * 43))
+
+    class Response:
+        status_code = 200
+        def json(self):
+            return {'missing': expected, 'readTime': '2026-10-15T00:00:00Z'}
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+        def request(self, method, url, **kwargs):
+            self.calls.append((method, url, kwargs))
+            return Response()
+
+    backend = FirestoreSessionPersistence('public-demo-project')
+    backend._client = Client()
+    assert backend.probe_readiness() is True
+    method, url, kwargs = backend._client.calls[0]
+    assert len(backend._client.calls) == 1
+    assert method == 'POST' and url.endswith('/documents:batchGet')
+    assert kwargs['json'] == {'documents': [expected], 'mask': {'fieldPaths': ['expiresAt']}}
+
+
+@pytest.mark.parametrize('body', [
+    {}, [], [{'missing': 'wrong-name'}],
+    {'found': {'name': 'wrong-name'}},
+    [{'missing': 'wrong-name'}, {'missing': 'wrong-name'}],
+    {'missing': 'wrong-name', 'found': {'name': 'wrong-name'}},
+])
+def test_firestore_readiness_rejects_malformed_or_wrong_resource(body):
+    class Response:
+        status_code = 200
+        def json(self):
+            return body
+    class Client:
+        def request(self, *_args, **_kwargs):
+            return Response()
+    backend = FirestoreSessionPersistence('public-demo-project')
+    backend._client = Client()
+    with pytest.raises(StorageInvalid):
+        backend.probe_readiness()
+
+
+def test_firestore_readiness_accepts_one_found_probe_document():
+    expected = ('projects/public-demo-project/databases/(default)/documents/'
+                'demo_sessions/' + document_id('0' * 43))
+    class Response:
+        status_code = 200
+        def json(self):
+            return {'found': {'name': expected, 'fields': {}}}
+    class Client:
+        def request(self, *_args, **_kwargs):
+            return Response()
+    backend = FirestoreSessionPersistence('public-demo-project')
+    backend._client = Client()
+    assert backend.probe_readiness() is True
+
+
+def test_firestore_readiness_rejects_extra_or_duplicate_results():
+    expected = ('projects/public-demo-project/databases/(default)/documents/'
+                'demo_sessions/' + document_id('0' * 43))
+    class Response:
+        status_code = 200
+        def __init__(self, body):
+            self.body = body
+        def json(self):
+            return self.body
+    class Client:
+        def __init__(self, body):
+            self.body = body
+        def request(self, *_args, **_kwargs):
+            return Response(self.body)
+    backend = FirestoreSessionPersistence('public-demo-project')
+    for body in ({'missing': expected, 'error': {'code': 404}},
+                 [{'missing': expected}, {'missing': expected}]):
+        backend._client = Client(body)
+        with pytest.raises(StorageInvalid):
+            backend.probe_readiness()
+
+
+def test_memory_readiness_observes_availability_without_writing():
+    backend = MemorySessionPersistence()
+    assert backend.probe_readiness() is True
+    assert backend._documents == {}
+    backend.unavailable = True
+    with pytest.raises(StorageUnavailable):
+        backend.probe_readiness()
+    assert backend._documents == {}
+
+
+def test_firestore_transport_allows_another_session_while_one_request_waits():
+    class Response:
+        status_code = 404
+    class Client:
+        def __init__(self, blocked_key):
+            self.blocked_key = blocked_key
+            self.entered = threading.Event()
+            self.release = threading.Event()
+        def request(self, _method, url, **_kwargs):
+            if url.endswith(self.blocked_key):
+                self.entered.set()
+                assert self.release.wait(3)
+            return Response()
+    backend = FirestoreSessionPersistence('public-demo-project')
+    first_id, second_id = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+    backend._client = Client(document_id(first_id))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(backend.load, first_id)
+        assert backend._client.entered.wait(2)
+        try:
+            assert pool.submit(backend.load, second_id).result(timeout=1) is None
+        finally:
+            backend._client.release.set()
+        assert first.result(timeout=3) is None
 
 
 def test_firestore_failed_precondition_400_is_conflict_but_other_400_is_unavailable():

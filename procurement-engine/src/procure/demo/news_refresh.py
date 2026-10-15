@@ -12,6 +12,7 @@ import sys
 import time
 
 from .company import list_companies
+from .global_watch import carry_watch, present as present_watch
 from .news import NewsService, _now, _company_item
 from .news_ranking import rank_items
 from .news_snapshots import GcsSnapshotStore, _slot, catalog_version, validate_bundle
@@ -33,6 +34,16 @@ def _carry(current, previous, company, now):
     """Retain only failed-source observations, preserving original evidence clocks."""
     if not previous:
         return current
+    old_watch = previous.get('global_watch')
+    if old_watch:
+        current_watch = current.get('global_watch')
+        if current_watch is None:
+            current_watch = {'attempted_at': now.isoformat(), 'success_at': None,
+                             'status': 'unavailable', 'events': [],
+                             'sources': [{**source, 'state': 'unavailable',
+                                          'last_checked_at': now.isoformat()}
+                                         for source in old_watch['sources']]}
+        current['global_watch'] = carry_watch(current_watch, old_watch)
     prior_items = {item.get('url'): item for item in previous.get('items', []) if item.get('url')}
     for item in current['items']:
         old_item = prior_items.get(item.get('url'))
@@ -123,12 +134,21 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
             except (OSError, ValueError, KeyError, TypeError, GoogleAuthError, requests.RequestException):
                 continue
     prior_views = previous['views'] if previous else {}
-    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix='news-portfolio')
+    pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='news-portfolio')
     try:
         futures = {p['company_id']: pool.submit(live.get, p) for p in profiles}
-        done, _ = wait(futures.values(), timeout=max(0, deadline-time.monotonic()-_PUBLICATION_RESERVE))
+        watch = getattr(live, 'global_watch', None)
+        watch_future = pool.submit(watch.get, profiles[0], force=True) if watch is not None else None
+        done, _ = wait([*futures.values(), *([watch_future] if watch_future else [])],
+                       timeout=max(0, deadline-time.monotonic()-_PUBLICATION_RESERVE))
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    global_watch = None
+    if watch_future in done:
+        try:
+            global_watch = watch_future.result()
+        except Exception:
+            pass
     views = {}
     news_success, fx_success = False, False
     for profile in profiles:
@@ -142,6 +162,8 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
         except (Exception):
             current = {'checked_at': started.isoformat(), 'cache_state': 'unavailable',
                        'sources': [], 'items': [], 'fx': [], 'limitations': []}
+        if global_watch is not None:
+            current['global_watch'] = present_watch(global_watch, profile)
         current = _carry(current, prior_views.get(cid), profile, started)
         if any(s.get('state') in _NEWS_STATES and s.get('source_id') != 'ecb_fx'
                and _checked_this_run(s, started) for s in current['sources']):
@@ -171,12 +193,18 @@ def refresh_portfolio(*, live, store, clock, company_profiles=None) -> dict:
               'completed_at': _now(clock).isoformat(), 'catalog_version': catalog_version(profiles),
               'company_ids': [p['company_id'] for p in profiles], 'views': views, 'collection': collection}
     validate_bundle(bundle, profiles)
+    watch_success = bool(global_watch and global_watch.get('success_at')
+                         and global_watch['status'] in ('fresh', 'partial')
+                         and _slot(datetime.fromisoformat(global_watch['success_at'].replace('Z', '+00:00'))) == slot)
     receipt = {'slot': slot.isoformat(), 'attempted_at': started.isoformat(),
                'completed_at': bundle['completed_at'], 'status': status,
                'news_success': news_success, 'fx_success': fx_success}
+    if watch_future is not None:
+        receipt.update(watch_attempted_at=(global_watch['attempted_at'] if global_watch else started.isoformat()),
+                       watch_success=watch_success)
     if hasattr(store, 'create_attempt'):
         store.create_attempt(slot, receipt)
-    published = bool(news_success and store.create(slot, bundle))
+    published = bool((news_success or watch_success) and store.create(slot, bundle))
     return {**bundle, 'collection': {**collection, 'published': published}}
 
 

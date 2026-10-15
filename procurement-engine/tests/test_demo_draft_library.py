@@ -1,4 +1,4 @@
-"""Prepared draft artifacts survive reload without restoring action approval."""
+"""Prepared draft artifacts and bounded approvals survive a session reload."""
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from procure.demo.app import create_app
@@ -44,10 +44,14 @@ def test_prepared_email_is_visible_durable_scoped_and_never_sent(monkeypatch):
             restored.cookies.update(client.cookies)
             state = restored.get('/api/demo/session').json()
             assert state['drafts'] == drafts and state['simulated_outbox'] == []
-            denied = restored.post('/api/demo/operator/confirm', headers=headers, json={
+            approved = restored.post('/api/demo/operator/confirm', headers=headers, json={
                 'proposal_id': turn['proposal']['proposal_id'], 'reviewed': True,
                 'expected_context_version': 1, 'idempotency_key': 'old-consent'})
-            assert denied.status_code in (404, 409)
+            assert approved.status_code == 200, approved.text
+            assert approved.json()['kind'] == 'simulate_email'
+            assert approved.json()['result']['simulated'] is True
+            assert approved.json()['result']['external_delivery'] is False
+            assert len(restored.get('/api/demo/session').json()['simulated_outbox']) == 1
             switched = restored.post('/api/demo/company', headers=headers, json={
                 'company_id': 'terrapack', 'expected_context_version': 1, 'idempotency_key': 'switch'})
             assert switched.status_code == 200 and switched.json()['drafts'] == []

@@ -14,13 +14,13 @@ import requests
 from google.auth.transport.requests import AuthorizedSession
 
 from .company import list_companies
-from .news import _now, _company_item, MAX_ITEMS
+from .news import _now, _company_item, _safe_url, MAX_ITEMS
 from .news_ranking import rank_items
 
 MAX_BUNDLE_BYTES = 2 * 1024 * 1024
 MAX_ATTEMPT_BYTES = 8 * 1024
 SCHEMA_VERSION = 1
-_ALLOWED_VIEW = {'checked_at', 'cache_state', 'sources', 'items', 'fx', 'limitations', 'collection'}
+_ALLOWED_VIEW = {'checked_at', 'cache_state', 'sources', 'items', 'fx', 'limitations', 'collection', 'global_watch'}
 _ALLOWED_ITEM = {'item_id', 'title', 'url', 'publisher', 'provider', 'published_at', 'first_seen_at',
                  'retrieved_at', 'source_tier', 'source_reliability', 'reliability_reason', 'synthetic',
                  'source_id', 'matched_materials', 'matched_routes', 'matched_currencies',
@@ -32,6 +32,65 @@ _ARTICLE_FIELDS = {'status', 'method', 'fetched_at', 'title', 'published_at',
 _ALLOWED_SOURCE = {'source_id', 'name', 'state', 'last_checked_at', 'reason'}
 _ALLOWED_FX = {'base', 'quote', 'rate', 'observation_date', 'provider', 'retrieved_at', 'informational'}
 _ALLOWED_COLLECTION = {'attempted_at', 'news_success_at', 'fx_success_at', 'status', 'published'}
+_WATCH_FIELDS = {'attempted_at', 'success_at', 'status', 'sources', 'events'}
+_WATCH_EVENT_FIELDS = {'item_id', 'title', 'url', 'publisher', 'provider', 'published_at',
+                       'first_seen_at', 'retrieved_at', 'source_id', 'topic', 'exposure'}
+_WATCH_EXPOSURE_FIELDS = {'kind', 'reason', 'matched_materials', 'matched_routes', 'next_action'}
+
+
+def _validate_watch(watch):
+    if not isinstance(watch, dict) or set(watch) != _WATCH_FIELDS:
+        raise ValueError('Invalid Global Watch fields')
+    _stamp(watch['attempted_at'])
+    if watch['success_at'] is not None:
+        _stamp(watch['success_at'])
+    if watch['status'] not in ('fresh', 'partial', 'stale', 'unavailable', 'offline'):
+        raise ValueError('Invalid Global Watch status')
+    if not isinstance(watch['sources'], list) or len(watch['sources']) > 4:
+        raise ValueError('Invalid Global Watch sources')
+    for source in watch['sources']:
+        if (not isinstance(source, dict) or not set(source) <= _ALLOWED_SOURCE
+                or not {'source_id', 'name', 'state', 'last_checked_at'} <= set(source)):
+            raise ValueError('Invalid Global Watch source')
+        for key, cap in (('source_id', 40), ('name', 120), ('reason', 200)):
+            value = source.get(key)
+            if (value is None and key == 'reason'):
+                continue
+            if not isinstance(value, str) or not value or len(value) > cap:
+                raise ValueError('Invalid Global Watch source text')
+        if source.get('last_checked_at'):
+            _stamp(source['last_checked_at'])
+        if source.get('state') not in ('fresh', 'empty', 'stale', 'unavailable'):
+            raise ValueError('Invalid Global Watch source state')
+    if not isinstance(watch['events'], list) or len(watch['events']) > 18:
+        raise ValueError('Invalid Global Watch events')
+    for event in watch['events']:
+        if not isinstance(event, dict) or set(event) != _WATCH_EVENT_FIELDS:
+            raise ValueError('Invalid Global Watch event')
+        for key in ('published_at', 'first_seen_at', 'retrieved_at'):
+            if event[key] is not None:
+                _stamp(event[key])
+        if (not isinstance(event['url'], str) or _safe_url(event['url']) != event['url']):
+            raise ValueError('Invalid Global Watch URL')
+        if event['topic'] not in ('conflict', 'chokepoint', 'port', 'restriction'):
+            raise ValueError('Invalid Global Watch topic')
+        for key, cap in (('item_id', 40), ('title', 240), ('source_id', 40), ('topic', 30), ('provider', 80)):
+            if not isinstance(event[key], str) or not event[key] or len(event[key]) > cap:
+                raise ValueError('Invalid Global Watch text')
+        if event['publisher'] is not None and (not isinstance(event['publisher'], str) or len(event['publisher']) > 253):
+            raise ValueError('Invalid Global Watch publisher')
+        exposure = event['exposure']
+        if not isinstance(exposure, dict) or set(exposure) != _WATCH_EXPOSURE_FIELDS:
+            raise ValueError('Invalid Global Watch exposure')
+        if exposure['kind'] not in ('direct', 'indirect', 'background'):
+            raise ValueError('Invalid exposure kind')
+        for key in ('reason', 'next_action'):
+            if not isinstance(exposure[key], str) or len(exposure[key]) > 240:
+                raise ValueError('Invalid exposure explanation')
+        for key in ('matched_materials', 'matched_routes'):
+            if not isinstance(exposure[key], list) or len(exposure[key]) > 20 or any(
+                    not isinstance(value, str) or len(value) > 80 for value in exposure[key]):
+                raise ValueError('Invalid matched exposure')
 
 
 def _slot(value):
@@ -81,6 +140,8 @@ def validate_bundle(bundle, profiles=None):
         if not isinstance(view, dict) or not set(view) <= _ALLOWED_VIEW or not {'checked_at', 'cache_state', 'sources', 'items', 'fx'} <= set(view):
             raise ValueError('Invalid view')
         _stamp(view['checked_at'])
+        if 'global_watch' in view:
+            _validate_watch(view['global_watch'])
         if 'collection' in view:
             vc = view['collection']
             if not isinstance(vc, dict) or not set(vc) <= _ALLOWED_COLLECTION:
@@ -137,8 +198,9 @@ def validate_bundle(bundle, profiles=None):
 
 
 def validate_attempt_receipt(receipt, slot=None):
-    if not isinstance(receipt, dict) or set(receipt) != {
-            'slot', 'attempted_at', 'completed_at', 'status', 'news_success', 'fx_success'}:
+    base = {'slot', 'attempted_at', 'completed_at', 'status', 'news_success', 'fx_success'}
+    watch_fields = {'watch_attempted_at', 'watch_success'}
+    if not isinstance(receipt, dict) or set(receipt) not in (base, base | watch_fields):
         raise ValueError('Invalid attempt receipt fields')
     receipt_slot = _stamp(receipt['slot'])
     attempted = _stamp(receipt['attempted_at'])
@@ -151,6 +213,12 @@ def validate_attempt_receipt(receipt, slot=None):
         raise ValueError('Attempt outside slot')
     if type(receipt['news_success']) is not bool or type(receipt['fx_success']) is not bool:
         raise ValueError('Invalid attempt success flags')
+    if watch_fields <= set(receipt):
+        if type(receipt['watch_success']) is not bool:
+            raise ValueError('Invalid watch success flag')
+        watch_attempted = _stamp(receipt['watch_attempted_at'])
+        if not attempted <= watch_attempted <= completed:
+            raise ValueError('Invalid watch attempt timestamp')
     if receipt['status'] not in ('fresh', 'partial', 'news_unavailable'):
         raise ValueError('Invalid attempt status')
     if (receipt['status'] == 'news_unavailable') == receipt['news_success']:
@@ -277,10 +345,36 @@ class SnapshotNewsService:
         self._bundle = None
         self._attempt = None
 
+    def _with_live_watch(self, view, company):
+        if 'global_watch' not in view:
+            watch = getattr(self.live, 'global_watch', None)
+            if watch is not None:
+                try:
+                    view['global_watch'] = watch.get(company)
+                except (OSError, ValueError, TypeError, requests.RequestException):
+                    pass
+        return view
+
+    @staticmethod
+    def _with_failed_watch_attempt(view, attempt):
+        watch = view.get('global_watch')
+        if (not watch or not attempt or 'watch_attempted_at' not in attempt
+                or attempt['watch_success'] is not False
+                or _stamp(attempt['watch_attempted_at']) <= _stamp(watch['attempted_at'])):
+            return view
+        watch['attempted_at'] = attempt['watch_attempted_at']
+        retained = bool(watch['events'])
+        for source in watch['sources']:
+            if source['state'] in ('fresh', 'empty'):
+                source['state'] = 'stale'
+            retained = retained or source['state'] == 'stale'
+        watch['status'] = 'stale' if retained else 'unavailable'
+        return view
+
     def get(self, company: dict, force: bool = False) -> dict:
         now = _now(self.clock)
         if force:
-            manual = self.live.get(company, force=True)
+            manual = self._with_live_watch(self.live.get(company, force=True), company)
             manual['collection'] = {'status': 'manual', 'attempted_at': now.isoformat(),
                                     'news_success_at': None, 'fx_success_at': None,
                                     'published': False, 'mode': 'manual'}
@@ -362,11 +456,25 @@ class SnapshotNewsService:
                         stale_source = True
             if age > timedelta(hours=2) or stale_source or failed_new_attempt or view['cache_state'] in ('stale', 'unavailable'):
                 view['cache_state'] = 'stale' if view['items'] or view['fx'] or stale_source else 'unavailable'
+            watch = view.get('global_watch')
+            if watch:
+                watch_age = now - _stamp(watch['success_at']) if watch.get('success_at') else timedelta.max
+                watch_stale = watch_age > timedelta(hours=2)
+                for source in watch['sources']:
+                    if source.get('state') == 'fresh' and source.get('last_checked_at'):
+                        if now - _stamp(source['last_checked_at']) > timedelta(hours=2):
+                            source['state'] = 'stale'
+                            watch_stale = True
+                if watch_stale and watch['status'] in ('fresh', 'partial'):
+                    watch['status'] = 'stale'
             view['collection'] = collection
+            view = self._with_live_watch(view, company)
+            view = self._with_failed_watch_attempt(view, attempt)
             if callable(getattr(self.live, 'present_view', None)):
                 view = self.live.present_view(view, company)
             return view
-        fallback = self.live.get(company, force=force)
+        fallback = self._with_live_watch(self.live.get(company, force=force), company)
+        fallback = self._with_failed_watch_attempt(fallback, attempt)
         fallback['collection'] = {'status': attempt['status'] if attempt else 'live_fallback',
                                   'attempted_at': attempt['attempted_at'] if attempt else None,
                                   'news_success_at': None, 'fx_success_at': None,

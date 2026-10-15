@@ -26,6 +26,7 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
+from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
 COOKIE = 'demo_session'
 MAX_BODY = 750_000
@@ -85,6 +86,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
+    readiness = DependencyReadiness(store.backend)
+    app.state.dependency_readiness = readiness
+    app.router.add_event_handler('shutdown', readiness.close)
     from .context_cache import BoundedContextCache
     context_cache = BoundedContextCache()
     app.state.operator_context_cache = context_cache
@@ -121,6 +125,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
     @app.middleware('http')
     async def public_errors(request, call_next):
+        started = monotonic()
         try:
             response = await call_next(request)
             value = getattr(request.state, 'demo_session', None)
@@ -137,15 +142,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        request_outcome(diagnostics, request.method, request.url.path,
+                        response.status_code, (monotonic() - started) * 1000)
         return response
 
     def session(request):
         value = store.get(request.cookies.get(COOKIE), refresh=True)
         request.state.demo_session = value
-        with value.lock:
-            value.requests += 1
-            if value.requests > MAX_REQUESTS:
-                raise SessionError('request_limit', 'Session request limit reached. Start a new session later.', 429)
+        store.reserve_request(value, MAX_REQUESTS)
         return value
 
     def origin(value):
@@ -788,6 +792,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def health():
         return {'ready': True, 'revision': os.getenv('K_REVISION', 'local'), 'persistence': store.persistence}
 
+    @app.get('/-/ready')
+    async def dependency_ready():
+        ready = await run_in_threadpool(readiness.check)
+        return JSONResponse({'ready': ready, 'persistence': store.persistence},
+                            status_code=200 if ready else 503)
+
     @app.get('/api/demo/session')
     async def get_session(request: Request):
         try:
@@ -838,6 +848,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
             result = news_view(value, payload, company_id, version)
             value.news = deepcopy(result)
+            news_freshness(diagnostics, result.get('cache_state'))
             return result
 
     @app.post('/api/demo/news/refresh')
@@ -860,6 +871,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise SessionError('stale_context', 'Company context changed. Refresh before continuing.', 409)
                 result = news_view(value, payload, company_id, version)
                 value.news = deepcopy(result)
+                news_freshness(diagnostics, result.get('cache_state'))
                 return complete(value, key, result)
         except Exception:
             with value.lock:

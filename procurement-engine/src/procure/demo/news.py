@@ -360,6 +360,8 @@ class NewsService:
         self.transport = transport or _default_transport
         self.offline = (any(os.getenv(name, '').lower() in ('1', 'true', 'yes')
                             for name in ('OFFLINE', 'PROCURE_OFFLINE')) if offline is None else bool(offline))
+        from .global_watch import GlobalWatch
+        self.global_watch = GlobalWatch(clock=self.clock, transport=self.transport, offline=self.offline)
         # A test/injected feed transport never causes implicit article network calls.
         enabled = os.getenv('NEWS_ARTICLE_ENRICHMENT', '').lower() in ('1', 'true', 'yes')
         if article_enricher is not None:

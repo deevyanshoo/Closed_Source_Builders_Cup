@@ -1,4 +1,19 @@
 .demo-news-panel { color: #262320; background: #f6f3ed; }
+.demo-global-watch { margin: 22px 0; padding: 22px; border: 1px solid #d8cfc4; background: #fffaf1; }
+.demo-global-watch-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.demo-global-watch h3 { margin: 4px 0 0; font-size: clamp(22px, 2.4vw, 30px); letter-spacing: -.035em; }
+.demo-global-watch > p { max-width: 780px; color: #665b4e; font-size: 12px; line-height: 1.55; }
+.demo-global-watch-state { padding: 5px 10px; border: 1px solid #c6b7a4; border-radius: 20px; color: #685545; font-size: 11px; font-weight: 750; text-transform: capitalize; }
+.demo-global-watch-clock { color: #786d60; font-size: 11px!important; }
+.demo-global-watch-sources { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
+.demo-global-watch-sources span { padding: 8px 10px; border: 1px solid #e5dace; background: #fff; font-size: 10px; line-height: 1.4; }
+.demo-global-watch-events { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr)); gap: 10px; }
+.demo-global-watch-event { min-width: 0; padding: 16px; border: 1px solid #e2d8cb; background: #fff; overflow-wrap: anywhere; }
+.demo-global-watch-event h4 { margin: 7px 0; font-size: 16px; line-height: 1.3; }
+.demo-global-watch-event p { margin: 8px 0; color: #5b544a; font-size: 11px; line-height: 1.5; }
+.demo-global-watch-meta { display: flex; flex-wrap: wrap; gap: 6px; color: #8b4939; font-size: 10px; font-weight: 750; text-transform: uppercase; }
+.demo-global-watch-event a { color: #9f4837; font-size: 11px; font-weight: 750; }
+.demo-global-watch-empty { padding: 13px; background: #f6efe6; }
 .demo-news-panel button, .demo-news-panel select { font: inherit; }
 .demo-news-panel button:focus-visible, .demo-news-panel select:focus-visible, .demo-news-panel a:focus-visible, .demo-news-panel summary:focus-visible { outline: 3px solid #bf5b45; outline-offset: 3px; }
 .demo-news-panel .demo-news-status { border-color: #e0d8cf; color: #514a43; }

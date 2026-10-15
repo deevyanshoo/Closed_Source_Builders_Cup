@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { CompanyProfile, NewsItem, NewsView, SimulatedOutboxMessage } from './demo-api';
+import type { CompanyProfile, GlobalWatch, NewsItem, NewsView, SimulatedOutboxMessage } from './demo-api';
 import { ActivityIndicator } from './demo-activity';
 import { supplierDisplayName } from './demo-display';
 import './demo-company-news.css';
@@ -67,6 +67,26 @@ const briefAge = (item: NewsItem, now: number) => {
   return `Published ${Math.floor(hours / 24)}d ago`;
 };
 
+function GlobalWatchPanel({ watch }: { watch?: GlobalWatch }) {
+  return <section className="demo-global-watch" aria-label="Global Watch">
+    <div className="demo-global-watch-head"><div><span className="demo-kicker">Shared public event discovery</span><h3>Global Watch</h3></div><span className="demo-global-watch-state">{watch?.status ?? 'unavailable'}</span></div>
+    <p>Conflict, chokepoint, port and trade restriction headlines are context for review. A headline alone does not confirm a route closure, supplier delay or price change.</p>
+    {!watch ? <p className="demo-global-watch-empty">Global coverage unavailable. No public events have been verified for this view.</p> : <>
+      <p className="demo-global-watch-clock">Last successful global collection: {dateLabel(watch.success_at)} · Last attempt: {dateLabel(watch.attempted_at)}</p>
+      <div className="demo-global-watch-sources" aria-label="Global Watch source status">{watch.sources.map(source =>
+        <span key={source.source_id}><strong>{source.name}: {source.state}</strong> · checked {dateLabel(source.last_checked_at)}{source.reason ? ` · ${source.reason}` : ''}</span>)}</div>
+      <div className="demo-global-watch-events">{watch.events.length ? watch.events.map(event =>
+        <article key={event.item_id} className="demo-global-watch-event">
+          <div className="demo-global-watch-meta"><span>{event.topic}</span><span>{event.exposure.kind === 'background' ? 'background context' : `${event.exposure.kind} exposure to check`}</span></div>
+          <h4>{event.title}</h4>
+          <p>{event.exposure.reason}</p><p><strong>Next check:</strong> {event.exposure.next_action}</p>
+          <p className="demo-global-watch-clock">Publisher listed: {event.publisher ?? 'Unavailable'} · Discovered via: {event.provider} · Published: {feedPublicationLabel(event.published_at)} · First seen: {dateLabel(event.first_seen_at)} · Retrieved: {dateLabel(event.retrieved_at)}</p>
+          {sourceHref(event.url) && <a href={sourceHref(event.url)!} target="_blank" rel="noopener noreferrer">Open news link ↗</a>}
+        </article>) : <p className="demo-global-watch-empty">No public events returned by this collection. Source status and collection times remain available above.</p>}</div>
+    </>}
+  </section>;
+}
+
 export function CompanyOverview({ company }: { company: CompanyProfile }) {
   return <section className="demo-company-panel" aria-label="Company overview">
     <div className="demo-heading"><div><span className="demo-kicker">Fictional company workspace</span><h2>{company.name}</h2></div><span className="demo-session">Synthetic profile · as of {company.as_of}</span></div>
@@ -100,6 +120,7 @@ export function NewsWorkspace({ company, view, loading, error, onRefresh, onActi
   return <section className="demo-company-panel demo-news-panel" aria-label="Live news workspace">
     <div className="demo-heading"><div><span className="demo-kicker">Observed public signals · {company.name}</span><h2>News inbox</h2></div><button type="button" className="demo-button" disabled={loading} onClick={onRefresh}>{loading ? 'Checking sources…' : 'Refresh sources'}</button></div>
     <p className="demo-muted">Ranked for this fictional company. Open a story to inspect the evidence before changing a plan. A topic match is not a confirmed supplier delay, price change, or forecast.</p>
+    <GlobalWatchPanel watch={view?.global_watch} />
     {error && <div className="demo-alert" role="alert">Source check unavailable: {error}. Previously displayed results, if any, keep their recorded check time.</div>}
     {loading && <ActivityIndicator state="searching" label="Checking public news sources" detail={view ? `The items below are from the previous check at ${dateLabel(view.checked_at)}.` : 'Fetching observed headline metadata and source health for this company.'} />}
     {!view ? <p className="demo-alert">{loading ? 'Checking reviewed public sources…' : 'News coverage unavailable. No synthetic articles are substituted.'}</p> : <>

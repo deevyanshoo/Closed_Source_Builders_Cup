@@ -147,6 +147,47 @@ describe('company news workspace', () => {
     expect(html).toContain('Checked Time unavailable');
     expect(html).not.toContain('not-a-date');
   });
+  it('keeps Global Watch visible independently of the company inbox and labels exposure and source clocks', () => {
+    const watch = { attempted_at: '2026-10-15T10:00:00Z', success_at: '2026-10-14T09:00:00Z',
+      status: 'stale' as const, sources: [{ source_id: 'global_conflict', name: 'Conflict discovery',
+        state: 'stale', last_checked_at: '2026-10-14T09:00:00Z', reason: 'Source unavailable' }],
+      events: [{ item_id: 'global-one', title: 'Port congestion reported', url: 'https://example.org/port',
+        publisher: 'Example', provider: 'Google News RSS', published_at: null,
+        first_seen_at: '2026-10-14T09:00:00Z', retrieved_at: '2026-10-14T09:00:00Z',
+        source_id: 'global_conflict', topic: 'chokepoint' as const,
+        exposure: { kind: 'background' as const, reason: 'Public context only.',
+          matched_materials: [], matched_routes: [], next_action: 'Read original source.' } }] };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company}
+      view={{ ...news, items: [], global_watch: watch }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('Global Watch');
+    expect(html).toContain('Port congestion reported');
+    expect(html).toContain('background context');
+    expect(html).toContain('Publication time unavailable');
+    expect(html).toContain('Last successful global collection');
+    expect(html).toContain('Source unavailable');
+    expect(html).toContain('Read original source.');
+    expect(html).toContain('No observed headlines were returned');
+    const empty = renderToStaticMarkup(<NewsWorkspace company={company} view={null}
+      loading={false} error="" onRefresh={() => {}} />);
+    expect(empty).toContain('Global Watch');
+    expect(empty).toContain('Global coverage unavailable');
+  });
+  it('labels a Google News destination as a discovery link and separates listed publisher from provider', () => {
+    const watch = { attempted_at: '2026-10-15T10:00:00Z', success_at: '2026-10-15T10:00:00Z',
+      status: 'fresh' as const, sources: [], events: [{ item_id: 'google-link',
+        title: 'Port update', url: 'https://news.google.com/rss/articles/example',
+        publisher: 'Example Publisher', provider: 'Google News RSS', published_at: null,
+        first_seen_at: '2026-10-15T10:00:00Z', retrieved_at: '2026-10-15T10:00:00Z',
+        source_id: 'global_port', topic: 'port' as const,
+        exposure: { kind: 'background' as const, reason: 'Context only.',
+          matched_materials: [], matched_routes: [], next_action: 'Verify publisher report.' } }] };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company}
+      view={{ ...news, items: [], global_watch: watch }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toContain('Publisher listed: Example Publisher');
+    expect(html).toContain('Discovered via: Google News RSS');
+    expect(html).toContain('Open news link ↗');
+    expect(html).not.toContain('>Read original source ↗</a>');
+  });
   it('shows only this company’s server-confirmed simulated messages with no delivery claim', () => {
     const message = { message_id: 'm1', company_id: company.company_id, material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Availability check', body: 'Please review.', status: 'simulated_sent' as const, simulated: true as const, external_delivery: false as const, created_at: '2026-10-14T12:00:00Z' };
     const html = renderToStaticMarkup(<OutboxWorkspace company={company} messages={[message, { ...message, message_id: 'm2', company_id: 'elsewhere' }, { ...message, message_id: 'm3', status: 'draft' as never, subject: 'Unconfirmed draft' }]} />);

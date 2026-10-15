@@ -94,7 +94,64 @@ def test_real_news_service_reuses_four_global_feeds_across_portfolio():
     result = refresh_portfolio(live=live, store=Store(), clock=lambda: NOW)
     assert len(result['views']) == 10
     assert sum('news.google.com' not in url for url in calls) == 4
-    assert len(calls) == 4 + sum(len(__import__('procure.demo.news', fromlist=['_google_queries'])._google_queries(p)) for p in list_companies())
+    assert len(calls) == 8 + sum(len(__import__('procure.demo.news', fromlist=['_google_queries'])._google_queries(p)) for p in list_companies())
+    assert all('global_watch' in view for view in result['views'].values())
+    assert len({view['global_watch']['attempted_at'] for view in result['views'].values()}) == 1
+
+
+def test_hourly_global_watch_outage_carries_original_evidence_and_success_clock():
+    prior = bundle()
+    old = (NOW-timedelta(hours=1)).isoformat()
+    prior.update(slot=old, started_at=old, completed_at=old)
+    prior['collection'].update(attempted_at=old, news_success_at=old)
+    old_watch = {'attempted_at': old, 'success_at': old, 'status': 'fresh',
+                 'sources': [{'source_id': 'global_conflict', 'name': 'Global conflict', 'state': 'fresh',
+                              'last_checked_at': old, 'reason': 'Metadata received.'}],
+                 'events': [{'item_id': 'one', 'title': 'Shipping disruption reported',
+                             'url': 'https://example.org/one', 'publisher': 'Example',
+                             'provider': 'Google News RSS', 'published_at': old,
+                             'first_seen_at': old, 'retrieved_at': old, 'source_id': 'global_conflict',
+                             'topic': 'conflict', 'exposure': {'kind': 'background',
+                             'reason': 'Public context.', 'matched_materials': [], 'matched_routes': [],
+                             'next_action': 'Read original source.'}}]}
+    for view in prior['views'].values():
+        view['global_watch'] = old_watch
+    class FailedWatch(Live):
+        def get(self, company, force=False):
+            row = super().get(company, force=force)
+            row['global_watch'] = {'attempted_at': NOW.isoformat(), 'success_at': None,
+                                   'status': 'unavailable', 'sources': [{'source_id': 'global_conflict',
+                                   'name': 'Global conflict', 'state': 'unavailable',
+                                   'last_checked_at': NOW.isoformat(), 'reason': 'Timeout'}], 'events': []}
+            return row
+    result = refresh_portfolio(live=FailedWatch(), store=Store(prior), clock=lambda: NOW)
+    watch = result['views']['solara-cables']['global_watch']
+    assert watch['status'] == 'stale'
+    assert watch['attempted_at'] == NOW.isoformat()
+    assert watch['success_at'] == old
+    assert watch['sources'][0]['last_checked_at'] == old
+    assert watch['events'][0]['retrieved_at'] == old
+
+
+def test_global_only_success_publishes_watch_without_advancing_company_news_clock():
+    prior = bundle()
+    old = (NOW-timedelta(hours=1)).isoformat()
+    prior.update(slot=old, started_at=old, completed_at=old)
+    prior['collection'].update(attempted_at=old, news_success_at=old)
+    class Watch:
+        def get(self, company, force=False):
+            return {'attempted_at': NOW.isoformat(), 'success_at': NOW.isoformat(),
+                    'status': 'fresh', 'sources': [{'source_id': 'global_conflict',
+                    'name': 'Global conflict', 'state': 'empty', 'last_checked_at': NOW.isoformat()}],
+                    'events': []}
+    live = Live(fail=True)
+    live.global_watch = Watch()
+    store = Store(prior)
+    result = refresh_portfolio(live=live, store=store, clock=lambda: NOW)
+    assert result['collection']['news_success_at'] == old
+    assert result['views']['solara-cables']['collection']['news_success_at'] == old
+    assert result['views']['solara-cables']['global_watch']['success_at'] == NOW.isoformat()
+    assert result['collection']['published'] is True
 
 
 def test_current_run_shared_global_sources_count_for_every_company_during_query_outage():

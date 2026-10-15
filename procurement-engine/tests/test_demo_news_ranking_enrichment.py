@@ -166,6 +166,7 @@ def test_static_transport_curl_callback_parses_bounded_html():
         def get(self, url, **options):
             assert options['timeout'] == (3, 5)
             assert options['impersonate'] is None
+            assert options['headers']['User-Agent'] == 'ScraplingNewsReader/1.0 (bounded public-news enrichment)'
             assert options['content_callback'](html) == len(html)
             return SimpleNamespace(status_code=200, headers={'Content-Type': 'text/html'})
         def close(self): pass

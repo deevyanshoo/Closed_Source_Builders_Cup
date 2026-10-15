@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, confirmVoiceTransition, focusValidOperatorSeed, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, validateAudioCapture, VoiceConversationSurface } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, confirmVoiceTransition, focusValidOperatorSeed, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, scopedPreparedDrafts, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,18 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('follows loaded and near-bottom history while preserving manual readback', () => {
+    expect(shouldFollowOperatorHistory({ scrollTop: 0, scrollHeight: 0, clientHeight: 300 })).toBe(true);
+    expect(shouldFollowOperatorHistory({ scrollTop: 640, scrollHeight: 1000, clientHeight: 300 })).toBe(true);
+    expect(shouldFollowOperatorHistory({ scrollTop: 100, scrollHeight: 1000, clientHeight: 300 })).toBe(false);
+  });
+  it('keeps the current proposal and composer outside conversation history, with a dock close control', () => {
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn }} onClose={() => {}} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('aria-label="Close operator chat"');
+    expect(html.indexOf('Current proposal requiring review')).toBeLessThan(html.indexOf('aria-label="Assistant conversation"'));
+    expect(html.indexOf('aria-label="Assistant conversation"')).toBeLessThan(html.indexOf('class="demo-operator-chat demo-assistant-composer"'));
+  });
   it('keeps one voice connection for reviewed research and closes it for business Apply', () => {
     let ends = 0, revisions = 0;
     const close = () => { ends += 1; };

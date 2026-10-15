@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory, OperatorOverview, OperatorTurn, PlanView, PreparedDraft, ResearchResult } from './demo-api';
@@ -21,6 +21,9 @@ export function focusValidOperatorSeed(seed: OperatorSeed | null | undefined, sc
   const message = operatorSeedMessage(seed, scope);
   if (message) focus();
   return message;
+}
+export function shouldFollowOperatorHistory(view: { scrollTop: number; scrollHeight: number; clientHeight: number }): boolean {
+  return view.scrollHeight - view.clientHeight - view.scrollTop <= 72;
 }
 type OperatorExchange = { id: number | string; question: string | null; turn?: OperatorTurn; error?: string; channel?: 'text' | 'voice'; answer?: string; speaker?: 'input' | 'output'; research?: ResearchResult; created_at?: string };
 const MAX_EXCHANGES = 20;
@@ -245,8 +248,8 @@ export function VoiceConversationSurface({ open, onClose, voice, proposal, resea
     <div className="demo-voice-screen-body" data-has-proposal={!!proposal || !!research}>{proposal}{research && <div className="demo-voice-research-result"><span className="demo-kicker">Public research completed</span><ResearchOutcome result={research} /><p>You can ask a follow-up by voice. This result was returned by the confirmed web request.</p></div>}{voice}</div>
   </div>;
 }
-export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, materials = [], seed, riskSummary, beforeTurn, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
-  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
+export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal, initialState, news = null, offers = [], plan = null, materials = [], seed, riskSummary, beforeTurn, onClose, onSession, onNavigate, onPreparedDrafts, onUnknown }: {
+  scope: OperatorScope; csrf: string; dirty: boolean; blocked?: boolean; closeSignal?: number; initialState?: OperatorState; news?: NewsView | null; offers?: OfferView[]; plan?: PlanView | null; materials?: MaterialLabel[]; seed?: OperatorSeed | null; riskSummary?: { high: number; medium: number; low: number; checkedAt: string } | null; beforeTurn?: () => Promise<DemoSession>; onClose?: () => void; onSession: (session: DemoSession, action?: OperatorTurn['action_result']) => void; onNavigate?: (view: 'company' | 'news' | 'procurement' | 'outbox' | 'drafts') => void; onPreparedDrafts?: (drafts: PreparedDraft[], scope: OperatorScope) => void; onUnknown: () => void;
 }) {
   const [rawState, dispatch] = useReducer(applyOperatorResult, initialState ?? { ...initialOperatorState, scope });
   const state = sameScope(rawState.scope, scope) ? rawState : {
@@ -269,6 +272,10 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
   const voiceSurfaceRef = useRef<HTMLDivElement | null>(null);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const messageRef = useRef<HTMLTextAreaElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
+  const followHistoryRef = useRef(true);
+  const forceHistoryScrollRef = useRef(false);
+  const historyScopeRef = useRef(`${scope.sessionId}:${scope.companyId}:${scope.contextVersion}`);
   const restoreVoiceFocusRef = useRef(false);
   const lastCloseSignal = useRef(closeSignal);
   const voiceScopeRef = useRef(scope);
@@ -307,6 +314,20 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     const message = focusValidOperatorSeed(seed, scopeRef.current, () => messageRef.current?.focus());
     if (message) setMessage(message);
   }, [seed?.id, seed?.companyId, scope.companyId, scope.sessionId, scope.contextVersion, scope.epoch]);
+  useLayoutEffect(() => {
+    const history = historyRef.current;
+    if (!history) return;
+    const historyScope = `${scope.sessionId}:${scope.companyId}:${scope.contextVersion}`;
+    if (historyScopeRef.current !== historyScope) {
+      historyScopeRef.current = historyScope;
+      followHistoryRef.current = true;
+    }
+    if (followHistoryRef.current || forceHistoryScrollRef.current) {
+      history.scrollTop = history.scrollHeight;
+      followHistoryRef.current = true;
+    }
+    forceHistoryScrollRef.current = false;
+  }, [scope.sessionId, scope.companyId, scope.contextVersion, state.exchanges, state.turns, state.turn, state.outcome, state.pendingQuestion]);
 
   function cancel() {
     const proposal = state.turn?.proposal;
@@ -343,6 +364,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     const value = message.trim();
     if (!value || value.length > 1200 || blocked || busy || voiceOpen || state.overview?.available === false) return;
     const captured = scope, generation = ++generationRef.current, requestId = ++requestRef.current;
+    forceHistoryScrollRef.current = true;
     setBusy('asking'); setError('');
     dispatch({ type: 'start', scope: captured, requestId, question: value });
     let acceptedTurn = false;
@@ -413,7 +435,6 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     const card = proposalRef.current;
     if (proposal?.proposal_id && card?.getClientRects().length) {
       card.focus({ preventScroll: true });
-      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }, [proposal?.proposal_id]);
   const supplierNames = offers.flatMap(offer => {
@@ -435,7 +456,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
       return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Fixture: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested synthetic document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;
     })}</> : <p className="demo-alert">Quote preview unavailable. Request a new proposal.</p>}{!reviewCurrent && <p className="demo-alert">A quote source or version changed. Request a new review proposal.</p>}</div>}{preparedPreview && <div className="demo-draft-preview" id="demo-current-draft"><span className="demo-kicker">Prepared unsent draft · review before Apply</span><p><strong>To:</strong> {displaySupplierMentions(preparedPreview.recipient, supplierNames)}</p><p><strong>Subject: {preparedPreview.subject}</strong></p><pre>{displaySupplierMentions(preparedPreview.body, supplierNames)}</pre><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></div>}<details className="demo-assistant-trace"><summary>Exact proposed arguments</summary><p>Company {scope.companyId} · Context v{proposal.context_version} · Expires {proposal.expires_at}</p><p>Plan ID: {proposal.plan_id ?? 'none'} · Offer versions: {JSON.stringify(proposal.offer_versions)}</p><pre>{JSON.stringify(proposal.parameters, null, 2)}</pre></details><label><input type="checkbox" checked={state.reviewed} disabled={dirty || blocked || !!busy || !reviewCurrent} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />{proposal.kind === 'research' ? 'I reviewed the public query and want to search the web.' : 'I reviewed the exact arguments and want to apply this change to the current session.'}</label><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>{proposal.kind === 'research' ? 'Research web' : 'Apply reviewed proposal'}</button><p>{proposal.kind === 'simulate_email' ? 'No external delivery. Applying records a simulated sent message in this session only.' : proposal.kind === 'review_quotes' ? 'Only these synthetic quote values will be corrected and saved after your review. No supplier message or order is sent.' : proposal.kind === 'research' ? 'Select Research web to confirm this query. Voice requests can instead be confirmed aloud after the query is read.' : 'No supplier message or order is sent.'}</p></div>) : null;
   return <section className="demo-company-panel demo-operator-panel demo-assistant-panel" aria-label="Operator workspace">
-    <div className="demo-heading demo-assistant-heading"><div><span className="demo-kicker">Workspace assistant</span><h2>Operator</h2><p>Ask a question. Actions wait for your review.</p></div><span className="demo-session">{state.overview?.available === false ? 'Unavailable' : 'Ready to help'}</span></div>
+    <div className="demo-heading demo-assistant-heading"><div><span className="demo-kicker">Workspace assistant</span><h2>Operator</h2><p>Ask a question. Actions wait for your review.</p></div><span className="demo-session">{state.overview?.available === false ? 'Unavailable' : 'Ready to help'}</span>{onClose && <button type="button" className="demo-assistant-close" aria-label="Close operator chat" onClick={onClose}>Close</button>}</div>
     <VoiceConversationSurface open={voiceOpen} onClose={() => closeVoice()} surfaceRef={voiceSurfaceRef} proposal={voiceOpen ? proposalCard : null} research={voiceOpen && !proposal ? latestVoiceResearch(state, scope) : null}
       voice={<LiveVoice key={voiceRevision} ref={voiceRef} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} onExit={() => closeVoice()} />} />
     {riskSummary && <p className="demo-operator-risk"><strong>Current company risks:</strong> {riskSummary.high} high · {riskSummary.medium} medium · {riskSummary.low} low <small>Checked {riskSummary.checkedAt}</small></p>}
@@ -447,13 +468,13 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     {busy === 'applying' && <ActivityIndicator state="working" label="Applying the reviewed proposal…" size={20} theme="dark" />}
     {busy === 'researching' && <ActivityIndicator state="working" label="Searching the public web with the reviewed query…" size={20} theme="dark" />}
     {!voiceOpen && proposalCard}
-    <div className="demo-assistant-history" role="log" aria-label="Assistant conversation" aria-live="polite" aria-relevant="additions text">
+    <div ref={historyRef} className="demo-assistant-history" role="log" aria-label="Assistant conversation" aria-live="polite" aria-relevant="additions text" onScroll={event => { followHistoryRef.current = shouldFollowOperatorHistory(event.currentTarget); }}>
     {(state.exchanges?.length ? state.exchanges : (state.turns?.length ? state.turns : state.turn ? [state.turn] : []).map((turn, id): OperatorExchange => ({ id, question: null, turn }))).map(exchange => <div key={exchange.id} className="demo-assistant-exchange">{exchange.question && <div className="demo-assistant-question"><span className="demo-kicker">You</span><p>{exchange.question}</p></div>}{exchange.answer && !exchange.turn && !exchange.research && <div className="demo-operator-result"><span className="demo-kicker">{exchange.channel === 'voice' ? exchange.speaker === 'input' ? 'You · voice' : 'Operator · voice' : 'Saved answer'}</span><div className="demo-operator-answer"><MarkdownAnswer text={exchange.answer} /></div></div>}{exchange.research && <ResearchOutcome result={exchange.research} />}{exchange.error && <div className="demo-assistant-failure" role="status"><span className="demo-kicker">Request failed</span><p>{exchange.error}</p></div>}{exchange.turn && <div className="demo-operator-result"><span className="demo-kicker">{exchange.turn.status === 'proposal' ? 'Proposal ready' : 'Operator'}</span><OperatorAnswer turn={exchange.turn} scope={scope} supplierNames={supplierNames} />{exchange.turn.action_result && <p className="demo-assistant-result-note">{exchange.turn.action_result.summary}{exchange.turn.action_result.fields_changed?.length ? ` · Filled: ${exchange.turn.action_result.fields_changed.join(', ')}` : ''}</p>}<details className="demo-assistant-trace"><summary>Evidence and specialist activity · {exchange.turn.evidence_ids.length} references · {exchange.turn.agent_steps.length} steps</summary>{exchange.turn.analytics && <OperatorAnalytics analytics={exchange.turn.analytics} />}<h3>Evidence in this workspace</h3>{exchange.turn.evidence_ids.length ? <ul className="demo-operator-evidence">{exchange.turn.evidence_ids.map(id => {
       const evidence = resolveOperatorEvidence(id, scope, news, offers, plan);
       return <li key={id}><code>{id}</code><span>{evidence.kind === 'news' ? 'Observed news' : evidence.kind === 'quote' ? 'Quote' : evidence.kind === 'plan' ? 'Comparison' : 'Unavailable'}</span>{evidence.href ? <a href={evidence.href} target="_blank" rel="noopener noreferrer">{evidence.title} ↗</a> : <strong>{evidence.title}</strong>}{evidence.publisher && <span>Publisher: {evidence.publisher}</span>}{evidence.detail && <small>{evidence.detail}</small>}{evidence.kind === 'news' && !evidence.href && <small>Source link unavailable</small>}</li>;
     })}</ul> : <p>No evidence IDs returned.</p>}<h3>Actual agent activity</h3>{exchange.turn.agent_steps.length ? <ol>{exchange.turn.agent_steps.map((step, index) => <li key={index}><strong>{step.agent} · {step.role}</strong><span>{step.status} · {step.model} · provider call {step.provider_call} · tool {step.tool}</span><p>{step.summary}</p></li>)}</ol> : <p>No specialist calls were recorded for this turn.</p>}</details></div>}</div>)}
-    </div>
     {state.outcome && <div className="demo-operator-result"><span className="demo-kicker">{state.outcome.kind === 'research' ? 'Approved public research' : `Applied to server session · ${state.outcome.kind}`}</span>{state.outcome.kind !== 'research' && <p>This result is the server-confirmed workspace change. The current session and comparison below were restored from its response.</p>}{state.outcome.kind === 'research' ? <ResearchOutcome result={state.outcome.result as ResearchResult} /> : state.outcome.kind === 'watch' ? (() => { const line = formatOperatorWatch(state.outcome.result, materials, scope.companyId); return <p><strong>{line.title}</strong>{line.detail && ` · ${line.detail}`}{line.synthetic && ' · Synthetic watch item'}</p>; })() : <p>{state.outcome.kind === 'recovery' ? 'The hypothetical recovery comparison is available below.' : state.outcome.kind === 'simulate_email' ? 'A simulated sent record is available in the outbox. No external delivery occurred.' : state.outcome.kind === 'review_quotes' ? 'The reviewed synthetic quotes were restored from the confirmed server session.' : 'The unsent RFQ draft is available in Drafts.'}</p>}{(state.outcome.kind === 'rfq' || state.outcome.kind === 'simulate_email') && <button type="button" className="demo-link" onClick={() => onNavigate?.('drafts')}>View draft</button>}</div>}
+    </div>
     <form onSubmit={send} className="demo-operator-chat demo-assistant-composer"><label htmlFor="demo-operator-message">Your message</label><div className="demo-composer-box"><textarea ref={messageRef} id="demo-operator-message" value={message} maxLength={1200} onChange={event => setMessage(event.target.value)} placeholder="Ask about a story or your workspace" disabled={blocked || !!busy || voiceOpen || state.overview?.available === false} /><button ref={micRef} type="button" className="demo-composer-mic" aria-label="Open voice conversation" title="Open voice conversation" disabled={blocked || !!busy || voiceOpen || state.overview?.available === false} onClick={openVoice}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3m-4 0h8" /></svg></button><button className="demo-button" disabled={!message.trim() || blocked || !!busy || voiceOpen || state.overview?.available === false}>Send</button></div><div className="demo-composer-meta"><span>{message.length}/1200 characters</span><button type="button" className="demo-link" disabled={busy === 'applying' || busy === 'researching'} onClick={cancel}>Cancel current turn</button></div></form>
   </section>;
 }

@@ -99,7 +99,7 @@ def _static_fetch(url, *, session_factory=curl_requests.Session):
             return len(chunk)
 
         try:
-            response = session.get(url, headers={'User-Agent': 'ProcureNewsArticleReader/1.0'},
+            response = session.get(url, headers={'User-Agent': 'ScraplingNewsReader/1.0 (bounded public-news enrichment)'},
                                    timeout=(3, 5), allow_redirects=False, impersonate=None,
                                    content_callback=bounded_chunk)
         except Exception:

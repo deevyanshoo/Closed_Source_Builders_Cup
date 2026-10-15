@@ -1292,7 +1292,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             from .quote_service import company_for_offer
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
                        'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
-                       'prepare_simulated_email', 'navigate_workspace'}
+                       'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
             with value.lock:
@@ -1369,6 +1369,38 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                                       'recipient_label': item['recipient_label'], 'status': item['status']}
                                                      for item in value.simulated_outbox]}
                         result['assistant_text'] = 'Current workspace facts are ready.'
+                    elif name == 'prepare_rfq':
+                        shape(args, ())
+                        plan = active_plan(value)
+                        if plan is None:
+                            raise SessionError('draft_unavailable',
+                                               'Compare reviewed supplier quotes to create a current sourcing plan before drafting an RFQ.', 409)
+                        selected_id = plan.get('selected_offer_id')
+                        if selected_id is None or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0':
+                            raise SessionError('draft_unavailable',
+                                               'The current plan has no eligible purchase to request. Review the plan before drafting an RFQ.', 409)
+                        from .rfq import build_draft
+                        selected = current_offers(value, plan, plan['offer_versions'],
+                                                  today=store.now().date())
+                        chosen = next((offer for offer in selected if offer['offer_id'] == selected_id), None)
+                        if chosen is None:
+                            raise SessionError('stale_plan', 'Selected quote is no longer available.', 409)
+                        preview = build_draft(deepcopy(plan), deepcopy(chosen),
+                                              all_offers=deepcopy(selected), created_at=store.now())
+                        proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'rfq',
+                                    'summary': 'Review the unsent RFQ draft for the current sourcing plan.',
+                                    'parameters': {}, 'plan_id': plan['plan_id'],
+                                    'offer_versions': deepcopy(plan['offer_versions']),
+                                    'context_version': value.context_version,
+                                    'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                                    '_marker': marker, '_company_id': value.company_id,
+                                    '_session_id': value.session_id}
+                        remember_prepared_draft(value, proposal, rfq_preview=preview)
+                        value.pending_proposal = proposal
+                        result['status'] = 'proposal'
+                        result['proposal'] = public_proposal(proposal)
+                        result['assistant_text'] = proposal['summary']
+                        result['workspace'] = {'drafts': deepcopy(value.drafts)}
                     elif name == 'prepare_simulated_email':
                         parameters = simulated_email_parameters(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'simulate_email',

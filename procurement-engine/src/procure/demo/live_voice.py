@@ -82,8 +82,12 @@ INSTRUCTION = (
     "explicit buyer inputs, load_sample_quotes to load drafts, review_sample_quotes to "
     "prepare a review, compare_suppliers for a saved-quote plan, and navigate_workspace "
     "to show the requested view. Use operate_workspace for complex analysis, news risks, "
-    "supplier-delay recovery and RFQ drafts. Use prepare_simulated_email to prepare a "
-    "simulation proposal. For news, headlines, world events or what could affect this business, "
+    "and supplier-delay recovery. For any request to draft or prepare an RFQ or request "
+    "for quotation for the current sourcing plan, use prepare_rfq. It uses the current "
+    "reviewed plan and selected quote; if there is no eligible purchase, explain what "
+    "needs review. Never substitute a simulated email for an RFQ. Use "
+    "prepare_simulated_email only when the user explicitly requests a simulated email. "
+    "For news, headlines, world events or what could affect this business, "
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
     "Summarize two relevant developments with publication dates, named sources, conditional company impact "
     "and a practical next step in three or four short sentences. Never just report the number of signals. "
@@ -300,7 +304,8 @@ def _config(company=None):
         ('review_sample_quotes', 'Prepare all current owned unmodified synthetic quote drafts for this material for human review; never invent offer IDs.',
          {'material_id': text}, ['material_id']),
         ('compare_suppliers', 'Run the procurement planner on saved quotes and current buyer inputs.', {'material_id': text}, ['material_id']),
-        ('prepare_simulated_email', 'Prepare a reviewed simulated email; never sends externally.',
+        ('prepare_rfq', 'Prepare an unsent, reviewed RFQ draft from the current eligible sourcing plan and selected quote. Use for RFQ or request-for-quotation requests.', {}, []),
+        ('prepare_simulated_email', 'Prepare a reviewed simulated email only when explicitly requested as an email; never use for an RFQ and never sends externally.',
          {'material_id': text, 'recipient_label': {'type': 'string', 'maxLength': 160},
           'subject': {'type': 'string', 'maxLength': 120}, 'body': {'type': 'string', 'maxLength': 1000}}, ['material_id']),
         ('navigate_workspace', 'Show a workspace view.',
@@ -1003,7 +1008,8 @@ async def run_live_voice(
                                      'prepare_research', 'confirm_research', 'read_research',
                                      'read_risks', 'read_news',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
-                                     'compare_suppliers', 'prepare_simulated_email', 'navigate_workspace'}
+                                     'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
+                                     'navigate_workspace'}
                             if name not in known:
                                 raise _Invalid()
                             call_id = getattr(call, 'id', None)
@@ -1011,6 +1017,8 @@ async def run_live_voice(
                                 raise _Invalid()
                             args = getattr(call, 'args', None)
                             if not isinstance(args, dict) or len(json.dumps(args)) > 8000:
+                                raise _Invalid()
+                            if name == 'prepare_rfq' and args:
                                 raise _Invalid()
                             if name == 'operate_workspace' and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or

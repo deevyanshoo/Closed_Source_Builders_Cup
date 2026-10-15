@@ -10,6 +10,25 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('names each reviewable action plainly and makes the email simulation outcome explicit', () => {
+    const labels = {
+      rfq: 'Unsent RFQ draft', simulate_email: 'Email simulation', review_quotes: 'Quote review',
+      recovery: 'Supplier-delay scenario', research: 'Internet research', watch: 'Watch item',
+    } as const;
+    for (const [kind, label] of Object.entries(labels)) {
+      const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+        initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: { ...proposal, kind: kind as keyof typeof labels } } }}
+        onSession={() => {}} onUnknown={() => {}} />);
+      const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+      expect(card).toContain(`Current proposal · ${label}`);
+      expect(card).not.toContain(`Reviewable ${kind} proposal`);
+    }
+    const simulated = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: { ...proposal, kind: 'simulate_email', parameters: { recipient_label: 'Supplier', subject: 'Availability', body: 'Please confirm stock.' } } } }}
+      onSession={() => {}} onUnknown={() => {}} />);
+    expect(simulated).toContain('Record simulated sent message');
+    expect(simulated).toContain('No external delivery occurs.');
+  });
   it('gives a pending proposal the main review flow before attention and history', () => {
     const overview = { company_id: scope.companyId, context_version: scope.contextVersion, available: true, agents: [], attention: [], watch_items: [], limitations: [] };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
@@ -61,10 +80,10 @@ describe('operator response boundary', () => {
     expect(card).toContain('Availability');
     expect(card).toMatch(/<details[^>]*><summary>Full draft preview<\/summary>/);
     expect(card).toContain('Please confirm a 400 kg shipment.');
-    expect(card.indexOf('Full draft preview')).toBeLessThan(card.indexOf('Apply reviewed proposal'));
+    expect(card.indexOf('Full draft preview')).toBeLessThan(card.indexOf('Record simulated sent message'));
     expect(card).toContain('Open the full draft preview before confirming.');
     expect(card).toMatch(/<input type="checkbox"[^>]*disabled=""/);
-    expect(card).toMatch(/disabled=""[^>]*>Apply reviewed proposal<\/button>/);
+    expect(card).toMatch(/disabled=""[^>]*>Record simulated sent message<\/button>/);
     const opened = proposalPreviewKey(scope, draft.proposal);
     expect(proposalPreviewReady(scope, draft, null)).toBe(false);
     expect(proposalPreviewReady(scope, draft, opened)).toBe(true);
@@ -98,7 +117,7 @@ describe('operator response boundary', () => {
         const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
         expect(card).toContain('Draft preview unavailable. Request a new proposal.');
         expect(card).toMatch(/<input type="checkbox"[^>]*disabled=""/);
-        expect(card).toMatch(/disabled=""[^>]*>Apply reviewed proposal<\/button>/);
+        expect(card).toMatch(kind === 'simulate_email' ? /disabled=""[^>]*>Record simulated sent message<\/button>/ : /disabled=""[^>]*>Apply reviewed proposal<\/button>/);
       }
     }
   });
@@ -190,7 +209,7 @@ describe('operator response boundary', () => {
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
       initialState={{ ...initialOperatorState, scope, turn }} onSession={() => {}} onUnknown={() => {}} />);
     const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
-    expect(card).toContain('CURRENT proposal');
+    expect(card).toContain('Current proposal · Watch item');
     expect(card).toContain('I reviewed the exact arguments');
     expect(card).toContain('Apply reviewed proposal');
     expect(card).toContain('Cancel proposal');
@@ -361,7 +380,7 @@ describe('operator response boundary', () => {
     expect(html).toContain('<h3>Status</h3>');
     const pending = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
       initialState={{ ...initialOperatorState, scope, turn, exchanges: Array.from({ length: 20 }, (_, index) => ({ id: index, question: 'Old question', answer: 'Old answer' })) }} onSession={() => {}} onUnknown={() => {}} />);
-    expect(pending.indexOf('Reviewable watch proposal')).toBeLessThan(pending.indexOf('Old question'));
+    expect(pending.indexOf('Current proposal · Watch item')).toBeLessThan(pending.indexOf('Old question'));
     expect(pending).toContain('role="region" aria-label="Current proposal requiring review"');
   });
   it('discloses the email body and a direct draft review link while keeping recipient and subject visible', () => {
@@ -646,10 +665,11 @@ describe('operator response boundary', () => {
   it('shows a reviewable simulated email with exact arguments and a server-confirmed outbox outcome', () => {
     const email = { ...proposal, kind: 'simulate_email' as const, summary: 'Prepare a simulated supplier message', parameters: { material_id: 'copper', recipient_label: 'Supplier desk', subject: 'Availability', body: 'Please confirm stock.' } };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: email }, reviewed: true }} onSession={() => {}} onUnknown={() => {}} />);
-    expect(html).toContain('simulate_email');
+    expect(html).toContain('Current proposal · Email simulation');
     expect(html).toContain('Please confirm stock.');
     expect(html).toContain('No external delivery');
     const outcomeHtml = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, outcome: { status: 'applied', company_id: scope.companyId, context_version: 1, kind: 'simulate_email', result: { message_id: 'm1' }, session: { session_id: scope.sessionId, csrf_token: 'csrf', expires_at: '2026-10-15T00:00:00Z', synthetic: true, persistence: 'ephemeral', offers: [], provider: { model: 'test', available: true } } } }} onSession={() => {}} onUnknown={() => {}} />);
+    expect(outcomeHtml).toContain('Applied to server session · Email simulation');
     expect(outcomeHtml).toContain('simulated sent record is available in the outbox');
   });
   it('renders server inventory analytics as a table with stated units', () => {

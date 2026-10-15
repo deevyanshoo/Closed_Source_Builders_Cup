@@ -23,6 +23,23 @@ const news: NewsView = {
 describe('company news workspace', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-15T10:00:00Z')); });
   afterEach(() => vi.useRealTimers());
+  it('opens with company stories before an adjacent, inactive Global Watch tab', () => {
+    const dated = { ...news.items[0], published_at: '2026-10-14T09:00:00Z' };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [dated] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html).toMatch(/role="tablist"[^>]*aria-label="News views"/);
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="true"[^>]*>For your company<\/button>/);
+    expect(html).toMatch(/role="tab"[^>]*aria-selected="false"[^>]*>Global Watch<\/button>/);
+    expect(html.indexOf('Copper lane update')).toBeLessThan(html.indexOf('Shared public event discovery'));
+    expect(html).toMatch(/role="tabpanel"[^>]*aria-label="Global Watch"[^>]*hidden=""/);
+  });
+  it('keeps one primary story action and discloses secondary actions and evidence progressively', () => {
+    const dated = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', relevance_strength: 'strong' as const };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [dated] }} loading={false} error="" onRefresh={() => {}} onAction={() => {}} />);
+    expect(html).toMatch(/class="demo-news-actions"[^>]*><button[^>]*>Ask operator<\/button><\/div>/);
+    expect(html).toMatch(/<details[^>]*><summary>More actions<\/summary>[\s\S]*?Check inventory[\s\S]*?Prepare unsent draft[\s\S]*?<\/details>/);
+    expect(html).toMatch(/<details[^>]*><summary>Evidence and source details<\/summary>/);
+    expect(html).toContain('Matched exposure:');
+  });
   it('ranks operational fit ahead of incidental material mentions, with stable newest sorting', () => {
     const background = { ...news.items[0], item_id: 'background', relevance_strength: 'background' as const, published_at: '2026-10-15T09:00:00Z' };
     const strong = { ...news.items[0], item_id: 'strong', relevance_strength: 'strong' as const, published_at: '2026-10-14T09:00:00Z' };
@@ -147,7 +164,7 @@ describe('company news workspace', () => {
     expect(html).toContain('Checked Time unavailable');
     expect(html).not.toContain('not-a-date');
   });
-  it('keeps Global Watch visible independently of the company inbox and labels exposure and source clocks', () => {
+  it('retains Global Watch evidence in its adjacent tab with compact events and collapsed source health', () => {
     const watch = { attempted_at: '2026-10-15T10:00:00Z', success_at: '2026-10-14T09:00:00Z',
       status: 'stale' as const, sources: [{ source_id: 'global_conflict', name: 'Conflict discovery',
         state: 'stale', last_checked_at: '2026-10-14T09:00:00Z', reason: 'Source unavailable' }],
@@ -160,6 +177,8 @@ describe('company news workspace', () => {
     const html = renderToStaticMarkup(<NewsWorkspace company={company}
       view={{ ...news, items: [], global_watch: watch }} loading={false} error="" onRefresh={() => {}} />);
     expect(html).toContain('Global Watch');
+    expect(html).toMatch(/<details class="demo-global-watch-sources"><summary>Global source health/);
+    expect(html).toMatch(/class="demo-global-watch-row"[^>]*aria-current="true"/);
     expect(html).toContain('Port congestion reported');
     expect(html).toContain('background context');
     expect(html).toContain('Publication time unavailable');

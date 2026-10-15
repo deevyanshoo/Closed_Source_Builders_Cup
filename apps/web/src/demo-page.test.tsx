@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
+import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview } from './zoorq-workspace';
 
 const offer = (version: number, status = 'corrected'): OfferView => ({
   offer_id: 'q1', version, status, synthetic: true,
@@ -28,7 +29,7 @@ it('shows a clean RFQ recipient while preserving the canonical server draft', ()
   const raw = 'Europa Copper SA [SYNTHETIC]';
   const canonical = { ...rfq, supplier: raw, text: `Request for quotation to ${raw}. This draft remains unsent.` };
   const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, rfq: canonical }, epoch: 0 });
-  const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+  const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="rfq" />);
   expect(html).toContain('Draft for Europa Copper SA</strong>');
   expect(html).toContain('This draft remains unsent.');
   expect(html).not.toContain('[SYNTHETIC]');
@@ -43,6 +44,97 @@ const naphthaRequest: PlanRequest = { ...request, material: 'naphtha', quantity:
 const multiCompany = { ...company, materials: [...company.materials, { ...company.materials[0], material_id: 'naphtha', name: 'Naphtha', quantity_unit: 'barrel', stock: '40' }], quote_coverage: { materials: ['copper', 'naphtha'], fixture_ids: ['quote-a', 'naphtha-a'], note: 'Two runnable materials.', scenarios: [{ material_id: 'copper', fixture_ids: ['quote-a'], buyer_defaults: request }, { material_id: 'naphtha', fixture_ids: ['naphtha-a'], buyer_defaults: naphthaRequest }] }, buyer_defaults: request };
 const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', filename: 'copper.csv', description: '', download_url: '/api/demo/fixtures/quote-a' }, { id: 'naphtha-a', name: 'Naphtha quote', filename: 'naphtha.csv', description: '', download_url: '/api/demo/fixtures/naphtha-a' }];
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
+
+describe('ZOORQ workspace routes', () => {
+  const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+  it('opens at the company hub and keeps the saved company as a continuation', () => {
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialCompanies={[company, emptyCompany]} />);
+    expect(html).toContain('Continue Solara Cables');
+    expect(html).toContain('Search companies');
+    expect(html).not.toContain('demo-extract-form');
+  });
+  it('keeps quote forms within Procurement and separates its stages', () => {
+    const news = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="news" />);
+    expect(news).not.toContain('demo-extract-form');
+    expect(news).not.toContain('demo-plan-form');
+    const add = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="add" />);
+    expect(add).toContain('demo-extract-form');
+    expect(add).not.toContain('demo-plan-form');
+    const review = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="review" />);
+    expect(review).toContain('Quote accepted');
+    expect(review).not.toContain('demo-extract-form');
+    const compare = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+    expect(compare).toContain('demo-plan-form');
+    expect(compare).not.toContain('demo-extract-form');
+    expect(compare).toContain('Procurement material');
+    expect(compare).toContain('zoorq-material-context');
+    expect(compare).not.toMatch(/<span>Material<\/span>\s*<select\b/);
+    const rfqStage = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
+    expect(rfqStage).toContain('I reviewed this plan and understand the RFQ is an unsent draft');
+    expect(rfqStage).not.toContain('demo-plan-form');
+  });
+  it('restores only a destination and stage from the URL', () => {
+    expect(readWorkspaceLocation('?view=procurement&stage=compare&company=other')).toEqual({ view: 'procurement', stage: 'compare' });
+    expect(readWorkspaceLocation('?view=invalid&stage=invalid')).toEqual({ view: 'hub', stage: 'add' });
+    expect(workspaceSearch('?company=other&source=demo', 'news', 'add')).toBe('?source=demo&view=news');
+  });
+  it('uses measured synthetic stock cover and a relevant company story in Overview', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
+    try {
+    const news = { company_id: company.company_id, context_version: 1, checked_at: '2026-10-14T10:00:00Z', cache_state: 'fresh', sources: [], fx: [], limitations: [], items: [
+      { item_id: 'global', title: 'Unrelated event', relevance_kind: 'unmatched', relevance_strength: 'unmatched', matched_materials: [], matched_routes: [], matched_currencies: [] },
+      { item_id: 'copper', title: 'Copper supply update', relevance_kind: 'direct_material', relevance_strength: 'strong', matched_materials: ['copper'], matched_routes: [], matched_currencies: [], publisher: 'Market desk', published_at: '2026-10-14' },
+    ] };
+    const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
+    expect(html).toContain('20 days of stock cover');
+    expect(html).toContain('Copper supply update');
+    expect(html).not.toContain('Unrelated event');
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not promote old, background, or undated headlines above the News inbox defaults', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
+    try {
+      const base = { item_id: 'item', title: 'Headline', provider: 'Public source', publisher: 'Market desk', matched_materials: ['copper'], matched_routes: [], matched_currencies: [], relevance_kind: 'direct_material', relevance_strength: 'strong', published_at: '2026-10-15T09:00:00Z' };
+      const news = { company_id: company.company_id, context_version: 1, checked_at: '2026-10-16T10:00:00Z', cache_state: 'fresh', sources: [], fx: [], limitations: [], items: [
+        { ...base, item_id: 'old', title: 'Old copper headline', published_at: '2026-09-20T09:00:00Z' },
+        { ...base, item_id: 'background', title: 'Background copper headline', relevance_strength: 'background' },
+        { ...base, item_id: 'unknown', title: 'Undated copper headline', published_at: null },
+        { ...base, item_id: 'current', title: 'Current copper headline' },
+      ] };
+      const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
+      expect(html).toContain('Current copper headline');
+      expect(html).toContain('2026-10-15T09:00:00Z');
+      expect(html).not.toContain('Old copper headline');
+      expect(html).not.toContain('Background copper headline');
+      expect(html).not.toContain('Undated copper headline');
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['stale', 'partial', 'source-stale'])('marks %s coverage as dated instead of promoting a headline', condition => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
+    try {
+      const news = { company_id: company.company_id, context_version: 1, checked_at: '2026-10-16T10:00:00Z', cache_state: condition === 'source-stale' ? 'fresh' : condition, sources: condition === 'source-stale' ? [{ source_id: 's1', name: 'Market desk', state: 'stale', last_checked_at: '2026-10-15T10:00:00Z', reason: 'Refresh failed' }] : [], fx: [], limitations: [], items: [
+        { item_id: 'recent', title: 'Unconfirmed copper headline', provider: 'Public source', publisher: 'Market desk', matched_materials: ['copper'], matched_routes: [], matched_currencies: [], relevance_kind: 'direct_material', relevance_strength: 'strong', published_at: '2026-10-15T09:00:00Z' },
+      ] };
+      const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
+      expect(html).toContain('Coverage needs review');
+      expect(html).toContain('Coverage may be incomplete or dated');
+      expect(html).toContain('2026-10-16T10:00:00Z');
+      expect(html).not.toContain('Unconfirmed copper headline');
+    } finally { vi.useRealTimers(); }
+  });
+  it('guides an empty review toward quote intake and makes a prepared draft discoverable', () => {
+    const empty = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [], plan: null, plan_request: null, rfq: null }, epoch: 0 });
+    const review = renderToStaticMarkup(<DemoPage initialState={empty} initialView="procurement" initialStage="review" />);
+    expect(review).toContain('Add a supplier quote to begin review');
+    expect(review).toContain('>Add quotes</button>');
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const draft = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
+    expect(draft).toContain('View saved draft');
+  });
+});
 
 describe('demo response state', () => {
   it('shows saved unsent email and RFQ drafts by company, plus clearly labeled simulated messages', () => {
@@ -78,11 +170,11 @@ describe('demo response state', () => {
     const canonical = { ...companySession, company: multiCompany, offers: [{ ...offer(1, 'saved'), fixture_id: 'quote-a' }, naphthaOffer], plan: null, plan_request: null, rfq: null };
     expect(canonicalBuyerState(canonical, 'naphtha').inputs).toMatchObject({ material: 'naphtha', quantity: '240', quantity_unit: 'barrel' });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...canonical, plan_request: naphthaRequest }, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
-    expect(html.indexOf('Proactive risk monitor')).toBeLessThan(html.indexOf('Start with a supplier quote'));
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="add" />);
+    expect(html).toContain('zoorq-risk-container" hidden=""');
     expect(html.indexOf('Procurement material')).toBeLessThan(html.indexOf('Sample quote'));
     expect(html).toContain('Naphtha · barrel');
-    expect(html).toContain('naphtha.csv');
+    expect(renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="review" />)).toContain('naphtha.csv');
     expect(html).not.toContain('synthetic.pdf');
   });
   it('restores the server buyer draft over an old comparison and shows server-confirmed simulated messages', () => {
@@ -93,9 +185,9 @@ describe('demo response state', () => {
     const stalePlan = applyDemoResult(initialDemoState, { type: 'session', session: { ...canonical, plan: selectedPlan, plan_request: request, rfq }, epoch: 0 });
     expect(stalePlan.plan).toBeNull();
     expect(stalePlan.rfq).toBeNull();
-    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 })} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 })} initialView="drafts" />);
     expect(html).toContain('Simulated outbox');
-    expect(html).toContain('>Simulated outbox</button>');
+    expect(html).toContain('Review availability');
   });
   it('syncs initially displayed defaults before agent turns but preserves a current computed comparison', () => {
     const defaults = materialInputs(multiCompany, 'naphtha')!;
@@ -176,20 +268,20 @@ describe('demo response state', () => {
 
   it('shows company inventory/orders and blocks unsupported quote planning', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: emptyCompany, plan: null, plan_request: null, rfq: null }, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="inventory" />);
     expect(html).toContain('Loomworks');
     expect(html).toContain('Cotton');
     expect(html).toContain('order-1');
     expect(html).toContain('No runnable quote coverage.');
-    expect(html).toMatch(/disabled=""[^>]*>Run comparison/);
-    expect(html).toContain('News workspace');
+    expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />)).toMatch(/disabled=""[^>]*>Run comparison/);
+    expect(html).toContain('>News</button>');
   });
   it('uses generic units and covered company defaults for a runnable tonne workflow', () => {
     const generic = { ...request, quantity: '20', current_stock: '3', additional_cost_per_unit: '2', quantity_unit: 'tonne' };
     const tonneCompany = { ...company, materials: [{ ...company.materials[0], quantity_unit: 'tonne' }], buyer_defaults: generic };
     const tonnePlan = { ...selectedPlan, quantity: '20', current_stock: '3', required_purchase: '17', quantity_unit: 'tonne', alternatives: [{ ...selectedPlan.alternatives[0], quantity: '17', unit_price_per_unit: '84' }] };
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: tonneCompany, plan: tonnePlan, plan_request: generic }, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
     expect(canonicalBuyerState({ ...companySession, company: tonneCompany, plan_request: generic }).inputs).toMatchObject({ quantity: '20', current_stock: '3', quantity_unit: 'tonne' });
     expect(html).toContain('Needed quantity (tonne)');
     expect(html).toContain('17 tonne');
@@ -213,7 +305,7 @@ describe('demo response state', () => {
     const oilPlan = { ...selectedPlan, material: 'crude-oil', quantity: '20', current_stock: '3', required_purchase: '17', quantity_unit: 'barrel' };
     const oilRfq = { ...rfq, material: 'crude-oil', quantity: '17', quantity_unit: 'barrel' };
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, company: oilCompany, plan: oilPlan, plan_request: generic, rfq: oilRfq }, epoch: 0 });
-    expect(renderToStaticMarkup(<DemoPage initialState={restored} />)).toMatch(/Draft for Swift<\/strong>[^<]*17 barrel/);
+    expect(renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="rfq" />)).toMatch(/Draft for Swift<\/strong>[^<]*17 barrel/);
   });
   it('prefills only unverified quote terms from the matching synthetic fixture for explicit reviewer apply', () => {
     const fixture = { id: 'atlas-quote', name: 'Atlas', filename: 'atlas.csv', description: '', download_url: '/api/demo/fixtures/atlas-quote', review_values: { 'items[0].material': 'naphtha', 'items[0].quantity': { amount: '40', unit: 'barrel' } } };
@@ -231,14 +323,14 @@ describe('demo response state', () => {
   });
   it('exposes the scoped operator tab beside company and news without removing procurement results', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="overview" />);
     expect(html).toContain('Company overview');
-    expect(html).toContain('News workspace');
+    expect(html).toContain('>News</button>');
     expect(html).toContain('Operator');
-    expect(html).toContain('current reviewed comparison');
+    expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toContain('current reviewed comparison');
     expect(html).toContain('Read the signals. Review the impact. Choose your next action.');
     expect(html).toContain('<h1>Solara Cables</h1>');
-    expect(html).toContain('Fictional company profile · changes kept separately for this visit');
+    expect(html).toContain('Fictional company profile');
     expect(html).not.toContain('context v1');
     expect(html).toContain('demo-operator-dock');
     expect(html).toContain('Open operator chat');
@@ -258,13 +350,13 @@ describe('demo response state', () => {
     const removed = { ...recovery, scenario_request: { ...request, delay_days_by_offer: {} }, cost_delta: '0' };
     expect(delayControlsForRecovery(removed, 'q2')).toEqual({ offerId: 'q1', days: '0' });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1, 'saved')], plan: selectedPlan, plan_request: request, recovery: removed, rfq }, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('Scenario: synthetic.pdf delayed 0 days');
     expect(html).not.toContain('Scenario: synthetic.pdf delayed 20 days');
   });
   it('describes the RFQ as the current reviewed comparison without exposing a plan ID in preview copy', () => {
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1, 'saved')], plan: selectedPlan, plan_request: request, rfq }, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="rfq" />);
     expect(html).toContain('current reviewed comparison');
     expect(html).not.toContain('current plan p2');
   });
@@ -272,10 +364,11 @@ describe('demo response state', () => {
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, plan: selectedPlan, plan_request: request, recovery, rfq }, epoch: 0 });
     expect(restored.plan?.plan_id).toBe('p2');
     expect(restored.recovery?.baseline.plan_id).toBe('p1');
-    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('4000 USD');
-    expect(html).toContain('Synthetic unsent request for quotation');
-    expect(html).toContain('Download RFQ draft');
+    const draftHtml = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="rfq" />);
+    expect(draftHtml).toContain('Synthetic unsent request for quotation');
+    expect(draftHtml).toContain('Download RFQ draft');
   });
 
   it('clears recovery and draft on buyer edit and ignores the old async response', () => {
@@ -299,24 +392,24 @@ describe('demo response state', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1, 'saved')], plan: selectedPlan, plan_request: request, recovery, rfq }, epoch: 0 });
     const edited = applyDemoResult(loaded, { type: 'scenario-edit' });
     expect(edited.recovery?.baseline.plan_id).toBe('p1');
-    const dirtyHtml = renderToStaticMarkup(<DemoPage initialState={edited} />);
+    const dirtyHtml = renderToStaticMarkup(<DemoPage initialState={edited} initialView="procurement" initialStage="rfq" />);
     expect(dirtyHtml).toMatch(/type="checkbox" disabled=""\/>I reviewed this plan/);
     expect(dirtyHtml).toMatch(/disabled=""[^>]*>Prepare unsent RFQ/);
-    expect(dirtyHtml).toMatch(/disabled=""[^>]*>Download JSON report/);
-    expect(renderToStaticMarkup(<DemoPage initialState={{ ...edited, rfq }} />)).toMatch(/disabled=""[^>]*>Download RFQ draft/);
+    expect(renderToStaticMarkup(<DemoPage initialState={edited} initialView="inventory" />)).toMatch(/disabled=""[^>]*>Download JSON report/);
+    expect(renderToStaticMarkup(<DemoPage initialState={{ ...edited, rfq }} initialView="procurement" initialStage="rfq" />)).toMatch(/disabled=""[^>]*>Download RFQ draft/);
     expect(applyDemoResult(edited, { type: 'reviewed', value: true }).reviewed).toBe(false);
     const buyerEdited = applyDemoResult(loaded, { type: 'invalidate' });
-    expect(renderToStaticMarkup(<DemoPage initialState={buyerEdited} />)).toMatch(/disabled=""[^>]*>Download JSON report/);
+    expect(renderToStaticMarkup(<DemoPage initialState={buyerEdited} initialView="inventory" />)).toMatch(/disabled=""[^>]*>Download JSON report/);
     const compared = applyDemoResult(edited, { type: 'recovery', recovery: { ...recovery, comparison_id: 'c2' }, epoch: 1 });
     expect(compared.dirty).toBe(false);
-    const cleanHtml = renderToStaticMarkup(<DemoPage initialState={compared} />);
+    const cleanHtml = renderToStaticMarkup(<DemoPage initialState={compared} initialView="procurement" initialStage="rfq" />);
     expect(cleanHtml).toMatch(/type="checkbox"\/>I reviewed this plan/);
-    expect(cleanHtml).not.toMatch(/disabled=""[^>]*>Download JSON report/);
+    expect(renderToStaticMarkup(<DemoPage initialState={compared} initialView="inventory" />)).not.toMatch(/disabled=""[^>]*>Download JSON report/);
     const reviewed = applyDemoResult(compared, { type: 'reviewed', value: true });
-    expect(renderToStaticMarkup(<DemoPage initialState={reviewed} />)).not.toMatch(/disabled=""[^>]*>Prepare unsent RFQ/);
+    expect(renderToStaticMarkup(<DemoPage initialState={reviewed} initialView="procurement" initialStage="rfq" />)).not.toMatch(/disabled=""[^>]*>Prepare unsent RFQ/);
     const replanned = applyDemoResult(buyerEdited, { type: 'plan', plan: selectedPlan, request, epoch: 1 });
     expect(replanned.dirty).toBe(false);
-    expect(renderToStaticMarkup(<DemoPage initialState={replanned} />)).not.toMatch(/disabled=""[^>]*>Download JSON report/);
+    expect(renderToStaticMarkup(<DemoPage initialState={replanned} initialView="inventory" />)).not.toMatch(/disabled=""[^>]*>Download JSON report/);
   });
 
   it('rejects pending recovery and restores the canonical plan without reviving an old draft', () => {
@@ -338,23 +431,23 @@ describe('demo response state', () => {
     const canonical = { ...session, offers: [offer(1, 'saved'), q2], plan: q2Plan, plan_request: { ...request, offer_ids: ['q2'], expected_versions: { q2: 1 }, material: 'aluminium', quantity_kg: '8000' } };
     expect(canonicalBuyerState(canonical)).toMatchObject({ selected: ['q2'], inputs: { material: 'aluminium', quantity: '8000', budget: '10000' } });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: canonical, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={restored} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('value="aluminium"');
     expect(html).toContain('value="8000"');
     expect(html).toMatch(/type="checkbox" checked=""\/>second\.pdf/);
   });
 
   it('disables buyer edits and sample values until the first session is ready', () => {
-    const html = renderToStaticMarkup(<DemoPage />);
+    const html = renderToStaticMarkup(<DemoPage  initialView="procurement" initialStage="compare"/>);
     expect(html).toMatch(/disabled=""[^>]*>Use sample buyer inputs/);
     expect(html).toMatch(/<input required="" disabled="" value=""/);
   });
 
   it('requires an active selected purchase and explicit review before showing draft action as enabled', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 });
-    expect(renderToStaticMarkup(<DemoPage initialState={loaded} />)).toMatch(/disabled=""[^>]*>Prepare unsent RFQ/);
+    expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toMatch(/disabled=""[^>]*>Prepare unsent RFQ/);
     const withPlan = applyDemoResult(loaded, { type: 'plan', plan: selectedPlan, request, epoch: 0 });
-    expect(renderToStaticMarkup(<DemoPage initialState={withPlan} />)).toContain('I reviewed this plan and understand the RFQ is an unsent draft');
+    expect(renderToStaticMarkup(<DemoPage initialState={withPlan} initialView="procurement" initialStage="rfq" />)).toContain('I reviewed this plan and understand the RFQ is an unsent draft');
   });
   it('ignores a late extraction after reset moves to a new session', () => {
     const before = applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 });
@@ -375,13 +468,13 @@ describe('demo response state', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1), { ...offer(1), offer_id: 'q2' }] }, epoch: 0 });
     const extracted = applyDemoResult(loaded, { type: 'offer', offer: offer(2), epoch: 0, cached: true });
     const other = applyDemoResult(extracted, { type: 'focus', offerId: 'q2' });
-    const html = renderToStaticMarkup(<DemoPage initialState={other} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={other} initialView="procurement" initialStage="review" />);
     expect(html).not.toContain('Cached real Gemini extraction');
   });
 
   it('restores a cached real-extraction label from a quote returned in a new session read', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [{ ...offer(1), served_from_cache: true }] }, epoch: 0 });
-    expect(renderToStaticMarkup(<DemoPage initialState={loaded} />)).toContain('Cached real Gemini extraction');
+    expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="review" />)).toContain('Cached real Gemini extraction');
   });
 
   it('offers optional fictional buyer inputs with the dated synthetic currency assumption', () => {
@@ -389,7 +482,7 @@ describe('demo response state', () => {
     vi.setSystemTime(new Date('2026-10-14T08:00:00Z'));
     try {
     expect(sampleBuyerInputs()).toEqual({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
-    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('Use sample buyer inputs');
     expect(html).toContain('Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export.');
     expect(html).not.toContain('EUR 1 = USD 1.25');
@@ -419,7 +512,7 @@ describe('demo response state', () => {
   });
 
   it('renders honest demo limits and disabled planning before an accepted quote', () => {
-    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [], plan: null, plan_request: null, rfq: null }, epoch: 0 })} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('Company profiles, quotes and buyer inputs are synthetic');
     expect(html).toContain('news is observed public data');
     expect(html).toContain('temporary session');
@@ -427,15 +520,15 @@ describe('demo response state', () => {
     expect(html).toMatch(/disabled=""[^>]*>Run comparison|disabled=""[^>]*>[^<]*Run comparison/);
   });
   it('explains saved same-browser workspace and bounded conversation only for a durable session', () => {
-    const durable = { ...session, persistence: 'firestore' as const, expires_at: '2026-10-22T12:00:00Z' };
-    const savedHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: durable, epoch: 0 })} />);
+    const durable = { ...companySession, persistence: 'firestore' as const, expires_at: '2026-10-22T12:00:00Z' };
+    const savedHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: durable, epoch: 0 })} initialView="overview" />);
     expect(savedHtml).toContain('same browser');
     expect(savedHtml).toContain('saved until this seven-day session expires');
     expect(savedHtml).toContain('Recent conversation history is limited');
     expect(savedHtml).toContain('Raw voice audio is not stored');
     expect(savedHtml).not.toContain('may disappear when the service restarts');
     expect(savedHtml).not.toContain('Firestore');
-    const temporaryHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} />);
+    const temporaryHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 })} initialView="overview" />);
     expect(temporaryHtml).toContain('temporary session and may disappear when the service restarts');
     expect(temporaryHtml).not.toContain('saved until this seven-day session expires');
   });

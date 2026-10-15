@@ -52,3 +52,90 @@
 }
 
 @media(max-width:999px){.demo-operator-toggle[aria-expanded="true"]{display:none}}
+
+/* ZOORQ company-first workspace */
+.zoorq-page{background:#f7f5f0;color:#272622;line-height:1.45;padding-right:0!important}
+.zoorq-page [hidden]{display:none!important}
+.zoorq-page .demo-masthead{min-height:68px;background:#252622;color:#f7f5f0;border-bottom:3px solid #df6e5d;letter-spacing:0;text-transform:none}
+.zoorq-page .demo-brand{font-size:24px;letter-spacing:-.055em;white-space:nowrap}
+.zoorq-page .demo-brand span{font-size:11px;font-weight:600;letter-spacing:0;color:#d8d4cc}
+.zoorq-page .demo-masthead>span{font:500 12px Georgia,serif;font-style:italic;letter-spacing:.01em;color:#d8d4cc}
+.zoorq-page main{max-width:1540px;min-height:calc(100vh - 130px)}
+.zoorq-page .demo-button{background:#2d2d2a;border-color:#2d2d2a;letter-spacing:0;text-transform:none;font-size:13px!important}
+.zoorq-page .demo-button:hover:not(:disabled){background:#ba5548;border-color:#ba5548}
+.zoorq-page .demo-link{color:#a44338;text-transform:none;font-size:13px!important}
+.zoorq-page .demo-kicker{color:#a44338;letter-spacing:.08em}
+.zoorq-hub{display:grid;grid-template-columns:minmax(260px,.72fr) minmax(0,1.8fr);min-height:calc(100vh - 130px)}
+.zoorq-hub-intro{padding:clamp(36px,5vw,76px) clamp(24px,4vw,62px);background:#e9e5dc;border-right:1px solid #d4cec3;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;align-self:start;min-height:calc(100dvh - 68px);position:sticky;top:0}
+.zoorq-hub-intro h1{font:600 clamp(42px,5vw,78px)/.99 Georgia,serif;letter-spacing:-.055em;margin:22px 0}
+.zoorq-hub-intro p{font-size:16px;color:#5c5952;max-width:31ch;line-height:1.6;margin:0 0 34px}
+.zoorq-hub-list{padding:clamp(28px,4vw,54px) clamp(22px,4vw,62px)}
+.zoorq-hub-list-head{display:flex;align-items:end;justify-content:space-between;gap:24px;margin-bottom:30px}
+.zoorq-hub-list-head h2{font:600 clamp(29px,3vw,42px)/1.1 Georgia,serif;letter-spacing:-.04em;margin:7px 0 0}
+.zoorq-hub-list-head h2 small{font:600 13px Arial,sans-serif;color:#a44338;vertical-align:top;margin-left:5px}
+.zoorq-hub-list-head label{width:min(275px,45%);font-size:11px;font-weight:700;color:#5c5952}
+.zoorq-hub-list-head label span{display:block;margin-bottom:7px}
+.zoorq-page .zoorq-hub-list-head input{border-color:#c7c0b5;background:#fff;height:43px}
+.zoorq-company-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.zoorq-company-card{display:flex;flex-direction:column;justify-content:space-between;gap:24px;min-width:0;min-height:205px;background:#fff;border:1px solid #d9d4cb;padding:22px;transition:border-color .2s,transform .2s}
+.zoorq-company-card:hover{border-color:#b55749;transform:translateY(-2px)}
+.zoorq-company-card h3{font:600 clamp(23px,2vw,30px)/1.1 Georgia,serif;letter-spacing:-.035em;margin:12px 0 8px}
+.zoorq-company-card p{font-size:12px;line-height:1.5;color:#69645c;margin:0;max-width:48ch}
+.zoorq-company-card-foot{display:flex;justify-content:space-between;align-items:end;gap:14px;border-top:1px solid #ece8e1;padding-top:12px}
+.zoorq-company-card-foot>span{font-size:11px;color:#726d65}
+.zoorq-company-card-foot .demo-link{text-align:right;white-space:nowrap}
+.zoorq-nav{display:grid;grid-template-columns:auto minmax(160px,1fr) auto;align-items:center;gap:24px;background:#30312e;color:#f7f5f0;padding:0 clamp(18px,3vw,42px);min-height:70px}
+.zoorq-nav button{border:0;background:none;color:inherit;min-height:44px;font-size:13px;font-weight:700}
+.zoorq-nav .zoorq-all-companies{color:#e6b0a7;text-align:left}
+.zoorq-nav-company{display:flex;flex-direction:column;line-height:1.25}
+.zoorq-nav-company span{color:#aaa9a3;font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+.zoorq-nav-company strong{font-size:16px}
+.zoorq-nav-links{display:flex;align-self:stretch;gap:2px;overflow-x:auto}
+.zoorq-nav-links button{padding:0 13px;white-space:nowrap;border-bottom:3px solid transparent;color:#c7c5bf;font-weight:600}
+.zoorq-nav-links button.active{color:#fff;border-color:#e27361}
+.zoorq-page .demo-workspace-heading{background:#f7f5f0;padding-block:24px 20px}
+.zoorq-page .demo-workspace-heading h1{font:600 clamp(30px,3vw,42px)/1.1 Georgia,serif;text-transform:none}
+.zoorq-page .demo-boundary{display:block;cursor:auto;padding:10px clamp(18px,3vw,40px);font-size:12px}
+.zoorq-page .demo-boundary summary{cursor:pointer;font-weight:700;color:#6b625b}
+.zoorq-page .demo-boundary p{margin:8px 0;max-width:95ch}
+.zoorq-overview{padding:35px clamp(18px,3vw,42px) 60px}
+.zoorq-section-heading h2{font:600 clamp(32px,3.2vw,48px)/1.1 Georgia,serif;letter-spacing:-.045em;margin:9px 0}
+.zoorq-section-heading p{color:#6b655d;margin:0 0 30px;font-size:14px}
+.zoorq-priority-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.zoorq-priority-grid article{background:#fff;border:1px solid #dbd6cc;padding:25px;min-height:270px;display:flex;flex-direction:column;align-items:flex-start}
+.zoorq-priority-grid article>span{color:#a44338;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.zoorq-priority-grid h3{font:600 clamp(22px,2vw,29px)/1.15 Georgia,serif;letter-spacing:-.035em;margin:19px 0 9px}
+.zoorq-priority-grid p{font-size:13px;line-height:1.6;color:#625e58;margin:0 0 24px}
+.zoorq-priority-grid .demo-link{margin-top:auto}
+.zoorq-next{margin-top:30px;border-top:1px solid #dcd5ca;padding-top:17px;display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.zoorq-next h3{margin:0 14px 0 0;font-size:13px}
+.zoorq-next button{background:#eeebe4;border:1px solid #d4cec4;padding:10px 13px;color:#35332f;font-weight:600;font-size:12px}
+.zoorq-stage-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:18px clamp(18px,3vw,42px) 0;border:1px solid #d8d1c6;background:#ece8df}
+.zoorq-stage-nav button{background:none;border:0;border-right:1px solid #d8d1c6;padding:15px 12px;text-align:left;font-size:13px;font-weight:700;color:#6d675f;min-height:62px}
+.zoorq-stage-nav button:last-child{border-right:0}
+.zoorq-stage-nav button span{font-size:10px;color:#a44338;display:block;margin-bottom:2px}
+.zoorq-stage-nav button.active{background:#fff;color:#292824;box-shadow:inset 0 -3px #d56a5a}
+.zoorq-risk-disclosure{padding:0 clamp(18px,4vw,58px) 24px}
+.zoorq-page .demo-material-picker{background:#eeeae2;border-color:#d6d0c6}
+.zoorq-page .demo-start,.zoorq-page .demo-review,.zoorq-page .demo-planning,.zoorq-page .demo-results,.zoorq-page .demo-end{border-color:#ddd7cd}
+.zoorq-page .demo-heading h2,.zoorq-page .demo-results h2,.zoorq-page .demo-end h2{font-family:Georgia,serif;font-weight:600;text-transform:none;letter-spacing:-.035em}
+.zoorq-page .demo-operator-toggle{display:block;position:fixed;right:20px;bottom:20px;z-index:41;border:1px solid #282925;background:#282925;color:#fff;border-radius:999px;padding:12px 18px;box-shadow:0 6px 22px #0002;font-size:13px;font-weight:700}
+.zoorq-page .demo-operator-scrim{position:fixed;inset:0;z-index:39;border:0;background:rgba(28,27,25,.45)}
+.zoorq-page .demo-operator-dock{display:none;position:fixed;right:0;top:0;bottom:0;width:min(100%,440px);z-index:40;overflow:hidden;border-left:1px solid #d2ccc2;background:#f7f5f0;padding:0}
+.zoorq-page .demo-operator-dock.is-open{display:block}
+.zoorq-page .demo-operator-toggle[aria-expanded="true"]{display:none}
+@media(max-width:1150px){.zoorq-nav{grid-template-columns:auto 1fr}.zoorq-nav-links{grid-column:1/-1;justify-content:space-between;min-height:48px}.zoorq-hub{grid-template-columns:minmax(220px,.7fr) minmax(0,1.5fr)}}
+@media(max-width:760px){.zoorq-hub{display:block}.zoorq-hub-intro{min-height:290px;border-right:0;border-bottom:1px solid #d4cec3;padding:32px 22px}.zoorq-hub-intro h1{font-size:46px}.zoorq-hub-list{padding:30px 18px}.zoorq-company-grid{grid-template-columns:1fr}.zoorq-company-card{min-height:175px}.zoorq-priority-grid{grid-template-columns:1fr}.zoorq-priority-grid article{min-height:210px}.zoorq-nav{padding:8px 18px;gap:5px 15px}.zoorq-nav-links{overflow-x:auto;justify-content:start}.zoorq-nav-links button{padding:0 10px}.zoorq-stage-nav button{font-size:11px;padding:10px 6px;text-align:center}.zoorq-page .demo-masthead>span{display:none}}
+@media(max-width:480px){.zoorq-hub-list-head{display:block}.zoorq-hub-list-head label{display:block;width:100%;margin-top:18px}.zoorq-nav-company strong{font-size:14px}.zoorq-stage-nav{margin-inline:12px}.zoorq-stage-nav button{min-height:58px}.zoorq-page .demo-brand{font-size:22px}.zoorq-page .demo-brand span{display:block;font-size:10px}}
+@media(prefers-reduced-motion:reduce){.zoorq-company-card{transition:none}.zoorq-company-card:hover{transform:none}}
+.zoorq-stage-empty{margin:24px clamp(18px,3vw,42px);padding:34px;background:#fff;border:1px solid #ded8cd}
+.zoorq-stage-empty h2{font:600 clamp(24px,2.5vw,34px)/1.15 Georgia,serif;letter-spacing:-.035em;margin:0 0 10px}
+.zoorq-stage-empty p{font-size:13px;line-height:1.6;color:#625e58;max-width:55ch;margin:0 0 22px}
+.zoorq-material-context{display:flex;flex-direction:column;gap:5px;min-height:64px;padding:8px 0}
+.zoorq-material-context span{font:800 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em}
+.zoorq-material-context strong{font-size:14px}
+.zoorq-material-context small{font-size:10px;color:#666}
+
+.zoorq-page .zoorq-retained-upload{margin:16px 0 0;padding:12px 14px;background:#eee9df;font-size:13px;line-height:1.6;overflow-wrap:anywhere}.zoorq-page .zoorq-retained-upload .demo-link{margin-left:10px}
+@media(min-width:1000px){.zoorq-page .demo-operator-scrim{display:none}}
+@media(max-width:760px){.zoorq-hub-intro{position:static;min-height:0}}

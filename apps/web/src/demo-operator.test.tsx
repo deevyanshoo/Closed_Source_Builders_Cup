@@ -10,6 +10,25 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('names the selected company in a compact branded header and keeps close available', () => {
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      onClose={() => {}} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('ZOORQ operator');
+    expect(html).toContain('Solara Cables');
+    expect(html).toContain('Ask about this company');
+    expect(html).toContain('aria-label="Close operator chat"');
+  });
+  it('keeps current review and cancel actions visible above history while details stay collapsed', () => {
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn }} onSession={() => {}} onUnknown={() => {}} />);
+    const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+    expect(card).toContain('CURRENT proposal');
+    expect(card).toContain('I reviewed the exact arguments');
+    expect(card).toContain('Apply reviewed proposal');
+    expect(card).toContain('Cancel proposal');
+    expect(card).toMatch(/<details[^>]*><summary>What happens next<\/summary>/);
+    expect(card).not.toMatch(/<details[^>]* open/);
+  });
   it('follows loaded and near-bottom history while preserving manual readback', () => {
     expect(shouldFollowOperatorHistory({ scrollTop: 0, scrollHeight: 0, clientHeight: 300 })).toBe(true);
     expect(shouldFollowOperatorHistory({ scrollTop: 640, scrollHeight: 1000, clientHeight: 300 })).toBe(true);
@@ -247,7 +266,7 @@ describe('operator response boundary', () => {
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={true}
       initialState={{ ...initialOperatorState, scope, overview }}
       riskSummary={{ high: 1, medium: 0, low: 0, checkedAt: '2026-10-15' }} onSession={() => {}} onUnknown={() => {}} />);
-    expect(html.indexOf('>Operator</h2>')).toBeLessThan(html.indexOf('Current company risks:'));
+    expect(html.indexOf('>ZOORQ operator</h2>')).toBeLessThan(html.indexOf('Current company risks:'));
     expect(html.indexOf('Current company risks:')).toBeLessThan(html.indexOf('Your message'));
     expect(html).toContain('The agent provider is unavailable');
     expect(html).toContain('Your message');

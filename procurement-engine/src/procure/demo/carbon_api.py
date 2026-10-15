@@ -6,6 +6,9 @@ from copy import deepcopy
 from fastapi import Request
 
 from procure.carbon import CarbonInputError, compare_plan, load_registry
+from procure.carbon.schemes import SchemeInputError, find_schemes, load_schemes
+
+from .company import get_company
 
 from .sessions import SessionError
 
@@ -15,6 +18,14 @@ def carbon_export(value, active_plan) -> dict | None:
     stored = getattr(value, 'carbon_estimate', None)
     plan = active_plan(value)
     if not stored or plan is None or stored['company_id'] != value.company_id or stored['plan_id'] != plan.get('plan_id'):
+        return None
+    return deepcopy(stored['result'])
+
+
+def schemes_export(value) -> dict | None:
+    """The stored scheme list only while the same company is active."""
+    stored = getattr(value, 'carbon_schemes', None)
+    if not stored or stored['company_id'] != value.company_id:
         return None
     return deepcopy(stored['result'])
 
@@ -30,6 +41,14 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
             except (OSError, ValueError, KeyError):
                 raise SessionError('carbon_unavailable', 'Carbon factors are unavailable in this deployment.', 503) from None
         return loaded['value']
+
+    def schemes():
+        if 'schemes' not in loaded:
+            try:
+                loaded['schemes'] = load_schemes()
+            except (OSError, ValueError, KeyError):
+                raise SessionError('carbon_unavailable', 'Carbon schemes are unavailable in this deployment.', 503) from None
+        return loaded['schemes']
 
     @app.get('/api/demo/carbon/factors')
     async def carbon_factors(request: Request):
@@ -54,3 +73,16 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
                                      'result': deepcopy(result)}
             return result
 
+    @app.post('/api/demo/carbon/schemes')
+    async def carbon_schemes(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('inputs_by_scheme',), ('expected_context_version',))
+        with value.lock:
+            context(value, data)
+            try:
+                result = find_schemes(schemes(), get_company(value.company_id), data['inputs_by_scheme'])
+            except SchemeInputError as error:
+                raise SessionError('invalid_scheme_input', str(error), 422) from None
+            value.carbon_schemes = {'company_id': value.company_id, 'result': deepcopy(result)}
+            return result

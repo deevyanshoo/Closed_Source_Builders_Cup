@@ -1,0 +1,122 @@
+{
+  "registry_version": "carbon-schemes-v1",
+  "checked_on": "2026-10-15",
+  "label": "indicative, not financial or legal advice",
+  "match_wording": "possibly eligible, check conditions",
+  "saving_wording": "approximate, based on these assumptions",
+  "eu_member_states": ["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus", "Czechia", "Denmark", "Estonia", "Finland", "France", "Germany", "Greece", "Hungary", "Ireland", "Italy", "Latvia", "Lithuania", "Luxembourg", "Malta", "Netherlands", "Poland", "Portugal", "Romania", "Slovakia", "Slovenia", "Spain", "Sweden"],
+  "schemes": [
+    {
+      "scheme_id": "in-ccts-offset",
+      "country": "India",
+      "official_name": "Carbon Credit Trading Scheme (CCTS), offset mechanism",
+      "publisher": "Bureau of Energy Efficiency, Ministry of Power, Government of India",
+      "official_url": "https://beeindia.gov.in/show_content.php?lang=1&level=1&ls_id=116&lid=294",
+      "checked_on": "2026-10-15",
+      "offers": "credit",
+      "offers_text": "Carbon Credit Certificates for registered projects that reduce, remove or avoid greenhouse gas emissions. Each certificate represents one tonne of CO2e and can be traded on the Indian carbon market platform.",
+      "who": "Entities not obligated under the compliance mechanism that register an eligible project in an approved offset sector and follow the published detailed procedure.",
+      "match": {"company_country": "India"},
+      "numbers_used": ["1 Carbon Credit Certificate = 1 tCO2e (BEE carbon market page)."],
+      "saving": {
+        "formula": "credit_value",
+        "text": "tonnes reduced by a registered project x your stated certificate price",
+        "currency": "INR",
+        "inputs": [
+          {"name": "tonnes_reduced", "label": "Verified reduction from a registered project", "unit": "tCO2e"},
+          {"name": "price_per_tonne", "label": "Certificate price you assume", "unit": "INR per tCO2e", "note": "No official price is published; enter the price and date you rely on."}
+        ]
+      }
+    },
+    {
+      "scheme_id": "in-ccts-compliance",
+      "country": "India",
+      "official_name": "Carbon Credit Trading Scheme (CCTS), compliance mechanism",
+      "publisher": "Bureau of Energy Efficiency, Ministry of Power, Government of India",
+      "official_url": "https://beeindia.gov.in/show_content.php?lang=1&level=1&ls_id=116&lid=294",
+      "checked_on": "2026-10-15",
+      "offers": "credit",
+      "offers_text": "Obligated entities that reduce emission intensity below their notified target receive Carbon Credit Certificates; entities that miss the target surrender or buy certificates for the shortfall.",
+      "who": "Entities notified as obligated entities. BEE lists aluminium, chlor alkali, cement, fertiliser, iron and steel, pulp and paper, petrochemicals, petroleum refinery and textile for gradual transition.",
+      "match": {"company_country": "India", "sector_keywords": ["aluminium", "chlor", "cement", "fertiliser", "fertilizer", "iron", "steel", "pulp", "paper", "petrochemical", "refinery", "textile"]},
+      "numbers_used": ["1 Carbon Credit Certificate = 1 tCO2e.", "Nine sectors named for gradual transition (BEE carbon market page)."],
+      "saving": {
+        "formula": "credit_value",
+        "text": "tonnes below your notified target x your stated certificate price",
+        "currency": "INR",
+        "inputs": [
+          {"name": "tonnes_reduced", "label": "Tonnes below the notified intensity target", "unit": "tCO2e"},
+          {"name": "price_per_tonne", "label": "Certificate price you assume", "unit": "INR per tCO2e", "note": "No official price is published; enter the price and date you rely on."}
+        ]
+      }
+    },
+    {
+      "scheme_id": "in-msme-zed",
+      "country": "India",
+      "official_name": "MSME Sustainable (ZED) Certification Scheme",
+      "publisher": "Ministry of Micro, Small and Medium Enterprises, Government of India",
+      "official_url": "https://zed.msme.gov.in/subsidy-on-cost-of-certification",
+      "checked_on": "2026-10-15",
+      "offers": "subsidy",
+      "offers_text": "A subsidy on the cost of Zero Defect Zero Effect (ZED) certification, plus other incentives listed on the scheme site.",
+      "who": "Micro, small and medium enterprises with Udyam Registration; each unit applies for certification separately.",
+      "match": {"company_country": "India"},
+      "numbers_used": ["Subsidy on cost of certification: micro 80%, small 60%, medium 50%.", "Additional 10% or 5% applies only in stated cases (for example women or SC/ST owned MSMEs); not applied here."],
+      "saving": {
+        "formula": "subsidy_share",
+        "text": "certification cost x subsidy rate for your enterprise category",
+        "currency": "INR",
+        "rates": {"micro": "0.80", "small": "0.60", "medium": "0.50"},
+        "inputs": [
+          {"name": "enterprise_category", "label": "MSME category (micro, small or medium)", "unit": "category"},
+          {"name": "certification_cost", "label": "Certification cost you were quoted", "unit": "INR"}
+        ]
+      }
+    },
+    {
+      "scheme_id": "in-sidbi-green-finance",
+      "country": "India",
+      "official_name": "SIDBI Green Finance Scheme (GFS)",
+      "publisher": "Small Industries Development Bank of India (SIDBI)",
+      "official_url": "https://www.sidbi.in/en/green-finance",
+      "checked_on": "2026-10-15",
+      "offers": "cheaper_loan",
+      "offers_text": "Term loans for green projects: up to Rs 50 crore, at most 75% of project cost, repayment up to 10 years with up to 18 months moratorium, MCLR-linked interest.",
+      "who": "Manufacturers, service providers and MSMEs on the supply or demand side of the green value chain, for activities such as energy efficiency, renewable energy, e-mobility and waste management.",
+      "match": {"company_country": "India"},
+      "numbers_used": ["Loan up to Rs 50 crore, maximum 75% of project cost.", "Repayment up to 10 years; moratorium up to 18 months.", "No interest rate or concession is published on the page."],
+      "saving": {
+        "formula": "rate_difference",
+        "text": "loan amount x (your current rate - the green loan rate you are offered) per year",
+        "currency": "INR",
+        "inputs": [
+          {"name": "loan_amount", "label": "Loan amount", "unit": "INR"},
+          {"name": "current_rate_percent", "label": "Your current borrowing rate", "unit": "% per year"},
+          {"name": "green_rate_percent", "label": "Green loan rate you are offered", "unit": "% per year"}
+        ]
+      }
+    },
+    {
+      "scheme_id": "eu-cbam",
+      "country": "European Union",
+      "official_name": "Carbon Border Adjustment Mechanism (CBAM), definitive regime",
+      "publisher": "European Commission, Directorate-General for Taxation and Customs Union",
+      "official_url": "https://taxation-customs.ec.europa.eu/carbon-border-adjustment-mechanism_en",
+      "checked_on": "2026-10-15",
+      "offers": "avoided_cost",
+      "offers_text": "From 1 January 2026 EU importers buy and surrender CBAM certificates for the embedded emissions of covered goods. Lower embedded emissions mean fewer certificates for your EU buyer.",
+      "who": "Exporters of cement, iron and steel, aluminium, fertilisers, electricity or hydrogen to the EU, through their EU importer. Check the CN code of the exact product.",
+      "match": {"export_to_eu": true, "material_ids": ["aluminium", "aluminium-foil", "steel", "rebar", "clinker", "hydrogen"]},
+      "numbers_used": ["CBAM certificate price Q3 2026: EUR 82.32, published 5 October 2026 (Price of CBAM certificates page)."],
+      "saving": {
+        "formula": "avoided_certificates",
+        "text": "embedded tonnes avoided x CBAM certificate price",
+        "currency": "EUR",
+        "inputs": [
+          {"name": "tonnes_reduced", "label": "Embedded emissions avoided on goods sold into the EU", "unit": "tCO2e"},
+          {"name": "price_per_tonne", "label": "CBAM certificate price", "unit": "EUR per tCO2e", "default": "82.32", "default_source": "European Commission, Price of CBAM certificates, Q3 2026, published 2026-10-05", "default_url": "https://taxation-customs.ec.europa.eu/carbon-border-adjustment-mechanism/price-cbam-certificates_en"}
+        ]
+      }
+    }
+  ]
+}

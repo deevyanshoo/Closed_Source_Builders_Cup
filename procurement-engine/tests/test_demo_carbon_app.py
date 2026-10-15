@@ -61,3 +61,34 @@ def test_invalid_legs_are_rejected_without_csrf_or_with_bad_input(demo):
     extra = client.post('/api/demo/carbon/estimate', headers=headers,
                         json={'plan_id': plan['plan_id'], 'legs_by_offer': {}, 'company': 'x'})
     assert extra.status_code == 422
+
+
+def test_deploy_package_ships_the_carbon_registry(tmp_path):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    destination = tmp_path / 'package'
+    prepared = subprocess.run([sys.executable, str(repo / 'deploy/judge-demo/prepare_package.py'), str(destination)],
+                              capture_output=True, text=True)
+    assert prepared.returncode == 0, prepared.stderr
+    packaged = destination / 'procurement-engine/config/carbon_factors_v1.json'
+    assert json.loads(packaged.read_text())['registry_version'] == 'carbon-factors-v1'
+
+
+def test_missing_registry_only_disables_carbon_routes(monkeypatch):
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from procure.demo import carbon_api
+    from procure.demo.app import create_app
+
+    def missing():
+        raise FileNotFoundError('carbon_factors_v1.json')
+    monkeypatch.setattr(carbon_api, 'load_registry', missing)
+    with TestClient(create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc)),
+                    base_url='https://demo.test') as client:
+        assert client.get('/api/demo/session').status_code == 200
+        response = client.get('/api/demo/carbon/factors')
+        assert response.status_code == 503
+        assert response.json()['error']['code'] == 'carbon_unavailable'

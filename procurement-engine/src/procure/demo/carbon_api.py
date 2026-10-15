@@ -20,12 +20,21 @@ def carbon_export(value, active_plan) -> dict | None:
 
 
 def register_carbon_routes(app, *, session, mutate, body, shape, context, active_plan):
-    registry = load_registry()
+    loaded = {}
+
+    def registry():
+        # Loaded on first use so a missing factor file disables only these routes.
+        if 'value' not in loaded:
+            try:
+                loaded['value'] = load_registry()
+            except (OSError, ValueError, KeyError):
+                raise SessionError('carbon_unavailable', 'Carbon factors are unavailable in this deployment.', 503) from None
+        return loaded['value']
 
     @app.get('/api/demo/carbon/factors')
     async def carbon_factors(request: Request):
         session(request)
-        return deepcopy(registry)
+        return deepcopy(registry())
 
     @app.post('/api/demo/carbon/estimate')
     async def carbon_estimate(request: Request):
@@ -38,7 +47,7 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
             if plan is None or plan['plan_id'] != data['plan_id']:
                 raise SessionError('stale_plan', 'The comparison changed. Run it again before estimating carbon.', 409)
             try:
-                result = compare_plan(registry, plan, data['legs_by_offer'])
+                result = compare_plan(registry(), plan, data['legs_by_offer'])
             except CarbonInputError as error:
                 raise SessionError('invalid_carbon_input', str(error), 422) from None
             value.carbon_estimate = {'company_id': value.company_id, 'plan_id': plan['plan_id'],

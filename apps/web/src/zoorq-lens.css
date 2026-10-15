@@ -4,4 +4,4 @@
 .zoorq-lens-fallback{width:22%;height:22%;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b7edff,#2487e8 48%,#073879);box-shadow:0 0 26px rgba(46,151,236,.35)}
 .zoorq-lens[data-state="muted"] .zoorq-lens-canvas{opacity:.55}
 .zoorq-lens[data-state="error"] .zoorq-lens-canvas{opacity:.65}
-@media(prefers-reduced-motion:reduce){.zoorq-lens-canvas{transition:none}}
+@media(prefers-reduced-motion:reduce){.zoorq-lens-canvas{transform:none;opacity:1;transition:none}}

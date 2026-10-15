@@ -7,21 +7,42 @@ function safeAnswerHref(value: string): string | null {
   } catch { return null; }
 }
 
+function readableDurations(text: string): string {
+  const round = (part: string) => part.replace(
+    /(?<![\w.,/?=&:%+$-])(\d{1,4}\.\d{6,})[ \t]*(days?)\b/g,
+    (original, raw: string, unit: string) => {
+      const days = Number(raw);
+      if (!Number.isFinite(days)) return original;
+      if (days > 0 && days < 0.1) return `less than 0.1 ${unit}`;
+      return `${days.toFixed(1)} ${unit}`;
+    },
+  );
+  const protectedSpans = /`+[^`]*`+|https?:\/\/[^\s<>]+/g;
+  let output = '';
+  let offset = 0;
+  for (const match of text.matchAll(protectedSpans)) {
+    const index = match.index ?? 0;
+    output += round(text.slice(offset, index)) + match[0];
+    offset = index + match[0].length;
+  }
+  return output + round(text.slice(offset));
+}
+
 function inline(text: string): ReactNode[] {
   const pieces: ReactNode[] = [];
   const pattern = /\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+)\*\*/g;
   let offset = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;
-    if (index > offset) pieces.push(text.slice(offset, index));
-    if (match[3] !== undefined) pieces.push(<strong key={index}>{match[3]}</strong>);
+    if (index > offset) pieces.push(readableDurations(text.slice(offset, index)));
+    if (match[3] !== undefined) pieces.push(<strong key={index}>{readableDurations(match[3])}</strong>);
     else {
       const href = safeAnswerHref(match[2]);
       pieces.push(href ? <a key={index} href={href} target="_blank" rel="noopener noreferrer">{match[1]}</a> : match[1]);
     }
     offset = index + match[0].length;
   }
-  if (offset < text.length) pieces.push(text.slice(offset));
+  if (offset < text.length) pieces.push(readableDurations(text.slice(offset)));
   return pieces;
 }
 

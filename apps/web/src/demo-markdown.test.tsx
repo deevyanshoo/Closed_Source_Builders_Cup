@@ -17,4 +17,29 @@ describe('assistant answer formatting', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('<strong>safe</strong>');
   });
+  it('rounds excessive stock-cover duration precision in ordinary and bold answer prose', () => {
+    const html = renderToStaticMarkup(<MarkdownAnswer text={'Atlas inventory has **26.76056338028169014084507042days** of stock cover. Another material has 0.0000042 days.'} />);
+    expect(html).toContain('<strong>26.8 days</strong>');
+    expect(html).toContain('less than 0.1 days');
+    expect(html).not.toContain('26.76056338028169014084507042');
+    expect(html).not.toContain('0.0 days');
+  });
+  it('preserves concise durations, other units, prices, URLs, link labels, and backtick code', () => {
+    const raw = '4.25 days; $26.76056338028169014084507042 per kg; 26.76056338028169014084507042 kg; '
+      + '[26.76056338028169014084507042days](https://example.org/26.76056338028169014084507042days) '
+      + 'https://example.org/?q=26.76056338028169014084507042days '
+      + '`26.76056338028169014084507042days` -26.76056338028169014084507042days '
+      + '1,026.76056338028169014084507042days 123456.76056338028169014084507042days';
+    const html = renderToStaticMarkup(<MarkdownAnswer text={raw} />);
+    expect(html).toContain('4.25 days');
+    expect(html).toContain('$26.76056338028169014084507042 per kg');
+    expect(html).toContain('26.76056338028169014084507042 kg');
+    expect(html).toContain('>26.76056338028169014084507042days</a>');
+    expect(html).toContain('href="https://example.org/26.76056338028169014084507042days"');
+    expect(html).toContain('https://example.org/?q=26.76056338028169014084507042days');
+    expect(html).toContain('`26.76056338028169014084507042days`');
+    expect(html).toContain('-26.76056338028169014084507042days');
+    expect(html).toContain('1,026.76056338028169014084507042days');
+    expect(html).toContain('123456.76056338028169014084507042days');
+  });
 });

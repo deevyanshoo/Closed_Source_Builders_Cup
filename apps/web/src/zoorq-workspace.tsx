@@ -2,8 +2,11 @@ import { useState } from 'react';
 import type { CompanyProfile, NewsView } from './demo-api';
 import { filterNewsItems, rankNewsItems } from './demo-company-news';
 import { ZoorqLens } from './zoorq-lens';
+import { ThemeControl } from './demo-theme';
+import { ZoorqEcosystem } from './zoorq-ecosystem';
 import { destinationIcon, ArrowLeftIcon, ArrowRightIcon, ChatBubbleIcon, CompanyIcon, MagnifyingGlassIcon, SpeakerLoudIcon } from './zoorq-icons';
 import './zoorq-workspace.css';
+import './zoorq-landing.css';
 
 export type WorkspaceView = 'hub' | 'overview' | 'news' | 'procurement' | 'inventory' | 'drafts';
 export type ProcurementStage = 'add' | 'review' | 'compare' | 'rfq';
@@ -34,8 +37,30 @@ export function filterWorkspaceCompanies(companies: CompanyProfile[], query: str
 
 export function CompanyHub({ companies, current, busy, onOpen }: { companies: CompanyProfile[]; current?: CompanyProfile; busy: boolean; onOpen: (id: string) => void }) {
   const [query, setQuery] = useState(''); const matches = filterWorkspaceCompanies(companies, query);
-  return <section className="zoorq-hub" aria-label="All companies"><div className="zoorq-hub-intro"><div className="zoorq-hub-intro-copy"><span className="zoorq-eyebrow">Company intelligence</span><h1>Your companies.</h1><p>Choose a company to review signals, supply position and pending decisions.</p></div>{current && <button type="button" className="zoorq-primary" disabled={busy} onClick={() => onOpen(current.company_id)}>Continue {current.name} <ArrowRightIcon /></button>}</div>
-    <div className="zoorq-hub-list"><div className="zoorq-hub-list-head"><div><span className="zoorq-eyebrow">Company index</span><h2>All companies <small>{companies.length}</small></h2></div><label className="zoorq-search"><span className="sr-only">Search companies</span><MagnifyingGlassIcon /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search company or sector" aria-label="Search companies" /></label></div><div className="zoorq-company-grid">{matches.map(item => <article key={item.company_id} className="zoorq-company-card"><div className="zoorq-company-identity"><span className="zoorq-company-sector">{item.sector}</span><h3>{item.name}</h3><p>{item.size} · {[...new Set(item.locations.map(location => location.country))].join(' · ')}</p></div><div className="zoorq-company-card-foot"><span>{item.materials.length} materials · {item.orders.length} orders</span><button type="button" aria-label={`Open ${item.name} workspace`} disabled={busy} onClick={() => onOpen(item.company_id)}>Open workspace <ArrowRightIcon /></button></div></article>)}</div>{!matches.length && <div className="zoorq-hub-empty" role="status"><strong>{companies.length ? 'No matching companies' : 'No companies available'}</strong><p>{companies.length ? `No companies match “${query}”. Try a company or sector name.` : 'The company index is unavailable. Try refreshing the workspace.'}</p></div>}</div>
+  return <section className="zoorq-hub zoorq-landing" aria-label="All companies">
+    <div className="zoorq-entrance">
+      <div className="zoorq-entrance-copy">
+        <span className="zoorq-entrance-kicker">An ecosystem of resilience intelligence</span>
+        <h1>A clearer view.<br /><span>A stronger next move.</span></h1>
+        <p>Connect world signals, supply decisions and an operator that helps you act.</p>
+        <div className="zoorq-entrance-actions">
+          {current ? <button type="button" className="zoorq-primary" disabled={busy} onClick={() => onOpen(current.company_id)}>Continue {current.name} <ArrowRightIcon /></button> : <a className="zoorq-primary" href="#zoorq-companies">Choose a company <ArrowRightIcon /></a>}
+          {current && <a className="zoorq-entrance-link" href="#zoorq-companies">Explore companies <ArrowRightIcon /></a>}
+        </div>
+      </div>
+      <div className="zoorq-entrance-visual"><ZoorqEcosystem /><span className="zoorq-network-caption">Signals. Supply. Decisions. Connected.</span></div>
+    </div>
+    <div className="zoorq-entrance-path" aria-label="What you can do"><span>Read the signal</span><ArrowRightIcon /><span>Explore the impact</span><ArrowRightIcon /><span>Make your next move</span></div>
+    <div className="zoorq-hub-list" id="zoorq-companies">
+      <div className="zoorq-hub-list-head"><div><h2>Choose your company.<small>{companies.length} companies. A world of decisions.</small></h2></div>
+        <label className="zoorq-search"><span className="sr-only">Search companies</span><MagnifyingGlassIcon /><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search company or sector" aria-label="Search companies" /></label>
+      </div>
+      <div className="zoorq-company-grid">{matches.map((item, index) => <article key={item.company_id} className="zoorq-company-card">
+        <div className="zoorq-company-identity"><span className="zoorq-company-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><div><span className="zoorq-company-sector">{item.sector}</span><h3>{item.name}</h3><p>{item.size} · {[...new Set(item.locations.map(location => location.country))].join(' · ')}</p></div></div>
+        <div className="zoorq-company-card-foot"><span>{item.materials.length} materials · {item.orders.length} orders</span><button type="button" aria-label={'Open ' + item.name + ' workspace'} disabled={busy} onClick={() => onOpen(item.company_id)}>Open workspace <ArrowRightIcon /></button></div>
+      </article>)}</div>
+      {!matches.length && <div className="zoorq-hub-empty" role="status"><strong>{companies.length ? 'No matching companies' : 'No companies available'}</strong><p>{companies.length ? 'Try a company or sector name.' : 'The company index is unavailable. Try refreshing the workspace.'}</p></div>}
+    </div>
   </section>;
 }
 
@@ -44,7 +69,8 @@ export function WorkspaceNavigation({ company, view, onView, disabled = false }:
 }
 
 export function WorkspaceHeader({ company, view, onTalk, onChat, onHub, disabled = false }: { company?: CompanyProfile; view: WorkspaceView; onTalk: () => void; onChat: () => void; onHub?: () => void; disabled?: boolean }) {
-  return <header className="zoorq-workspace-header">{onHub ? <button type="button" className="zoorq-header-location zoorq-header-hub" aria-label="All companies" disabled={disabled} onClick={onHub}><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{view === 'hub' ? 'Company index' : viewNames[view]}</strong></button> : <div className="zoorq-header-location"><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{view === 'hub' ? 'Company index' : viewNames[view]}</strong></div>}<button id="zoorq-talk-live" type="button" className="zoorq-header-talk" aria-label="Talk to ZOORQ" disabled={disabled || !company} onClick={onTalk}><SpeakerLoudIcon /><span className="zoorq-header-full">Talk to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Talk</span></button><button type="button" className="zoorq-header-chat" aria-label="Type to ZOORQ" disabled={disabled || !company} onClick={onChat}><ChatBubbleIcon /><span className="zoorq-header-full">Type to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Type</span></button></header>;
+  if (view === 'hub') return <header className="zoorq-landing-nav"><button type="button" className="zoorq-landing-brand" aria-label="ZOORQ home" onClick={onHub}><strong>ZOORQ</strong><span>A product by ClosedSource</span></button><a className="zoorq-company-jump" href="#zoorq-companies">Explore companies</a><ThemeControl /></header>;
+  return <header className="zoorq-workspace-header">{onHub ? <button type="button" className="zoorq-header-location zoorq-header-hub" aria-label="All companies" disabled={disabled} onClick={onHub}><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></button> : <div className="zoorq-header-location"><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></div>}<button id="zoorq-talk-live" type="button" className="zoorq-header-talk" aria-label="Talk to ZOORQ" disabled={disabled || !company} onClick={onTalk}><SpeakerLoudIcon /><span className="zoorq-header-full">Talk to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Talk</span></button><button type="button" className="zoorq-header-chat" aria-label="Type to ZOORQ" disabled={disabled || !company} onClick={onChat}><ChatBubbleIcon /><span className="zoorq-header-full">Type to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Type</span></button><ThemeControl /></header>;
 }
 
 export function ProcurementNavigation({ stage, onStage }: { stage: ProcurementStage; onStage: (stage: ProcurementStage) => void }) {

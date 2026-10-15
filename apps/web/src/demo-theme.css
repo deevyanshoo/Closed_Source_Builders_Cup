@@ -1,0 +1,135 @@
+/* The default palette remains the existing white, ink and cobalt workspace. */
+.zoorq-page {
+  --zoorq-cobalt: var(--zoorq-blue);
+  --zoorq-surface: #fff;
+  --zoorq-soft: #f7f9fc;
+  --zoorq-tint: #eff5ff;
+  --zoorq-warning: #fff3de;
+  --zoorq-warning-ink: #a95d00;
+  --zoorq-danger: #fff1f2;
+  --zoorq-danger-ink: #8c1d2b;
+}
+
+.zoorq-page .zoorq-theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--zoorq-muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.zoorq-page .zoorq-theme-control select {
+  min-width: 88px;
+  min-height: 44px;
+  padding: 8px 28px 8px 10px;
+  border: 1px solid var(--zoorq-line);
+  border-radius: 7px;
+  background: var(--zoorq-white);
+  color: var(--zoorq-ink);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.zoorq-page .zoorq-theme-control select:focus-visible {
+  outline: 3px solid var(--zoorq-blue);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .zoorq-page .zoorq-theme-control { gap: 0; }
+  .zoorq-page .zoorq-theme-control > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .zoorq-page .zoorq-theme-control select { min-width: 74px; padding-left: 7px; font-size: 11px; }
+}
+
+:root[data-zoorq-theme="dark"] .zoorq-page {
+  --zoorq-white: #121d31;
+  --zoorq-canvas: #0c1220;
+  --zoorq-ink: #eef4ff;
+  --zoorq-blue: #8db1ff;
+  --zoorq-cobalt: #8db1ff;
+  --zoorq-muted: #a9b9d1;
+  --zoorq-line: #34445f;
+  --zoorq-surface: #17243a;
+  --zoorq-soft: #1a2941;
+  --zoorq-tint: #1b3153;
+  --zoorq-warning: #473119;
+  --zoorq-warning-ink: #ffcf82;
+  --zoorq-danger: #48262e;
+  --zoorq-danger-ink: #ffd0d7;
+  background: var(--zoorq-canvas);
+  color: var(--zoorq-ink);
+}
+
+/* Navigation, company hub and overview. */
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-nav,.zoorq-workspace-header,.zoorq-hub,.zoorq-hub-intro,.zoorq-company-card,.zoorq-overview-grid > article,.zoorq-stage-nav button.active,.zoorq-hub-empty,.zoorq-skip-link) {
+  background: var(--zoorq-white);
+  color: var(--zoorq-ink);
+  border-color: var(--zoorq-line);
+}
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-hub-intro { background: linear-gradient(135deg,#172b4c,#101a2c 76%); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-nav-brand strong,.zoorq-hub-intro h1,.zoorq-overview-heading h2,.zoorq-cover-number,.zoorq-cover-label,.zoorq-work-card button) { color: var(--zoorq-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-hub-intro p,.zoorq-company-card p,.zoorq-company-card-foot > span,.zoorq-work-card button small,.zoorq-overview-heading p,.zoorq-voice-card p,.zoorq-voice-card > span,.zoorq-signal-content p,.zoorq-header-location span:first-child,.zoorq-nav-company small,.zoorq-nav-brand small,.zoorq-nav-foot,.zoorq-hub-empty,.zoorq-page .demo-footer) { color: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-nav button { color: #bfd0eb; }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-nav-company-icon,
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-gap-readout strong { color: var(--zoorq-blue); }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-nav-links .zoorq-nav-link.active,
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-nav-links .zoorq-nav-link:hover:not(:disabled),
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-company-card:hover { background: #1d355b; color: #eaf2ff; }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-header-chat { background: var(--zoorq-soft); color: var(--zoorq-ink); border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-primary,.zoorq-header-talk,.demo-button,.demo-operator-toggle) { background: #336ae4; border-color: #336ae4; color: #fff; }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-primary,.zoorq-header-talk,.demo-button):hover:not(:disabled) { background: #2455be; border-color: #2455be; }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-attention { background: var(--zoorq-warning); color: var(--zoorq-warning-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.zoorq-stage-nav,.zoorq-search,.zoorq-stage-nav button) { background: var(--zoorq-soft); border-color: var(--zoorq-line); color: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-stage-nav button.active { color: var(--zoorq-ink); }
+
+/* Procurement forms, results, evidence and operational status. */
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-start,.demo-review,.demo-planning,.demo-results,.demo-end,.demo-company-panel,.demo-material-picker,.demo-field,.demo-snapshot,.demo-draft,.demo-company-grid > div,.demo-news-item,.demo-risk-company,.demo-risk-alert,.demo-outbox-message,.demo-draft-record,.demo-operator-overview > div,.demo-operator-result,.demo-operator-proposal,.demo-operator-voice) {
+  background: var(--zoorq-white);
+  color: var(--zoorq-ink);
+  border-color: var(--zoorq-line);
+}
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-fixtures,.demo-offer-tabs,.demo-offer-tabs button,.demo-badge,.demo-table-wrap th,.demo-draft pre,.demo-draft-record pre,.demo-operator-proposal pre,.demo-operator-result pre,.zoorq-rfq-summary > div,.demo-risk-metrics div,.demo-risk-monitor,.demo-material-picker,.demo-company-shell,.demo-operator-panel,.demo-operator-dock) {
+  background: var(--zoorq-soft);
+  color: var(--zoorq-ink);
+  border-color: var(--zoorq-line);
+}
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-offer-tabs button.active,.demo-table-wrap table,.demo-risk-filters select,.demo-operator-chat textarea,.demo-draft pre,.demo-draft-record pre) { background: var(--zoorq-white); color: var(--zoorq-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(input:not([type=checkbox]),select,textarea,.demo-composer-box,.demo-composer-box textarea,.demo-assistant-composer) { background: var(--zoorq-white); color: var(--zoorq-ink); border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page input::placeholder,
+:root[data-zoorq-theme="dark"] .zoorq-page textarea::placeholder { color: #9aabc6; }
+:root[data-zoorq-theme="dark"] .zoorq-page input[type=file]::file-selector-button { background: var(--zoorq-soft); color: var(--zoorq-ink); border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-boundary,.demo-workspace-heading > p,.demo-session,.demo-material-picker p,.demo-material-picker label > span,.demo-extract-form label > span,.demo-plan-grid label > span,.demo-editor-grid label > span,.demo-delay-controls label > span,.demo-muted,.demo-provider,.demo-source-line,.demo-assumption,.demo-table-wrap th,.demo-table-wrap td small,.zoorq-rfq-summary dt,.zoorq-material-context small,.demo-risk-evidence li span,.demo-risk-evidence li small,.demo-risk-actions small) { color: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-source-line,.demo-boundary,.demo-risk-summary,.demo-workspace-heading,.demo-table-wrap td,.demo-table-wrap th) { border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-alert,.demo-sample,.zoorq-retained-upload,.demo-risk-gap,.demo-operator-risk) { background: var(--zoorq-tint); color: var(--zoorq-ink); border-color: var(--zoorq-blue); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-error,.demo-risk-alert[data-severity="high"]) { background: var(--zoorq-danger); color: var(--zoorq-danger-ink); border-color: #ff9dac; }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-risk-alert[data-severity="medium"] { background: var(--zoorq-warning); color: var(--zoorq-warning-ink); border-color: #ffcf82; }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-risk-company > summary:hover,.demo-risk-detail > summary:hover,.demo-news-row:hover,.demo-global-watch-row:hover) { background: var(--zoorq-tint); }
+
+/* News already uses semantic variables; these selectors cover its selected and warning states. */
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-news-panel { --news-white: var(--zoorq-white); --news-ink: var(--zoorq-ink); --news-cobalt: var(--zoorq-blue); --news-canvas: var(--zoorq-soft); --news-line: var(--zoorq-line); --news-muted: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page :is(.demo-news-row[aria-current="true"],.demo-global-watch-row[aria-current="true"],.demo-news-note,.demo-news-warning) { background: var(--zoorq-tint); color: var(--zoorq-ink); }
+
+/* Operator, consent, proposal and full-screen voice must all follow the selected palette. */
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-operator-dock .demo-operator-panel.demo-assistant-panel,
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-voice-screen,
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-operator-dock .demo-assistant-panel .demo-assistant-composer {
+  background: var(--zoorq-white);
+  color: var(--zoorq-ink);
+  border-color: var(--zoorq-line);
+}
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-assistant-heading h2,.demo-assistant-heading p strong,.demo-assistant-attention > summary,.demo-operator-overview h3,.demo-operator-result,.demo-operator-answer,.demo-markdown-answer h2,.demo-markdown-answer h3,.demo-markdown-answer h4,.demo-operator-proposal,.demo-voice-screen-header h2,.demo-voice-state,.demo-voice-context-heading h3,.demo-caption) { color: var(--zoorq-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-assistant-heading p,.demo-muted,.demo-session,.demo-assistant-close,.demo-assistant-result-note,.demo-operator-proposal p,.demo-operator-proposal label,.demo-assistant-composer > label,.demo-composer-meta span,.demo-voice-context-heading p,.demo-operator-voice > p:first-child,.demo-voice-activity-evidence small) { color: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(a,.demo-link,.demo-kicker,.demo-composer-mic) { color: var(--zoorq-blue); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-operator-evidence li span,.demo-operator-evidence li small,.demo-operator-overview li span,.demo-operator-overview li small,.demo-assistant-trace > summary,.demo-research-details > summary,.demo-proposal-explanation > summary,.demo-assistant-composer .demo-composer-meta .demo-link,.demo-voice-research-result > p) { color: var(--zoorq-muted); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-operator-analytics th,.demo-operator-analytics td,.demo-research-suggestions iframe) { color: var(--zoorq-ink); border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-research-suggestions iframe { background: var(--zoorq-white); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-voice-controls .demo-link:last-child { color: var(--zoorq-danger-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-session,.demo-assistant-close,.demo-assistant-attention,.demo-operator-overview > div,.demo-assistant-result-note,.demo-operator-evidence li,.demo-operator-proposal,.demo-research-consent,.demo-draft-preview,.demo-operator-proposal pre,.demo-operator-result pre,.demo-assistant-composer .demo-composer-box,.demo-voice-back,.demo-voice-controls .demo-link,.demo-caption,.demo-caption.is-user,.demo-voice-activity-question) { background: var(--zoorq-soft); color: var(--zoorq-ink); border-color: var(--zoorq-line); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-assistant-question,.demo-composer-mic,.demo-operator-risk) { background: var(--zoorq-tint); color: var(--zoorq-ink); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-alert,.demo-assistant-failure) { background: var(--zoorq-danger); color: var(--zoorq-danger-ink); border-color: #ff9dac; }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-voice-main { background: radial-gradient(ellipse at 50% 36%,#1a3054 0%,#101a2b 65%); }
+:root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel :is(.demo-voice-context,.demo-voice-screen-header,.demo-voice-activity-evidence,.demo-assistant-heading,.demo-current-proposal,.demo-assistant-trace,.demo-research-details,.demo-proposal-explanation) { border-color: var(--zoorq-line); }
+@media (max-width: 760px) {
+  :root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-operator-voice > .demo-voice-controls { background: #121d31f5; border-color: var(--zoorq-line); }
+}

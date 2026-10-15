@@ -15,6 +15,7 @@ import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
 import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceHeader, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
 import type { ProcurementStage, WorkspaceView } from './zoorq-workspace';
+import './demo-theme.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
 export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
@@ -675,7 +676,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   }
 
   const progress = workspaceActivity(busy, mode);
-  return <div className="demo-page zoorq-page"><a className="zoorq-skip-link" href="#zoorq-workspace-content">Skip to workspace</a><WorkspaceNavigation company={view === 'hub' ? undefined : company} view={view} onView={navigate} disabled={busy === 'company'} /><main><WorkspaceHeader company={view === 'hub' ? undefined : company} view={view} onTalk={requestLiveVoice} onChat={openOperatorChat} onHub={() => navigate('hub')} disabled={!!busy || !riskScope} /><div id="zoorq-workspace-content" className="zoorq-workspace-content" ref={contentRef} tabIndex={-1}>{company && view !== 'hub' && <h1 className="sr-only">{company.name} workspace</h1>}
+  return <div className={"demo-page zoorq-page" + (view === 'hub' ? ' zoorq-is-hub' : '')}><a className="zoorq-skip-link" href="#zoorq-workspace-content">Skip to workspace</a><WorkspaceNavigation company={view === 'hub' ? undefined : company} view={view} onView={navigate} disabled={busy === 'company'} /><main><WorkspaceHeader company={view === 'hub' ? undefined : company} view={view} onTalk={requestLiveVoice} onChat={openOperatorChat} onHub={() => navigate('hub')} disabled={!!busy || !riskScope} /><div id="zoorq-workspace-content" className="zoorq-workspace-content" ref={contentRef} tabIndex={-1}>{company && view !== 'hub' && <h1 className="sr-only">{company.name} workspace</h1>}
     {view === 'hub' && <CompanyHub companies={companyOptions} current={company} busy={busy === 'company' || !state.session?.company || state.session.context_version === undefined} onOpen={id => { if (id === company?.company_id) navigate('overview'); else void switchCompany(id); }} />}
     {company && view !== 'hub' && <>
 

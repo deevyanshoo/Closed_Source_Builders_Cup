@@ -46,6 +46,20 @@ export function pcm16Base64(samples: Float32Array, sourceRate: number): string {
   for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
   return btoa(binary);
 }
+export function voiceAudioLevel(samples: Float32Array): number {
+  if (!samples.length) return 0;
+  let energy = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const sample = Number.isFinite(samples[i]) ? samples[i] : 0;
+    energy += sample * sample;
+  }
+  return Math.min(1, Math.max(0, (Math.sqrt(energy / samples.length) - 0.008) * 7));
+}
+export function smoothVoiceLevel(previous: number, next: number): number {
+  const from = Number.isFinite(previous) ? Math.min(1, Math.max(0, previous)) : 0;
+  const to = Number.isFinite(next) ? Math.min(1, Math.max(0, next)) : 0;
+  return from + (to - from) * (to > from ? 0.72 : 0.32);
+}
 function pcm24Buffer(context: AudioContext, encoded: string): AudioBuffer {
   const binary = atob(encoded);
   const buffer = context.createBuffer(1, Math.floor(binary.length / 2), 24000);
@@ -82,7 +96,7 @@ export function voiceResearchLabel(phase: VoiceResearchPhase | null | undefined)
     phase === 'unavailable' ? 'Research unavailable' : null;
 }
 
-type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null };
+type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null; outputMeter?: AnalyserNode; inputLevel?: number };
 type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
 type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
 const CAPTION_LIMIT = 24;
@@ -150,11 +164,11 @@ export function voiceThinkingAfterEvent(previous: boolean,
   return previous;
 }
 
-export function queueLivePlayback(current: Pick<ActiveVoice, 'output' | 'playback' | 'nextTime'>,
+export function queueLivePlayback(current: Pick<ActiveVoice, 'output' | 'playback' | 'nextTime' | 'outputMeter'>,
   encoded: string, onState: () => void): void {
   const node = current.output.createBufferSource();
   node.buffer = pcm24Buffer(current.output, encoded);
-  node.connect(current.output.destination);
+  node.connect(current.outputMeter ?? current.output.destination);
   node.onended = () => { current.playback.delete(node); onState(); };
   const startTime = Math.max(current.output.currentTime, current.nextTime);
   node.start(startTime);
@@ -166,6 +180,7 @@ export function releaseLiveVoice(current: ActiveVoice): void {
   clearTimeout(current.timer); clearTimeout(current.startupTimer);
   current.processor.onaudioprocess = null;
   current.processor.disconnect(); current.source.disconnect();
+  current.outputMeter?.disconnect();
   current.stream.getTracks().forEach(track => track.stop());
   current.playback.forEach(node => { try { node.stop(); } catch { /* Already stopped. */ } });
   current.playback.clear();
@@ -192,6 +207,7 @@ type LiveVoiceProps = { scope: LiveScope; csrf: string; disabled: boolean; befor
 export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown, onExit }, ref) {
   const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [researchPhase, setResearchPhase] = useState<VoiceResearchPhase | null>(null);
   const [error, setError] = useState('');
   const [captions, setCaptions] = useState<Caption[]>([]);
@@ -207,12 +223,32 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const pendingCaptions = useRef<Caption[]>([]);
   const historyWrites = useRef<Promise<void>>(Promise.resolve());
 
+  useEffect(() => {
+    const samples = new Float32Array(256);
+    const timer = window.setInterval(() => {
+      const current = active.current;
+      if (!current || !sameLiveScope(current.scope, scopeRef.current) || document.hidden) return;
+      const visual = voiceVisualState(current, thinking.current);
+      let level = visual === 'listening' ? current.inputLevel ?? 0 : 0;
+      if (visual === 'speaking' && current.outputMeter) {
+        current.outputMeter.getFloatTimeDomainData(samples);
+        level = voiceAudioLevel(samples);
+      }
+      setAudioLevel(old => {
+        const next = smoothVoiceLevel(old, level);
+        return Math.abs(next - old) > 0.008 ? next : old;
+      });
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, []);
+
   function stopPlayback(current: ActiveVoice) {
     current.playback.forEach(node => { try { node.stop(); } catch { /* Already stopped. */ } });
     current.playback.clear();
     current.nextTime = current.output.currentTime;
   }
   function end() {
+    setAudioLevel(0);
     generation.current += 1;
     starting.current = false;
     thinking.current = false;
@@ -270,11 +306,20 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         timer: setTimeout(() => { setError('This voice conversation reached its three-minute limit. Start another conversation.'); end(); }, 180000),
         startupTimer: setTimeout(() => { setError('The live voice service did not become ready. Try starting again.'); end(); }, CONNECT_TIMEOUT_MS),
         scope: captured, ready: false, muted: false, responsePending: false };
+      try {
+        const outputMeter = output.createAnalyser();
+        outputMeter.fftSize = 256;
+        outputMeter.connect(output.destination);
+        current.outputMeter = outputMeter;
+      } catch { /* Metering is optional; playback can use the existing destination. */ }
       active.current = current;
       let pending: number[] = [];
       processor.onaudioprocess = event => {
-        if (active.current !== current || !current.ready || current.muted || current.socket.readyState !== WebSocket.OPEN) return;
-        pending.push(...event.inputBuffer.getChannelData(0));
+        if (active.current !== current || !sameLiveScope(scopeRef.current, captured) || !current.ready || current.socket.readyState !== WebSocket.OPEN) return;
+        const samples = event.inputBuffer.getChannelData(0);
+        current.inputLevel = current.muted ? 0 : voiceAudioLevel(samples);
+        if (current.muted) return;
+        pending.push(...samples);
         const count = Math.round(input!.sampleRate / 10);
         while (pending.length >= count) {
           const chunk = pending.splice(0, count);
@@ -394,7 +439,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const shownCaptions = visibleLiveCaptions(captions, captionScope, scope);
   return <div className="demo-operator-voice">
     <p>Speak naturally. You can interrupt an answer by speaking.</p>
-    <div className="demo-voice-orb"><ZoorqLens state={orbState} /></div>
+    <div className="demo-voice-orb"><ZoorqLens state={orbState} level={visible.status === 'listening' || visible.status === 'speaking' ? audioLevel : 0} /></div>
     <div className="demo-voice-state" role="status" aria-live="polite" aria-atomic="true"><strong>{statusLabel}</strong></div>
     <div className="demo-voice-controls">{visible.status === 'idle' && <button type="button" className="demo-button" disabled={disabled} onClick={start}>Start conversation</button>}<button type="button" className="demo-link" disabled={visible.status === 'idle'} onClick={mute}>{microphoneMuted ? 'Unmute' : 'Mute microphone'}</button><button type="button" className="demo-link" onClick={() => { end(); onExit?.(); }}>End conversation</button></div>
     {visible.error && <p className="demo-alert" role="alert">{visible.error}</p>}

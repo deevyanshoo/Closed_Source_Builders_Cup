@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRef } from 'react';
-import { acceptedResearchProgress, settleLiveResearch, voiceResearchLabel, acceptsLiveTurn, appendLiveCaption, claimLiveVoiceStart, endActiveVoice, finalizedLiveCaptions, LiveVoice, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+import { voiceAudioLevel, smoothVoiceLevel, acceptedResearchProgress, settleLiveResearch, voiceResearchLabel, acceptsLiveTurn, appendLiveCaption, claimLiveVoiceStart, endActiveVoice, finalizedLiveCaptions, LiveVoice, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
 
 vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
@@ -286,5 +286,34 @@ describe('delayed research completion', () => {
     const event = { type: 'research_progress', phase: 'started', proposal_id: 'old', company_id: 'solara', context_version: 1 };
     expect(acceptedResearchProgress(event, scope, scope, 'new')).toBeNull();
     expect(acceptedResearchProgress({ ...event, proposal_id: 'new' }, scope, scope, 'new', 'completed')).toBeNull();
+  });
+});
+
+describe('actual voice energy', () => {
+  it('routes playback through the one output meter instead of duplicating the destination', () => {
+    const meter = {};
+    const connect = vi.fn();
+    const output = {
+      currentTime: 1, destination: {},
+      createBuffer: (_channels: number, length: number) => ({ duration: length / 24000, getChannelData: () => new Float32Array(length) }),
+      createBufferSource: () => ({ connect, start: vi.fn(), buffer: null, onended: null }),
+    };
+    const current = { output, outputMeter: meter, playback: new Set(), nextTime: 0 };
+    queueLivePlayback(current as never, btoa(String.fromCharCode(0, 0)), () => {});
+    expect(connect).toHaveBeenCalledExactlyOnceWith(meter);
+    expect(current.playback.size).toBe(1);
+  });
+
+  it('rejects silence and malformed energy, clamps loud input and responds to speech', () => {
+    expect(voiceAudioLevel(new Float32Array(256))).toBe(0);
+    expect(voiceAudioLevel(new Float32Array([NaN, Infinity]))).toBe(0);
+    expect(voiceAudioLevel(new Float32Array(256).fill(1))).toBe(1);
+    expect(voiceAudioLevel(new Float32Array(256).fill(0.1))).toBeGreaterThan(0.5);
+  });
+  it('attacks quickly and releases gently without inventing energy from silence', () => {
+    expect(smoothVoiceLevel(0, 0)).toBe(0);
+    expect(smoothVoiceLevel(0, 1)).toBeGreaterThan(0.6);
+    expect(smoothVoiceLevel(1, 0)).toBeGreaterThan(0);
+    expect(smoothVoiceLevel(1, 0)).toBeLessThan(1);
   });
 });

@@ -74,11 +74,12 @@ describe('ZOORQ workspace routes', () => {
     const html = renderToStaticMarkup(<DemoPage initialCompanies={[company, emptyCompany]} />);
     expect(html).toMatch(/aria-label="Open Solara Cables workspace"[^>]*disabled=""/);
   });
-  it('keeps the application navigation present at the company hub without quote controls', () => {
+  it('offers company selection and appearance at the landing without quote controls', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
     expect(html).toContain('aria-label="Workspace destinations"');
-    expect(html).toContain('Choose a company');
+    expect(html).toContain('aria-label="Appearance"');
+    expect(html).toContain('aria-label="Search companies"');
     expect(html).not.toContain('demo-extract-form');
   });
   const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });

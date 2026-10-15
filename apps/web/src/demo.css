@@ -21,6 +21,13 @@
 .demo-draft-record h3{margin:9px 0;font-size:18px}
 .demo-draft-record p{font-size:12px;line-height:1.5}
 .demo-draft-record pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;background:#f7f9fc;border:1px solid #dce3ec;font:12px/1.6 ui-monospace,monospace}
+.demo-results h2[tabindex="-1"]{scroll-margin-top:82px}
+.demo-results h2[tabindex="-1"]:focus{outline:3px solid #2159d6;outline-offset:5px}
+.demo-rfq-next{padding:18px 30px 24px;border-bottom:1px solid var(--zoorq-line,#dce3ec);background:var(--zoorq-white,#fff);color:var(--zoorq-ink,#142033);display:flex;align-items:center;justify-content:space-between;gap:18px}
+.demo-rfq-next p{margin:0;font-size:13px;line-height:1.5;color:var(--zoorq-ink,#142033)}
+.demo-rfq-next .demo-button{flex:none}
+.demo-draft-group>h3{font-size:16px;margin:22px 0 8px}
+@media(max-width:760px){.demo-rfq-next{padding:20px 18px;align-items:stretch;flex-direction:column}.demo-rfq-next .demo-button{align-self:flex-start}}
 .demo-drafts-simulated{border-top:1px solid #dce3ec;margin-top:28px;padding-top:14px}
 
 /* Compact operational heading keeps the active workspace above the fold. */

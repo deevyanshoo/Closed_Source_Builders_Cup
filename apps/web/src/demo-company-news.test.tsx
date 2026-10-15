@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { feedPublicationLabel, filterNewsItems, focusNewsTransition, rankNewsItems, selectNewsItem, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
+import { activeAdditionalFilters, feedPublicationLabel, filterNewsItems, focusNewsTransition, rankNewsItems, selectNewsItem, SelectionUnavailableNotice, NewsWorkspace, OutboxWorkspace } from './demo-company-news';
 import type { CompanyProfile, NewsView } from './demo-api';
 
 const company: CompanyProfile = {
@@ -104,7 +104,45 @@ describe('company news workspace', () => {
     const background = { ...dated, item_id: 'background', relevance_strength: 'background' as const };
     expect(filterNewsItems([dated, old, unknown, future, background], 'all', 'all', false, { now: Date.parse('2026-10-15T10:00:00Z') }).map(item => item.item_id)).toEqual(['a']);
     expect(filterNewsItems([dated, old, unknown, future, background], 'all', 'all', false, { now: Date.parse('2026-10-15T10:00:00Z'), age: '30d', includeUnknown: true, includeBackground: true }).map(item => item.item_id)).toEqual(['a', 'old', 'unknown', 'background']);
-    expect(selectNewsItem('from-previous-company', [dated])?.item_id).toBe('a');
+    expect(selectNewsItem(null, [dated])?.item_id).toBe('a');
+    expect(selectNewsItem('from-previous-company', [dated])).toBeNull();
+  });
+  it('keeps an explicit selection unavailable when refresh or filters remove it, until it returns', () => {
+    const first = { ...news.items[0], item_id: 'first' };
+    const chosen = { ...news.items[0], item_id: 'chosen', category: 'energy' };
+    expect(selectNewsItem('chosen', [first, chosen])?.item_id).toBe('chosen');
+    expect(selectNewsItem('chosen', filterNewsItems([first, chosen], 'all', 'trade'))).toBeNull();
+    expect(selectNewsItem('chosen', [first])).toBeNull();
+    expect(selectNewsItem('chosen', [first, chosen])?.item_id).toBe('chosen');
+    expect(selectNewsItem('global-chosen', [{ item_id: 'global-first' }])).toBeNull();
+  });
+  it('announces a missing chosen item without naming a replacement or offering an action', () => {
+    const filtered = renderToStaticMarkup(<SelectionUnavailableNotice kind="story" filtered />);
+    expect(filtered).toMatch(/role="status"/);
+    expect(filtered).toContain('selected story is hidden by the current filters');
+    expect(filtered).not.toContain('Ask operator');
+    const refreshed = renderToStaticMarkup(<SelectionUnavailableNotice kind="global event" filtered={false} />);
+    expect(refreshed).toContain('selected global event is no longer in this collection');
+  });
+  it('counts secondary filters so their effect stays visible while collapsed', () => {
+    expect(activeAdditionalFilters('relevant', 'all', false, false, false)).toBe(0);
+    expect(activeAdditionalFilters('newest', 'trade', true, false, true)).toBe(4);
+  });
+  it('shows source facts once and moves the specific next check beside the source and action', () => {
+    const item = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', summary: 'A source reported a copper shipment delay.', next_steps: ['Verify the affected supplier shipment'] };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [item] }} loading={false} error="" onRefresh={() => {}} onAction={() => {}} />);
+    expect(html.match(/A source reported a copper shipment delay\./g)).toHaveLength(1);
+    expect(html.indexOf('Verify the affected supplier shipment')).toBeLessThan(html.indexOf('What happened'));
+    expect(html).toContain('If the lane is affected, review lead times.');
+    expect(html).toContain('Conditional implication (low)');
+  });
+  it('does not repeat an implication that only differs from the lead in whitespace', () => {
+    const item = { ...news.items[0], published_at: '2026-10-14T09:00:00Z', summary: 'Copper shipment delay  reported.', implication: 'Copper shipment delay reported.', relevance_reason: 'Tracked copper supply may be exposed.' };
+    const html = renderToStaticMarkup(<NewsWorkspace company={company} view={{ ...news, items: [item] }} loading={false} error="" onRefresh={() => {}} />);
+    expect(html.match(/Copper shipment delay\s+reported\./g)).toHaveLength(1);
+    const why = html.slice(html.indexOf('<h4>Why it may matter</h4>'), html.indexOf('Evidence and source details'));
+    expect(why).toContain('Tracked copper supply may be exposed.');
+    expect(why).toContain('Conditional implication (low)');
   });
   it('shows independent successful news, FX and attempted refresh times', () => {
     const scheduled = { ...news, collection: { mode: 'scheduled', status: 'partial',

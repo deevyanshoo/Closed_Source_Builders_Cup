@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
@@ -207,6 +207,20 @@ describe('demo response state', () => {
     const sameRfq = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={[{ ...drafts[0], draft_id: rfq.draft_id, kind: 'rfq', body: rfq.text }]} rfq={rfq} messages={[]} dirty={false} onDownloadRfq={() => {}} />);
     expect(sameRfq).toContain('Download RFQ draft');
   });
+  it('attaches the download only to the current RFQ and labels older unsent drafts', () => {
+    const old = { draft_id: 'old-rfq', kind: 'rfq' as const, status: 'draft_unsent' as const, company_id: company.company_id, material_id: 'copper', recipient_label: 'Earlier supplier', subject: 'Earlier RFQ', body: 'Earlier unsent body', created_at: '2026-10-14T09:00:00Z' };
+    const current = { ...old, draft_id: rfq.draft_id, recipient_label: 'Swift', subject: 'Current request', body: 'Cached stale preview' };
+    const html = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={[old, current]} rfq={rfq} messages={[]} dirty={false} onDownloadRfq={() => {}} />);
+    const currentStart = html.indexOf('Current RFQ');
+    const olderStart = html.indexOf('Earlier unsent drafts');
+    expect(currentStart).toBeGreaterThan(-1);
+    expect(html.slice(currentStart, olderStart)).toContain('Download RFQ draft');
+    expect(html.slice(currentStart, olderStart)).toContain(rfq.text);
+    expect(html).not.toContain('Cached stale preview');
+    expect(html.slice(olderStart)).toContain('Earlier RFQ');
+    expect(html.slice(olderStart)).not.toContain('Download RFQ draft');
+    expect(html).toContain('Unsent draft');
+  });
   it('retains a recovery notice only when canonical voice preflight changes workspace identity', () => {
     expect(workspaceChanged(session, { ...session, offers: [] })).toBe(false);
     expect(workspaceChanged(session, { ...session, session_id: 'renewed' })).toBe(true);
@@ -403,8 +417,57 @@ describe('demo response state', () => {
     expect(delayControlsForRecovery(removed, 'q2')).toEqual({ offerId: 'q1', days: '0' });
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1, 'saved')], plan: selectedPlan, plan_request: request, recovery: removed, rfq }, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="compare" />);
-    expect(html).toContain('Scenario: synthetic.pdf delayed 0 days');
-    expect(html).not.toContain('Scenario: synthetic.pdf delayed 20 days');
+    expect(html).toContain('Edit scenario: synthetic.pdf delayed 0 days');
+    expect(html).not.toContain('Edit scenario: synthetic.pdf delayed 20 days');
+  });
+  it('shows every accepted supplier delay and makes the reset scope explicit', () => {
+    const q2 = { ...offer(1, 'saved'), offer_id: 'q2', document: { ...offer(1).document, filename: 'second.pdf' } };
+    const two = { ...recovery, baseline: { ...recovery.baseline, offer_versions: { q1: 1, q2: 1 } }, scenario: { ...recovery.scenario, offer_versions: { q1: 1, q2: 1 } }, scenario_request: { ...request, delay_days_by_offer: { q1: 20, q2: 10 } } };
+    const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [offer(1, 'saved'), q2], recovery: two, rfq: null }, epoch: 0 });
+    const html = renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="compare" />);
+    expect(html).toContain('synthetic.pdf +20 days');
+    expect(html).toContain('second.pdf +10 days');
+    expect(html).toContain('Add or update a supplier delay');
+    expect(html).toContain('Remove all delays');
+    expect(html).not.toContain('changes only the selected supplier');
+  });
+  it('offers RFQ review for a feasible current plan and explains unavailable review', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const feasible = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+    expect(feasible).toContain('Review RFQ draft');
+    const infeasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan }} initialView="procurement" initialStage="compare" />);
+    expect(infeasible).toContain('No feasible supplier is selected for an RFQ draft');
+    expect(infeasible).not.toContain('Review RFQ draft');
+    const dirty = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, dirty: true }} initialView="procurement" initialStage="compare" />);
+    expect(dirty).toContain('Run a new comparison before reviewing an RFQ draft');
+    expect(dirty).not.toContain('Review RFQ draft');
+  });
+  it('focuses only the accepted current result and uses auto scrolling for reduced motion', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    const heading = { focus: vi.fn(), scrollIntoView: vi.fn() } as unknown as HTMLElement;
+    const pending = { kind: 'plan' as const, id: 'p1', epoch: 0, sessionId: 's1', companyId: company.company_id, contextVersion: 1 };
+    expect(focusAcceptedComparison(pending, loaded, 'procurement', 'compare', heading, true)).toBe(true);
+    expect(heading.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(heading.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
+    heading.focus = vi.fn();
+    expect(focusAcceptedComparison({ ...pending, epoch: 1 }, loaded, 'procurement', 'compare', heading, true)).toBe(false);
+    expect(focusAcceptedComparison({ ...pending, companyId: 'other' }, loaded, 'procurement', 'compare', heading, true)).toBe(false);
+    expect(focusAcceptedComparison({ ...pending, id: 'old' }, loaded, 'procurement', 'compare', heading, true)).toBe(false);
+    expect(focusAcceptedComparison(pending, { ...loaded, dirty: true }, 'procurement', 'compare', heading, true)).toBe(false);
+    expect(focusAcceptedComparison(pending, loaded, 'procurement', 'rfq', heading, true)).toBe(false);
+    expect(heading.focus).not.toHaveBeenCalled();
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+    expect(html).toContain('03 / Compare');
+    expect(html).not.toContain('04 / Comparison');
+    expect(html).toMatch(/aria-label="Comparison result"[^>]*>.*<h2[^>]*tabindex="-1"/);
+    const recovered = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, recovery }, epoch: 0 });
+    const recoveryHeading = { focus: vi.fn(), scrollIntoView: vi.fn() } as unknown as HTMLElement;
+    expect(focusAcceptedComparison({ ...pending, kind: 'recovery', id: 'c1' }, recovered, 'procurement', 'compare', recoveryHeading, false)).toBe(true);
+    expect(recoveryHeading.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    const recoveryHtml = renderToStaticMarkup(<DemoPage initialState={recovered} initialView="procurement" initialStage="compare" />);
+    expect(recoveryHtml).toMatch(/aria-label="Hypothetical delay comparison"[^>]*>.*<h2[^>]*tabindex="-1"/);
+    expect(recoveryHtml).not.toContain('05 / Hypothetical supplier delay');
+    expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toContain('04 / Draft RFQ');
   });
   it('describes the RFQ as the current reviewed comparison without exposing a plan ID in preview copy', () => {
     const restored = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, offers: [offer(1, 'saved')], plan: selectedPlan, plan_request: request, rfq }, epoch: 0 });

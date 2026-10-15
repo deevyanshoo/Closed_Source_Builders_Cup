@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewsView, OfferView, OperatorTurn, OperatorHistory, PlanView, RecoveryView } from './demo-api';
-import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, claimOperatorVoiceRequest, confirmVoiceTransition, focusCurrentProposal, focusValidOperatorSeed, focusVoiceReturn, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, researchFromTurn, resolveOperatorEvidence, routeVoiceExit, scopedPreparedDrafts, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface, voiceRequestIsCurrent } from './demo-operator';
+import { acceptLiveOperatorRequest, acceptsOperatorTurn, applyOperatorResult, canApplyProposal, claimOperatorVoiceRequest, confirmVoiceTransition, focusCurrentProposal, focusValidOperatorSeed, focusVoiceReturn, formatOperatorAttention, formatOperatorWatch, initialOperatorState, latestVoiceResearch, OperatorPanel, operatorSeedMessage, proposalPreviewKey, proposalPreviewReady, researchFromTurn, resolveOperatorEvidence, routeVoiceExit, scopedPreparedDrafts, scopedVoiceHistory, shouldFollowOperatorHistory, validateAudioCapture, VoiceConversationSurface, voiceRequestIsCurrent } from './demo-operator';
 
 const scope = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 1, epoch: 0 };
 const proposal = { proposal_id: 'p1', kind: 'watch' as const, summary: 'Watch copper', parameters: { material_id: 'copper', threshold: '12.5' }, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-10-14T12:00:00Z' };
@@ -10,6 +10,86 @@ const news: NewsView = { company_id: 'solara-cables', context_version: 1, checke
 const quote: OfferView = { offer_id: 'q1', version: 2, status: 'saved', synthetic: true, document: { document_id: 'd1', filename: 'reviewed.pdf', media_type: 'application/pdf', byte_size: 10 }, extractor: 'gemini', extractor_detail: {}, as_of: '2026-10-14', fields: { supplier_name: { name: 'supplier_name', kind: 'text', status: 'corrected', value: 'Swift Supply', source: 'buyer', evidence: [], reasons: [] } }, items: [], review_flags: [], normalized: {}, blocking_reasons: [] };
 
 describe('operator response boundary', () => {
+  it('offers recent earlier voice exchanges only for the current company and session', () => {
+    const answered = { ...turn, status: 'completed' as const, proposal: null, assistant_text: 'Earlier copper answer.' };
+    const exchanges = [{ id: 'old', question: 'Earlier question?', turn: answered }, { id: 'latest', question: 'Latest question?', turn: { ...answered, assistant_text: 'Latest answer.' } }];
+    const current = { ...initialOperatorState, scope, exchanges };
+    expect(scopedVoiceHistory(current, scope)).toEqual([exchanges[0]]);
+    expect(scopedVoiceHistory(current, { ...scope, companyId: 'another-company' })).toEqual([]);
+    expect(scopedVoiceHistory(current, { ...scope, sessionId: 'another-session' })).toEqual([]);
+    const many = { ...current, exchanges: Array.from({ length: 10 }, (_, index) => ({ id: index, question: `Question ${index}`, answer: `Answer ${index}` })) };
+    expect(scopedVoiceHistory(many, scope).map(exchange => exchange.question)).toEqual(['Question 4', 'Question 5', 'Question 6', 'Question 7', 'Question 8']);
+    const voice = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>}
+      activity={<article>Latest question? Latest answer.</article>}
+      history={<ol>{scopedVoiceHistory(current, scope).map(exchange => <li key={exchange.id}>{exchange.question} {exchange.turn?.assistant_text}</li>)}</ol>} />);
+    expect(voice).toContain('Recent conversation');
+    expect(voice).toMatch(/<details class="demo-voice-history"><summary>Recent conversation<\/summary>/);
+    expect(voice).toContain('Earlier question?');
+    expect(voice).toContain('Earlier copper answer.');
+    expect(voice).toContain('Latest question?');
+    expect(voice.match(/Latest answer\./g)).toHaveLength(1);
+  });
+  it('requires opening the full draft for the exact proposal before confirmation', () => {
+    const draft = { ...turn, proposal: { ...proposal, kind: 'simulate_email' as const,
+      parameters: { recipient_label: 'Supplier desk', subject: 'Availability', body: 'Please confirm a 400 kg shipment.' } } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: draft, reviewed: true }} onSession={() => {}} onUnknown={() => {}} />);
+    const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+    expect(card).toContain('Supplier desk');
+    expect(card).toContain('Availability');
+    expect(card).toMatch(/<details[^>]*><summary>Full draft preview<\/summary>/);
+    expect(card).toContain('Please confirm a 400 kg shipment.');
+    expect(card.indexOf('Full draft preview')).toBeLessThan(card.indexOf('Apply reviewed proposal'));
+    expect(card).toContain('Open the full draft preview before confirming.');
+    expect(card).toMatch(/<input type="checkbox"[^>]*disabled=""/);
+    expect(card).toMatch(/disabled=""[^>]*>Apply reviewed proposal<\/button>/);
+    const opened = proposalPreviewKey(scope, draft.proposal);
+    expect(proposalPreviewReady(scope, draft, null)).toBe(false);
+    expect(proposalPreviewReady(scope, draft, opened)).toBe(true);
+    expect(proposalPreviewReady({ ...scope, companyId: 'other-company' }, draft, opened)).toBe(false);
+    expect(proposalPreviewReady(scope, { ...draft, proposal: { ...draft.proposal, proposal_id: 'next-proposal' } }, opened)).toBe(false);
+    expect(opened).not.toBe(proposalPreviewKey({ ...scope, companyId: 'other-company' }, draft.proposal));
+    expect(opened).not.toBe(proposalPreviewKey(scope, { ...draft.proposal, proposal_id: 'next-proposal' }));
+  });
+  it('requires opening the full quote fields for the current proposal before review', () => {
+    const review = { ...proposal, kind: 'review_quotes' as const, parameters: { material_id: 'copper', offer_ids: ['q1'], preview: [{ offer_id: 'q1', fixture_id: 'fixture-copper', source_filename: 'reviewed.pdf', expected_version: 2, review_values: { lead_time_days: '10' } }] }, offer_versions: { q1: 2 } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} offers={[{ ...quote, fixture_id: 'fixture-copper' }]}
+      initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: review }, reviewed: true }} onSession={() => {}} onUnknown={() => {}} />);
+    const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+    expect(card.indexOf('Full quote preview')).toBeLessThan(card.indexOf('Apply reviewed proposal'));
+    expect(card).toContain('Open the full quote preview before confirming.');
+    expect(card).toMatch(/<input type="checkbox"[^>]*disabled=""/);
+    expect(card).toMatch(/disabled=""[^>]*>Apply reviewed proposal<\/button>/);
+  });
+  it('rejects missing or blank RFQ and email previews even with an opened key and checked review', () => {
+    for (const kind of ['rfq', 'simulate_email'] as const) {
+      for (const parameters of [
+        { recipient_label: 'Supplier desk', subject: 'Availability' },
+        { recipient_label: '  ', subject: 'Availability', body: 'Please confirm stock.' },
+        { recipient_label: 'Supplier desk', subject: ' ', body: 'Please confirm stock.' },
+        { recipient_label: 'Supplier desk', subject: 'Availability', body: '  ' },
+      ]) {
+        const invalid = { ...turn, proposal: { ...proposal, kind, parameters } };
+        expect(proposalPreviewReady(scope, invalid, proposalPreviewKey(scope, invalid.proposal))).toBe(false);
+        const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+          initialState={{ ...initialOperatorState, scope, turn: invalid, reviewed: true }} onSession={() => {}} onUnknown={() => {}} />);
+        const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+        expect(card).toContain('Draft preview unavailable. Request a new proposal.');
+        expect(card).toMatch(/<input type="checkbox"[^>]*disabled=""/);
+        expect(card).toMatch(/disabled=""[^>]*>Apply reviewed proposal<\/button>/);
+      }
+    }
+  });
+  it('keeps exact research consent and confirmation ahead of optional argument details', () => {
+    const research = { ...turn, proposal: { ...proposal, kind: 'research' as const,
+      parameters: { query: 'Public port status', destination: 'Google Search via Vertex AI' } } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: research }} onSession={() => {}} onUnknown={() => {}} />);
+    const card = html.slice(html.indexOf('aria-label="Current proposal requiring review"'), html.indexOf('aria-label="Assistant conversation"'));
+    expect(card.indexOf('Public port status')).toBeLessThan(card.indexOf('Research web'));
+    expect(card.indexOf('Google Search via Vertex AI')).toBeLessThan(card.indexOf('Research web'));
+    expect(card.indexOf('Research web')).toBeLessThan(card.indexOf('Exact proposed arguments'));
+  });
   it('places a current voice proposal before earlier activity and scrolls mobile focus to consent', () => {
     const html = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>}
       activity={<article aria-label="Latest operator exchange">Earlier answer</article>}
@@ -262,12 +342,12 @@ describe('operator response boundary', () => {
     expect(pending.indexOf('Reviewable watch proposal')).toBeLessThan(pending.indexOf('Old question'));
     expect(pending).toContain('role="region" aria-label="Current proposal requiring review"');
   });
-  it('shows the email body before Apply and a direct draft review link', () => {
+  it('discloses the email body and a direct draft review link while keeping recipient and subject visible', () => {
     const email = { ...turn, proposal: { ...proposal, kind: 'simulate_email' as const,
       parameters: { material_id: 'copper', recipient_label: 'Supplier', subject: 'Availability', body: 'Please confirm lead time.' } } };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
       initialState={{ ...initialOperatorState, scope, turn: email }} onSession={() => {}} onUnknown={() => {}} />);
-    expect(html).toContain('Subject: Availability');
+    expect(html).toMatch(/<strong>Subject:<\/strong> Availability/);
     expect(html).toContain('Please confirm lead time.');
     expect(html).toContain('View draft');
   });
@@ -536,7 +616,7 @@ describe('operator response boundary', () => {
     expect(html).toContain('Expected version 3');
     expect(html).toContain('Original: 18');
     expect(html).toContain('Reviewer value: 10');
-    expect(html).not.toMatch(/disabled=""[^>]*>Apply reviewed proposal/);
+    expect(html).toMatch(/disabled=""[^>]*>Apply reviewed proposal/);
     const changed = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, proposal: review }, reviewed: true }} offers={[{ ...original, version: 4 }]} onSession={() => {}} onUnknown={() => {}} />);
     expect(changed).toContain('A quote source or version changed');
     expect(changed).toMatch(/disabled=""[^>]*>Apply reviewed proposal/);

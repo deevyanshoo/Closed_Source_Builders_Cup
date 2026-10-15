@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent } from 'react';
+import type { FormEvent, KeyboardEvent, RefObject } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
 import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
 import { CompanyOverview, NewsWorkspace } from './demo-company-news';
@@ -70,6 +70,18 @@ export function applyDemoResult(state: DemoState, action: DemoAction): DemoState
     return { ...state, rfq: action.rfq };
   }
   return state;
+}
+
+type ResultFocus = { kind: 'plan' | 'recovery'; id: string; epoch: number; sessionId: string; companyId: string; contextVersion: number | undefined };
+export function focusAcceptedComparison(pending: ResultFocus, state: DemoState, view: WorkspaceView, stage: ProcurementStage, heading: HTMLElement | null, reducedMotion: boolean): boolean {
+  if (!heading || view !== 'procurement' || stage !== 'compare' || state.dirty || pending.epoch !== state.epoch ||
+    pending.sessionId !== state.session?.session_id || pending.companyId !== (state.session?.company?.company_id ?? '') ||
+    pending.contextVersion !== state.session?.context_version) return false;
+  if (pending.kind === 'plan' ? state.recovery !== null || state.plan?.plan_id !== pending.id :
+    state.recovery?.comparison_id !== pending.id || state.plan?.plan_id !== state.recovery.scenario.plan_id) return false;
+  heading.focus({ preventScroll: true });
+  heading.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+  return true;
 }
 
 const api = createDemoApi();
@@ -248,10 +260,10 @@ const planReason: Record<string, string> = {
 };
 const reasonText = (reason: string) => planReason[reason] ?? words(reason);
 
-export function PlanResults({ plan, offers }: { plan: PlanView; offers: OfferView[] }) {
+export function PlanResults({ plan, offers, headingRef }: { plan: PlanView; offers: OfferView[]; headingRef?: RefObject<HTMLHeadingElement | null> }) {
   const selected = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
   const stockCoversNeed = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
-  return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">04 / Comparison</span><h2>{stockCoversNeed ? 'Stock covers this need' : selected ? `${supplierDisplayName(selected.supplier)} is feasible` : 'No feasible quote for these inputs'}</h2><p>{displaySupplierMentions(plan.explanation, plan.alternatives.map(item => item.supplier))}</p>
+  return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">Comparison result</span><h2 ref={headingRef} tabIndex={-1}>{stockCoversNeed ? 'Stock covers this need' : selected ? `${supplierDisplayName(selected.supplier)} is feasible` : 'No feasible quote for these inputs'}</h2><p>{displaySupplierMentions(plan.explanation, plan.alternatives.map(item => item.supplier))}</p>
     <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{requiredPurchase(plan)} {planUnit(plan)}</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
     {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
     <p className="demo-muted">Total includes your extra cost per {planUnit(plan)}. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
@@ -265,11 +277,21 @@ function PlanSnapshot({ title, plan, offers }: { title: string; plan: PlanView; 
     {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{a.offer_id === plan.selected_offer_id ? 'Selected' : a.feasible ? 'Feasible alternative' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}</article>;
 }
 
-export function RecoveryResults({ recovery, offers }: { recovery: RecoveryView; offers: OfferView[] }) {
-  return <section className="demo-results demo-recovery-results" aria-label="Hypothetical delay comparison"><span className="demo-kicker">05 / Hypothetical supplier delay</span><h2>Original and changed plan</h2><p>This is a synthetic what-if comparison. No shipment delay or production effect has been observed.</p>
+export function RecoveryResults({ recovery, offers, headingRef }: { recovery: RecoveryView; offers: OfferView[]; headingRef?: RefObject<HTMLHeadingElement | null> }) {
+  return <section className="demo-results demo-recovery-results" aria-label="Hypothetical delay comparison"><span className="demo-kicker">Hypothetical supplier delay</span><h2 ref={headingRef} tabIndex={-1}>Original and changed plan</h2><p>This is a synthetic what-if comparison. No shipment delay or production effect has been observed.</p>
     <div className="demo-paired"><PlanSnapshot title="Original baseline" plan={recovery.baseline} offers={offers} /><PlanSnapshot title="Hypothetical scenario" plan={recovery.scenario} offers={offers} /></div>
     <p><strong>Buyer cost change:</strong> {recovery.cost_delta == null ? 'Unavailable because a plan has no selection' : `${recovery.cost_delta} ${recovery.scenario.reporting_currency}`} · Outcome: {words(recovery.outcome)}. This is an illustrative cost difference, not customer savings.</p>
   </section>;
+}
+
+function RfqNextStep({ plan, dirty, onReview }: { plan: PlanView; dirty: boolean; onReview: () => void }) {
+  const selected = plan.alternatives.find(item => item.offer_id === plan.selected_offer_id && item.feasible);
+  const purchaseNeeded = !/^0(?:\.0+)?$/.test(requiredPurchase(plan));
+  return <div className="demo-rfq-next">
+    {dirty ? <p>Run a new comparison before reviewing an RFQ draft.</p> : selected && purchaseNeeded ?
+      <><p>{supplierDisplayName(selected.supplier)} is selected in the current feasible plan. Review its unsent RFQ draft next.</p><button type="button" className="demo-button" onClick={onReview}>Review RFQ draft</button></> :
+      <p>{purchaseNeeded ? 'No feasible supplier is selected for an RFQ draft.' : 'Stock covers this need, so no supplier RFQ is needed.'}</p>}
+  </div>;
 }
 
 export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownloadRfq }: {
@@ -278,18 +300,25 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
   const ownDrafts = drafts.filter(draft => draft && draft.company_id === company.company_id && draft.status === 'draft_unsent' &&
     (draft.kind === 'email' || draft.kind === 'rfq') && typeof draft.body === 'string' && typeof draft.subject === 'string').slice(-24);
   const currentRfq = rfq && company.materials.some(material => material.material_id === rfq.material) ? rfq : null;
+  const matchingDraft = currentRfq ? ownDrafts.find(draft => draft.draft_id === currentRfq.draft_id && draft.kind === 'rfq') : null;
+  const earlierDrafts = ownDrafts.filter(draft => draft.draft_id !== currentRfq?.draft_id);
   const ownMessages = messages.filter(message => message.company_id === company.company_id && message.status === 'simulated_sent' && message.simulated && !message.external_delivery);
   return <section id="demo-drafts-workspace" className="demo-company-panel demo-drafts-workspace" aria-label="Drafts workspace">
     <div className="demo-heading"><div><span className="demo-kicker">Reviewable writing</span><h2>Drafts</h2></div><span className="demo-session">No external delivery</span></div>
     <p>Prepared drafts are unsent. Applying a simulated email records a separate simulated sent entry below; it never delivers a message to a supplier.</p>
-    {currentRfq && <button type="button" className="demo-button" disabled={dirty} onClick={onDownloadRfq}>Download RFQ draft</button>}
-    {ownDrafts.length ? ownDrafts.map(draft => <article key={draft.draft_id} className="demo-draft-record">
+    {currentRfq && <div className="demo-draft-group"><h3>Current RFQ</h3><article className="demo-draft-record"><span className="demo-kicker">Unsent draft · Current RFQ · Synthetic</span>
+      <h3>{matchingDraft?.subject ?? `Request for quotation to ${supplierDisplayName(currentRfq.supplier)}`}</h3>
+      {matchingDraft && <p>To: {supplierDisplayName(matchingDraft.recipient_label)} · Material: {matchingDraft.material_id} · Prepared {matchingDraft.created_at}</p>}
+      <pre>{displaySupplierMentions(currentRfq.text, [currentRfq.supplier])}</pre>
+      <button type="button" className="demo-button" disabled={dirty} onClick={onDownloadRfq}>Download RFQ draft</button>
+    </article></div>}
+    {earlierDrafts.length > 0 && <div className="demo-draft-group"><h3>Earlier unsent drafts</h3>{earlierDrafts.map(draft => <article key={draft.draft_id} className="demo-draft-record">
       <span className="demo-kicker">Unsent draft · {draft.kind === 'rfq' ? 'RFQ' : 'Email'}</span>
       <h3>{draft.subject}</h3>
       <p>To: {supplierDisplayName(draft.recipient_label)} · Material: {draft.material_id} · Prepared {draft.created_at}</p>
       <pre>{displaySupplierMentions(draft.body, [draft.recipient_label])}</pre>
-    </article>) : !currentRfq && <p className="demo-muted">No prepared drafts in this company workspace yet. Ask the operator to prepare an email or RFQ, or prepare an RFQ from a reviewed comparison.</p>}
-    {currentRfq && !ownDrafts.some(draft => draft.draft_id === currentRfq.draft_id) && <article className="demo-draft-record"><span className="demo-kicker">Unsent draft · RFQ · Current reviewed comparison</span><h3>Request for quotation to {supplierDisplayName(currentRfq.supplier)}</h3><pre>{displaySupplierMentions(currentRfq.text, [currentRfq.supplier])}</pre></article>}
+    </article>)}</div>}
+    {!currentRfq && !earlierDrafts.length && <p className="demo-muted">No prepared drafts in this company workspace yet. Ask the operator to prepare an email or RFQ, or prepare an RFQ from a reviewed comparison.</p>}
     {ownMessages.length > 0 && <div className="demo-drafts-simulated"><h3>Simulated sent records</h3>{ownMessages.map(message => <article key={message.message_id} className="demo-draft-record"><span className="demo-kicker">Simulated sent · No external delivery</span><h3>{message.subject}</h3><p>To: {supplierDisplayName(message.recipient_label)} · Material: {message.material_id} · Recorded {message.created_at}</p><pre>{displaySupplierMentions(message.body, [message.recipient_label])}</pre></article>)}</div>}
   </section>;
 }
@@ -310,6 +339,8 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const [voiceRequest, setVoiceRequest] = useState<OperatorVoiceRequest | null>(null);
   const voiceRequestIdRef = useRef(0);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const resultHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingResultFocusRef = useRef<ResultFocus | null>(null);
   const [compactViewport, setCompactViewport] = useState(false);
   const [operatorCloseSignal, setOperatorCloseSignal] = useState(0);
   const [riskSnapshot, setRiskSnapshot] = useState<{ scope: RiskScope; report: RiskReport } | null>(null);
@@ -396,6 +427,13 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     if (operatorOpen) (operatorDockRef.current?.querySelector<HTMLElement>('textarea:not(:disabled)') ?? operatorDockRef.current)?.focus();
     else if (restoreOperatorFocusRef.current) { restoreOperatorFocusRef.current = false; restoreOperatorFocus(operatorToggleRef.current, contentRef.current); }
   }, [operatorOpen]);
+  useLayoutEffect(() => {
+    const pending = pendingResultFocusRef.current;
+    if (!pending) return;
+    if (focusAcceptedComparison(pending, state, view, stage, resultHeadingRef.current, window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false) ||
+      pending.epoch !== state.epoch || view !== 'procurement' || stage !== 'compare' ||
+      pending.companyId !== (state.session?.company?.company_id ?? '')) pendingResultFocusRef.current = null;
+  }, [state, view, stage]);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 999px)');
     const sync = () => setCompactViewport(media.matches);
@@ -624,6 +662,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     const request: PlanRequest = { ...inputs, offer_ids: chosen.map(o => o.offer_id), expected_versions: Object.fromEntries(chosen.map(o => [o.offer_id, o.version])) };
     invalidate();
     run('plan', () => api.plan(state.session!.csrf_token, request, state.session!.context_version), (plan, epoch) => {
+      pendingResultFocusRef.current = { kind: 'plan', id: plan.plan_id, epoch, sessionId: state.session!.session_id, companyId: state.session!.company?.company_id ?? '', contextVersion: state.session!.context_version };
       dispatch({ type: 'plan', plan, request, epoch });
       const controls = delayControlsForPlan(plan, request);
       setDelayOfferId(controls.offerId); setDelayDays(controls.days);
@@ -637,6 +676,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     const expected_versions = baseline.offer_versions;
     editScenario();
     run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days }, state.session!.context_version), (recovery, epoch) => {
+      pendingResultFocusRef.current = { kind: 'recovery', id: recovery.comparison_id, epoch, sessionId: state.session!.session_id, companyId: state.session!.company?.company_id ?? '', contextVersion: state.session!.context_version };
       dispatch({ type: 'recovery', recovery, epoch });
       const controls = delayControlsForRecovery(recovery, selectedDelayOffer);
       setDelayOfferId(controls.offerId); setDelayDays(controls.days);
@@ -705,7 +745,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     {view === 'procurement' && stage === 'review' && visibleOffers.length === 0 && <section className="zoorq-stage-empty"><h2>Add a supplier quote to begin review</h2><p>Read a listed sample quote or an accepted sample upload, then check its source values here before comparing.</p><button type="button" className="demo-button" onClick={() => navigate('procurement', 'add')}>Add quotes</button></section>}
     {view === 'procurement' && stage === 'review' && visibleOffers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes for selected material">{visibleOffers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === offer?.offer_id ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
     {view === 'procurement' && stage === 'review' && offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} company={company} fixtures={supportedFixtures} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
-    {view === 'procurement' && stage === 'compare' && <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Test a purchase</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
+    {view === 'procurement' && stage === 'compare' && <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Compare</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
       <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !currentDefaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(currentDefaults ?? sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? currentDefaults ? 'Dated synthetic buyer assumptions for the selected material. Edit any input below; quantities use its listed unit.' : 'No buyer defaults or runnable quote scenario are available for this material.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
@@ -713,16 +753,16 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <div className="zoorq-material-context"><span>Material</span><strong>{coveredMaterials.find(item => item.material_id === selectedMaterialId)?.name ?? selectedMaterialId}</strong><small>Selected for this procurement workflow</small></div> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name} className={highlightFields.includes(name) ? 'demo-agent-filled' : ''}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; setHighlightFields([]); invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>}
-    {view === 'procurement' && stage === 'compare' && state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} />}
-    {view === 'procurement' && stage === 'compare' && baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
-      <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. A delay changes only the selected supplier arrival assumption.</p>
+    {view === 'procurement' && stage === 'compare' && state.plan && !state.recovery && <><PlanResults plan={state.plan} offers={state.offers} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
+    {view === 'procurement' && stage === 'compare' && baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
+      <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. Add or update a supplier delay; each comparison retains the other active supplier delays.</p>
       {busy === 'recovery' && progress && <ActivityIndicator {...progress} />}
       <div className="demo-delay-controls"><label><span>Accepted supplier</span><select value={selectedDelayOffer} onChange={e => { editScenario(); setDelayOfferId(e.target.value); setDelayDays(String(state.recovery?.scenario_request.delay_days_by_offer?.[e.target.value] ?? 0)); }}>{delayOffers.map(o => <option key={o.offer_id} value={o.offer_id}>{o.document.filename}</option>)}</select></label><label><span>Hypothetical delay (whole days)</span><input type="number" min="0" max="3650" step="1" value={delayDays} onChange={e => { editScenario(); setDelayDays(e.target.value); }} /></label></div>
-      <p className="demo-assumption">Scenario: {selectedDelayOffer ? `${delayOffers.find(o => o.offer_id === selectedDelayOffer)?.document.filename} delayed ${delayDays || '0'} days` : 'Choose an accepted supplier'}{state.recovery && Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).length ? ` · Current comparison: ${Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).map(([id, days]) => `${delayOffers.find(o => o.offer_id === id)?.document.filename ?? id} +${days} days`).join(', ')}` : ''}; the original quote and evidence remain unchanged.</p>
-      <div className="demo-actions"><button type="button" className="demo-button" disabled={!selectedDelayOffer || !/^\d+$/.test(delayDays) || Number(delayDays) > 3650 || !!busy} onClick={() => compareDelay(delayRequest(state.recovery?.scenario_request.delay_days_by_offer ?? {}, selectedDelayOffer, delayDays))}>{busy === 'recovery' ? 'Comparing delay…' : 'Compare hypothetical delay'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={() => compareDelay({})}>Remove delay</button></div>
+      <p className="demo-assumption">Edit scenario: {selectedDelayOffer ? `${delayOffers.find(o => o.offer_id === selectedDelayOffer)?.document.filename} delayed ${delayDays || '0'} days` : 'Choose an accepted supplier'}. Current comparison delays: {state.recovery && Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).length ? Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).map(([id, days]) => `${delayOffers.find(o => o.offer_id === id)?.document.filename ?? id} +${days} days`).join(', ') : 'none'}; the original quote and evidence remain unchanged.</p>
+      <div className="demo-actions"><button type="button" className="demo-button" disabled={!selectedDelayOffer || !/^\d+$/.test(delayDays) || Number(delayDays) > 3650 || !!busy} onClick={() => compareDelay(delayRequest(state.recovery?.scenario_request.delay_days_by_offer ?? {}, selectedDelayOffer, delayDays))}>{busy === 'recovery' ? 'Comparing delay…' : 'Compare hypothetical delay'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={() => compareDelay({})}>Remove all delays</button></div>
     </section>}
-    {view === 'procurement' && stage === 'compare' && state.recovery && <RecoveryResults recovery={state.recovery} offers={state.offers} />}
-    {view === 'procurement' && stage === 'rfq' && <section className="demo-planning demo-rfq"><div className="demo-heading"><div><span className="demo-kicker">06 / Prepare an RFQ draft</span><h2>Review before you download</h2></div><span className="demo-session">Synthetic · unsent · no order commitment</span></div>
+    {view === 'procurement' && stage === 'compare' && state.recovery && <><RecoveryResults recovery={state.recovery} offers={state.offers} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan!} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
+    {view === 'procurement' && stage === 'rfq' && <section className="demo-planning demo-rfq"><div className="demo-heading"><div><span className="demo-kicker">04 / Draft RFQ</span><h2>Review before you download</h2></div><span className="demo-session">Synthetic · unsent · no order commitment</span></div>
       {busy === 'rfq' && progress && <ActivityIndicator {...progress} />}
       <p className="demo-muted">The draft uses the current selected plan and quote. The buyer total is a scenario comparison, not the supplier's commercial quote.</p>
       {state.dirty && <p className="demo-alert">Inputs changed. Run a new comparison before reviewing, preparing or downloading an RFQ draft.</p>}

@@ -10,7 +10,7 @@ import argparse
 import asyncio
 import base64
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import ipaddress
 import json
@@ -112,6 +112,100 @@ def proposal_spoken(value, query):
 
 def dated(value):
     return isinstance(value, str) and bool(DATE.search(value))
+
+
+MONTH_NUMBERS = {name: number for number, names in enumerate((
+    ('jan', 'january'), ('feb', 'february'), ('mar', 'march'), ('apr', 'april'),
+    ('may',), ('jun', 'june'), ('jul', 'july'), ('aug', 'august'),
+    ('sep', 'september'), ('oct', 'october'), ('nov', 'november'),
+    ('dec', 'december')), 1) for name in names}
+SPOKEN_DAYS = {
+    'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+    'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+    'eleventh': 11, 'twelfth': 12, 'thirteenth': 13, 'fourteenth': 14,
+    'fifteenth': 15, 'sixteenth': 16, 'seventeenth': 17, 'eighteenth': 18,
+    'nineteenth': 19, 'twentieth': 20, 'twenty first': 21,
+    'twenty second': 22, 'twenty third': 23, 'twenty fourth': 24,
+    'twenty fifth': 25, 'twenty sixth': 26, 'twenty seventh': 27,
+    'twenty eighth': 28, 'twenty ninth': 29, 'thirtieth': 30,
+    'thirty first': 31,
+}
+SPOKEN_DAYS.update({
+    'sixteen': 16, 'twenty one': 21, 'twenty two': 22, 'twenty three': 23,
+    'twenty four': 24, 'twenty five': 25, 'twenty six': 26,
+    'twenty seven': 27, 'twenty eight': 28, 'twenty nine': 29,
+    'thirty one': 31,
+})
+LOOKUP_LEAD = re.compile(r'\b(?:public\s+)?lookup\s+(?:was\s+)?checked\s+(?:on\s+)?', re.I)
+LOOKUP_DATE = re.compile(
+    r'(?P<iso>\d{4}-\d{2}-\d{2})\b|'
+    r'(?P<day>\d{1,2})(?:st|nd|rd|th)?\s+(?P<day_month>' + MONTH +
+    r')\s*,?\s*(?P<day_year>\d{4})\b|'
+    r'(?P<month>' + MONTH + r')\s+(?P<month_day>\d{1,2})'
+    r'(?:st|nd|rd|th)?\s*,?\s*(?P<month_year>\d{4})\b', re.I)
+
+
+def lookup_day_spoken(value, expected):
+    if expected is None:
+        return False
+    normalized = value.casefold().replace('-', ' ')
+    normalized = re.sub(r'\btwenty twenty six\b|\btwo thousand twenty six\b',
+                        '2026', normalized)
+    for spoken, day in sorted(SPOKEN_DAYS.items(), key=lambda item: -len(item[0])):
+        normalized = re.sub(r'\b' + spoken + r'\b', str(day), normalized)
+    # Retain ISO hyphens after normalizing spoken forms.
+    normalized = re.sub(r'\b(\d{4}) (\d{2}) (\d{2})\b', r'\1-\2-\3', normalized)
+    for lead in LOOKUP_LEAD.finditer(normalized):
+        candidate = LOOKUP_DATE.match(normalized, lead.end())
+        if candidate is None:
+            continue
+        try:
+            if candidate.group('iso'):
+                spoken_day = date.fromisoformat(candidate.group('iso'))
+            else:
+                month = candidate.group('day_month') or candidate.group('month')
+                number = candidate.group('day') or candidate.group('month_day')
+                year = candidate.group('day_year') or candidate.group('month_year')
+                spoken_day = date(int(year), MONTH_NUMBERS[month], int(number))
+        except (ValueError, KeyError):
+            continue
+        if spoken_day == expected:
+            return True
+    return False
+
+
+class AnswerEvidence:
+    """Bounded answer captions with persistent date evidence across fragments."""
+
+    def __init__(self):
+        self.spoken = ''
+        self.has_explicit_date = False
+        self.has_lookup_date = False
+        self._expected_lookup_date = None
+        self._joined_tail = ''
+        self._tight_tail = ''
+
+    def bind_lookup_date(self, expected):
+        if type(expected) is not date:
+            raise ValueError('expected lookup day must be a validated calendar date')
+        self._expected_lookup_date = expected
+
+    def feed(self, text, *, eligible):
+        if not eligible or not isinstance(text, str):
+            return
+        joined = self._joined_tail + ' ' + text
+        tight = self._tight_tail + text
+        self.has_lookup_date |= (lookup_day_spoken(joined, self._expected_lookup_date) or
+                                 lookup_day_spoken(tight, self._expected_lookup_date))
+        self.has_explicit_date |= dated(joined) or dated(tight) or self.has_lookup_date
+        self._joined_tail = joined[-256:]
+        self._tight_tail = tight[-256:]
+        self.spoken = (self.spoken + ' ' + text).strip()[-2000:]
+
+
+def answer_caption_eligible(kind, direction, streaming, research, progress_completed):
+    return (kind == 'consent' and direction == 'output' and streaming and
+            research is not None and progress_completed)
 
 
 def public_https(value):
@@ -264,6 +358,7 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
     sender = asyncio.create_task(send_audio(socket, data, streaming))
     counts, tools, progress, captions = Counter(), [], [], []
     input_parts, output_parts = [], []
+    answer_evidence = AnswerEvidence()
     audio_bytes = 0
     current_proposal = proposal
     research = None
@@ -280,7 +375,7 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
                         text, current_proposal['parameters']['query'])) and audio_bytes >= 10000 and
                     not progress_started and not progress_completed)
         return (heard and progress_started and progress_completed and research is not None and
-                spoken_answer(' '.join(output_parts), research) and audio_bytes >= 10000)
+                spoken_answer(answer_evidence.spoken, research) and audio_bytes >= 10000)
 
     try:
         while True:
@@ -324,9 +419,12 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
                 if direction == 'input':
                     input_parts.append(text)
                     input_parts[:] = input_parts[-16:]
-                elif direction == 'output' and streaming.is_set():
+                elif direction == 'output' and streaming.is_set() and kind == 'request':
                     output_parts.append(text)
                     output_parts[:] = output_parts[-16:]
+                else:
+                    answer_evidence.feed(text, eligible=answer_caption_eligible(
+                        kind, direction, streaming.is_set(), research, progress_completed))
             elif event == 'tool_result':
                 if kind == 'request':
                     check((result.get('action_result') or {}).get('tool') != 'confirm_research' and
@@ -382,6 +480,8 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
                     if maybe is not None:
                         research = completed_research(result, context,
                                                       current_proposal['parameters']['query'])
+                        answer_evidence.bind_lookup_date(datetime.fromisoformat(
+                            research['checked_at'].replace('Z', '+00:00')).date())
                         row['research_id_digest'] = hashlib.sha256(research['research_id'].encode()).hexdigest()[:12]
                         receipt.data['public_result'] = public_result(research)
                         receipt.flush()
@@ -443,7 +543,7 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
         await sender
         check(answer_completion_seen, f'{kind}:turn', 'answer_completion_missing')
         heard = captions_match(input_parts, question_heard if kind == 'request' else consent_heard)
-        spoken = ' '.join(output_parts)
+        spoken = ' '.join(output_parts) if kind == 'request' else answer_evidence.spoken
         if kind == 'request':
             check(current_proposal is not None and heard and captions_match(
                   output_parts, lambda text: proposal_spoken(text, current_proposal['parameters']['query']))
@@ -455,7 +555,8 @@ async def receive_turn(socket, data, kind, context, receipt, proposal=None):
             check(progress_started and progress_completed and research is not None and
                   spoken_answer(spoken, research) and audio_bytes >= 10000,
                   'consent:turn', 'completed_sourced_spoken_answer_missing')
-            row['spoken_answer_has_explicit_date'] = dated(spoken)
+            row['spoken_answer_has_explicit_date'] = answer_evidence.has_explicit_date
+            row['spoken_answer_has_lookup_date'] = answer_evidence.has_lookup_date
         row.update(ok=True, caption_grace_ms=round(CAPTION_GRACE_SECONDS * 1000),
                    elapsed_ms=round((time.monotonic() - started) * 1000))
         receipt.flush()
@@ -471,6 +572,8 @@ def final_quality(receipt):
           'consent:research', 'answer_missing_or_undated')
     check(receipt.data['turns'][1].get('spoken_answer_has_explicit_date') is True,
           'consent:turn', 'spoken_answer_undated')
+    check(receipt.data['turns'][1].get('spoken_answer_has_lookup_date') is True,
+          'consent:turn', 'spoken_lookup_date_missing')
 
 
 async def run(base, revision, question_pcm, consent_pcm, receipt):

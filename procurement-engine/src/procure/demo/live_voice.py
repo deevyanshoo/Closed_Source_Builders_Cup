@@ -75,6 +75,22 @@ def research_spoken_result(result: dict) -> str:
     ending = (f'Source: {publisher}; verify the linked publication before acting.' if publisher else
               'Verify the linked sources before acting.')
     return ' '.join((opening, answer, ending))
+
+
+def completed_research_speech(result: dict, *, reused: bool = False) -> dict:
+    """Send Live one dated answer, without the longer browser research object."""
+    speech = {'status': result['status'], 'read_only': result['read_only'],
+              'tool_succeeded': True, 'required_spoken_response': research_spoken_result(result)}
+    if reused:
+        speech.update(read_only=True, action_applied=False, reused=True)
+    elif result.get('read_only') is False:
+        speech['action_applied'] = True
+        action = result.get('action_result')
+        if isinstance(action, dict) and action.get('tool') == 'confirm_research':
+            speech['action_result'] = {'tool': 'confirm_research'}
+    return speech
+
+
 VOICE_CUE_FILE = Path(__file__).resolve().parents[3] / 'demo_fixtures/voice-cues/research-checking.wav'
 _SLOTS = threading.BoundedSemaphore(MAX_CONNECTIONS)
 _START_LOCK = threading.Lock()
@@ -285,8 +301,10 @@ INSTRUCTION = (
     "When the tool returns a research proposal, read its exact public query aloud, then say "
     "Say confirm research to start. Wait for the user's new spoken confirmation before "
     "calling confirm_research with that proposal_id. Never infer consent from your own words "
-    "or call confirmation for any other proposal. After a completed result, answer in two or "
-    "three short sentences and offer detail on request. Use read_research only to retrieve a completed, "
+    "or call confirmation for any other proposal. For a completed public research result, speak the "
+    "server's required_spoken_response first and briefly, including its explicit public lookup date; "
+    "that date is when the lookup was checked, not a source publication date. Offer more detail on request. "
+    "Use read_research only to retrieve a completed, "
     "already approved result by its research_id, or omit the ID for the latest completed "
     "result in the current company. Preserve its dated source uncertainty. "
     "For watch or recovery proposals, speak the full server-provided review, then wait "
@@ -953,14 +971,14 @@ async def run_live_voice(
                 async def answer_research_call(
                         call, binding: str, key: str, result: dict, *, reused: bool = False) -> None:
                     tool_results[call.id] = (binding, key, result)
-                    model_result = {field: value for field, value in result.items()
-                                    if field != 'session' and (not reused or field != 'action_result')}
-                    if reused:
-                        model_result.update(read_only=True, action_applied=False,
-                                            tool_succeeded=research_succeeded(result))
                     if research_succeeded(result):
-                        model_result['required_spoken_response'] = research_spoken_result(result)
+                        model_result = completed_research_speech(result, reused=reused)
                     else:
+                        model_result = {field: value for field, value in result.items()
+                                        if field != 'session' and (not reused or field != 'action_result')}
+                        if reused:
+                            model_result.update(read_only=True, action_applied=False,
+                                                tool_succeeded=False)
                         model_result.update(tool_succeeded=False, action_applied=False,
                             required_spoken_response=result['assistant_text'])
                     if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
@@ -1107,13 +1125,16 @@ async def run_live_voice(
                                 operation['primary_call_sent'] = True
                             operation['calls'].clear()
                             if not operation['had_model_call']:
-                                model_result = {field: value for field, value in result.items()
-                                                if field != 'session'}
-                                spoken = research_spoken_result(result) if research_succeeded(result) else result['assistant_text']
+                                succeeded = research_succeeded(result)
+                                model_result = (completed_research_speech(result) if succeeded else
+                                                {field: value for field, value in result.items()
+                                                 if field != 'session'})
+                                spoken = (model_result['required_spoken_response'] if succeeded else
+                                          result['assistant_text'])
                                 brief = json.dumps({'trusted_research_result': model_result,
                                     'required_spoken_response': spoken,
                                     'instruction': ('Speak required_spoken_response, including its lookup date. Offer more detail on request.'
-                                        if research_succeeded(result) else
+                                        if succeeded else
                                         'Explain that public research was unavailable; do not claim sourced findings.')},
                                     ensure_ascii=True)
                                 if len(brief) > 64_000:
@@ -1546,8 +1567,11 @@ async def run_live_voice(
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'prepare_rfq' and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = result['assistant_text']
-                            if name == 'confirm_research' and allowed_research and result['status'] == 'completed':
-                                model_result['required_spoken_response'] = research_spoken_result(result)
+                            if name == 'confirm_research' and allowed_research and research_succeeded(result):
+                                model_result = completed_research_speech(result)
+                            elif name == 'confirm_research' and result['status'] == 'completed':
+                                model_result.update(tool_succeeded=False, action_applied=False,
+                                    required_spoken_response=result['assistant_text'])
                             if suppress_failed_speech:
                                 required_response = result['assistant_text']
                                 if name == 'confirm_research' and result['status'] == 'proposal' and research_gate is not None:

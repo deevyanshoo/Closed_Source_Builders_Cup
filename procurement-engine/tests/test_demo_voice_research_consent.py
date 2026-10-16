@@ -2,12 +2,128 @@
 import asyncio
 import base64
 import json
+import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 from procure.demo import live_voice
 from procure.demo.sessions import SessionStore
+
+
+def test_research_audit_date_evidence_survives_caption_tail_without_accepting_other_speech():
+    audit_dir = Path(__file__).resolve().parents[2] / 'deploy' / 'judge-demo'
+    sys.path.insert(0, str(audit_dir))
+    try:
+        from voice_research_consent_audit import AnswerEvidence, answer_caption_eligible
+    finally:
+        sys.path.pop(0)
+
+    answer = AnswerEvidence()
+    answer.feed('Public lookup checked on 16 Oct', eligible=True)
+    answer.feed('ober 2026. Copper supply remains uncertain.', eligible=True)
+    for index in range(20):
+        answer.feed(f'Sourced finding {index} needs verification.', eligible=True)
+    assert answer.has_explicit_date
+    assert len(answer.spoken) <= 2000
+    assert 'Sourced finding 19' in answer.spoken
+
+    undated = AnswerEvidence()
+    for index in range(20):
+        undated.feed(f'Sourced finding {index} needs verification.', eligible=True)
+    assert not undated.has_explicit_date
+
+    untrusted = AnswerEvidence()
+    for kind, direction, streaming, research, completed in (
+            ('consent', 'input', True, object(), True),
+            ('consent', 'output', True, None, False),  # Cue or pre-result model speech.
+            ('request', 'output', True, object(), True),
+            ('consent', 'output', False, object(), True)):
+        untrusted.feed('16 October 2026', eligible=answer_caption_eligible(
+            kind, direction, streaming, research, completed))
+    untrusted.feed('Sourced findings need verification.', eligible=answer_caption_eligible(
+        'consent', 'output', True, object(), True))
+    assert not untrusted.has_explicit_date
+
+
+def test_research_audit_requires_spoken_checked_day_not_publication_day():
+    audit_dir = Path(__file__).resolve().parents[2] / 'deploy' / 'judge-demo'
+    sys.path.insert(0, str(audit_dir))
+    try:
+        from voice_research_consent_audit import (AcceptanceError, AnswerEvidence,
+                                                  answer_caption_eligible, final_quality)
+    finally:
+        sys.path.pop(0)
+
+    expected = date(2026, 10, 16)
+    publication = AnswerEvidence()
+    publication.bind_lookup_date(expected)
+    publication.feed('A source was published on 16 October 2026. Copper supply remains uncertain.', eligible=True)
+    assert publication.has_explicit_date
+    assert not publication.has_lookup_date
+
+    for utterance in ('Public lookup checked on 15 October 2026.',
+                      'Public lookup checked on 16 October 2025.',
+                      'Public lookup checked on 2026-10-15.'):
+        wrong = AnswerEvidence()
+        wrong.bind_lookup_date(expected)
+        wrong.feed(utterance, eligible=True)
+        assert not wrong.has_lookup_date
+
+    for utterance in ('Public lookup checked on 16 October 2026.',
+                      'Public lookup checked on October 16, 2026.',
+                      'Public lookup checked on 2026-10-16.',
+                      'Public lookup checked on sixteenth October twenty twenty six.'):
+        answer = AnswerEvidence()
+        answer.bind_lookup_date(expected)
+        answer.feed(utterance[:22], eligible=True)
+        answer.feed(utterance[22:], eligible=True)
+        for index in range(20):
+            answer.feed(f'Sourced finding {index} needs verification.', eligible=True)
+        assert answer.has_lookup_date, utterance
+        assert len(answer._joined_tail) <= 256
+        assert len(answer._tight_tail) <= 256
+
+    untrusted = AnswerEvidence()
+    untrusted.feed('Public lookup checked on 16 October 2026.', eligible=True)
+    assert not untrusted.has_lookup_date  # Metadata has not been validated and bound.
+    untrusted.bind_lookup_date(expected)
+    for kind, direction, streaming, research, completed in (
+            ('consent', 'input', True, object(), True),
+            ('consent', 'output', True, None, False),
+            ('request', 'output', True, object(), True),
+            ('consent', 'output', False, object(), True)):
+        untrusted.feed('Public lookup checked on 16 October 2026.', eligible=answer_caption_eligible(
+            kind, direction, streaming, research, completed))
+    assert not untrusted.has_lookup_date
+
+    receipt = NS(data={'public_result': {'has_explicit_date': True},
+                       'turns': [{}, {'spoken_answer_has_explicit_date': True,
+                                      'spoken_answer_has_lookup_date': False}]})
+    try:
+        final_quality(receipt)
+    except AcceptanceError as exc:
+        assert getattr(exc, 'reason', None) == 'spoken_lookup_date_missing' or \
+            'spoken_lookup_date_missing' in str(exc)
+    else:
+        raise AssertionError('publication date alone passed final audit quality')
+
+
+def test_completed_research_projection_does_not_invent_missing_lookup_date():
+    result = {'status': 'completed', 'read_only': True,
+              'assistant_text': 'A short sourced finding.',
+              'workspace': {'research': {'status': 'completed',
+                                          'answer': 'A short sourced finding.',
+                                          'sources': []}}}
+    projected = live_voice.completed_research_speech(result)
+    assert projected['tool_succeeded'] is True
+    assert projected['read_only'] is True
+    assert 'public lookup time is unavailable' in projected['required_spoken_response']
+    assert not any(month in projected['required_spoken_response'] for month in
+                   ('January', 'February', 'March', 'April', 'May', 'June', 'July',
+                    'August', 'September', 'October', 'November', 'December'))
+    assert 'assistant_text' not in projected and 'workspace' not in projected
 
 
 QUERY = 'How would a Hormuz blockage affect petrochemicals today?'
@@ -191,6 +307,15 @@ def test_voice_research_requires_fresh_spoken_confirmation_after_query_prompt():
         await socket.next('transcript', 'input')
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'real-consent')
         assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        while True:
+            provider_result = await asyncio.wait_for(provider.responses.get(), 2)
+            if provider_result.id == 'real-consent':
+                break
+        assert provider_result.response['status'] == 'completed'
+        assert provider_result.response['tool_succeeded'] is True
+        assert 'public lookup time is unavailable' in provider_result.response['required_spoken_response']
+        assert 'assistant_text' not in provider_result.response
+        assert 'workspace' not in provider_result.response
         assert [c[0] for c in calls] == ['prepare_research', 'confirm_research']
         assert calls[-1][1] == {'proposal_id': 'proposal-1'}
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'real-consent')
@@ -1016,12 +1141,15 @@ def test_finalized_consent_starts_one_research_without_model_call_and_drains_eve
             started.set()
             await release.wait()
             await on_progress('started')
-            return turn(session, 'completed', text='Three sourced findings are available.',
+            with session.lock:
+                session.research_records['proposal-1'] = {'state': 'completed',
+                    'result': {'answer': 'Long competing detail ' * 90}}
+            return turn(session, 'completed', text='Long competing detail ' * 90,
                 workspace={'research': {'status': 'completed', 'checked_at':
-                    '2026-10-15T00:00:00+00:00', 'answer': 'Three sourced findings are available.',
+                    '2026-10-15T00:00:00+00:00', 'answer': 'Three sourced findings are available. ' +
+                    'Long competing detail ' * 90,
                     'sources': [{'publisher': 'Mining.com.au', 'title': 'Copper report',
-                                 'url': 'https://mining.com.au/copper-report'}]},
-                           'padding': 'x' * 70000})
+                                 'url': 'https://mining.com.au/copper-report'}]}})
 
         _, session, socket, provider, calls, task = await scenario(research=research)
         await prepare(socket, provider)
@@ -1043,13 +1171,22 @@ def test_finalized_consent_starts_one_research_without_model_call_and_drains_eve
         assert research_calls[0][1] == 1
         release.set()
         assert (await socket.next('research_progress'))['phase'] == 'started'
-        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        browser_result = (await socket.next('tool_result'))['result']
+        assert browser_result['status'] == 'completed'
+        assert 'Long competing detail' in browser_result['workspace']['research']['answer']
+        assert 'Long competing detail' in session.research_records['proposal-1']['result']['answer']
         assert (await socket.next('research_progress'))['phase'] == 'completed'
         turns, complete = await asyncio.wait_for(provider.client_content.get(), 2)
         assert complete and 'Three sourced findings' in turns[0].parts[0].text
         assert '15 October 2026' in turns[0].parts[0].text
         assert 'Mining.com.au' in turns[0].parts[0].text
         assert 'required_spoken_response' in turns[0].parts[0].text
+        provider_payload = json.loads(turns[0].parts[0].text)
+        assert provider_payload['trusted_research_result']['status'] == 'completed'
+        assert provider_payload['required_spoken_response'].startswith('Public lookup checked on 15 October 2026.')
+        assert 'Long competing detail' not in turns[0].parts[0].text
+        assert 'assistant_text' not in provider_payload['trusted_research_result']
+        assert 'workspace' not in provider_payload['trusted_research_result']
         assert len(research_calls) == 1
         await finish(socket, task)
 
@@ -1067,9 +1204,10 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
             started.set()
             await release.wait()
             await on_progress('started')
-            result = turn(session, 'completed', text='Current sourced answer.',
+            result = turn(session, 'completed', text='Long competing detail ' * 90,
                 workspace={'research': {'status': 'completed', 'checked_at':
-                    '2026-10-15T00:00:00+00:00', 'answer': 'Current sourced answer.',
+                    '2026-10-15T00:00:00+00:00', 'answer': 'Current sourced answer. ' +
+                    'Long competing detail ' * 90,
                     'sources': [{'title': 'Mining.com.au',
                         'url': 'https://mining.com.au/copper-report'}]}})
             result.update(read_only=False, session={'session_id': session.session_id,
@@ -1090,7 +1228,9 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
         await provider.spoken('input', 'not a second approval', finished=False)
         assert (await socket.next('transcript', 'input'))['text'] == 'not a second approval'
         release.set()
-        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        browser_result = (await socket.next('tool_result'))['result']
+        assert browser_result['status'] == 'completed'
+        assert 'Long competing detail' in browser_result['workspace']['research']['answer']
         response = await asyncio.wait_for(provider.responses.get(), 2)
         assert response.id == 'late-real-call' and response.response['status'] == 'completed'
         assert response.response['read_only'] is False
@@ -1099,6 +1239,10 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
         assert 'Current sourced answer.' in guidance
         assert 'Mining.com.au' in guidance
         assert 'verify' in guidance.lower()
+        assert 'Long competing detail' not in json.dumps(response.response)
+        assert 'assistant_text' not in response.response
+        assert 'workspace' not in response.response
+        assert response.response['action_result']['tool'] == 'confirm_research'
         assert provider.responses.empty()
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'new-attempt')
         reused = await asyncio.wait_for(provider.responses.get(), 2)
@@ -1283,6 +1427,11 @@ def test_nested_unavailable_research_emits_unavailable_progress():
         await provider.spoken('input', 'confirm research', finished=True)
         assert (await socket.next('tool_result'))['result']['workspace']['research']['status'] == 'unavailable'
         assert (await socket.next('research_progress'))['phase'] == 'unavailable'
+        turns, complete = await asyncio.wait_for(provider.client_content.get(), 2)
+        payload = json.loads(turns[0].parts[0].text)
+        assert complete and payload['trusted_research_result']['workspace']['research']['status'] == 'unavailable'
+        assert payload['required_spoken_response'] == 'Public research could not verify a sourced answer.'
+        assert 'Public lookup checked on' not in turns[0].parts[0].text
         await finish(socket, task)
 
     asyncio.run(check())

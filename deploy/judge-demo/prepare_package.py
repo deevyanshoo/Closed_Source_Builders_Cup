@@ -15,7 +15,7 @@ for source in ['procurement-engine/src', 'procurement-engine/demo_fixtures', 'ap
     shutil.copytree(repo / source, destination / source, ignore=ignore)
 config = destination / 'procurement-engine/config'
 config.mkdir(parents=True)
-for name in ['materials.yaml', 'assumptions.yaml', 'iso3166_alpha2.csv']:
+for name in ['materials.yaml', 'assumptions.yaml', 'iso3166_alpha2.csv', 'commodity_benchmarks_v1.json', 'prediction_history_v1.json']:
     shutil.copy2(repo / 'procurement-engine/config' / name, config / name)
 deploy = destination / 'deploy/judge-demo'
 deploy.mkdir(parents=True)

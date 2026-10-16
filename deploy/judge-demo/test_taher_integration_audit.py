@@ -632,7 +632,7 @@ def test_r68_publisher_parenthetical_and_planned_to_arrive_are_grounded():
 def test_forgeline_arrival_claim_must_match_selected_plan_date():
     plan = {**PLAN, 'plan_id': 'forge-plan', 'company_id': 'forgeline-components',
             'material': 'steel', 'selected_offer_id': 'q1'}
-    carbon = {'suppliers': [{'estimate': {
+    carbon = {'suppliers': [{'offer_id': 'q1', 'estimate': {
         'quantity': '720',
         'material': {'kg_co2e': '2060339.4072', 'factor': {
             'publisher': 'Department for Energy Security and Net Zero (UK government)'}},
@@ -698,7 +698,7 @@ def test_voice_caption_accepts_kg_of_and_validated_publisher_per():
 def test_stonebridge_caption_without_validated_publisher_is_not_grounded():
     plan = {**PLAN, 'plan_id': 'stone-plan', 'company_id': 'stonebridge-materials',
             'material': 'clinker'}
-    carbon = {'suppliers': [{'estimate': {
+    carbon = {'suppliers': [{'offer_id': 'q1', 'estimate': {
         'quantity': '14400',
         'material': {'status': 'unavailable', 'kg_co2e': None, 'factor': None},
         'transport': {'kg_co2e': '232128', 'legs': [{'factor': {
@@ -719,6 +719,188 @@ def test_stonebridge_caption_without_validated_publisher_is_not_grounded():
                             'Security and Net Zero.')
     assert audit.check_voice_caption(attributed, 'StoneBridge Materials', plan,
                                      carbon, view)['caption_grounded'] is True
+
+
+def test_voice_publisher_qualifiers_and_according_to_are_validated():
+    _, carbon = comparison()
+    view = dispatch()
+    base = ('Solara Cables copper shipment is a planning scenario. Freight is '
+            '128.96 kg CO2e {source}. Planned arrival is October 27, 2026.')
+    for source in ("sourced from the UK's Department for Energy Security and Net Zero",
+                   'sourced from the UK’s Department for Energy Security and Net Zero',
+                   'according to the Department for Energy Security and Net Zero'):
+        assert audit.check_voice_caption(base.format(source=source), 'Solara Cables',
+                                         PLAN, carbon, view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(base.format(source='according to Unknown Publisher'),
+                                  'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_arrival_is_planned_for_keeps_selected_date_guard():
+    _, carbon = comparison()
+    view = dispatch()
+    base = ('Solara Cables copper shipment uses a factor from the Department for '
+            'Energy Security and Net Zero. Freight is 128.96 kg CO2e. '
+            'Arrival is planned for {arrival}.')
+    assert audit.check_voice_caption(base.format(arrival='October 27, 2026'),
+                                     'Solara Cables', PLAN, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_arrival_date_mismatch'):
+        audit.check_voice_caption(base.format(arrival='November 5, 2026'),
+                                  'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_coordinated_no_route_or_tracking_is_not_a_live_claim():
+    _, carbon = comparison()
+    view = dispatch()
+    base = ('Solara Cables copper shipment is a planning scenario. Freight is '
+            '128.96 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+            'Planned arrival is October 27, 2026. No declared shipment route or live '
+            'tracking details are available.')
+    assert audit.check_voice_caption(base, 'Solara Cables', PLAN, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_live_tracking_claim'):
+        audit.check_voice_caption(base + ' Live tracking confirms delivery.',
+                                  'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_negated_unsupported_total_does_not_consume_arrival_date():
+    _, carbon = comparison()
+    unavailable = deepcopy(carbon)
+    for supplier in unavailable['suppliers']:
+        supplier['estimate']['total_kg_co2e'] = None
+    view = dispatch()
+    base = ('Solara Cables copper shipment uses a factor from the Department for '
+            'Energy Security and Net Zero. Entered freight is 128.96 kg CO2e. '
+            'No whole-scenario total is supported, and the planned arrival is '
+            'October 27, 2026.')
+    assert audit.check_voice_caption(base, 'Solara Cables', PLAN, unavailable,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_unknown_total_claim'):
+        audit.check_voice_caption(base + ' The combined total is 128.96 kg CO2e.',
+                                  'Solara Cables', PLAN, unavailable, view)
+    reversed_arrival = base.replace('the planned arrival is October 27, 2026',
+                                    'arrival is planned for October 27, 2026')
+    assert audit.check_voice_caption(reversed_arrival, 'Solara Cables', PLAN,
+                                     unavailable, view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_unknown_total_claim'):
+        audit.check_voice_caption(reversed_arrival + ' Total footprint is 128.96 kg CO2e.',
+                                  'Solara Cables', PLAN, unavailable, view)
+
+
+def test_voice_dates_cannot_stand_in_for_numeric_emissions():
+    _, carbon = comparison()
+    view = dispatch()
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               'one hundred twenty-eight kilograms of CO2e sourced from the '
+               'Department for Energy Security and Net Zero. Planned arrival is '
+               'October 27, 2026.')
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(caption, 'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_material_source_phrase_does_not_attribute_freight():
+    _, carbon = comparison()
+    carbon = deepcopy(carbon)
+    for supplier in carbon['suppliers']:
+        supplier['estimate']['material'].update(status='factor_unavailable',
+                                                kg_co2e=None, factor=None)
+        supplier['estimate']['total_kg_co2e'] = None
+    view = dispatch()
+    base = ('Solara Cables copper shipment is a planning scenario. Freight is '
+            '128.96 kg CO2e, and a production factor is unavailable in the {publisher} '
+            'sources. Planned arrival is October 27, 2026.')
+    publisher = 'Department for Energy Security and Net Zero'
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(base.format(publisher=publisher),
+                                  'Solara Cables', PLAN, carbon, view)
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(base.format(publisher='Unknown Publisher'),
+                                  'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_numeric_emission_anchor_uses_selected_offer_only():
+    _, carbon = comparison()
+    carbon = deepcopy(carbon)
+    alternative = next(row for row in carbon['suppliers'] if row['offer_id'] == 'q2')
+    alternative['estimate']['transport']['kg_co2e'] = '999'
+    view = dispatch()
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               '999 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+               'Planned arrival is October 27, 2026.')
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(caption, 'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_unsupported_total_uses_selected_offer_only():
+    _, carbon = comparison()
+    carbon = deepcopy(carbon)
+    selected = next(row for row in carbon['suppliers'] if row['offer_id'] == 'q1')
+    alternative = next(row for row in carbon['suppliers'] if row['offer_id'] == 'q2')
+    selected['estimate']['total_kg_co2e'] = None
+    alternative['estimate']['total_kg_co2e'] = '999'
+    view = dispatch()
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               '128.96 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+               'Planned arrival is October 27, 2026.')
+    assert audit.check_voice_caption(caption, 'Solara Cables', PLAN, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_unknown_total_claim'):
+        audit.check_voice_caption(caption + ' The combined total is 999 kg CO2e.',
+                                  'Solara Cables', PLAN, carbon, view)
+
+
+def test_voice_explicit_total_must_equal_supported_selected_total():
+    _, carbon = comparison()
+    view = dispatch()
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               '128.96 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+               'Planned arrival is October 27, 2026.')
+    with pytest.raises(AcceptanceError, match='voice_total_mismatch'):
+        audit.check_voice_caption(caption + ' The combined total emissions are '
+                                  '128.96 kg CO2e.', 'Solara Cables', PLAN, carbon, view)
+    assert audit.check_voice_caption(caption + ' The combined total emissions are '
+                                     '31,848.96 kg CO2e.', 'Solara Cables', PLAN,
+                                     carbon, view)['caption_grounded'] is True
+    rounded = deepcopy(carbon)
+    selected = next(row for row in rounded['suppliers'] if row['offer_id'] == 'q1')
+    selected['estimate']['total_kg_co2e'] = '31848.965'
+    assert audit.check_voice_caption(caption + ' The combined total emissions are '
+                                     '31,848.97 kg CO2e.', 'Solara Cables', PLAN,
+                                     rounded, view)['caption_grounded'] is True
+
+
+def test_voice_checks_every_date_in_same_arrival_claim():
+    _, carbon = comparison()
+    view = dispatch()
+    view['shipments'][0]['need_by'] = '2026-11-02'
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               '128.96 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+               'Planned arrival is October 27, 2026')
+    with pytest.raises(AcceptanceError, match='voice_arrival_date_mismatch'):
+        audit.check_voice_caption(caption + ' or November 2, 2026.',
+                                  'Solara Cables', PLAN, carbon, view)
+    assert audit.check_voice_caption(caption + ', against a need-by date of '
+                                     'November 2, 2026.', 'Solara Cables', PLAN,
+                                     carbon, view)['caption_grounded'] is True
+
+
+def test_voice_rejects_confirmed_selected_purchase_but_allows_prospective_wording():
+    _, carbon = comparison()
+    view = dispatch()
+    caption = ('Solara Cables copper shipment is a planning scenario. Freight is '
+               '128.96 kg CO2e sourced from the Department for Energy Security and Net Zero. '
+               'Planned arrival is October 27, 2026.')
+    prospective = caption + ' Solara Cables plans to purchase copper after review.'
+    assert audit.check_voice_caption(prospective, 'Solara Cables', PLAN, carbon,
+                                     view)['caption_grounded'] is True
+    for claim in ('The current purchase is confirmed.',
+                  'The selected order has been placed.',
+                  'Solara Cables has ordered copper.',
+                  "Solara Cables' order is confirmed."):
+        with pytest.raises(AcceptanceError, match='voice_action_claim'):
+            audit.check_voice_caption(caption + ' ' + claim, 'Solara Cables',
+                                      PLAN, carbon, view)
 
 
 def test_only_canonical_carbon_values_gain_two_decimal_rounding():

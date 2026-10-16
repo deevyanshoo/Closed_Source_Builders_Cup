@@ -132,8 +132,9 @@ def _selected_purchase_model_result(name: str, result: dict, model_result: dict,
             'alternative_quote_omitted': len(alternative_rows) - len(alternatives),
             'carbon_scope': ('Answer selected-purchase emissions from suppliers only. '
                 'Alternative_quote_estimates are quote alternatives, not the current purchase. '
+                'The selected supplier is a reviewed plan, not a confirmed order. '
                 'Keep production and entered freight separate unless combined_status permits a total; '
-                'name source publishers and explain unavailable or overlapping components. '
+                'name each component source publisher beside its amount and explain proxy, unavailable or overlapping components. '
                 'These emissions estimates contain no price or cost comparison. '
                 'Cost needs a validated plan joined by offer ID and version. '
                 'Disclose alternative_quote_omitted when enumerating quote alternatives.')}}
@@ -223,6 +224,8 @@ INSTRUCTION = (
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
     "For a question combining emissions and planned arrivals, call both read_carbon and read_shipments before answering. "
     "Use read_carbon.selected_purchase_brief as the selected source-grounded carbon reference. "
+    "For ordinary selected-purchase summaries, preserve its planning boundary: the reviewed plan is not a confirmed order. "
+    "Keep each component's publisher adjacent to its estimate and state the recorded proxy and combined-reason caveats. "
     "For broader comparisons, use read_carbon.workspace.carbon.alternative_quote_estimates as quote scenarios, "
     "never as current purchases or prices; costs need a validated offer-and-version plan join. "
     "If material production and entered "

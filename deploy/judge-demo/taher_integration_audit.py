@@ -33,6 +33,14 @@ from procure.demo.agent_tools import BUYER_FIELDS
 ID = re.compile(r'[A-Za-z0-9_.:-]{1,128}\Z')
 MASS_BASIS = 'Controlled QA assumption: 1000 kg shipped mass per offer.'
 VOICE_NUMBERS = re.compile(r'(?<![\w.-])\d[\d,]*(?:\.\d+)?(?!\w|\.\d)')
+VOICE_EMISSION_AMOUNT = re.compile(
+    r'(?<![\w.-])(?P<value>\d[\d,]*(?:\.\d+)?)(?!\w|\.\d)\s+'
+    r'(?:kg\s*(?:of\s+)?CO2e|kilograms?\s+(?:of\s+)?'
+    r'(?:CO2e|CO2\s+equivalent|carbon dioxide equivalent))\b', re.I)
+VOICE_TOTAL_AMOUNT = re.compile(
+    r'\b(?:combined\s+total|whole[- ]scenario\s+total|total)\b'
+    r'\s*(?:estimated\s+)?(?:carbon\s+)?(?:emissions?|footprint)?\s*'
+    r'(?:is|are|of|at|equals?|:)\s*' + VOICE_EMISSION_AMOUNT.pattern, re.I)
 VOICE_ACTION = re.compile(
     r'\b(?:i|we)\s+(?:have\s+)?(?:sent|emailed|placed|ordered|approved|'
     r'purchased|saved|created|submitted)\b|\b(?:i|we)\s+'
@@ -40,6 +48,9 @@ VOICE_ACTION = re.compile(
     r'(?:send|email|place|order|approve|purchase|save|create|submit)\b|'
     r'\b(?:rfq|email|order|purchase)\s+'
     r'(?:has\s+been|was|is)\s+(?:sent|placed|approved|created|submitted)\b', re.I)
+VOICE_CONFIRMED_PURCHASE = re.compile(
+    r'\b(?:the\s+)?(?:current|selected|this)\s+(?:purchase|order|selection)\s+'
+    r'(?:has\s+been|was|is)\s+(?:confirmed|placed|ordered|purchased)\b', re.I)
 VOICE_PRICE = re.compile(
     r'(?:[$€£₹]\s*\d|(?i:\b(?:price|pricing|cost|savings|unit rate)\b\s*'
     r'(?:(?:is|of|at)\s*)?)(?:[A-Z]{3}\s*)?\d|'
@@ -52,8 +63,10 @@ VOICE_LIVE_CLAIM = re.compile(
 VOICE_ARRIVAL_CUE = re.compile(
     r'\b(?:planned|expected)\s+(?:inbound\s+)?arrival\b|'
     r'\bplanned\s+to\s+arrive\b|'
+    r'\barrival\s+is\s+planned\s+for\b|'
     r'\b(?:the\s+)?(?:current|selected|this)\s+(?:inbound\s+)?shipment\s+arrives?\b',
     re.I)
+PUBLISHER_PREFIX = r"(?:the\s+)?(?:UK(?:['’]s)?\s+)?"
 VOICE_CALENDAR_DATE = re.compile(
     r'(?P<iso>\b\d{4}-\d{2}-\d{2}\b)|'
     r'\b(?P<month>January|February|March|April|May|June|July|August|September|'
@@ -354,7 +367,9 @@ def _fact_numbers(carbon, dispatch):
 
 def _guard_voice_facts(answer, carbon, dispatch):
     require(isinstance(answer, str) and answer.strip(), 'voice', 'voice_empty_answer')
-    require(VOICE_ACTION.search(answer) is None, 'voice', 'voice_action_claim')
+    require(VOICE_ACTION.search(answer) is None
+            and VOICE_CONFIRMED_PURCHASE.search(answer) is None,
+            'voice', 'voice_action_claim')
     require(VOICE_PRICE.search(answer) is None, 'voice', 'voice_price_claim')
     allowed = _fact_numbers(carbon, dispatch)
     claims = [Decimal(raw.replace(',', '')) for raw in VOICE_NUMBERS.findall(answer)]
@@ -362,26 +377,48 @@ def _guard_voice_facts(answer, carbon, dispatch):
     return claims
 
 
+def _canonical_emission_numbers(carbon, selected_offer_id):
+    allowed = set()
+    for supplier in carbon.get('suppliers', []):
+        if supplier.get('offer_id') != selected_offer_id:
+            continue
+        estimate = supplier.get('estimate', {})
+        values = [estimate.get('material', {}).get('kg_co2e'),
+                  estimate.get('transport', {}).get('kg_co2e'),
+                  estimate.get('total_kg_co2e')]
+        values.extend(leg.get('kg_co2e') for leg in
+                      estimate.get('transport', {}).get('legs', []))
+        for raw in values:
+            if raw is None:
+                continue
+            try:
+                value = Decimal(str(raw))
+            except InvalidOperation:
+                continue
+            if value.is_finite():
+                allowed.add(value)
+                allowed.add(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+    return allowed
+
+
 def _claimed_arrival_dates(caption):
     """Read explicit dates immediately following a planned-arrival phrase."""
     for cue in VOICE_ARRIVAL_CUE.finditer(caption):
         clause = re.split(r'[.;]|\bneed[- ]by\b', caption[cue.end():cue.end() + 100],
                           maxsplit=1, flags=re.I)[0]
-        match = VOICE_CALENDAR_DATE.search(clause)
-        if match is None:
-            continue
-        try:
-            if match.group('iso'):
-                claimed = date.fromisoformat(match.group('iso'))
-                yield claimed.year, claimed.month, claimed.day
-            else:
-                month = datetime.strptime(match.group('month').title(), '%B').month
-                day = int(match.group('day'))
-                year = int(match.group('year')) if match.group('year') else None
-                date(year or 2000, month, day)
-                yield year, month, day
-        except ValueError:
-            yield None, None, None
+        for match in VOICE_CALENDAR_DATE.finditer(clause):
+            try:
+                if match.group('iso'):
+                    claimed = date.fromisoformat(match.group('iso'))
+                    yield claimed.year, claimed.month, claimed.day
+                else:
+                    month = datetime.strptime(match.group('month').title(), '%B').month
+                    day = int(match.group('day'))
+                    year = int(match.group('year')) if match.group('year') else None
+                    date(year or 2000, month, day)
+                    yield year, month, day
+            except ValueError:
+                yield None, None, None
 
 
 def check_voice_result(result, plan, context, carbon, dispatch):
@@ -421,6 +458,13 @@ def check_voice_result(result, plan, context, carbon, dispatch):
 def check_voice_caption(caption, company_name, plan, carbon, dispatch):
     stage = 'voice'
     claims = _guard_voice_facts(caption, carbon, dispatch)
+    require(re.search(r'\b' + re.escape(company_name) +
+                      r"(?:['’]s?)?\s+(?:(?:has|have)\s+(?:already\s+)?"
+                      r'(?:ordered|purchased)|(?:order|purchase)\s+'
+                      r'(?:has\s+been|was|is)\s+'
+                      r'(?:confirmed|placed|ordered|purchased))\b',
+                      caption, re.I) is None,
+            stage, 'voice_action_claim')
     linked = next((row for row in dispatch['shipments']
                    if row.get('plan_id') == plan['plan_id']
                    and row.get('offer_id') == plan['selected_offer_id']), None)
@@ -478,21 +522,28 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
         re.search(r'\(\s*' + re.escape(name) + r'\s*\)', normalized, re.I)
         or re.search(r'\b(?:figures?|published\s+averages?)\s+from\b.{0,100}\b'
                      + re.escape(name) + r'\b', normalized, re.I)
-        or re.search(r'\bbased\s+on\s+(?:the\s+)?(?:UK\s+)?'
+        or re.search(r'\bbased\s+on\s+' + PUBLISHER_PREFIX
                      + re.escape(name) + r'\b', normalized, re.I)
-        or re.search(r'\bsources?\s*:\s*(?:the\s+)?(?:UK\s+)?'
+        or re.search(r'\bsources?\s*:\s*' + PUBLISHER_PREFIX
                      + re.escape(name) + r'\b', normalized, re.I)
-        or re.search(r'\b(?:sourced\s+from|source\s+is|from)\s+(?:the\s+)?(?:UK\s+)?'
+        or re.search(r'\b(?:sourced\s+from|source\s+is|from)\s+' + PUBLISHER_PREFIX
                      + re.escape(name) + r'\b', normalized, re.I)
-        or re.search(r'\bper\s+(?:the\s+)?(?:UK\s+)?'
+        or re.search(r'\bper\s+' + PUBLISHER_PREFIX
+                     + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\baccording\s+to\s+' + PUBLISHER_PREFIX
                      + re.escape(name) + r'\b', normalized, re.I)
         for name in publisher_names)
-    for claim in VOICE_LIVE_CLAIM.finditer(caption):
-        prefix = caption[max(0, claim.start() - 80):claim.start()]
+    coordinated = re.search(
+        r'\bno\s+declared\s+shipment\s+route\s+or\s+live\s+tracking\s+'
+        r'details\s+are\s+available\b', normalized, re.I)
+    for claim in VOICE_LIVE_CLAIM.finditer(normalized):
+        prefix = normalized[max(0, claim.start() - 80):claim.start()]
         require(re.search(r'\b(?:no|not|never|without)\s+(?:a\s+|any\s+)?$',
                           prefix, re.I) is not None
                 or re.search(r'\bnot\s+(?:confirmed|verified)\s+by\s+$',
-                             prefix, re.I) is not None,
+                             prefix, re.I) is not None
+                or (coordinated is not None and coordinated.start() <= claim.start()
+                    and claim.end() <= coordinated.end()),
                 stage, 'voice_live_tracking_claim')
     require(company_name.lower() in lowered
             and (plan['material'].lower() in lowered
@@ -500,10 +551,12 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
             and re.search(r'\b(?:carbon|co2e|co2\s+equivalent|'
                           r'greenhouse gas emissions?)\b', normalized, re.I)
             and re.search(r'\b(?:ship(?:ment|ping)|dispatch|inbound delivery|'
-                          r'planned\s+arrival|planned\s+to\s+arrive)\b', normalized, re.I)
+                          r'planned\s+arrival|planned\s+to\s+arrive|'
+                          r'arrival\s+is\s+planned\s+for)\b', normalized, re.I)
             and re.search(r'\b(?:synthetic|fictional|planning scenario|hypothetical plan|'
                           r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
                           r'planned\s+to\s+arrive|'
+                          r'arrival\s+is\s+planned\s+for|'
                           r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
             and (attributed_publication or (not publishers and re.search(
                 r'\b(?:sources?|factors?|assumptions?|entered)\b', normalized, re.I)))
@@ -512,10 +565,27 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                           caption, re.I)
             and len(claims) >= 1,
             stage, 'voice_caption_not_grounded')
-    totals = [row['estimate'].get('total_kg_co2e') for row in carbon['suppliers']]
-    if all(value is None for value in totals):
-        require(re.search(r'\b(?:total|combined)\b[^.;]{0,60}\b\d', caption, re.I) is None,
+    emission_values = _canonical_emission_numbers(carbon, plan['selected_offer_id'])
+    if emission_values:
+        require(any(Decimal(match.group('value').replace(',', '')) in emission_values
+                    for match in VOICE_EMISSION_AMOUNT.finditer(normalized)),
+                stage, 'voice_caption_not_grounded')
+    selected = next((row for row in carbon['suppliers']
+                     if row.get('offer_id') == plan['selected_offer_id']), None)
+    require(isinstance(selected, dict), stage, 'voice_caption_not_grounded')
+    if selected['estimate'].get('total_kg_co2e') is None:
+        require(re.search(r'\b(?:total|combined)\b'
+                          r'(?:(?!\b(?:planned|expected)\s+arrival\b|'
+                          r'\barrival\s+is\s+planned\s+for\b)[^.;]){0,60}\b\d',
+                          caption, re.I) is None,
                 stage, 'voice_unknown_total_claim')
+    else:
+        selected_total = number(selected['estimate']['total_kg_co2e'], stage)
+        allowed_totals = {selected_total,
+                          selected_total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}
+        require(all(Decimal(match.group('value').replace(',', '')) in allowed_totals
+                    for match in VOICE_TOTAL_AMOUNT.finditer(normalized)),
+                stage, 'voice_total_mismatch')
     return {'numbers_checked': len(claims), 'caption_grounded': True}
 
 

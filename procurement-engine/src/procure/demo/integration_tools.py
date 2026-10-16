@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 from .company import list_companies
@@ -54,6 +55,37 @@ def _material_scope(snapshot, message):
     return named, own
 
 
+def _spoken_kg(value):
+    """Round spoken kilograms without changing the saved Decimal text."""
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+    if number and abs(number) < Decimal('0.01'):
+        return format(number, 'f')
+    try:
+        return format(number.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP).normalize(), 'f')
+    except InvalidOperation:
+        return format(number, 'f')
+
+
+def _publishers(factors):
+    names = []
+    for factor in factors:
+        publisher = factor.get('publisher') if isinstance(factor, dict) else None
+        if publisher and publisher not in names:
+            names.append(publisher)
+    return names
+
+
+def _spoken_unit(quantity, unit):
+    try:
+        plural = Decimal(str(quantity)) != 1
+    except (InvalidOperation, TypeError, ValueError):
+        plural = False
+    return unit + 's' if plural and unit in {'barrel', 'tonne', 'unit'} else unit
+
+
 def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     company = snapshot['company']['name']
     named, own = _material_scope(snapshot, message)
@@ -82,16 +114,38 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
             else:
                 estimate = row['estimate']
                 material = next((m['name'] for m in snapshot['company']['materials'] if m['material_id'] == result['material_id']), result['material_id'])
-                parts = [f"For {company}, {estimate['quantity']} {estimate['unit']} of {material}, using {supplier_display_name(row['supplier'])}:"]
+                parts = [f"For {company}, the reviewed plan covers {estimate['quantity']} "
+                         f"{_spoken_unit(estimate['quantity'], estimate['unit'])} "
+                         f"of {material} from {supplier_display_name(row['supplier'])} "
+                         '(not a confirmed order):']
                 production, freight = estimate['material'], estimate['transport']
+                factor = production.get('factor') or {}
                 if production.get('kg_co2e') is not None:
-                    parts.append(f"Production average: {production['kg_co2e']} kg CO2e.")
+                    publisher = factor.get('publisher')
+                    parts.append(f"Production average: {_spoken_kg(production['kg_co2e'])} kg CO2e"
+                                 + (f' from {publisher}.' if publisher else '; source unavailable in this assessment.'))
+                    if production.get('product_match') == 'proxy':
+                        category = factor.get('category')
+                        note = factor.get('note')
+                        parts.append('The production factor is a proxy, not an exact product match'
+                                     + (f' ({category}).' if category else '.')
+                                     + (f' {note}' if note else ''))
                 else:
-                    parts.append('A usable production factor or material mass is unavailable.')
+                    reason = production.get('reason')
+                    parts.append('For this saved assessment, material production is not estimated'
+                                 + (f': {reason}' if reason else '; a usable factor or material mass is unavailable.'))
                 if freight.get('kg_co2e') is not None:
-                    parts.append(f"Entered freight: {freight['kg_co2e']} kg CO2e.")
+                    publishers = _publishers((leg.get('factor') for leg in freight.get('legs', [])
+                                              if isinstance(leg, dict)))
+                    parts.append(f"Entered freight: {_spoken_kg(freight['kg_co2e'])} kg CO2e"
+                                 + (f" from {'; '.join(publishers)}." if publishers else
+                                    '; source unavailable in this assessment.'))
                 else:
-                    parts.append('Freight is not fully estimated; enter mode, distance and any required mass.')
+                    reasons = [leg.get('reason') for leg in freight.get('legs', [])
+                               if isinstance(leg, dict) and leg.get('reason')]
+                    parts.append('For this saved assessment, entered freight is not fully estimated'
+                                 + (': ' + ' '.join(reasons) if reasons else
+                                    '; enter a freight mode, distance and any required shipping mass.'))
                 for leg in freight.get('legs', []):
                     mode = leg['mode'].replace('_', ' ')
                     distance = leg.get('distance_km')
@@ -100,17 +154,10 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                     else:
                         parts.append(f'Entered freight leg: {mode}, {distance} km (distance entered by you).')
                 if estimate.get('combined_status') == 'combined' and estimate.get('total_kg_co2e') is not None:
-                    parts.append(f"Production average plus the entered freight leg: {estimate['total_kg_co2e']} kg CO2e.")
+                    parts.append(f"Supported whole-scenario total: {_spoken_kg(estimate['total_kg_co2e'])} kg CO2e.")
                 else:
-                    parts.append('No whole-scenario total is supported; components remain separate.')
-                factor = production.get('factor') or {}
-                sources = [factor['publisher']] if factor.get('publisher') else []
-                for leg in freight.get('legs', []):
-                    publisher = (leg.get('factor') or {}).get('publisher')
-                    if publisher and publisher not in sources:
-                        sources.append(publisher)
-                if sources:
-                    parts.append('Sources: ' + '; '.join(sources) + '.')
+                    parts.append('No whole-scenario total is supported; components remain separate. '
+                                 + (estimate.get('combined_reason') or ''))
                 parts.append('This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.')
                 answer = ' '.join(parts)
         return {'assistant_text': answer, 'workspace': {'carbon': result}}
@@ -123,20 +170,26 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     if planned:
         row = planned[0]
         reference = row.get('order_id') or row.get('demand_reference')
-        answer = (f"{company}: the current inbound planning scenario is {row['quantity']} {row['quantity_unit']} "
-                  f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the selected supplier')}. "
-                  f"Demand reference: {reference}. ")
         if row.get('scenario_status') == 'infeasible':
-            answer += 'The reviewed disruption has no feasible supplier; the original shipment context is retained for review. '
+            answer = (f'{company}: the reviewed disruption has no feasible supplier. '
+                      f"The retained baseline planning context was {row['quantity']} "
+                      f"{_spoken_unit(row['quantity'], row['quantity_unit'])} "
+                      f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the baseline supplier')}. "
+                      'This is not a current selected purchase or a confirmed order. '
+                      f'Demand reference: {reference}. ')
         else:
-            answer += f"Planned arrival is {row['expected_arrival']}, against a need-by date of {row['need_by']}. "
+            answer = (f"{company}: the current inbound planning scenario is {row['quantity']} "
+                      f"{_spoken_unit(row['quantity'], row['quantity_unit'])} "
+                      f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the selected supplier')}. "
+                      f"This is not a confirmed order. Demand reference: {reference}. "
+                      f"Planned arrival is {row['expected_arrival']}, against a need-by date of {row['need_by']}. ")
         answer += 'Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. '
         answer += ('Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.'
                    if row.get('recovery_available') else 'Review the saved recovery comparison before preparing another action.')
     else:
         answer = (f'{company} has {len(rows)} expected-order records in this view. '
                   'No current reviewed supplier plan is linked for recovery. Compare reviewed quotes first. '
-                  'These are planning records, not live carrier tracking.')
+                  'These are planning records, not confirmed orders or live carrier tracking.')
     return {'assistant_text': answer, 'workspace': {'shipments': view}}
 
 

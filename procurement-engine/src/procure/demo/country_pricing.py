@@ -28,9 +28,41 @@ def load_benchmarks(path: Path | None = None) -> dict:
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
+HISTORY_FILE = 'prediction_history_v1.json'
+TITLE = 'Market reference: global benchmarks and synthetic origin quotes'
+
+
+def _positive(text) -> bool:
+    try:
+        value = Decimal(text)
+    except (ArithmeticError, TypeError, ValueError):
+        return False
+    return value.is_finite() and value > 0
+
+
 def _eur_rates(fx: list) -> dict:
+    """Valid EUR reference rows only: positive finite decimal rate, a provider and a date."""
     return {row['quote']: row for row in fx if isinstance(row, dict) and row.get('base') == 'EUR'
-            and isinstance(row.get('rate'), str) and row.get('quote')}
+            and isinstance(row.get('rate'), str) and _positive(row['rate']) and row.get('quote')
+            and row.get('provider') and row.get('observation_date')}
+
+
+def load_fx_snapshot(path: Path | None = None) -> dict:
+    """Latest BIS monthly average per currency from the committed history snapshot (not a live rate)."""
+    import hashlib
+    path = Path(path) if path is not None else get_settings().config_dir / HISTORY_FILE
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    out = {}
+    for series_id, series in data['series'].items():
+        if not series_id.startswith('fx:') or series['status'] != 'available':
+            continue
+        canonical = json.dumps(series['observations'], separators=(',', ':'), ensure_ascii=True)
+        if hashlib.sha256(canonical.encode('ascii')).hexdigest() != series['values_sha256']:
+            raise ValueError(f'FX snapshot values changed for {series_id}')
+        month, rate = series['observations'][-1]
+        if _positive(rate):
+            out[series['currency']] = {'rate': rate, 'month': month, 'provider': 'BIS', 'source_series': series['source_series']}
+    return out
 
 
 def usd_rate(fx: list, currency: str) -> dict | None:
@@ -44,6 +76,10 @@ def _usd_rate(fx: list, currency: str) -> dict | None:
     usd = rates.get('USD')
     if usd is None:
         return None
+    if currency != 'EUR':
+        other = rates.get(currency)
+        if other is None or other.get('provider') != usd.get('provider'):
+            return None
     with localcontext() as context:
         context.prec = nz.ARITHMETIC_PRECISION
         if currency == 'EUR':
@@ -57,7 +93,20 @@ def _usd_rate(fx: list, currency: str) -> dict | None:
             formula = (f"USD->{currency} = EUR->{currency} {other['rate']} / EUR->USD {usd['rate']} "
                        f"(ECB reference rates, {usd['observation_date']})")
     return {'rate': nz.fmt(rate), 'observation_date': usd['observation_date'], 'provider': usd.get('provider'),
-            'formula': formula, '_exact': rate}
+            'formula': formula, 'basis': 'live', '_exact': rate}
+
+
+def _snapshot_rate(fx_snapshot: dict | None, currency: str) -> dict | None:
+    entry = (fx_snapshot or {}).get(currency)
+    if entry is None:
+        return None
+    return {'rate': entry['rate'], 'observation_date': entry['month'], 'provider': entry['provider'],
+            'formula': f"USD->{currency} = {entry['rate']} (BIS monthly average {entry['month']}, {entry['source_series']}; "
+                       'snapshot, not a live rate)', 'basis': 'snapshot', '_exact': Decimal(entry['rate'])}
+
+
+def _rate(fx: list, fx_snapshot: dict | None, currency: str) -> dict | None:
+    return _usd_rate(fx, currency) or _snapshot_rate(fx_snapshot, currency)
 
 
 def _currencies(company: dict) -> list[str]:
@@ -67,11 +116,12 @@ def _currencies(company: dict) -> list[str]:
     return [reporting] + sorted(others - {reporting})
 
 
-def _conversion(value: Decimal, source_currency: str, per_unit: str, currency: str, fx: list) -> dict:
+def _conversion(value: Decimal, source_currency: str, per_unit: str, currency: str, fx: list,
+                fx_snapshot: dict | None = None) -> dict:
     if currency == source_currency:
         return {'currency': currency, 'status': 'same_currency', 'rate': '1', 'amount': nz.fmt(value),
                 'per_unit': per_unit, 'observation_date': None, 'provider': None, 'formula': None}
-    rate = _usd_rate(fx, currency) if source_currency == 'USD' else None
+    rate = _rate(fx, fx_snapshot, currency) if source_currency == 'USD' else None
     if rate is None:
         return {'currency': currency, 'status': 'fx_unavailable', 'rate': None, 'amount': None, 'per_unit': per_unit,
                 'observation_date': None, 'provider': None, 'formula': None}
@@ -80,7 +130,7 @@ def _conversion(value: Decimal, source_currency: str, per_unit: str, currency: s
         amount = value * rate['_exact']
     return {'currency': currency, 'status': 'converted', 'rate': rate['rate'], 'amount': nz.fmt(amount),
             'per_unit': per_unit, 'observation_date': rate['observation_date'], 'provider': rate['provider'],
-            'formula': rate['formula']}
+            'formula': rate['formula'], 'basis': rate['basis']}
 
 
 def _month_end(month: str) -> date:
@@ -89,7 +139,8 @@ def _month_end(month: str) -> date:
     return date.fromordinal(following.toordinal() - 1)
 
 
-def _benchmark(material: dict, snapshot: dict, fx: list, currencies: list[str], today: date) -> dict:
+def _benchmark(material: dict, snapshot: dict, fx: list, currencies: list[str], today: date,
+               fx_snapshot: dict | None = None) -> dict:
     entry = snapshot['benchmarks'].get(material['material_id'])
     if entry is None:
         return {'material_id': material['material_id'], 'name': material['name'], 'unit': material['quantity_unit'],
@@ -101,7 +152,8 @@ def _benchmark(material: dict, snapshot: dict, fx: list, currencies: list[str], 
            'status': 'benchmark', 'series': entry['series'], 'month': latest['month'], 'value': latest['value'],
            'currency': entry['currency'], 'per_unit': entry['per_unit'], 'note': entry['note'],
            'recent': entry['observations'], 'age_days': age, 'stale': age > snapshot['stale_after_days'],
-           'conversions': [_conversion(value, entry['currency'], entry['per_unit'], currency, fx) for currency in currencies]}
+           'conversions': [_conversion(value, entry['currency'], entry['per_unit'], currency, fx, fx_snapshot)
+                           for currency in currencies]}
     company_unit = material['quantity_unit']
     if company_unit in _KG_PER and entry['per_unit'] in _KG_PER and company_unit != entry['per_unit']:
         factor = _KG_PER[entry['per_unit']] / _KG_PER[company_unit]
@@ -115,19 +167,20 @@ QUOTE_NOTE = 'Demo quotes are synthetic and not calibrated to market prices'
 COMPARE_LABEL = 'synthetic quote compared with a public benchmark'
 
 
-def _comparable(offer: dict, units: dict) -> dict | None:
+def _comparable(offer: dict, units: dict, index: int = 0) -> dict | None:
     """The quote's own currency per one material unit, from the reviewed normalized offer."""
-    pricing = (((offer.get('normalized') or {}).get('items') or [{}])[0]).get('pricing') or {}
+    items = (offer.get('normalized') or {}).get('items') or []
+    pricing = (items[index] if index < len(items) else {}).get('pricing') or {}
     if (pricing.get('per_kg') or {}).get('amount'):
         return {'amount': pricing['per_kg']['amount'], 'currency': pricing['per_kg']['currency'], 'per_unit': 'kg'}
-    material = ((offer.get('items') or [{}])[0].get('material') or {}).get('value')
+    material = ((offer.get('items') or [{}])[index].get('material') or {}).get('value')
     per_unit = pricing.get('per_unit') if isinstance(pricing.get('per_unit'), dict) else None
     if per_unit and per_unit.get('amount') and material in units:
         return {'amount': per_unit['amount'], 'currency': per_unit['currency'], 'per_unit': units[material]}
     return None
 
 
-def _versus(comparable: dict | None, benchmark: dict | None, fx: list) -> dict:
+def _versus(comparable: dict | None, benchmark: dict | None, fx: list, fx_snapshot: dict | None = None) -> dict:
     if benchmark is None:
         return {'status': 'no_public_benchmark', 'difference_percent': None, 'label': COMPARE_LABEL}
     if comparable is None or comparable['per_unit'] not in _KG_PER or benchmark['per_unit'] not in _KG_PER:
@@ -138,7 +191,7 @@ def _versus(comparable: dict | None, benchmark: dict | None, fx: list) -> dict:
         base = Decimal(latest['value']) * _KG_PER[comparable['per_unit']] / _KG_PER[benchmark['per_unit']]
         note = ''
         if comparable['currency'] != benchmark['currency']:
-            rate = _usd_rate(fx, comparable['currency']) if benchmark['currency'] == 'USD' else None
+            rate = _rate(fx, fx_snapshot, comparable['currency']) if benchmark['currency'] == 'USD' else None
             if rate is None:
                 return {'status': 'fx_unavailable', 'difference_percent': None, 'label': COMPARE_LABEL,
                         'reason': f"No same-day ECB reference rate for {benchmark['currency']} to {comparable['currency']} is loaded."}
@@ -152,39 +205,55 @@ def _versus(comparable: dict | None, benchmark: dict | None, fx: list) -> dict:
             'formula': f"({nz.fmt(quote)} - {nz.fmt(base)}) / {nz.fmt(base)} x 100, rounded to 0.1{note}"}
 
 
-def _quote(offer: dict, snapshot: dict, fx: list, units: dict) -> dict | None:
-    if offer.get('status') != 'saved' or not offer.get('items'):
-        return None
-    item = offer['items'][0]
-    pricing = (item.get('pricing') or {}).get('value') or {}
-    unit_price = pricing.get('unit_price') or {}
-    if not unit_price.get('amount'):
-        return None
-    material = (item.get('material') or {}).get('value')
-    comparable = _comparable(offer, units)
-    return {'offer_id': offer['offer_id'], 'supplier': (offer['fields'].get('supplier_name') or {}).get('value'),
-            'origin_country_code': (offer.get('normalized') or {}).get('origin_country_code'),
-            'material_id': material, 'unit_price': unit_price['amount'],
-            'currency': unit_price.get('currency'), 'per_unit': pricing.get('per_unit'), 'as_of': offer.get('as_of'),
-            'synthetic': offer.get('synthetic') is True, 'document': (offer.get('document') or {}).get('filename'),
-            'comparable': comparable,
-            'vs_benchmark': _versus(comparable, snapshot['benchmarks'].get(material), fx)}
+def _quotes(offer: dict, snapshot: dict, fx: list, units: dict, fx_snapshot: dict | None = None) -> list[dict]:
+    """One row per priced item of a saved offer."""
+    if offer.get('status') != 'saved':
+        return []
+    rows = []
+    for index, item in enumerate(offer.get('items') or []):
+        pricing = (item.get('pricing') or {}).get('value') or {}
+        unit_price = pricing.get('unit_price') or {}
+        if not unit_price.get('amount'):
+            continue
+        material = (item.get('material') or {}).get('value')
+        comparable = _comparable(offer, units, index)
+        rows.append({'offer_id': offer['offer_id'], 'item_index': index,
+                     'supplier': (offer['fields'].get('supplier_name') or {}).get('value'),
+                     'origin_country_code': (offer.get('normalized') or {}).get('origin_country_code'),
+                     'material_id': material, 'unit_price': unit_price['amount'],
+                     'currency': unit_price.get('currency'), 'per_unit': pricing.get('per_unit'), 'as_of': offer.get('as_of'),
+                     'synthetic': offer.get('synthetic') is True, 'document': (offer.get('document') or {}).get('filename'),
+                     'comparable': comparable,
+                     'vs_benchmark': _versus(comparable, snapshot['benchmarks'].get(material), fx, fx_snapshot)})
+    return rows
 
 
-def build_country_pricing(company: dict, offers: list, fx: list, snapshot: dict, *, today: date) -> dict:
+def build_country_pricing(company: dict, offers: list, fx: list, snapshot: dict, *, today: date,
+                          fx_snapshot: dict | None = None, context_version: int | None = None) -> dict:
     currencies = _currencies(company)
     units = {material['material_id']: material['quantity_unit'] for material in company.get('materials', [])}
     limitations = ['Benchmarks are monthly averages in nominal US dollars from the World Bank Pink Sheet, '
                    'not quotes for your grade, origin or delivery terms.',
                    'Quotes are synthetic demo documents and are shown separately from public benchmarks.']
-    if 'USD' not in _eur_rates(fx):
+    live = 'USD' in _eur_rates(fx)
+    if not live and not fx_snapshot:
         limitations.append('No dated reference FX rate is loaded for this session, so conversions show as unavailable.')
-    return {'company_id': company['company_id'], 'reporting_currency': company['reporting_currency'],
+    fx_basis = ('ECB reference rates loaded for this session' if live else
+                'BIS monthly average from the committed snapshot (latest month shown on each rate), not a live rate'
+                if fx_snapshot else 'no FX rate loaded')
+    benchmarked = sorted(m['material_id'] for m in company.get('materials', []) if m['material_id'] in snapshot['benchmarks'])
+    total = len(company.get('materials', []))
+    coverage = {'state': 'none' if not benchmarked else 'all' if len(benchmarked) == total else 'partial',
+                'benchmarked': benchmarked,
+                'without_benchmark': sorted(m['material_id'] for m in company.get('materials', []) if m['material_id'] not in snapshot['benchmarks']),
+                'note': 'Only materials with an exact series mapping are benchmarked; others are not guessed.'}
+    return {'title': TITLE, 'company_id': company['company_id'], 'context_version': context_version,
+            'reporting_currency': company['reporting_currency'], 'coverage': coverage, 'fx_basis': fx_basis,
             'currencies': currencies, 'source': snapshot['source'], 'snapshot_version': snapshot['snapshot_version'],
             'benchmarks_synthetic': snapshot['synthetic'], 'synthetic_quotes': True,
-            'benchmarks': [_benchmark(material, snapshot, fx, currencies, today) for material in company.get('materials', [])],
+            'benchmarks': [_benchmark(material, snapshot, fx, currencies, today, fx_snapshot) for material in company.get('materials', [])],
             'quote_note': QUOTE_NOTE,
-            'quotes': [row for row in (_quote(offer, snapshot, fx, units) for offer in offers) if row is not None],
+            'quotes': [row for offer in offers for row in _quotes(offer, snapshot, fx, units, fx_snapshot)],
             'fx_rates_used': sorted({(row['observation_date'], row['provider']) for row in _eur_rates(fx).values()}),
             'limitations': limitations}
 
@@ -198,9 +267,11 @@ def register_country_pricing_routes(app, *, session, now):
         if 'snapshot' not in loaded:
             try:
                 loaded['snapshot'] = load_benchmarks()
+                loaded['fx'] = load_fx_snapshot()
             except (OSError, ValueError):
                 raise SessionError('pricing_unavailable', 'Commodity benchmarks are unavailable in this deployment.', 503) from None
         with value.lock:
             fx = list((value.news or {}).get('fx') or [])
             return build_country_pricing(get_company(value.company_id), list(value.offers.values()), fx,
-                                         loaded['snapshot'], today=now().date())
+                                         loaded['snapshot'], today=now().date(), fx_snapshot=loaded['fx'],
+                                         context_version=value.context_version)

@@ -47,7 +47,7 @@ def test_benchmark_is_converted_at_view_time_with_a_dated_cross_rate(snapshot):
     # USD->EUR = 1 / (EUR->USD 1.25) = 0.8; 14474 x 0.8 = 11579.2
     assert eur == {'currency': 'EUR', 'status': 'converted', 'rate': '0.8', 'amount': '11579.2', 'per_unit': 'tonne',
                    'observation_date': '2026-10-14', 'provider': 'ECB',
-                   'formula': 'USD->EUR = 1 / EUR->USD 1.25 (ECB reference rate, 2026-10-14)'}
+                   'formula': 'USD->EUR = 1 / EUR->USD 1.25 (ECB reference rate, 2026-10-14)', 'basis': 'live'}
     aed = next(c for c in copper['conversions'] if c['currency'] == 'AED')
     assert aed['status'] == 'fx_unavailable' and aed['amount'] is None
     usd = next(c for c in copper['conversions'] if c['currency'] == 'USD')
@@ -135,24 +135,27 @@ def test_quote_for_a_material_without_benchmark_is_not_compared(snapshot):
     assert quote['comparable'] == {'amount': '130', 'currency': 'INR', 'per_unit': 'kg'}
 
 
-def test_route_returns_view_with_fx_unavailable_when_offline():
+def test_route_carries_company_and_context_and_uses_the_dated_bis_snapshot_offline():
     with TestClient(create_app(clock=lambda: datetime(2026, 10, 15, tzinfo=timezone.utc)),
                     base_url='https://demo.test') as client:
         client.get('/api/demo/session')
         response = client.get('/api/demo/country-pricing')
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body['company_id'] == 'solara-cables'
-        assert body['source']['publisher'] == 'World Bank'
+        assert (body['company_id'], body['context_version']) == ('solara-cables', 1)
+        assert body['title'] == 'Market reference: global benchmarks and synthetic origin quotes'
         copper = next(row for row in body['benchmarks'] if row['material_id'] == 'copper')
-        assert {c['status'] for c in copper['conversions'] if c['currency'] != 'USD'} == {'fx_unavailable'}
+        eur = next(c for c in copper['conversions'] if c['currency'] == 'EUR')
+        assert eur['status'] == 'converted' and eur['basis'] == 'snapshot'
+        assert eur['observation_date'] == '2026-08' and eur['provider'] == 'BIS'
+        assert 'snapshot, not a live rate' in eur['formula']
 
 
 def test_cross_rate_through_the_euro_reference():
     from procure.demo.country_pricing import usd_rate
     rate = usd_rate(FX, 'INR')
     assert rate == {'rate': '84', 'observation_date': '2026-10-14', 'provider': 'ECB',
-                    'formula': 'USD->INR = EUR->INR 105 / EUR->USD 1.25 (ECB reference rates, 2026-10-14)'}
+                    'formula': 'USD->INR = EUR->INR 105 / EUR->USD 1.25 (ECB reference rates, 2026-10-14)', 'basis': 'live'}
     assert usd_rate(FX, 'AED') is None
     mixed = [FX[0], {**FX[1], 'observation_date': '2026-10-13'}]
     assert usd_rate(mixed, 'INR') is None
@@ -170,3 +173,60 @@ def test_deploy_package_ships_the_benchmark_snapshot(tmp_path):
     assert prepared.returncode == 0, prepared.stderr
     packaged = destination / 'procurement-engine/config/commodity_benchmarks_v1.json'
     assert json.loads(packaged.read_text())['snapshot_version'] == 'commodity-benchmarks-v1'
+    history = destination / 'procurement-engine/config/prediction_history_v1.json'
+    assert json.loads(history.read_text())['snapshot_version'] == 'prediction-history-v1'
+
+
+def test_fx_rates_must_be_positive_finite_and_from_one_provider_and_date(snapshot):
+    for bad in (
+        [{**FX[0], 'rate': '0'}, FX[1]],
+        [{**FX[0], 'rate': '-1.25'}, FX[1]],
+        [{**FX[0], 'rate': 'NaN'}, FX[1]],
+        [{**FX[0], 'rate': 'Infinity'}, FX[1]],
+        [FX[0], {**FX[1], 'provider': 'Other'}],
+        [FX[0], {**FX[1], 'observation_date': '2026-10-13'}],
+    ):
+        from procure.demo.country_pricing import usd_rate
+        assert usd_rate(bad, 'INR') is None, bad
+
+
+def test_offline_conversion_uses_the_labelled_snapshot_never_a_guess(snapshot):
+    from procure.demo.country_pricing import load_fx_snapshot
+    fx_snapshot = load_fx_snapshot()
+    view = build_country_pricing(get_company('solara-cables'), [], [], snapshot, today=TODAY, fx_snapshot=fx_snapshot)
+    copper = next(row for row in view['benchmarks'] if row['material_id'] == 'copper')
+    aed = next(c for c in copper['conversions'] if c['currency'] == 'AED')
+    rate = fx_snapshot['AED']['rate']
+    assert aed['rate'] == rate and aed['basis'] == 'snapshot' and aed['observation_date'] == '2026-08'
+    assert 'BIS monthly average' in view['fx_basis']
+    # live ECB rates win over the snapshot when loaded
+    live = build_country_pricing(get_company('solara-cables'), [], FX, snapshot, today=TODAY, fx_snapshot=fx_snapshot)
+    eur = next(c for c in next(r for r in live['benchmarks'] if r['material_id'] == 'copper')['conversions'] if c['currency'] == 'EUR')
+    assert eur['basis'] == 'live' and eur['rate'] == '0.8'
+
+
+def test_every_priced_item_in_a_quote_is_listed(snapshot):
+    from copy import deepcopy
+    offer = saved_offer('express-copper')
+    two = deepcopy(offer)
+    two['items'].append(deepcopy(two['items'][0]))
+    two['items'][1]['pricing']['value']['unit_price']['amount'] = '11.00'
+    two['normalized']['items'].append(deepcopy(two['normalized']['items'][0]))
+    two['normalized']['items'][1]['pricing']['per_kg'] = {'amount': '11', 'currency': 'USD'}
+    rows = build_country_pricing(get_company('solara-cables'), [two], FX, snapshot, today=TODAY)['quotes']
+    assert [(r['item_index'], r['unit_price']) for r in rows] == [(0, '10.50'), (1, '11.00')]
+    assert rows[1]['comparable']['amount'] == '11'
+
+
+def test_every_company_has_an_explicit_benchmark_coverage_state(snapshot):
+    from procure.demo.company import list_companies
+    expected = {'solara-cables': ('partial', ['aluminium', 'copper']), 'terrapack': ('none', []),
+                'loomworks': ('partial', ['cotton']), 'harvest-foods': ('partial', ['oil', 'sugar', 'wheat']),
+                'meridian-pharma': ('none', []), 'forgeline-components': ('partial', ['copper']),
+                'gridspring-batteries': ('none', []), 'circuitpeak-systems': ('none', []),
+                'atlas-petrochem': ('none', []), 'stonebridge-materials': ('none', [])}
+    for summary in list_companies():
+        view = build_country_pricing(get_company(summary['company_id']), [], [], snapshot, today=TODAY)
+        coverage = view['coverage']
+        assert (coverage['state'], coverage['benchmarked']) == expected[summary['company_id']], summary['company_id']
+        assert coverage['note'] == 'Only materials with an exact series mapping are benchmarked; others are not guessed.'

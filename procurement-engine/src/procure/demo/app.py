@@ -1019,7 +1019,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def execute_operator_turn(value, data, *, channel='text'):
         nonlocal operator_process_calls
         from .operator import (DEFAULT_MODEL, OperatorUnavailable, OperatorValidationError,
-                               run_turn)
+                               _broad_inventory_scope, run_turn)
         shape(data, ('message', 'expected_context_version', 'idempotency_key'))
         message = data['message']
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
@@ -1050,6 +1050,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 raise SessionError('stale_context', 'A newer operator turn superseded this request.', 409)
             snapshot = operator_snapshot(value)
             marker = snapshot_marker(snapshot)
+            # Canonical reads do not call a model. Keep the normal request,
+            # session and concurrency limits, without reserving AI capacity.
+            prepared = prepared or _broad_inventory_scope(snapshot, message) is not None
             adapter = operator_adapter()
             model = getattr(adapter, 'model', None) or os.getenv('GEMINI_OPERATOR_MODEL', DEFAULT_MODEL)
             if not prepared and not bool(getattr(adapter, 'available', True)):

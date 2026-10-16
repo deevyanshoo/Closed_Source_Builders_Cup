@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, localcontext
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 import json
 import logging
 import os
@@ -14,6 +14,7 @@ from time import monotonic
 
 from .agent_tools import ToolValidationError, inventory_analytics, prepare_form
 from .context_cache import without_derived_check_times
+from .company import list_companies
 from .news_brief import build_news_brief, is_workspace_news_question
 from .presentation import present_answer, supplier_display_name
 from .research import ResearchValidationError, prepare_research
@@ -561,6 +562,171 @@ def _grounded_answer(snapshot, message, material_id, evidence, facts, cited):
     return _render_answer(raw, facts, cited)
 
 
+def _broad_inventory_scope(snapshot, message):
+    """Recognize only plain read requests, with material scope from the user's words."""
+    action_text = re.sub(r'\b(?:do\s+not\s+change\s+anything|without\s+changing\s+anything)\b',
+                         '', message, flags=re.I)
+    if (not re.search(r'\b(?:inventory|stock|cover|short|shortage|gap|replenishment)\b', message, re.I)
+            or not re.search(r'\b(?:sourcing|source|sources|supplier|suppliers|procurement)\b',
+                             message, re.I)
+            or not re.search(r'\b(?:position|options|overview|summary|summarize|shortages|gaps)\b',
+                             message, re.I)
+            or re.search(r'\d|\{\{|\}\}|\b(?:send|draft|prepare|approve|apply|save|update|change|'
+                         r'edit|load|compare|place|buy|purchase|simulate|execute|search|'
+                         r'browse|research|online|web|news|headline|forecast|market)\b',
+                         action_text, re.I)):
+        return None
+    company = snapshot['company']
+    if company.get('company_id') != snapshot.get('company_id'):
+        return None
+    own_ids = {row['material_id'] for row in company['materials']}
+    own_names = {row['name'] for row in company['materials']}
+    for profile in list_companies():
+        if profile['company_id'] != snapshot['company_id'] and re.search(
+                r'(?<!\w)(?:' + re.escape(profile['name']) + '|' +
+                re.escape(profile['company_id']) + r')(?!\w)', message, re.I):
+            return None
+        if profile['company_id'] != snapshot['company_id'] and any(
+                re.search(r'(?<!\w)(?:' + re.escape(row['name']) + '|' +
+                          re.escape(row['material_id']) + r')(?!\w)', message, re.I)
+                for row in profile['materials']
+                if row['name'] not in own_names and row['material_id'] not in own_ids):
+            return None
+    named = [row['material_id'] for row in company['materials'] if
+             re.search(r'(?<!\w)(?:' + re.escape(row['name']) + '|' +
+                       re.escape(row['material_id']) + r')(?!\w)', message, re.I)]
+    if len(named) > 1:
+        return None
+    if re.search(r'\b(?:this|selected|current)\s+material\b', message, re.I):
+        selected = snapshot.get('selected_material_id')
+        buyer = (snapshot.get('buyer_draft') or {}).get('material')
+        if selected not in own_ids or (buyer and selected != buyer):
+            return None
+        return selected if not named or named[0] == selected else None
+    if named:
+        return named[0]
+    for_reference = re.search(r'\bfor\s+(.+?)(?:[?.!]|$)', message, re.I)
+    if for_reference and not re.match(
+            r'(?:(?:our|this|the|my)\s+(?:company|workspace|business|inventory|orders?)|'
+            r'(?:(?:our|this|the|my)\s+)?(?:current|selected)\s+(?:company|workspace)|'
+            r'all\s+materials|' + re.escape(company['name']) + r')\b',
+            for_reference.group(1), re.I):
+        return None
+    return 'company-wide'
+
+
+def _saved_reviewed_quote(snapshot, material_id):
+    """Only a saved, reviewed offer from a verified owned document counts."""
+    if not snapshot.get('offers'):
+        return False
+    from .quote_service import blocking_reasons, company_for_offer
+
+    for offer in snapshot['offers']:
+        if (offer.get('status') != 'saved' or type(offer.get('version')) is not int or
+                offer['version'] <= 0 or company_for_offer(offer) != snapshot['company_id']):
+            continue
+        if not any((item.get('material') or {}).get('value') == material_id and
+                   (item.get('material') or {}).get('status') in {'extracted', 'corrected'}
+                   for item in offer.get('items', [])):
+            continue
+        try:
+            if not blocking_reasons(offer, date.fromisoformat(offer['as_of'])):
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return False
+
+
+def _profile_cover(row):
+    cover = row.get('stock_cover_days')
+    if cover is None:
+        return 'stock cover is unavailable'
+    rounded = Decimal(cover).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return f'about {format(rounded, "f")} days of stock cover at stated daily use'
+
+
+def _profile_gap(row):
+    cover, lead = row.get('stock_cover_days'), row.get('shortest_supplier_lead_days')
+    if cover is None or lead is None:
+        return 'A cover-to-lead comparison is unavailable.'
+    if Decimal(cover) < lead:
+        return 'Cover is below the shortest listed lead, a potential replenishment timing gap.'
+    if Decimal(cover) == lead:
+        return 'Cover only matches the shortest listed lead, leaving no timing buffer.'
+    return 'Cover exceeds the shortest listed lead in this simple profile comparison.'
+
+
+def _broad_inventory_answer(snapshot, scope, message):
+    company = snapshot['company']
+    rows = inventory_analytics(snapshot)['materials']
+    if scope != 'company-wide':
+        row = next((item for item in rows if item['material_id'] == scope), None)
+        if row is None:
+            return None
+        stock = (f"{row['stock']} {row['unit']}" if _decimal(row.get('stock')) is not None
+                 else 'unavailable')
+        daily = (f"{row['consumption_per_day']} {row['unit']} per day"
+                 if _decimal(row.get('consumption_per_day')) is not None else 'unavailable')
+        leads = sorted(row['suppliers'], key=lambda item: (item['lead_time_days'], item['name']))
+        options = '; '.join(f"{supplier_display_name(item['name'])}: listed "
+                            f"{item['lead_time_days']} days, {item['settlement_currency']}"
+                            for item in leads[:3])
+        lead = (f"Shortest listed supplier lead is {row['shortest_supplier_lead_days']} days. "
+                if row['shortest_supplier_lead_days'] is not None else
+                'No listed supplier lead time is available. ')
+        quote = ('A saved reviewed quote document for this material is in the workspace; '
+                 if _saved_reviewed_quote(snapshot, scope) else
+                 'No saved reviewed quote document for this material is in the workspace; ')
+        answer = (f"In the {company['name']} workspace profile dated {company['as_of']}, "
+                  f"{row['name']} stock is {stock}; stated daily use is {daily}, and "
+                  f"{_profile_cover(row)}. {lead}{_profile_gap(row)} "
+                  f"Supplier profile options: {options or 'none with a listed lead'}. "
+                  f"{quote}profile suppliers are not live price or capacity offers. "
+                  'Compare quote validity, capacity, quantity, currency and delivery against demand '
+                  'before choosing a source.')
+    else:
+        def priority(row):
+            cover, lead = row['stock_cover_days'], row['shortest_supplier_lead_days']
+            gap = Decimal(lead) - Decimal(cover) if cover is not None and lead is not None else None
+            return (0 if gap is not None and gap >= 0 else 1,
+                    -gap if gap is not None and gap > 0 else Decimal('0'),
+                    Decimal(cover) if cover is not None else Decimal('Infinity'),
+                    row['material_id'])
+
+        ranked = sorted(rows, key=priority)[:3]
+        summaries = []
+        for row in ranked:
+            leads = sorted(row['suppliers'], key=lambda item: (item['lead_time_days'], item['name']))
+            fastest = (f"{supplier_display_name(leads[0]['name'])} "
+                       f"({leads[0]['lead_time_days']} days listed)" if leads else
+                       'no listed supplier lead')
+            stock = (f"{row['stock']} {row['unit']}" if _decimal(row.get('stock')) is not None
+                     else 'stock unavailable')
+            cover = row['stock_cover_days']
+            cover_text = (f"about {Decimal(cover).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)} "
+                          'days cover' if cover is not None else 'cover unavailable')
+            lead = row['shortest_supplier_lead_days']
+            lead_text = f'{lead} days shortest listed lead' if lead is not None else 'lead unavailable'
+            timing = ('potential timing gap' if cover is not None and lead is not None and
+                      Decimal(cover) <= lead else 'no simple timing gap' if
+                      cover is not None and lead is not None else 'gap unknown')
+            summaries.append(f"{row['name']}: stock {stock}, {cover_text} vs {lead_text} "
+                             f"({timing}); profile source {fastest}.")
+        quoted = [row['name'] for row in ranked
+                  if _saved_reviewed_quote(snapshot, row['material_id'])]
+        quote_note = ('Saved reviewed quote documents in this workspace: ' +
+                      ', '.join(quoted) + '. ' if quoted else
+                      'No saved reviewed quote documents for these materials are in the workspace. ')
+        answer = (f"Company-wide inventory and sourcing overview for {company['name']} "
+                  f"(workspace profile dated {company['as_of']}):\n\n- " +
+                  '\n- '.join(summaries) + '\n\n' + quote_note +
+                  'Supplier profiles are not live quotes or confirmed availability. '
+                  'Compare quote validity, capacity, units and arrival against demand '
+                  'before choosing a source. Ask for the inventory and sourcing position of '
+                  'a named material to see more detail.')
+    return present_answer(answer, message, [supplier['name'] for supplier in company['suppliers']])
+
+
 def _prepare_context(snapshot):
     compact = _compact(snapshot)
     facts = _facts(snapshot, compact)
@@ -595,6 +761,20 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                                  'summary': 'Prepared a public research query for human consent.'}],
                 'evidence_ids': [], 'candidate': candidate, 'proposal_kind': 'research',
                 'parameters': deepcopy(research), 'utility': None}
+    broad_scope = _broad_inventory_scope(snapshot, message)
+    if broad_scope is not None:
+        answer = _broad_inventory_answer(snapshot, broad_scope, message)
+        if answer is not None:
+            if '{{' in answer or '}}' in answer:
+                raise OperatorValidationError('Answer contains an unresolved fact token.')
+            return {'status': 'completed', 'assistant_text': answer,
+                    'agent_steps': [{'agent': 'verifier',
+                                     'role': 'Read current fictional inventory and supplier profile facts.',
+                                     'status': 'completed', 'model': 'deterministic',
+                                     'provider_call': 'none', 'tool': 'inventory_sourcing_read',
+                                     'summary': 'Compared stock cover with listed supplier leads and reviewed quote state.'}],
+                    'evidence_ids': [], 'candidate': None, 'proposal_kind': None,
+                    'parameters': None, 'utility': None}
     prepared = (context_cache.get_or_build(cache_scope, snapshot, lambda: _prepare_context(snapshot))
                 if context_cache is not None else _prepare_context(snapshot))
     compact, facts = prepared['compact'], dict(prepared['facts'])

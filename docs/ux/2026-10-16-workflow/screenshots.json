@@ -1,0 +1,79 @@
+[
+  {
+    "file": "hosted-news-dark-desktop-r60.png",
+    "width": 1440,
+    "height": 900,
+    "sha256": "3f86b3da75e39bfd02269f6122383def0b8a7908ffbc9c48f0be0101c437d5b5",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-news-light-mobile-r60.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "a4ab8a5d6b2329c129820717b0cc4ce12ec2d7a410525d6aace15125d0388e33",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-news-detail-light-mobile-r60.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "5dc4f177dffed096b30f98d2e82d2d47dc4602afd47763dd97f6effba4a153a0",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-operator-full-draft-dark-desktop-r60.png",
+    "width": 1440,
+    "height": 900,
+    "sha256": "fe2bd8b6ac81dbfa905160e0007ea97034cce379cac126c9d149756fe7fc34bb",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-operator-full-draft-dark-mobile-r60.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "c429377f4ccf3cc05a6f22d3c4cb7353bdda6c6fbd38bc4e1331e9e1a598da87",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-voice-rfq-dark-mobile-r60.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "42692139844988865519af74ce65be580dcfd14c871df52d6a948510a0e1cdba",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-voice-news-light-desktop-r60.png",
+    "width": 1440,
+    "height": 900,
+    "sha256": "55f88075c0e7898128c75d74147107e39a3efc137b65da36f8971b7f20b38f3b",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-delay-dark-desktop-r60.png",
+    "width": 1440,
+    "height": 900,
+    "sha256": "1eb6f812b57ad62036f31004fa435ec7d91bd66c214ee4d925d1f27583b0af75",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-delay-light-mobile-r60.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "1914a978caaa54b00d36d205078e05c7b8d960b615954b830b5b7d38e621987b",
+    "revision": "closed-source-quote-demo-00060-bjq"
+  },
+  {
+    "file": "hosted-drafts-arrival-dark-desktop-r61.png",
+    "width": 1440,
+    "height": 900,
+    "sha256": "b098bc9724ea343d37a8b134cb382760518f89fd385068a23816d0decb745c96",
+    "revision": "closed-source-quote-demo-00061-49v"
+  },
+  {
+    "file": "hosted-drafts-arrival-dark-mobile-r61.png",
+    "width": 390,
+    "height": 844,
+    "sha256": "f6516f5016b0cc742977ec0de4218e2ea88ad9fbaad585bf15224c417ac8de90",
+    "revision": "closed-source-quote-demo-00061-49v"
+  }
+]

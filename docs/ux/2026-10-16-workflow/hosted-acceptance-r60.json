@@ -1,0 +1,368 @@
+{
+  "revision": "closed-source-quote-demo-00060-bjq",
+  "source": "7c1d81f",
+  "voiceInput": "Controlled Google TTS audio through actual browser Gemini Live WebSocket; physical microphone not exercised.",
+  "rfq": {
+    "draftsVisible": true,
+    "simulatedSentVisible": false,
+    "download": {
+      "contentType": "text/plain; charset=utf-8",
+      "correctQuantity": true,
+      "simulatedOutboxCount": 0,
+      "status": 200,
+      "unsent": true
+    }
+  },
+  "reviewGate": {
+    "before": {
+      "review": false,
+      "apply": false
+    },
+    "afterOpen": {
+      "review": true,
+      "apply": false
+    },
+    "afterReview": {
+      "apply": true
+    }
+  },
+  "recovery": {
+    "focused": "Original and changed plan",
+    "headingTop": 82.171875,
+    "noFeasible": true,
+    "overflow": false,
+    "width": 390
+  },
+  "newsLostSelection": {
+    "notice": true,
+    "askActions": 0,
+    "width": 390
+  },
+  "voiceRfq": {
+    "closedSockets": 0,
+    "controlledInput": true,
+    "events": [
+      {
+        "at": 1792108207858,
+        "type": "ready"
+      },
+      {
+        "at": 1792108219992,
+        "duration": 3.5031875,
+        "name": "rfq",
+        "type": "controlled_input"
+      },
+      {
+        "at": 1792108223489,
+        "name": "rfq",
+        "type": "controlled_input_end"
+      },
+      {
+        "at": 1792108224868,
+        "type": "tool_result"
+      },
+      {
+        "at": 1792108224874,
+        "type": "turn_complete"
+      },
+      {
+        "at": 1792108225809,
+        "type": "tool_result"
+      },
+      {
+        "at": 1792108225829,
+        "type": "turn_complete"
+      },
+      {
+        "at": 1792108226525,
+        "type": "first_verified_audio"
+      },
+      {
+        "at": 1792108242996,
+        "type": "turn_complete"
+      }
+    ],
+    "inputPeak": 0.99,
+    "outputAudioBytes": 793442,
+    "outputPeak": 1,
+    "physicalMicrophoneTested": false,
+    "ready": true,
+    "sockets": 1,
+    "states": [
+      "idle",
+      "connecting",
+      "listening",
+      "thinking",
+      "speaking"
+    ],
+    "stoppedTracks": 0,
+    "streams": 1,
+    "tools": [
+      {
+        "answer": "Current workspace facts are ready.",
+        "company": "solara-cables",
+        "context": 1,
+        "proposalKind": null,
+        "status": "completed",
+        "steps": [
+          "read_workspace"
+        ]
+      },
+      {
+        "answer": "Review the unsent RFQ draft for the current sourcing plan.",
+        "company": "solara-cables",
+        "context": 1,
+        "proposalKind": "rfq",
+        "status": "proposal",
+        "steps": [
+          "prepare_rfq"
+        ]
+      }
+    ],
+    "transcripts": [
+      {
+        "direction": "input",
+        "text": "Prepare an RFQ draft for the current sourcing plan."
+      },
+      {
+        "direction": "output",
+        "text": "The Request for Quotation "
+      },
+      {
+        "direction": "output",
+        "text": "draft for the"
+      },
+      {
+        "direction": "output",
+        "text": " copper sourcing plan"
+      },
+      {
+        "direction": "output",
+        "text": " is now ready."
+      },
+      {
+        "direction": "output",
+        "text": " It is addressed to Swift"
+      },
+      {
+        "direction": "output",
+        "text": " Copper Trading"
+      },
+      {
+        "direction": "output",
+        "text": " Ltd for 8,000"
+      },
+      {
+        "direction": "output",
+        "text": " kg of copper"
+      },
+      {
+        "direction": "output",
+        "text": " cathode, needed"
+      },
+      {
+        "direction": "output",
+        "text": " by November 5,"
+      },
+      {
+        "direction": "output",
+        "text": " 2026. Please"
+      },
+      {
+        "direction": "output",
+        "text": " note that this is an"
+      },
+      {
+        "direction": "output",
+        "text": " unsent draft"
+      },
+      {
+        "direction": "output",
+        "text": " and no communication"
+      },
+      {
+        "direction": "output",
+        "text": " has been sent to the"
+      },
+      {
+        "direction": "output",
+        "text": " supplier."
+      }
+    ]
+  },
+  "voiceNews": {
+    "closedSockets": 0,
+    "controlledInput": true,
+    "events": [
+      {
+        "at": 1792108657596,
+        "type": "ready"
+      },
+      {
+        "at": 1792108709451,
+        "duration": 6.98475,
+        "name": "news",
+        "type": "controlled_input"
+      },
+      {
+        "at": 1792108716467,
+        "name": "news",
+        "type": "controlled_input_end"
+      },
+      {
+        "at": 1792108717934,
+        "type": "tool_result"
+      },
+      {
+        "at": 1792108717948,
+        "type": "turn_complete"
+      },
+      {
+        "at": 1792108719038,
+        "type": "first_verified_audio"
+      },
+      {
+        "at": 1792108744523,
+        "type": "turn_complete"
+      }
+    ],
+    "inputPeak": 1,
+    "outputAudioBytes": 1226882,
+    "outputPeak": 1,
+    "physicalMicrophoneTested": false,
+    "ready": true,
+    "sockets": 1,
+    "states": [
+      "idle",
+      "connecting",
+      "listening",
+      "thinking",
+      "speaking"
+    ],
+    "stoppedTracks": 0,
+    "streams": 1,
+    "tools": [
+      {
+        "answer": "For Solara Cables, watch: Copper price falls for third day as US inflation shock, easing Chile strike risk spur selloff - Mining.com (Mining.com, published 2026-10-15); BHP sues union at Spence copper mine over 'illegal' production stoppages, lawsuit shows - Reuters (Reuters, published 2026-10-15). These are potential procurement exposures, not confirmed shipment delays. Check current supplier and route evidence before changing your plan. Coverage is partial or stale; check the source dates.",
+        "company": "solara-cables",
+        "context": 41,
+        "proposalKind": null,
+        "status": "completed",
+        "steps": [
+          "read_news"
+        ]
+      }
+    ],
+    "transcripts": [
+      {
+        "direction": "input",
+        "text": "What is happening in the world that can affect procurement for Solara cables? Please use the current news workspace."
+      },
+      {
+        "direction": "output",
+        "text": "On October 15, "
+      },
+      {
+        "direction": "output",
+        "text": "2026, Mining.com"
+      },
+      {
+        "direction": "output",
+        "text": " reported that"
+      },
+      {
+        "direction": "output",
+        "text": " copper prices fell"
+      },
+      {
+        "direction": "output",
+        "text": " due to a US inflation"
+      },
+      {
+        "direction": "output",
+        "text": " shock"
+      },
+      {
+        "direction": "output",
+        "text": " and easing strike risks"
+      },
+      {
+        "direction": "output",
+        "text": " in Chile, which could"
+      },
+      {
+        "direction": "output",
+        "text": " conditionally lower"
+      },
+      {
+        "direction": "output",
+        "text": " procurement costs."
+      },
+      {
+        "direction": "output",
+        "text": " Also"
+      },
+      {
+        "direction": "output",
+        "text": " on October 15,"
+      },
+      {
+        "direction": "output",
+        "text": " 2026,"
+      },
+      {
+        "direction": "output",
+        "text": " Reuters reported"
+      },
+      {
+        "direction": "output",
+        "text": " that BHP"
+      },
+      {
+        "direction": "output",
+        "text": " is suing a union"
+      },
+      {
+        "direction": "output",
+        "text": " at its Spence copper"
+      },
+      {
+        "direction": "output",
+        "text": " mine over production"
+      },
+      {
+        "direction": "output",
+        "text": " stoppages, creating"
+      },
+      {
+        "direction": "output",
+        "text": " a potential exposure"
+      },
+      {
+        "direction": "output",
+        "text": " for copper supplies."
+      },
+      {
+        "direction": "output",
+        "text": " You should check your current"
+      },
+      {
+        "direction": "output",
+        "text": " supplier and route"
+      },
+      {
+        "direction": "output",
+        "text": " evidence before taking"
+      },
+      {
+        "direction": "output",
+        "text": " any action."
+      }
+    ],
+    "muteControl": false
+  },
+  "voiceCleanup": {
+    "remainingLiveTracks": 0,
+    "restored": true
+  }
+}

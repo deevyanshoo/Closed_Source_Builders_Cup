@@ -1059,7 +1059,11 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
             started.set()
             await release.wait()
             await on_progress('started')
-            result = turn(session, 'completed', text='Current sourced answer.')
+            result = turn(session, 'completed', text='Current sourced answer.',
+                workspace={'research': {'status': 'completed', 'checked_at':
+                    '2026-10-15T00:00:00+00:00', 'answer': 'Current sourced answer.',
+                    'sources': [{'title': 'Mining.com.au',
+                        'url': 'https://mining.com.au/copper-report'}]}})
             result.update(read_only=False, session={'session_id': session.session_id,
                 'company_id': session.company_id, 'context_version': 1},
                 action_result={'tool': 'confirm_research', 'summary': 'Public research completed.'})
@@ -1082,6 +1086,10 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
         response = await asyncio.wait_for(provider.responses.get(), 2)
         assert response.id == 'late-real-call' and response.response['status'] == 'completed'
         assert response.response['read_only'] is False
+        guidance = response.response['required_spoken_response'].lower()
+        assert 'checked_at' in guidance and 'lookup' in guidance
+        assert 'publisher' in guidance and 'publication date' in guidance
+        assert 'conditional' in guidance and 'verify' in guidance
         assert provider.responses.empty()
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'new-attempt')
         reused = await asyncio.wait_for(provider.responses.get(), 2)

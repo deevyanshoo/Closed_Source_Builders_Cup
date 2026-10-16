@@ -53,6 +53,11 @@ CONSENT_ACTIVITY_GRACE_SECONDS = 5
 CUE_DELAY_SECONDS = 1.2
 CUE_CHUNK_BYTES = 12_000  # 250 ms of mono PCM16 at 24 kHz.
 CUE_SPOKEN_TEXT = 'I am checking the public sources now.'
+_RESEARCH_SPOKEN_GUIDANCE = (
+    'Give the sourced answer in two or three short sentences. Include research.checked_at '
+    'as the lookup time, not a source publication date; name the actual publisher, state '
+    'conditional impact and one practical verify step. Never invent a publication date. '
+    'Offer more detail on request.')
 VOICE_CUE_FILE = Path(__file__).resolve().parents[3] / 'demo_fixtures/voice-cues/research-checking.wav'
 _SLOTS = threading.BoundedSemaphore(MAX_CONNECTIONS)
 _START_LOCK = threading.Lock()
@@ -871,8 +876,7 @@ async def run_live_voice(
                         model_result.update(read_only=True, action_applied=False,
                                             tool_succeeded=research_succeeded(result))
                     if research_succeeded(result):
-                        model_result['required_spoken_response'] = (
-                            'Give the sourced answer in two or three short sentences; offer more detail on request.')
+                        model_result['required_spoken_response'] = _RESEARCH_SPOKEN_GUIDANCE
                     else:
                         model_result.update(tool_succeeded=False, action_applied=False,
                             required_spoken_response=result['assistant_text'])
@@ -1407,8 +1411,7 @@ async def run_live_voice(
                             if name == 'preview_supplier_delay':
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'confirm_research' and allowed_research and result['status'] == 'completed':
-                                model_result['required_spoken_response'] = (
-                                    'Give the sourced answer in two or three short sentences; offer more detail on request.')
+                                model_result['required_spoken_response'] = _RESEARCH_SPOKEN_GUIDANCE
                             if suppress_failed_speech:
                                 required_response = result['assistant_text']
                                 if name == 'confirm_research' and result['status'] == 'proposal' and research_gate is not None:

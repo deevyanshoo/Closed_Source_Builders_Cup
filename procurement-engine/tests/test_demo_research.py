@@ -220,6 +220,32 @@ def test_grounded_result_uses_one_search_tool_and_preserves_suggestions():
     assert 'generic lpg' in instruction.lower()
 
 
+def test_sdk_instruction_uses_trusted_lookup_date_and_source_scope():
+    client = FakeClient(_response(uri='https://mining.com.au/copper-report'))
+    result = VertexResearchProvider(client=client, clock=lambda: NOW).research(
+        'Latest public copper market news?')
+    assert result['status'] == 'completed'
+    assert result['checked_at'] == NOW.isoformat()
+    assert len(client.calls) == 1
+    call = client.calls[0]
+    assert call['contents'] == 'Latest public copper market news?'
+    assert call['model'] == 'gemini-3.5-flash-lite'
+    config = call['config']
+    assert len(config.tools) == 1 and config.tools[0].google_search is not None
+    assert config.automatic_function_calling.disable is True
+    assert config.max_output_tokens == 1800
+    instruction = config.system_instruction.lower()
+    assert '2026-10-15' in instruction
+    assert 'as of 2026-10-15 utc' in instruction
+    assert 'lookup' in instruction and 'publication date' in instruction
+    assert 'unverified' in instruction
+    assert 'actual publisher' in instruction
+    assert 'official lme' in instruction and 'primary source' in instruction
+    assert 'hedg' in instruction and 'secondary' in instruction
+    assert 'conditional' in instruction and 'verify' in instruction
+    assert 'two short sentences' in instruction and '80 to 130 words' in instruction
+
+
 def test_sdk_client_is_reused_per_adapter_and_logs_only_success_counts(monkeypatch, caplog):
     from google import genai
     response = _response()

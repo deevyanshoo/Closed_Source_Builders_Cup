@@ -333,10 +333,12 @@ def test_recovery_then_second_recovery_and_unsent_rfq_use_authoritative_tools():
         provider.offer_id, provider.delay_days = None, None
         rfq_turn = turn(client, headers, 'Prepare an unsent RFQ', key='rfq-turn')
         assert rfq_turn.status_code == 200, rfq_turn.text
-        assert client.get('/api/demo/session').json()['rfq'] is None
+        prepared_rfq = client.get('/api/demo/session').json()['rfq']
+        assert prepared_rfq['draft_id'] == rfq_turn.json()['proposal']['proposal_id']
         draft = confirm(client, headers, rfq_turn.json()['proposal'], key='apply-rfq')
         assert draft.status_code == 200, draft.text
         assert draft.json()['result']['status'] == 'draft_unsent'
+        assert draft.json()['result'] == prepared_rfq
         assert draft.json()['result']['plan_id'] == restored.json()['result']['scenario']['plan_id']
 
 

@@ -115,12 +115,21 @@ class NativeVoiceRfqTests(unittest.TestCase):
         assert 'No order commitment' in preview['body']
         assert model_result['proposal']['kind'] == 'rfq'
         state = self.client.get('/api/demo/session').json()
-        assert state['rfq'] is None and state['simulated_outbox'] == []
+        rfq = state['rfq']
+        assert rfq['draft_id'] == preview['draft_id'] == proposal['proposal_id']
+        assert rfq['text'] == preview['body']
+        assert rfq['plan_id'] == plan['plan_id']
+        assert rfq['offer_versions'] == plan['offer_versions']
+        assert result['session']['rfq'] == rfq
+        download = self.client.get(f"/api/demo/rfq/{rfq['draft_id']}/download")
+        assert download.status_code == 200 and download.text == rfq['text']
+        assert state['simulated_outbox'] == []
         applied = self.client.post('/api/demo/operator/confirm', headers=self.headers, json={
             'proposal_id': proposal['proposal_id'], 'reviewed': True,
             'expected_context_version': state['context_version'], 'idempotency_key': 'apply-rfq'})
         assert applied.status_code == 200, applied.text
-        assert applied.json()['result']['plan_id'] == plan['plan_id']
+        assert applied.json()['result'] == rfq
+        assert len(self.client.get('/api/demo/session').json()['drafts']) == 1
         assert self.client.get('/api/demo/session').json()['simulated_outbox'] == []
 
     def test_model_supplied_operate_message_cannot_use_typed_approval(self):
@@ -171,13 +180,14 @@ class NativeVoiceRfqTests(unittest.TestCase):
         assert result['proposal']['plan_id'] != baseline['plan_id']
         assert preview['plan_id'] == scenario['plan_id']
         assert 'Requested quantity: 8000 kg' in preview['body']
-        assert self.client.get('/api/demo/session').json()['rfq'] is None
+        assert self.client.get('/api/demo/session').json()['rfq']['plan_id'] == scenario['plan_id']
 
     def test_review_cannot_apply_after_active_plan_changes(self):
         plan_for_copper(self.client, self.headers)
         result, _ = ask_for_rfq(self.client, self.provider)
         proposal_id = result['proposal']['proposal_id']
         state = self.client.get('/api/demo/session').json()
+        assert self.client.get(f'/api/demo/rfq/{proposal_id}/download').status_code == 200
         changed = self.client.post('/api/demo/plan', headers=self.headers, json={
             'offer_ids': list(state['plan']['offer_versions']),
             'expected_versions': state['plan']['offer_versions'],
@@ -186,6 +196,7 @@ class NativeVoiceRfqTests(unittest.TestCase):
             'reporting_currency': 'USD', 'budget': '80000',
             'additional_cost_per_kg': '0.25'})
         assert changed.status_code == 200, changed.text
+        assert self.client.get(f'/api/demo/rfq/{proposal_id}/download').status_code == 404
         applied = self.client.post('/api/demo/operator/confirm', headers=self.headers, json={
             'proposal_id': proposal_id, 'reviewed': True,
             'expected_context_version': state['context_version'], 'idempotency_key': 'stale-rfq'})

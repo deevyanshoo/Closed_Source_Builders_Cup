@@ -809,14 +809,22 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         is_email = proposal['kind'] == 'simulate_email'
         if not is_email and proposal['kind'] != 'rfq':
             return
+        if not is_email:
+            # The unsent RFQ is complete at preparation time. Use the ledger ID
+            # for the canonical session draft so the owned download resolves.
+            rfq = deepcopy(rfq_preview)
+            rfq['draft_id'] = proposal['proposal_id']
         artifact = {'draft_id': proposal['proposal_id'], 'kind': 'email' if is_email else 'rfq',
             'status': 'draft_unsent', 'company_id': value.company_id,
             'material_id': parameters['material_id'] if is_email else rfq_preview['material'],
             'recipient_label': parameters['recipient_label'] if is_email else rfq_preview['supplier'],
             'subject': parameters['subject'] if is_email else f"Quotation request for {rfq_preview['material']}",
             'body': parameters['body'] if is_email else rfq_preview['text'],
-            'created_at': store.now().isoformat(), 'plan_id': proposal['plan_id'],
+            'created_at': store.now().isoformat() if is_email else rfq['created_at'],
+            'plan_id': proposal['plan_id'],
             'offer_versions': deepcopy(proposal['offer_versions'])}
+        if not is_email:
+            value.rfq = rfq
         value.drafts.append(artifact)
         del value.drafts[:-24]
         parameters['draft_preview'] = deepcopy(artifact)
@@ -2271,7 +2279,6 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 elif kind == 'review_quotes':
                     result = apply_reviewed_quotes(value, proposal['parameters'])
                 else:
-                    from .rfq import build_draft
                     plan = active_plan(value)
                     if plan is None or proposal['plan_id'] != plan.get('plan_id'):
                         raise SessionError('stale_plan', 'Active plan changed.', 409)
@@ -2280,10 +2287,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     chosen = next((o for o in selected if o['offer_id'] == plan.get('selected_offer_id')), None)
                     if chosen is None or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0':
                         raise SessionError('draft_unavailable', 'Current plan has no purchase to draft.', 409)
-                    result = build_draft(deepcopy(plan), deepcopy(chosen),
-                                         all_offers=deepcopy(selected), created_at=store.now())
-                    result['draft_id'] = proposal['proposal_id']
-                    value.rfq = deepcopy(result)
+                    if value.rfq is None or value.rfq.get('draft_id') != proposal['proposal_id']:
+                        raise SessionError('stale_proposal', 'Prepared RFQ is no longer current.', 409)
+                    result = deepcopy(value.rfq)
                 value.pending_proposal = None
                 response = {'status': 'applied', 'company_id': value.company_id,
                             'context_version': value.context_version, 'kind': kind,

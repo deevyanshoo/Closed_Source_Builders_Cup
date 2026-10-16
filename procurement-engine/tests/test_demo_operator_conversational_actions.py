@@ -1,4 +1,6 @@
 """Conversational approvals stay bound to the current reviewed workspace proposal."""
+from fastapi.testclient import TestClient
+
 from test_demo_operator_app import auth, demo, planned_demo, turn
 from test_demo_operator import Provider
 from test_demo_operator_smart import SmartProvider
@@ -127,15 +129,28 @@ def test_unsent_rfq_preparation_completes_as_discoverable_draft():
     provider = Provider(intent='rfq', evidence=(), action='rfq')
     with demo(provider) as client:
         headers = auth(client)
-        planned_demo(client, headers)
+        _, _, plan = planned_demo(client, headers)
         prepared = turn(client, headers, 'Create an unsent RFQ draft', key='draft-request')
         assert prepared.status_code == 200, prepared.text
         result = prepared.json()
         assert result['status'] == 'completed'
         assert result['action_result']['tool'] == 'prepare_rfq'
-        assert result['session']['drafts'][-1]['status'] == 'draft_unsent'
-        assert result['session']['rfq'] is None
-        assert result['session']['drafts'][-1]['body']
+        ledger = result['session']['drafts'][-1]
+        rfq = result['session']['rfq']
+        assert ledger['status'] == rfq['status'] == 'draft_unsent'
+        assert rfq['draft_id'] == ledger['draft_id'] == result['proposal']['proposal_id']
+        assert rfq['text'] == ledger['body'] and rfq['plan_id'] == plan['plan_id']
+        assert rfq['offer_versions'] == plan['offer_versions']
+        download = client.get(f"/api/demo/rfq/{ledger['draft_id']}/download")
+        assert download.status_code == 200 and download.text == rfq['text']
+        assert client.get('/api/demo/session').json()['rfq'] == rfq
+        with TestClient(client.app, base_url='https://demo.test') as foreign:
+            foreign.get('/api/demo/session')
+            denied = foreign.get(f"/api/demo/rfq/{ledger['draft_id']}/download")
+            assert denied.status_code == 404 and denied.json()['error']['code'] == 'draft_not_found'
+        replay = turn(client, headers, 'Create an unsent RFQ draft', key='draft-request')
+        assert replay.status_code == 200 and replay.json()['session']['rfq'] == rfq
+        assert len(client.get('/api/demo/session').json()['drafts']) == 1
 
 
 def test_simulated_email_draft_is_saved_without_outbox_delivery():

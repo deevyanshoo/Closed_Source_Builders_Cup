@@ -22,14 +22,17 @@ def client():
 def test_schemes_for_the_current_company_are_exported(client):
     value, headers = client
     response = value.post('/api/demo/carbon/schemes', headers=headers, json={
-        'inputs_by_scheme': {'in-msme-zed': {'enterprise_category': 'medium', 'certification_cost': '100000'}}})
+        'inputs_by_scheme': {'in-sidbi-green-finance': {'loan_amount': '1000000', 'current_rate_percent': '10',
+                                                        'offered_rate_percent': '9'}}})
     assert response.status_code == 200, response.text
     body = response.json()
     assert body['company_id'] == 'solara-cables'
     assert body['label'] == 'indicative, not financial or legal advice'
+    sidbi = next(row for row in body['matches'] if row['scheme_id'] == 'in-sidbi-green-finance')
+    assert sidbi['eligibility'] == 'possibly eligible, check conditions'
+    assert (sidbi['benefit']['amount'], sidbi['benefit']['direction']) == ('10000', 'interest_reduction')
     zed = next(row for row in body['matches'] if row['scheme_id'] == 'in-msme-zed')
-    assert zed['eligibility'] == 'possibly eligible, check conditions'
-    assert zed['saving']['amount'] == '50000'
+    assert zed['benefit_status'] == 'unavailable' and zed['benefit'] is None
     assert value.get('/api/demo/export').json()['carbon_schemes'] == body
 
 

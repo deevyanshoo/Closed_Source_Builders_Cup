@@ -65,54 +65,59 @@ def _value(raw, name):
     return Decimal(raw)
 
 
-def _saving(scheme, entered: dict) -> dict:
-    spec = scheme['saving']
-    known = {item['name']: item for item in spec['inputs']}
-    if not set(entered) <= set(known):
+def _benefit(scheme, entered: dict):
+    """Returns (benefit or None, missing input names). Unsupported calculations are refused here, not only in the UI."""
+    spec = scheme['benefit']
+    if spec['status'] != 'available':
+        if entered:
+            raise SchemeInputError(f"The benefit calculation is unavailable for {scheme['scheme_id']}: {spec['reason']}")
+        return None, []
+    names = [item['name'] for item in spec['inputs']]
+    if not set(entered) <= set(names):
         raise SchemeInputError(f"Unknown input for {scheme['scheme_id']}.")
-    shown, values, missing = [], {}, []
-    for item in spec['inputs']:
-        name = item['name']
-        if name in entered:
-            raw, source = entered[name], 'entered by you'
-        elif 'default' in item:
-            raw, source = item['default'], item['default_source']
-        else:
-            missing.append(name)
-            continue
-        if name == 'enterprise_category':
-            if raw not in spec['rates']:
-                raise SchemeInputError('enterprise_category must be micro, small or medium.')
-            values[name] = raw
-        else:
-            values[name] = _value(raw, name)
-        shown.append({'name': name, 'value': raw if name == 'enterprise_category' else nz.fmt(values[name]),
-                      'unit': item['unit'], 'source': source})
-    base = {'currency': spec['currency'], 'wording': 'approximate, based on these assumptions',
-            'formula': spec['text'], 'inputs': shown}
+    missing = [name for name in names if name not in entered]
     if missing:
-        return {'status': 'missing_inputs', 'amount': None, 'missing': missing, **base}
-    currency = spec['currency']
+        return None, missing
+    currency, kind = spec['currency'], spec['kind']
+    shown = [{'name': item['name'], 'value': entered[item['name']], 'unit': item['unit'], 'source': 'entered by you'}
+             for item in spec['inputs']]
+    label = spec['label']
+    direction = None
     with localcontext() as context:
         context.prec = nz.ARITHMETIC_PRECISION
-        if spec['formula'] in ('credit_value', 'avoided_certificates'):
-            tonnes, price = values['tonnes_reduced'], values['price_per_tonne']
+        if kind == 'hypothetical_gross_certificate_value':
+            count, price = _value(entered['issued_certificates'], 'issued_certificates'), _value(entered['price_per_certificate'], 'price_per_certificate')
+            amount = count * price
+            arithmetic = f'{nz.fmt(count)} certificates x {nz.fmt(price)} {currency}'
+        elif kind == 'first_year_simple_interest_difference':
+            loan = _value(entered['loan_amount'], 'loan_amount')
+            current = _value(entered['current_rate_percent'], 'current_rate_percent')
+            offered = _value(entered['offered_rate_percent'], 'offered_rate_percent')
+            if loan > Decimal(spec['max_loan']):
+                raise SchemeInputError('The loan amount is above the Rs 50 crore limit stated on the scheme page.')
+            if current > 100 or offered > 100:
+                raise SchemeInputError('Interest rates must be between 0 and 100 percent.')
+            amount = loan * (current - offered) / 100
+            direction = 'interest_reduction' if amount > 0 else 'extra_cost' if amount < 0 else 'no_difference'
+            arithmetic = f'{nz.fmt(loan)} {currency} x ({nz.fmt(current)}% - {nz.fmt(offered)}%) for the first year'
+        elif kind == 'gross_cbam_sensitivity':
+            quarter = entered['import_quarter']
+            if quarter not in spec['quarter_prices']:
+                raise SchemeInputError('No CBAM certificate price is published for that import quarter.')
+            tonnes, price = _value(entered['embedded_tonnes'], 'embedded_tonnes'), Decimal(spec['quarter_prices'][quarter])
             amount = tonnes * price
-            arithmetic = f"{nz.fmt(tonnes)} tCO2e x {nz.fmt(price)} {currency} per tCO2e"
-        elif spec['formula'] == 'subsidy_share':
-            category, cost = values['enterprise_category'], values['certification_cost']
-            rate = Decimal(spec['rates'][category])
-            amount = cost * rate
-            arithmetic = f"{nz.fmt(cost)} {currency} x {nz.fmt(rate * 100)}% ({category})"
-        elif spec['formula'] == 'rate_difference':
-            loan, current, green = values['loan_amount'], values['current_rate_percent'], values['green_rate_percent']
-            amount = loan * (current - green) / 100
-            arithmetic = f"{nz.fmt(loan)} {currency} x ({nz.fmt(current)}% - {nz.fmt(green)}%)"
+            arithmetic = f'{nz.fmt(tonnes)} tCO2e x {nz.fmt(price)} {currency} per certificate ({quarter} published price)'
+            label = label.format(quarter=quarter)
+            shown[0]['source'] = 'entered by you'
+            shown.append({'name': 'certificate_price', 'value': nz.fmt(price), 'unit': f'{currency} per tCO2e',
+                          'source': f'European Commission, price of CBAM certificates, {quarter}'})
         else:
-            raise ValueError(f"Unknown saving formula {spec['formula']}.")
-    suffix = ' per year' if spec['formula'] == 'rate_difference' else ''
-    return {'status': 'calculated', 'amount': nz.fmt(amount), **base,
-            'arithmetic': f'{arithmetic} = {nz.fmt(amount)} {currency}{suffix}'}
+            raise ValueError(f'Unknown benefit kind {kind}.')
+    benefit = {'kind': kind, 'amount': nz.fmt(amount), 'currency': currency, 'label': label,
+               'formula': spec['formula'], 'arithmetic': f'{arithmetic} = {nz.fmt(amount)} {currency}', 'inputs': shown}
+    if direction:
+        benefit['direction'] = direction
+    return benefit, []
 
 
 def find_schemes(registry: dict, company: dict, inputs_by_scheme: dict) -> dict:
@@ -125,18 +130,27 @@ def find_schemes(registry: dict, company: dict, inputs_by_scheme: dict) -> dict:
         reasons = _matched_on(registry, scheme, company)
         if not reasons:
             continue
+        benefit, missing = _benefit(scheme, inputs_by_scheme.get(scheme['scheme_id'], {}))
+        spec = scheme['benefit']
         matches.append({key: scheme[key] for key in ('scheme_id', 'country', 'official_name', 'publisher',
                                                      'official_url', 'checked_on', 'offers', 'offers_text',
                                                      'who', 'numbers_used')}
                        | {'eligibility': registry['match_wording'], 'matched_on': reasons,
-                          'input_fields': [dict(item) for item in scheme['saving']['inputs']],
-                          'saving': _saving(scheme, inputs_by_scheme.get(scheme['scheme_id'], {}))})
+                          'benefit_status': spec['status'], 'benefit_reason': spec.get('reason'),
+                          'benefit_label': spec.get('label'), 'benefit_formula': spec.get('formula'),
+                          'input_fields': [dict(item) for item in spec.get('inputs', [])],
+                          'missing_inputs': missing, 'benefit': benefit})
     for scheme_id in inputs_by_scheme:
         if scheme_id not in {row['scheme_id'] for row in matches}:
             raise SchemeInputError(f'{scheme_id} does not match this company.')
     countries = sorted({location['country'] for location in company.get('locations', [])})
+    unverified = {c: registry.get('not_verified', {})[c] for c in countries if c in registry.get('not_verified', {})}
+    reason = None
+    if not matches:
+        reason = (f"No scheme in registry {registry['registry_version']} matches {', '.join(countries)} or this "
+                  "company's export routes. Absence here is not evidence that no scheme exists.")
+        if unverified:
+            reason += ' Official sources for ' + ', '.join(unverified) + ' could not be verified in this pass.'
     return {'company_id': company['company_id'], 'registry_version': registry['registry_version'],
             'checked_on': registry['checked_on'], 'label': registry['label'], 'matches': matches,
-            'no_match_reason': None if matches else (
-                f"No scheme in registry {registry['registry_version']} matches {', '.join(countries)} or this "
-                "company's export routes. Absence here is not evidence that no scheme exists.")}
+            'not_verified_countries': unverified, 'no_match_reason': reason}

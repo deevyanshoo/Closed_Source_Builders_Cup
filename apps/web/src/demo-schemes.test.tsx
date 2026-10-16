@@ -3,48 +3,53 @@ import { describe, expect, it, vi } from 'vitest';
 import { requestSchemes, SchemesPanel } from './demo-schemes';
 import type { SchemeResult } from './demo-schemes';
 
-const zed = { scheme_id: 'in-msme-zed', country: 'India', official_name: 'MSME Sustainable (ZED) Certification Scheme', publisher: 'Ministry of Micro, Small and Medium Enterprises, Government of India', official_url: 'https://zed.msme.gov.in/subsidy-on-cost-of-certification', checked_on: '2026-10-15', offers: 'subsidy', offers_text: 'A subsidy on the cost of ZED certification.', who: 'MSMEs with Udyam Registration.', numbers_used: ['Subsidy on cost of certification: micro 80%, small 60%, medium 50%.'],
-  eligibility: 'possibly eligible, check conditions', matched_on: ['company location in India'],
-  input_fields: [{ name: 'enterprise_category', label: 'MSME category (micro, small or medium)', unit: 'category' }, { name: 'certification_cost', label: 'Certification cost you were quoted', unit: 'INR' }],
-  saving: { status: 'calculated', amount: '150000', currency: 'INR', wording: 'approximate, based on these assumptions', formula: 'certification cost x subsidy rate for your enterprise category', arithmetic: '250000 INR x 60% (small) = 150000 INR', inputs: [{ name: 'enterprise_category', value: 'small', unit: 'category', source: 'entered by you' }, { name: 'certification_cost', value: '250000', unit: 'INR', source: 'entered by you' }] } };
-const cbam = { ...zed, scheme_id: 'eu-cbam', official_name: 'Carbon Border Adjustment Mechanism (CBAM), definitive regime', offers: 'avoided_cost', matched_on: ['export route A to Hamburg, Germany carries steel'],
-  input_fields: [{ name: 'tonnes_reduced', label: 'Embedded emissions avoided', unit: 'tCO2e' }, { name: 'price_per_tonne', label: 'CBAM certificate price', unit: 'EUR per tCO2e', default: '82.32', default_source: 'European Commission, Price of CBAM certificates, Q3 2026, published 2026-10-05' }],
-  saving: { status: 'missing_inputs', amount: null, missing: ['tonnes_reduced'], currency: 'EUR', wording: 'approximate, based on these assumptions', formula: 'embedded tonnes avoided x CBAM certificate price', inputs: [] } };
-const result: SchemeResult = { company_id: 'terrapack', registry_version: 'carbon-schemes-v1', checked_on: '2026-10-15', label: 'indicative, not financial or legal advice', matches: [zed, cbam], no_match_reason: null } as unknown as SchemeResult;
+const base = { country: 'India', publisher: 'Ministry of MSME', checked_on: '2026-10-16', who: 'MSMEs with Udyam Registration.', eligibility: 'possibly eligible, check conditions', matched_on: ['company location in India'], numbers_used: ['Women-owned MSMEs: free ZED certification.'] };
+const zed = { ...base, scheme_id: 'in-msme-zed', official_name: 'MSME Sustainable (ZED) Certification Scheme', official_url: 'https://zed.msme.gov.in/subsidy-on-cost-of-certification', offers: 'subsidy', offers_text: 'A subsidy on the official certification cost.',
+  benefit_status: 'unavailable', benefit_reason: 'No current official ZED fee schedule is archived here, so no amount is calculated.', benefit_label: null, benefit_formula: null, input_fields: [], missing_inputs: [], benefit: null };
+const sidbi = { ...base, scheme_id: 'in-sidbi-green-finance', official_name: 'SIDBI Green Finance Scheme (GFS)', official_url: 'https://www.sidbi.in/en/green-finance', offers: 'green_financing', offers_text: 'Green project financing may be available.',
+  benefit_status: 'available', benefit_reason: null, benefit_label: 'first-year simple interest difference, not an offer', benefit_formula: 'loan amount x (current rate - offered rate)',
+  input_fields: [{ name: 'loan_amount', label: 'Loan amount', unit: 'INR' }, { name: 'current_rate_percent', label: 'Your current borrowing rate', unit: '% per year' }, { name: 'offered_rate_percent', label: 'Rate in an offer you actually received', unit: '% per year' }],
+  missing_inputs: [], benefit: { kind: 'first_year_simple_interest_difference', amount: '-200000', currency: 'INR', direction: 'extra_cost', label: 'first-year simple interest difference, not an offer', formula: 'f', arithmetic: '20000000 INR x (9% - 10%) for the first year = -200000 INR', inputs: [] } };
+const offset = { ...base, scheme_id: 'in-ccts-offset', official_name: 'Carbon Credit Trading Scheme (CCTS), offset mechanism', official_url: 'https://beeindia.gov.in/', offers: 'certificates', offers_text: 'Certificates for registered projects.',
+  benefit_status: 'available', benefit_reason: null, benefit_label: 'hypothetical gross certificate value, not issued credit or a sale', benefit_formula: 'issued certificates x price',
+  input_fields: [{ name: 'issued_certificates', label: 'Carbon Credit Certificates actually issued to you', unit: 'certificates' }, { name: 'price_per_certificate', label: 'Certificate price you assume', unit: 'INR per certificate' }],
+  missing_inputs: ['issued_certificates', 'price_per_certificate'], benefit: null };
+const result = { company_id: 'terrapack', registry_version: 'carbon-schemes-v1', checked_on: '2026-10-16', label: 'indicative, not financial or legal advice', matches: [zed, sidbi, offset], not_verified_countries: {}, no_match_reason: null } as unknown as SchemeResult;
 
-describe('carbon schemes and green finance (#109)', () => {
-  it('lists possible schemes with cautious wording, sources and the saving arithmetic', () => {
+describe('carbon programmes and green finance (#109, review fixes)', () => {
+  it('shows an unavailable benefit as a reason with no inputs and no number', () => {
     const html = renderToStaticMarkup(<SchemesPanel csrf="c" contextVersion={1} companyName="TerraPack Films" result={result} onResult={() => {}} />);
-    expect(html).toContain('Indicative, not financial or legal advice');
-    expect(html).toContain('Possibly eligible, check conditions');
+    expect(html).toContain('Benefit amount unavailable: No current official ZED fee schedule is archived here, so no amount is calculated.');
+    expect(html).not.toContain('MSME category');
     expect(html).toContain('href="https://zed.msme.gov.in/subsidy-on-cost-of-certification"');
-    expect(html).toContain('checked 2026-10-15');
-    expect(html).toContain('250000 INR x 60% (small) = 150000 INR');
-    expect(html).toContain('Approximate, based on these assumptions');
-    expect(html).toContain('Subsidy on cost of certification: micro 80%, small 60%, medium 50%.');
-    expect(html).toContain('Matched on: company location in India');
-    expect(html).toContain('Default 82.32: European Commission, Price of CBAM certificates, Q3 2026, published 2026-10-05');
-    expect(html).toContain('Enter embedded emissions avoided to calculate.');
-    expect(html).not.toMatch(/\bis eligible\b|\bwill save\b|\bguaranteed\b/i);
   });
 
-  it('says plainly when nothing matches and does not claim nothing exists', () => {
-    const empty = { ...result, matches: [], no_match_reason: 'No scheme in registry carbon-schemes-v1 matches Mexico or this company\'s export routes. Absence here is not evidence that no scheme exists.' } as SchemeResult;
+  it('labels the interest difference and shows extra cost distinctly', () => {
+    const html = renderToStaticMarkup(<SchemesPanel csrf="c" contextVersion={1} companyName="TerraPack Films" result={result} onResult={() => {}} />);
+    expect(html).toContain('First-year simple interest difference, not an offer');
+    expect(html).toContain('Extra cost: 20000000 INR x (9% - 10%) for the first year = -200000 INR');
+    expect(html).toContain('Green financing');
+    expect(html).not.toMatch(/saving|cheaper loan|tradeable credit|is eligible/i);
+  });
+
+  it('lists missing inputs before any number is shown', () => {
+    const html = renderToStaticMarkup(<SchemesPanel csrf="c" contextVersion={1} companyName="TerraPack Films" result={result} onResult={() => {}} />);
+    expect(html).toContain('Enter carbon credit certificates actually issued to you and certificate price you assume to see the hypothetical gross certificate value, not issued credit or a sale.');
+  });
+
+  it('says plainly when nothing matches, including countries not verified', () => {
+    const empty = { ...result, matches: [], not_verified_countries: { Mexico: 'page unreadable' }, no_match_reason: 'No scheme in registry carbon-schemes-v1 matches Mexico. Absence here is not evidence that no scheme exists. Official sources for Mexico could not be verified in this pass.' } as unknown as SchemeResult;
     const html = renderToStaticMarkup(<SchemesPanel csrf="c" contextVersion={1} companyName="ForgeLine" result={empty} onResult={() => {}} />);
     expect(html).toContain('Absence here is not evidence that no scheme exists.');
-  });
-
-  it('offers only the three MSME categories for the category input', () => {
-    const html = renderToStaticMarkup(<SchemesPanel csrf="c" contextVersion={1} companyName="TerraPack Films" result={result} onResult={() => {}} />);
-    expect(html).toMatch(/<option value="micro">Micro<\/option><option value="small">Small<\/option><option value="medium">Medium<\/option>/);
+    expect(html).toContain('Mexico: page unreadable');
   });
 
   it('posts only the entered values with the CSRF token and context version', async () => {
     const send = vi.fn(async () => new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    await requestSchemes(send as unknown as typeof fetch, 'csrf1', { 'in-msme-zed': { enterprise_category: 'small', certification_cost: '250000', unused: '' } }, 4);
+    await requestSchemes(send as unknown as typeof fetch, 'csrf1', { 'in-sidbi-green-finance': { loan_amount: '100', current_rate_percent: '', offered_rate_percent: '9' } }, 4);
     const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/demo/carbon/schemes');
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf1');
-    expect(JSON.parse(init.body as string)).toEqual({ inputs_by_scheme: { 'in-msme-zed': { enterprise_category: 'small', certification_cost: '250000' } }, expected_context_version: 4 });
+    expect(JSON.parse(init.body as string)).toEqual({ inputs_by_scheme: { 'in-sidbi-green-finance': { loan_amount: '100', offered_rate_percent: '9' } }, expected_context_version: 4 });
   });
 });

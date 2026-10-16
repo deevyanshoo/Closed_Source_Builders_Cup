@@ -42,10 +42,30 @@ def test_named_tools_declared_with_bounded_arguments():
     assert {'read_workspace','analyze_inventory','fill_buyer_form','load_sample_quotes',
             'review_sample_quotes','compare_suppliers','prepare_rfq','prepare_simulated_email',
             'navigate_workspace','operate_workspace','read_risks','read_news',
-            'read_carbon','read_shipments','prepare_shipment_recovery',
+            'read_carbon','read_shipments','preview_supplier_delay',
             'prepare_research','confirm_research','read_research'}==names
     assert not any(('confirm' in name or 'approve' in name) and name != 'confirm_research'
                    for name in names)
+
+
+def test_live_rejects_old_direct_recovery_tool_without_workspace_call():
+    async def scenario():
+        store, session = setup()
+        provider, socket = Provider(), Socket(start(session))
+        calls = []
+        async def tool(*args):
+            calls.append(args)
+            raise AssertionError('hidden action tool reached workspace')
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session, store=store,
+            operate_workspace=tool, workspace_tools=tool, client_factory=connection(provider)))
+        await next_type(socket, 'ready')
+        await provider.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='prepare_shipment_recovery', id='hidden-recovery',
+            args={'shipment_id':'shipment-1', 'delay_days':7})]), server_content=None))
+        error = await next_type(socket, 'error')
+        assert error['code'] == 'voice_invalid' and calls == []
+        await asyncio.wait_for(task, 2)
+    asyncio.run(scenario())
 
 
 def test_live_config_binds_exact_owned_material_ids_without_session_credentials():

@@ -1,4 +1,5 @@
 """Native live tools and shipment actions use the same current server evidence."""
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace as NS
@@ -44,6 +45,72 @@ def voice_tool(client, provider, name, args, call_id):
     return result, provider.tool_response.response
 
 
+def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_proposes():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        session = client.get('/api/demo/session').json()
+        headers = {'Origin': 'https://demo.test', 'X-CSRF-Token': session['csrf_token']}
+        plan = plan_for_copper(client, headers)
+        value = app.state.sessions.get(session['session_id'])
+        before = deepcopy((value.last_plan, value.recovery, value.rfq, value.pending_proposal,
+                           value.drafts, value.simulated_outbox))
+        question = 'What if our current copper cathode supplier is delayed by 7 days?'
+        preview, model = voice_tool(client, provider, 'preview_supplier_delay',
+                                    {'message': question}, 'supplier-what-if')
+        assert preview['status'] == 'completed' and preview['read_only'] is True, preview['assistant_text']
+        assert preview['proposal'] is None and 'session' not in preview and 'action_result' not in preview
+        assert preview['workspace']['judge_preview']['baseline_plan_id'] == plan['plan_id']
+        assert preview['workspace']['judge_preview']['scenario_plan_id'] is None
+        assert model['workspace']['judge_preview']['read_only'] is True
+        assert before == (value.last_plan, value.recovery, value.rfq, value.pending_proposal,
+                          value.drafts, value.simulated_outbox)
+        rejected, _ = voice_tool(client, provider, 'preview_supplier_delay',
+            {'message': 'Prepare recovery for the current copper cathode supplier delayed by 7 days.'},
+            'not-a-preview')
+        assert rejected['status'] == 'needs_clarification' and rejected['proposal'] is None
+        assert before == (value.last_plan, value.recovery, value.rfq, value.pending_proposal,
+                          value.drafts, value.simulated_outbox)
+        shipment = next(row for row in client.get('/api/demo/dispatch').json()['shipments']
+                        if row['recovery_available'])
+        prepared, _ = voice_tool(client, provider, 'operate_workspace',
+            {'message': f"Prepare recovery for shipment {shipment['shipment_id']} delayed by 7 days"},
+            'explicit-recovery')
+        assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
+        assert value.recovery is None
+
+
+def test_native_supplier_preview_uses_original_baseline_after_accepted_recovery():
+    from procure.demo.recovery import compare
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        session = client.get('/api/demo/session').json()
+        headers = {'Origin': 'https://demo.test', 'X-CSRF-Token': session['csrf_token']}
+        plan = plan_for_copper(client, headers)
+        value = app.state.sessions.get(session['session_id'])
+        accepted = compare(value.last_plan, value.plan_request, list(value.offers.values()),
+                           {plan['selected_offer_id']: 1}, today=datetime(2026, 10, 14).date())
+        accepted['scenario']['plan_id'] = 'accepted-scenario'
+        value.recovery = accepted
+        before = deepcopy(value.recovery)
+        result, _ = voice_tool(client, provider, 'preview_supplier_delay',
+            {'message': 'What if our current copper cathode supplier is delayed by 7 days?'},
+            'baseline-preview')
+        assert result['status'] == 'completed' and result['proposal'] is None, result
+        assert result['workspace']['judge_preview']['baseline_plan_id'] == plan['plan_id']
+        assert result['workspace']['judge_preview']['scenario_plan_id'] is None
+        assert value.recovery == before
+
+
 def test_native_reads_and_preparation_share_current_evidence():
     provider = NamedProvider()
 
@@ -85,13 +152,15 @@ def test_native_reads_and_preparation_share_current_evidence():
         assert 'required_spoken_response' not in model
         row = next(row for row in view['shipments'] if row['recovery_available'])
 
-        invalid, _ = voice_tool(client, provider, 'prepare_shipment_recovery',
-                                {'shipment_id': 'foreign-shipment', 'delay_days': 20}, 'foreign-1')
-        assert invalid['status'] == 'needs_clarification' and invalid['proposal'] is None
+        invalid, _ = voice_tool(client, provider, 'operate_workspace',
+            {'message': 'Prepare recovery for shipment foreign-shipment delayed by 20 days'},
+            'foreign-1')
+        assert invalid['status'] in {'needs_clarification', 'unavailable'} and invalid['proposal'] is None
         assert client.get('/api/demo/session').json()['recovery'] is None
 
-        prepared, model = voice_tool(client, provider, 'prepare_shipment_recovery',
-            {'shipment_id': row['shipment_id'], 'delay_days': 20}, 'prepare-1')
+        prepared, model = voice_tool(client, provider, 'operate_workspace',
+            {'message': f"Prepare recovery for shipment {row['shipment_id']} delayed by 20 days"},
+            'prepare-1')
         assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
         assert prepared['proposal']['parameters']['shipment_id'] == row['shipment_id']
         assert model['proposal'] == prepared['proposal']

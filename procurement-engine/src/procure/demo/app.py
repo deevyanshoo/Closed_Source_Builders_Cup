@@ -1608,7 +1608,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
                        'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
                        'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace',
-                       'read_carbon', 'read_shipments', 'prepare_shipment_recovery'}
+                       'read_carbon', 'read_shipments', 'preview_supplier_delay',
+                       'prepare_shipment_recovery'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
             with value.lock:
@@ -1644,7 +1645,29 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                   'status': 'completed', 'model': 'none', 'provider_call': 'none',
                                   'tool': name, 'summary': 'Validated owned workspace tool.'}],
                               'evidence_ids': [], 'proposal': None, 'read_only': True}
-                    if name in ('read_carbon', 'read_shipments'):
+                    if name == 'preview_supplier_delay':
+                        shape(args, ('message',))
+                        message = args['message']
+                        if not isinstance(message, str) or not 1 <= len(message.strip()) <= 1200:
+                            raise SessionError('invalid_message', 'State one supplier delay question.', 422)
+                        from .experience_service import baseline_snapshot, resolve_local_turn, judge_outcome
+                        local = resolve_local_turn(baseline_snapshot(operator_snapshot(value)),
+                                                   message, now=store.now())
+                        if local is None or local['kind'] not in {
+                                'read_only_preview', 'needs_input', 'unavailable'}:
+                            result.update(status='needs_clarification',
+                                assistant_text='Ask a what-if question with an explicit supplier delay in whole days. No recovery was prepared.')
+                        else:
+                            outcome = judge_outcome(local)
+                            if local['kind'] == 'read_only_preview':
+                                outcome = execute_judge_preview(value, outcome)
+                            result.update(status=outcome['status'],
+                                assistant_text=outcome['assistant_text'],
+                                agent_steps=outcome['agent_steps'],
+                                evidence_ids=outcome['evidence_ids'])
+                            if outcome.get('workspace') is not None:
+                                result['workspace'] = outcome['workspace']
+                    elif name in ('read_carbon', 'read_shipments'):
                         shape(args, ())
                         from .integration_tools import integration_read
                         payload = integration_read(operator_snapshot(value), name)

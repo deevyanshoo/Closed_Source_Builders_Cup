@@ -63,6 +63,44 @@ def test_preview_does_not_change_baseline_recovery_rfq_or_drafts():
         assert '14' in b['assistant_text']
         assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
 
+
+def test_native_pure_supplier_preview_replays_only_unchanged_workspace(monkeypatch):
+    import procure.demo.live_voice as live
+    from procure.demo.sessions import SessionError
+    async def bridge(socket, *, session, workspace_tools, **kwargs):
+        await socket.accept()
+        request = await socket.receive_json()
+        args = {'message': request['message']}
+        first = await workspace_tools('preview_supplier_delay', args,
+                                      session.context_version, 'pure-preview-key')
+        again = await workspace_tools('preview_supplier_delay', args,
+                                      session.context_version, 'pure-preview-key')
+        with session.lock:
+            session.selected_material_id = 'polymer'
+        try:
+            await workspace_tools('preview_supplier_delay', args,
+                                  session.context_version, 'pure-preview-key')
+        except SessionError as exc:
+            stale = exc.code
+        else:
+            stale = None
+        await socket.send_json({'first': first, 'again': again, 'stale': stale})
+        await socket.close()
+    monkeypatch.setattr(live, 'run_live_voice', bridge)
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.pending_proposal))
+        with c.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                 headers={'Origin':'https://demo.test'}) as socket:
+            socket.send_json({'message':'What if our current copper cathode supplier is delayed by 7 days?'})
+            result = socket.receive_json()
+        assert result['first'] == result['again']
+        assert result['first']['workspace']['judge_preview']['read_only'] is True
+        assert result['first']['proposal'] is None and result['stale'] == 'stale_context'
+        assert before == (value.last_plan,value.recovery,value.rfq,value.pending_proposal)
+
 def test_all_ten_company_route_read_contract_and_foreign_rejection():
     with client() as c:
         s,h=auth(c)

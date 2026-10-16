@@ -20,6 +20,7 @@ def test_pinned_vertex_live_setup_serializes_blocking_authoritative_reads():
 
     assert declarations['read_carbon']['behavior'] == 'BLOCKING'
     assert declarations['read_shipments']['behavior'] == 'BLOCKING'
-    assert 'behavior' not in declarations['prepare_shipment_recovery']
+    assert declarations['preview_supplier_delay']['behavior'] == 'BLOCKING'
+    assert 'prepare_shipment_recovery' not in declarations
     assert 'behavior' not in declarations['read_news']
     assert len(declarations) == len(config.tools[0].function_declarations)

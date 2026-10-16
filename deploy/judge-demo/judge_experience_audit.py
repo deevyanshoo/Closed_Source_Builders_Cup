@@ -31,6 +31,10 @@ INVENTORY = 'Analyze our inventory and sourcing across all materials'
 VOICE_LIMIT = 100
 CAPTION_GRACE_SECONDS = 2
 RESEARCH_TOOLS = {'prepare_research', 'confirm_research'}
+SAFE_TOOL_LABEL = re.compile(r'[a-z][a-z0-9_]{0,59}\Z')
+SAFE_STATUSES = {'proposal', 'completed', 'needs_input', 'ok', 'error',
+                 'unavailable', 'applied', 'success', 'partial'}
+PROPOSAL_KINDS = {'research', 'watch', 'recovery', 'rfq', 'simulate_email', 'review_quotes'}
 
 
 def stamp():
@@ -193,6 +197,27 @@ def evidence_check(view, cid, context, stage):
 
 def protected(session):
     return {field: session.get(field) for field in PROTECTED}
+
+
+def last_tool_diagnostic(result, cid, context):
+    value = result if isinstance(result, dict) else {}
+    steps = value.get('agent_steps')
+    steps = steps if isinstance(steps, list) else []
+    labels = [step.get('tool') for step in steps[:12] if isinstance(step, dict)]
+    proposal = value.get('proposal')
+    proposal = proposal if isinstance(proposal, dict) else {}
+    status = value.get('status')
+    kind = proposal.get('kind')
+    return {'tool_labels': [label if isinstance(label, str) and SAFE_TOOL_LABEL.fullmatch(label)
+                            else 'invalid_label' for label in labels],
+            'status': status if isinstance(status, str) and status in SAFE_STATUSES else 'other',
+            'company_context_match': value.get('company_id') == cid and
+            value.get('context_version') == context,
+            'read_only': value.get('read_only') if type(value.get('read_only')) is bool else None,
+            'has_proposal': value.get('proposal') is not None,
+            'has_session': value.get('session') is not None,
+            'has_action': value.get('action_result') is not None,
+            'proposal_kind': kind if isinstance(kind, str) and kind in PROPOSAL_KINDS else None}
 
 
 def steps_read_only(result, stage):
@@ -437,6 +462,7 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
     tool_time = None
     audio_bytes = 0
     completion_deadline = None
+    answer_completion_seen = False
     pre_answer_completions = 0
     research_phases = []
 
@@ -507,8 +533,11 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                         output_events[:] = output_events[-16:]
                 elif event_type == 'tool_result':
                     result = event.get('result') or {}
+                    row['last_tool_diagnostic'] = last_tool_diagnostic(result, cid, context)
+                    receipt.flush()  # Keep the failing tool's safe shape before strict checks.
                     labels = [step.get('tool') for step in result.get('agent_steps', [])]
-                    tools.extend(str(label)[:60] for label in labels if label)
+                    tools.extend(label if isinstance(label, str) and SAFE_TOOL_LABEL.fullmatch(label)
+                                 else 'invalid_label' for label in labels if label)
                     if any(isinstance(label, str) and label in RESEARCH_TOOLS for label in labels):
                         trace()
                         receipt.flush()
@@ -551,6 +580,7 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                 elif event_type == 'audio' and validated_tool:
                     check(event.get('sample_rate_hertz') == 24000, 'voice:audio', 'output_sample_rate')
                     audio_bytes += len(base64.b64decode(event.get('data', ''), validate=True))
+                    answer_completion_seen = False
                     completion_deadline = None  # More answer audio requires a later completion.
                     if first_audio is None:
                         first_audio = round((time.monotonic() - started) * 1000)
@@ -562,14 +592,20 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                         output_events.clear()
                         continue  # An ungrounded greeting cannot finish the question.
                     if not validated_tool or audio_bytes < 10000:
+                        answer_completion_seen = False
                         pre_answer_completions += 1
                         trace()
                         receipt.flush()
                         continue  # A tool-transition completion precedes the spoken answer.
                     await sender
+                    answer_completion_seen = True
                     completion_deadline = time.monotonic() + CAPTION_GRACE_SECONDS
+                if answer_completion_seen and completion_deadline is None:
+                    saw_input, spoke_answer = trace()
+                    if saw_input and spoke_answer and validated_tool and audio_bytes >= 10000:
+                        break  # Late caption after grace belongs to the completed answer.
             saw_input, spoke_answer = trace()
-            check(completion_deadline is not None, 'voice:turn', 'turn_not_complete')
+            check(answer_completion_seen, 'voice:turn', 'turn_not_complete')
             check(saw_input, 'voice:turn', 'input_intent_missing')
             check(validated_tool and spoke_answer and audio_bytes >= 10000,
                   'voice:turn', 'ungrounded_or_silent_turn')
@@ -581,6 +617,18 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
         if not sender.done():
             sender.cancel()
         await asyncio.gather(sender, return_exceptions=True)
+
+
+async def failed_voice_state(client, row, receipt, cid, context, before):
+    try:
+        after = await asyncio.to_thread(client.json, 'voice:after_failure', '/api/demo/session')
+        row['failed_voice_state'] = {
+            'protected_state_unchanged': protected(after) == before,
+            'owned_context': after.get('company_id') == cid and
+            after.get('context_version') == context}
+        receipt.flush()
+    except Exception:
+        pass  # A diagnostic read must not replace the original voice failure.
 
 
 async def voice_visit(base, profile, wav, kind, receipt):
@@ -611,20 +659,32 @@ async def voice_visit(base, profile, wav, kind, receipt):
         row['stage'] = 'socket'
         receipt.flush()
         cookie = '; '.join(c.name + '=' + c.value for c in client.session.cookies)
-        async with connect(base.replace('https:', 'wss:') + '/api/demo/voice/live',
-                           origin=base, additional_headers={'Cookie': cookie},
-                           max_size=1_024_000, open_timeout=20, close_timeout=5) as socket:
-            await socket.send(json.dumps({'type': 'start', 'csrf_token': session['csrf_token'],
-                                          'expected_context_version': context}))
-            ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
-            check(ready.get('type') == 'ready', 'voice:ready', 'not_ready')
-            row['stage'] = 'turn'
-            receipt.flush()
-            try:
-                await voice_turn(socket, data, kind, cid, context,
-                                 session['plan']['plan_id'], row, receipt)
-            finally:
-                await socket.send(json.dumps({'type': 'stop'}))
+        try:
+            async with connect(base.replace('https:', 'wss:') + '/api/demo/voice/live',
+                               origin=base, additional_headers={'Cookie': cookie},
+                               max_size=1_024_000, open_timeout=20, close_timeout=5) as socket:
+                await socket.send(json.dumps({'type': 'start', 'csrf_token': session['csrf_token'],
+                                              'expected_context_version': context}))
+                ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
+                check(ready.get('type') == 'ready', 'voice:ready', 'not_ready')
+                row['stage'] = 'turn'
+                receipt.flush()
+                voice_failed = False
+                try:
+                    await voice_turn(socket, data, kind, cid, context,
+                                     session['plan']['plan_id'], row, receipt)
+                except Exception:
+                    voice_failed = True
+                    raise
+                finally:
+                    try:
+                        await socket.send(json.dumps({'type': 'stop'}))
+                    except Exception:
+                        if not voice_failed:
+                            raise
+        except Exception:
+            await failed_voice_state(client, row, receipt, cid, context, before)
+            raise
         after = await asyncio.to_thread(client.json, 'voice:after', '/api/demo/session')
         check(after.get('company_id') == cid and after.get('context_version') == context and
               protected(after) == before, 'voice:after', 'protected_state_changed')

@@ -56,6 +56,33 @@ def test_supplier_delay_binds_owned_current_shipment_without_mutation():
     assert state['plan']['plan_id'] == 'p1'
 
 
+def test_selected_material_supplier_alias_requires_one_current_owned_baseline_shipment():
+    state = snapshot()
+    material = state['selected_material_id']
+    state['plan'] = {'plan_id': 'p1', 'company_id': state['company_id'], 'material': material,
+                     'selected_offer_id': 'o1', 'offer_versions': {'o1': 2}}
+    row = {'shipment_id': 's1', 'company_id': state['company_id'], 'plan_id': 'p1',
+           'material_id': material, 'offer_id': 'o1', 'offer_version': 2,
+           'recovery_available': True, 'route': None}
+    state['shipments'] = {'shipments': [row]}
+    question = 'What if our current copper cathode supplier is delayed by 7 days?'
+    resolved = resolve_judge_turn(state, question, now=NOW)
+    assert resolved['kind'] == 'read_only_preview'
+    assert resolved['preview_request']['shipment_id'] == 's1'
+    assert resolved['preview_request']['delay_days_by_offer'] == {'o1': 7}
+    state['shipments']['shipments'].append({**row, 'shipment_id': 's2'})
+    assert resolve_judge_turn(state, question, now=NOW)['kind'] == 'needs_input'
+    state['shipments']['shipments'] = [{**row, 'offer_version': 3}]
+    assert resolve_judge_turn(state, question, now=NOW)['kind'] == 'needs_input'
+    state['shipments']['shipments'] = [row]
+    state['selected_material_id'] = 'polymer'
+    assert resolve_judge_turn(state, question, now=NOW)['kind'] == 'needs_input'
+    state['selected_material_id'] = material
+    foreign = resolve_judge_turn(state,
+        'What if LoomWorks current copper cathode supplier is delayed by 7 days?', now=NOW)
+    assert foreign['kind'] == 'needs_input' and foreign['missing_inputs'] == ['company']
+
+
 def test_suez_does_not_infer_route_from_supplier_or_country():
     state = snapshot()
     result = resolve_judge_turn(state, 'What if Suez delays shipping by 14 days?', now=NOW)

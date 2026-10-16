@@ -216,7 +216,10 @@ INSTRUCTION = (
     "explicit buyer inputs, load_sample_quotes to load drafts, review_sample_quotes to "
     "prepare a review, compare_suppliers for a saved-quote plan, and navigate_workspace "
     "to show the requested view. Use operate_workspace for complex analysis, news risks, "
-    "and supplier-delay recovery. For any request to draft or prepare an RFQ or request "
+    "and explicitly requested recovery preparation. For a supplier-delay what-if question, "
+    "use preview_supplier_delay with the user's exact words; it returns a read-only preview "
+    "or asks for missing details. Do not use operate_workspace or action tools for a what-if. "
+    "For any request to draft or prepare an RFQ or request "
     "for quotation for the current sourcing plan, use prepare_rfq. It uses the current "
     "reviewed plan and selected quote; if there is no eligible purchase, explain what "
     "needs review. Never substitute a simulated email for an RFQ. Use "
@@ -249,8 +252,8 @@ INSTRUCTION = (
     "read_workspace.plan.alternatives are quote scenarios, not planned shipments; mention unselected arrival dates "
     "only if asked and label them as quote alternatives, including infeasibility. "
     "Never infer a carbon total, route, carrier status or shipment delay from other facts. "
-    "For an explicitly named current linked shipment and whole delay days, use prepare_shipment_recovery; "
-    "it only prepares a recovery proposal for on-screen human review and never applies the plan. "
+    "For an explicit request to prepare recovery, use operate_workspace with the user's exact "
+    "request; it may prepare a proposal for on-screen human review but never applies the plan. "
     "Summarize two relevant developments with publication dates, named sources, conditional company impact "
     "and a practical next step in three or four short sentences. Never just report the number of signals. "
     "Describe missing or stale coverage honestly. Only when the user explicitly requests additional "
@@ -369,7 +372,10 @@ def _spoken_confirmation(value: str) -> bool:
                        'confirmresearch', 'iconfirm', 'yesstartresearch',
                        'yesconfirmresearch', 'iconfirmresearch',
                        'iconfirmstarttheresearch', 'starttheresearch',
-                       'yespleasestarttheresearch'}
+                       'yespleasestarttheresearch',
+                       'yesiconfirmpleasestartthatonlineresearch',
+                       'yespleasestartonlineresearch',
+                       'yesiconfirmpleasestarttheresearch'}
 
 
 def _spoken_negation(value: str) -> bool:
@@ -454,7 +460,9 @@ def _config(company=None):
         key: {'type': 'string', 'maxLength': 40} for key in
         ('quantity', 'current_stock', 'budget', 'additional_cost_per_unit', 'need_by')}}
     specs = [
-        ('operate_workspace', 'Multi-agent grounded answer, recovery or reviewed RFQ proposal.',
+        ('operate_workspace', 'Grounded answer or an explicitly requested reviewed recovery or RFQ proposal; not for what-if previews.',
+         {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
+        ('preview_supplier_delay', 'Read-only supplier-delay what-if preview from current owned baseline evidence; requires the exact user question and never prepares an action.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
         ('prepare_research', 'Prepare an exact public query for visible human consent; never searches or approves.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
@@ -465,10 +473,6 @@ def _config(company=None):
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
         ('read_carbon', 'Read current saved material and entered-freight estimates with cited calculator sources; a missing combined total can still have component estimates.', {}, []),
         ('read_shipments', 'Read current company planning shipments and demand scenarios; identify plan-linked inbound rows.', {}, []),
-        ('prepare_shipment_recovery', 'Prepare a reviewed recovery proposal for one current eligible shipment and an explicit whole-day delay; never applies it.',
-         {'shipment_id': {'type': 'string', 'minLength': 1, 'maxLength': 180},
-          'delay_days': {'type': 'integer', 'minimum': 0, 'maximum': 3650}},
-         ['shipment_id', 'delay_days']),
         ('read_workspace', 'Read current company, buyer form, current selected material, news, quotes and plan facts. Omit material_id to resolve the current selection.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
         ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
@@ -508,7 +512,8 @@ def _config(company=None):
     declarations = [types.FunctionDeclaration(name=name, description=description,
         parameters_json_schema={'type': 'object', 'additionalProperties': False,
                                 'properties': properties, 'required': required},
-        behavior=(types.Behavior.BLOCKING if name in {'read_carbon', 'read_shipments'} else None))
+        behavior=(types.Behavior.BLOCKING if name in {
+            'read_carbon', 'read_shipments', 'preview_supplier_delay'} else None))
         for name, description, properties, required in specs]
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
@@ -1181,9 +1186,9 @@ async def run_live_voice(
                         for call in calls:
                             name = getattr(call, 'name', None)
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
+                                     'preview_supplier_delay',
                                      'prepare_research', 'confirm_research', 'read_research',
                                      'read_risks', 'read_news', 'read_carbon', 'read_shipments',
-                                     'prepare_shipment_recovery',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
                                      'navigate_workspace'}
@@ -1199,14 +1204,7 @@ async def run_live_voice(
                                 raise _Invalid()
                             if name in ('read_carbon', 'read_shipments') and args:
                                 raise _Invalid()
-                            if name == 'prepare_shipment_recovery' and (
-                                    set(args) != {'shipment_id', 'delay_days'} or
-                                    not isinstance(args['shipment_id'], str) or
-                                    not 0 < len(args['shipment_id']) <= 180 or
-                                    type(args['delay_days']) is not int or
-                                    not 0 <= args['delay_days'] <= 3650):
-                                raise _Invalid()
-                            if name == 'operate_workspace' and (set(args) != {'message'} or
+                            if name in {'operate_workspace', 'preview_supplier_delay'} and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
                                 raise _Invalid()
@@ -1406,6 +1404,8 @@ async def run_live_voice(
                             _selected_purchase_model_result(name, result, model_result, active_plan)
                             if name in {'prepare_research','operate_workspace'} and research_gate is not None:
                                 model_result['required_spoken_response'] = judge_research_spoken_response(result,research_gate['query'])
+                            if name == 'preview_supplier_delay':
+                                model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'confirm_research' and allowed_research and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = (
                                     'Give the sourced answer in two or three short sentences; offer more detail on request.')

@@ -275,12 +275,52 @@ def test_voice_research_rejects_negation_and_replaced_proposal():
 
 def test_confirmation_phrases_reject_ambiguous_or_negated_speech():
     for text in ('confirmed', 'I confirm', 'yes, start research', 'confirm research',
-                 'yes, confirmed', 'it is confirmed', "it's confirmed"):
+                 'yes, confirmed', 'it is confirmed', "it's confirmed",
+                 'Yes, I confirm. Please start that online research.',
+                 'Yes, please start online research.',
+                 'Yes, I confirm. Please start the research.'):
         assert live_voice._spoken_confirmation(text), text
     for text in ('yes', 'no', 'do not confirm research', 'I confirmed earlier',
                  'confirmed, but cancel that', 'send the supplier email',
-                 'yes, maybe confirmed', "it's confirmed, no", 'that is confirmed'):
+                 'yes, maybe confirmed', "it's confirmed, no", 'that is confirmed',
+                 'No, I confirm. Please start that online research.',
+                 'Yes, I confirm. Please do not start that online research.',
+                 'Yes, I confirm, please start that online research after checking every detail again now.'):
         assert not live_voice._spoken_confirmation(text), text
+
+
+def test_exact_hosted_confirmation_requires_readback_and_independent_verifier_once():
+    async def check():
+        phrase = 'Yes, I confirm. Please start that online research.'
+        verified = []
+        searches = []
+        async def verifier(clip):
+            verified.append(len(clip))
+            return phrase
+        async def research(args, version, key, on_progress):
+            searches.append((args, version, key))
+            await on_progress('started')
+            return turn(session, 'completed', text='Sourced answer ready.')
+        _, session, socket, provider, calls, task = await scenario(
+            verifier=verifier, research=research)
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.',
+                              complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', phrase, finished=None)
+        assert (await socket.next('transcript', 'input'))['text'] == phrase
+        await provider.activity('ACTIVITY_START', '0.100s')
+        await provider.activity('ACTIVITY_END', '0.600s')
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
+        assert (await socket.next('research_progress'))['phase'] == 'started'
+        assert (await socket.next('tool_result'))['result']['status'] == 'completed'
+        assert (await socket.next('research_progress'))['phase'] == 'completed'
+        assert len(verified) == 1 and verified[0] >= 8000
+        assert len(searches) == 1 and searches[0][0] == {'proposal_id': 'proposal-1'}
+        assert [name for name, *_ in calls] == ['prepare_research']
+        await finish(socket, task)
+    asyncio.run(check())
 
 
 def test_missing_pending_research_never_calls_confirmation():

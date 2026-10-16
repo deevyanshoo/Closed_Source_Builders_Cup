@@ -258,10 +258,19 @@ def _preview(snapshot, message):
                 and row.get('plan_id') == plan.get('plan_id')
                 and row.get('material_id') == material and row.get('offer_id') == plan.get('selected_offer_id')
                 and row.get('offer_version') == (plan.get('offer_versions') or {}).get(row.get('offer_id'))]
+    selected = next((item for item in snapshot['company'].get('materials', [])
+                     if item.get('material_id') == material), None)
+    selected_supplier_alias = (selected is not None
+        and snapshot.get('selected_material_id') in (None, material)
+        and plan.get('company_id') == snapshot['company_id'] and plan.get('material') == material
+        and bool(re.search(r'\b(?:current|selected|this)\s+(?:'
+            + '|'.join(re.escape(label) for label in (selected['material_id'], selected['name']))
+            + r')\s+supplier\b', message, re.I)))
     named = [row for row in eligible if row.get('shipment_id') and row['shipment_id'] in message]
     if named:
         eligible = named
-    elif not route_question and not re.search(r'\b(current|selected|this)\s+(?:inbound\s+)?shipment\b', message, re.I):
+    elif not route_question and not (selected_supplier_alias or re.search(
+            r'\b(current|selected|this)\s+(?:inbound\s+)?shipment\b', message, re.I)):
         eligible = []
     if route_question:
         # Dispatch currently has no declared route. Only an explicit owned binding qualifies.

@@ -93,4 +93,5 @@ def test_typed_shipment_delay_prepares_reviewed_recovery_and_unsent_rfq(demo):
 def test_native_voice_declares_grounded_integration_tools():
     config = live_voice._config()
     tools = {tool.name for tool in config.tools[0].function_declarations}
-    assert {'read_carbon', 'read_shipments', 'prepare_shipment_recovery'} <= tools
+    assert {'read_carbon', 'read_shipments', 'preview_supplier_delay'} <= tools
+    assert 'prepare_shipment_recovery' not in tools

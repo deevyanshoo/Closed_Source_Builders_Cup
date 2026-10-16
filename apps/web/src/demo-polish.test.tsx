@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { OfferView, PlanView } from './demo-api';
 import { CompanyOverview } from './demo-company-news';
-import { applyDemoTitle, DEMO_TITLE, roundDecimalText } from './demo-display';
+import { applyDemoTitle, COMPARISON_PRICE_HEADER, comparisonUnitPriceText, coverReachesLead, originalQuotePriceText, roundDecimalText, stockCoverText } from './demo-display';
 import { formatOperatorAttention } from './demo-operator';
 import { PlanResults } from './demo-page';
 
@@ -24,18 +24,40 @@ describe('hosted demo polish (#107)', () => {
     expect(roundDecimalText('not a number', 1)).toBe('not a number');
   });
 
-  it('gives /demo its own browser tab title', () => {
-    const doc = { title: 'Closed Source | Planning' };
+  it('leaves the ZOORQ browser title alone (the legacy title change is dropped)', () => {
+    const doc = { title: 'ZOORQ - A product by ClosedSource' };
     applyDemoTitle(doc);
-    expect(DEMO_TITLE).toBe('Closed Source | Hosted demo');
-    expect(doc.title).toBe(DEMO_TITLE);
+    expect(doc.title).toBe('ZOORQ - A product by ClosedSource');
   });
 
-  it('labels the quoted unit price and says the total includes the extra cost', () => {
+  it('says about when stock cover is rounded and keeps the exact threshold', () => {
+    expect(stockCoverText('6.0000600006000060000600006')).toBe('about 6.0');
+    expect(stockCoverText('6.96')).toBe('about 7.0');
+    expect(stockCoverText('6.5')).toBe('6.5');
+    expect(stockCoverText('12')).toBe('12');
+    // 6.96 days displays as about 7.0 but is still below a 7-day lead
+    expect(coverReachesLead('6.96', 7)).toBe(true);
+    expect(coverReachesLead('7', 7)).toBe(true);
+    expect(coverReachesLead('7.01', 7)).toBe(false);
+  });
+
+  it('labels a normalised cross-currency value as the comparison price and keeps the original quote separately', () => {
+    expect(COMPARISON_PRICE_HEADER).toBe('Comparison unit price');
+    const plan = { reporting_currency: 'USD', quantity_unit: 'kg' } as unknown as PlanView;
+    const alternative = { offer_id: 'q2', unit_price_per_unit: '10', unit_price_per_kg: '10' } as unknown as PlanView['alternatives'][number];
+    expect(comparisonUnitPriceText(alternative, plan)).toBe('10 USD/kg (reporting currency, after unit and FX normalisation)');
+    const euroQuote = { offer_id: 'q2', items: [{ pricing: { value: { type: 'fixed', unit_price: { amount: '8.00', currency: 'EUR' }, per_unit: 'kg' } } }] } as unknown as OfferView;
+    expect(originalQuotePriceText(euroQuote)).toBe('8.00 EUR per kg as quoted');
+    const tonne = { offer_id: 'q1', items: [{ pricing: { value: { unit_price: { amount: '9412.50', currency: 'USD' }, per_unit: 'tonne' } } }] } as unknown as OfferView;
+    expect(originalQuotePriceText(tonne)).toBe('9412.50 USD per tonne as quoted');
+    expect(originalQuotePriceText({ offer_id: 'x', items: [] } as unknown as OfferView)).toBe('Original quote price not stated');
+  });
+
+  it('says the total includes the extra cost', () => {
     const offer = { offer_id: 'q1', document: { filename: 'quote.csv' } } as unknown as OfferView;
     const plan = { plan_id: 'p1', synthetic: true, decision_date: '2026-10-14', need_by: '2026-10-30', material: 'copper', quantity_kg: '8000', current_stock_kg: '0', required_purchase_kg: '8000', reporting_currency: 'USD', assumptions: { additional_cost_per_kg: '0.25', fx_source: 'synthetic' }, alternatives: [{ offer_id: 'q1', supplier: 'Swift [SYNTHETIC]', feasible: true, reasons: [], arrival_date: '2026-10-20', unit_price_per_kg: '10', total_cost: '82000', quantity_kg: '8000' }], selected_offer_id: 'q1', total_cost: '82000', explanation: 'Swift is cheapest.', forecast_action: 'ABSTAIN', customer_savings: null, offer_versions: { q1: 1 } } as unknown as PlanView;
     const html = renderToStaticMarkup(<PlanResults plan={plan} offers={[offer]} />);
-    expect(html).toContain('<th>Quoted unit price</th>');
+    // The unit price header moves to COMPARISON_PRICE_HEADER when the coordinator updates demo-page.tsx (review, 16 Oct).
     expect(html).toContain('<th>Total<small>includes extra cost</small></th>');
     expect(html).not.toContain('<th>Unit price</th>');
   });

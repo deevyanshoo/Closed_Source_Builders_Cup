@@ -72,10 +72,13 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                       'I can explain the saved calculation and its sources; missing weights or distances are not guessed.')
         else:
             rows = result.get('suppliers', [])
-            row = next((r for r in rows if r['offer_id'] == plan.get('selected_offer_id')), None)
-            row = row or (rows[0] if rows else None)
-            if row is None:
-                answer = f'No supplier emissions estimate is available for the current {company} comparison.'
+            selected_id = plan.get('selected_offer_id')
+            selected_offer = next((offer for offer in plan.get('alternatives', [])
+                                   if offer.get('offer_id') == selected_id), None)
+            row = next((r for r in rows if r['offer_id'] == selected_id), None) if selected_id else None
+            if row is None or selected_offer is None or selected_offer.get('feasible') is False:
+                answer = (f'No selected feasible purchase has a supplier emissions summary for {company}. '
+                          'The saved comparison contains quote scenarios, but none should be described as the current purchase.')
             else:
                 estimate = row['estimate']
                 material = next((m['name'] for m in snapshot['company']['materials'] if m['material_id'] == result['material_id']), result['material_id'])
@@ -89,6 +92,13 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                     parts.append(f"Entered freight: {freight['kg_co2e']} kg CO2e.")
                 else:
                     parts.append('Freight is not fully estimated; enter mode, distance and any required mass.')
+                for leg in freight.get('legs', []):
+                    mode = leg['mode'].replace('_', ' ')
+                    distance = leg.get('distance_km')
+                    if distance is None:
+                        parts.append(f'Freight leg {mode}: distance not entered; no route length is inferred.')
+                    else:
+                        parts.append(f'Entered freight leg: {mode}, {distance} km (distance entered by you).')
                 if estimate.get('combined_status') == 'combined' and estimate.get('total_kg_co2e') is not None:
                     parts.append(f"Production average plus the entered freight leg: {estimate['total_kg_co2e']} kg CO2e.")
                 else:

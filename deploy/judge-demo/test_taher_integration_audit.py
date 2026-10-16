@@ -345,6 +345,45 @@ def test_full_run_requires_and_records_ten_distinct_company_visits(tmp_path, mon
     assert json.loads(shorter.read_text(encoding='utf-8'))['error_code'] == 'company_coverage_mismatch'
 
 
+def test_manual_company_subset_still_checks_full_catalogue(tmp_path, monkeypatch):
+    profiles = [{'company_id': f'company-{index}'} for index in range(10)]
+
+    class FakeClient:
+        def __init__(self, _base):
+            pass
+
+        def json(self, _stage, path):
+            return ({'ready': True, 'revision': 'revision-7', 'persistence': 'firestore'}
+                    if path == '/-/health' else {'companies': profiles})
+
+    visited = []
+
+    def visit(_base, profile, row, _checkpoint):
+        visited.append(profile['company_id'])
+        row.update(ok=True, stage='completed', carbon={
+            'calibration_8000kg_1000km_verified': profile['company_id'] == 'company-0'})
+
+    monkeypatch.setattr(audit, 'Client', FakeClient)
+    monkeypatch.setattr(audit, 'prepare_company', visit)
+    target = tmp_path / 'subset.json'
+    assert audit.run('https://demo.example', 'revision-7', target,
+                     companies=['company-0', 'company-3']) == 0
+    assert visited == ['company-0', 'company-3']
+    receipt = json.loads(target.read_text(encoding='utf-8'))
+    assert receipt['selected_company_ids'] == ['company-0', 'company-3']
+    assert len(receipt['companies']) == 2
+    visited.clear()
+    other_only = tmp_path / 'other-only.json'
+    assert audit.run('https://demo.example', 'revision-7', other_only,
+                     companies=['company-3']) == 0
+    assert visited == ['company-3']
+    profiles.pop()
+    invalid = tmp_path / 'short-catalogue.json'
+    assert audit.run('https://demo.example', 'revision-7', invalid,
+                     companies=['company-0']) == 1
+    assert json.loads(invalid.read_text(encoding='utf-8'))['error_code'] == 'company_coverage_mismatch'
+
+
 def test_voice_result_and_caption_reject_foreign_scope_action_and_fabrication():
     _, carbon = comparison()
     view = dispatch()
@@ -372,6 +411,20 @@ def test_voice_result_and_caption_reject_foreign_scope_action_and_fabrication():
                'of carbon dioxide equivalent.')
     assert audit.check_voice_caption(natural, 'Solara Cables', PLAN, carbon,
                                      view)['caption_grounded'] is True
+    for provenance in ('Sources', 'factors', 'assumptions'):
+        equivalent = (f'At Solara Cables, the copper shipment is a planning scenario. '
+                      f'Published {provenance} support the entered 1000 km sea distance; '
+                      'estimated freight is 128.96 kilograms of CO2e.')
+        assert audit.check_voice_caption(equivalent, 'Solara Cables', PLAN, carbon,
+                                         view)['numbers_checked'] == 2
+    planned = ('For Solara Cables copper, the planned inbound arrival is 2026-10-27. '
+               'The shipment estimate uses a published carbon factor and the entered '
+               '1000 km sea distance; freight is 128.96 kg CO2e.')
+    assert audit.check_voice_caption(planned, 'Solara Cables', PLAN, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_live_tracking_claim'):
+        audit.check_voice_caption(planned + ' Live carrier tracking confirms the delivery.',
+                                  'Solara Cables', PLAN, carbon, view)
     with pytest.raises(AcceptanceError, match='voice_unverified_number'):
         audit.check_voice_caption(good + ' Freight is 999999 kg CO2e.',
                                   'Solara Cables', PLAN, carbon, view)
@@ -413,14 +466,31 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
                      'workspace': {'carbon': carbon}}
     shipment_result = {**base, 'agent_steps': [{**step, 'tool': 'read_shipments'}],
                        'workspace': {'shipments': view}}
+    workspace_result = {**base, 'agent_steps': [{**step, 'tool': 'read_workspace'}],
+                        'workspace': {'company': {'company_id': 'solara-cables'},
+                                      'plan': PLAN, 'selected_material_id': None,
+                                      'drafts': [], 'simulated_outbox': []}}
+    assert audit.check_voice_result(workspace_result, PLAN, 7, carbon, view) == 'read_workspace'
+    foreign = deepcopy(workspace_result)
+    foreign['workspace']['company']['company_id'] = 'other'
+    with pytest.raises(AcceptanceError, match='voice_workspace_mismatch'):
+        audit.check_voice_result(foreign, PLAN, 7, carbon, view)
+    action = deepcopy(workspace_result)
+    action['read_only'] = False
+    with pytest.raises(AcceptanceError, match='voice_wrong_scope'):
+        audit.check_voice_result(action, PLAN, 7, carbon, view)
     caption = ('At Solara Cables the synthetic copper shipment is a planning scenario. '
                'The carbon source is a published factor and the 1000 km assumption '
                'gives freight of 128.96 kg CO2e.')
     events = [
         {'type': 'transcript', 'direction': 'input',
          'text': 'Read my carbon estimate and shipments.'},
+        {'type': 'tool_result', 'result': workspace_result},
+        {'type': 'turn_complete'},
         {'type': 'tool_result', 'result': carbon_result},
+        {'type': 'turn_complete'},
         {'type': 'tool_result', 'result': shipment_result},
+        {'type': 'turn_complete'},
         {'type': 'transcript', 'direction': 'output', 'text': caption},
         {'type': 'audio', 'sample_rate_hertz': 24000,
          'data': base64.b64encode(b'\0' * 10000).decode('ascii')},
@@ -432,6 +502,8 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
             assert json.loads(message)['type'] in {'audio', 'audio_end'}
 
         async def recv(self):
+            if not events:
+                raise TimeoutError
             return json.dumps(events.pop(0))
 
     trace = {}
@@ -444,32 +516,56 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
     assert result['output_audio_semantics_verified'] is False
     assert trace['input_caption'] == 'Read my carbon estimate and shipments.'
     assert trace['output_caption'] == caption
+    assert trace['qualifying_output_caption'] == caption
     assert [entry['payload']['agent_steps'][0]['tool'] for entry in trace['tool_results']] == [
-        'read_carbon', 'read_shipments']
-    assert trace['tool_results'][0]['payload']['workspace']['carbon'] == carbon
+        'read_workspace', 'read_carbon', 'read_shipments']
+    assert trace['tool_results'][1]['payload']['workspace']['carbon'] == carbon
     assert trace['audio_bytes'] == 10000
+    assert trace['qualifying_audio_bytes'] == 10000
     assert trace['status'] == 'completed' and len(checkpoints) >= 3
+    assert trace['intermediate_count'] == 3
 
     events[:] = [
         {'type': 'transcript', 'direction': 'input',
          'text': 'Read my carbon estimate and shipments.'},
-        {'type': 'tool_result', 'result': carbon_result},
         {'type': 'transcript', 'direction': 'output', 'text': caption},
         {'type': 'audio', 'sample_rate_hertz': 24000,
          'data': base64.b64encode(b'\0' * 10000).decode('ascii')},
+        {'type': 'tool_result', 'result': carbon_result},
+        {'type': 'tool_result', 'result': shipment_result},
+        {'type': 'turn_complete'},
+    ]
+    trace = {}
+    with pytest.raises(AcceptanceError, match='voice_timeout'):
+        asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
+                                     'Solara Cables', PLAN, 7, carbon, view,
+                                     trace=trace))
+    assert trace['output_caption'] == caption
+    assert trace['audio_bytes'] == 10000
+    assert trace['qualifying_output_caption'] == ''
+    assert trace['qualifying_audio_bytes'] == 0
+
+    events[:] = [
+        {'type': 'transcript', 'direction': 'input',
+         'text': 'Read my carbon estimate and shipments.'},
+        {'type': 'tool_result', 'result': workspace_result},
+        {'type': 'turn_complete'},
+        {'type': 'turn_complete'},
         {'type': 'turn_complete'},
     ]
     trace = {}
     checkpoints = []
-    with pytest.raises(AcceptanceError, match='voice_missing_tools'):
+    with pytest.raises(AcceptanceError, match='voice_timeout'):
         asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
                                      'Solara Cables', PLAN, 7, carbon, view,
                                      trace=trace, checkpoint=lambda: checkpoints.append(deepcopy(trace))))
-    assert trace['error_code'] == 'voice_missing_tools'
+    assert trace['error_code'] == 'voice_timeout'
     assert trace['input_caption'] == 'Read my carbon estimate and shipments.'
-    assert trace['output_caption'] == caption
-    assert trace['audio_bytes'] == 10000
-    assert len(trace['tool_results']) == 1 and checkpoints[-1]['error_code'] == 'voice_missing_tools'
+    assert trace['output_caption'] == ''
+    assert trace['audio_bytes'] == 0
+    assert len(trace['tool_results']) == 1 and checkpoints[-1]['error_code'] == 'voice_timeout'
+    assert trace['tools_verified'] == []
+    assert trace['intermediate_count'] == 3
 
 
 def test_voice_failure_trace_sanitizes_tool_payload_and_caps_caption():

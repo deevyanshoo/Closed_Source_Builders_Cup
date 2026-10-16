@@ -44,6 +44,10 @@ VOICE_PRICE = re.compile(
     r'(?:(?:is|of|at)\s*)?)(?:[A-Z]{3}\s*)?\d|'
     r'\b(?:USD|EUR|GBP|INR|JPY|CNY|AUD|CAD)\s*\d|'
     r'\b\d[\d,.]*\s*(?:USD|EUR|GBP|INR|JPY|CNY|AUD|CAD)\b)')
+VOICE_LIVE_CLAIM = re.compile(
+    r'\b(?:live\s+(?:carrier\s+)?tracking|confirmed\s+(?:live\s+)?'
+    r'(?:shipment|delivery|arrival|carrier)|actual\s+(?:shipment|delivery|arrival)|'
+    r'carrier\s+tracking\s+confirms?)\b', re.I)
 
 
 def now() -> str:
@@ -342,10 +346,21 @@ def check_voice_result(result, plan, context, carbon, dispatch):
             'voice', 'voice_wrong_tool')
     step = steps[0]
     tool = step.get('tool')
-    require(tool in {'read_carbon', 'read_shipments'}
+    require(tool in {'read_carbon', 'read_shipments', 'read_workspace'}
             and step.get('agent') == 'workspace' and step.get('role') == 'deterministic'
             and step.get('status') == 'completed' and step.get('model') == 'none'
             and step.get('provider_call') == 'none', 'voice', 'voice_wrong_tool')
+    if tool == 'read_workspace':
+        workspace = result.get('workspace')
+        require(isinstance(workspace, dict)
+                and isinstance(workspace.get('company'), dict)
+                and workspace['company'].get('company_id') == plan['company_id']
+                and workspace.get('plan') == plan
+                and workspace.get('selected_material_id') in (None, plan['material'])
+                and workspace.get('drafts') == []
+                and workspace.get('simulated_outbox') == [],
+                'voice', 'voice_workspace_mismatch')
+        return tool
     expected_key = 'carbon' if tool == 'read_carbon' else 'shipments'
     expected = carbon if tool == 'read_carbon' else dispatch
     require(result.get('workspace') == {expected_key: expected},
@@ -362,14 +377,22 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                    and row.get('offer_id') == plan['selected_offer_id']), None)
     material_name = linked.get('material_name', '') if isinstance(linked, dict) else ''
     lowered = caption.lower()
+    for claim in VOICE_LIVE_CLAIM.finditer(caption):
+        prefix = caption[max(0, claim.start() - 16):claim.start()]
+        require(re.search(r'\b(?:no|not|never|without)\s+(?:a\s+|any\s+)?$',
+                          prefix, re.I) is not None,
+                stage, 'voice_live_tracking_claim')
     require(company_name.lower() in lowered
             and (plan['material'].lower() in lowered
                  or (material_name and material_name.lower() in lowered))
             and re.search(r'\b(?:carbon|co2e|greenhouse gas emissions?)\b', caption, re.I)
             and re.search(r'\b(?:ship(?:ment|ping)|dispatch|inbound delivery)\b', caption, re.I)
-            and re.search(r'\b(?:synthetic|fictional|planning scenario|hypothetical plan)\b', caption, re.I)
-            and re.search(r'\b(?:source|factor|assumption|entered)\b', caption, re.I)
-            and re.search(r'\b(?:kg\s*CO2e|kilograms?\s+(?:of\s+)?carbon dioxide equivalent)\b',
+            and re.search(r'\b(?:synthetic|fictional|planning scenario|hypothetical plan|'
+                          r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
+                          r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
+            and re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b', caption, re.I)
+            and re.search(r'\b(?:kg\s*CO2e|kilograms?\s+(?:of\s+)?'
+                          r'(?:CO2e|carbon dioxide equivalent))\b',
                           caption, re.I)
             and len(claims) >= 1,
             stage, 'voice_caption_not_grounded')
@@ -431,23 +454,30 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
     sender = asyncio.create_task(send_audio())
     started = time.monotonic()
     tools = set()
+    intermediate_count = 0
     input_text = ''
     output_text = ''
+    qualifying_output_text = ''
     audio_bytes = 0
+    qualifying_audio_bytes = 0
     if trace is not None:
         trace.update(status='running', input_caption='', output_caption='',
                      input_caption_truncated=False, output_caption_truncated=False,
-                     tool_results=[], tools_verified=[], audio_bytes=0, event_count=0)
+                     tool_results=[], tools_verified=[], audio_bytes=0, event_count=0,
+                     qualifying_output_caption='', qualifying_audio_bytes=0,
+                     intermediate_count=0)
 
     def note():
         if trace is None:
             return
         trace['input_caption'] = input_text.strip()[:2000]
         trace['output_caption'] = output_text.strip()[:2000]
+        trace['qualifying_output_caption'] = qualifying_output_text.strip()[:2000]
         trace['input_caption_truncated'] = len(input_text.strip()) > 2000
         trace['output_caption_truncated'] = len(output_text.strip()) > 2000
         trace['tools_verified'] = sorted(tools)
         trace['audio_bytes'] = audio_bytes
+        trace['qualifying_audio_bytes'] = qualifying_audio_bytes
         if checkpoint is not None:
             checkpoint()
 
@@ -466,21 +496,36 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                         input_text += ' ' + str(event.get('text', ''))
                     elif direction == 'output':
                         output_text += ' ' + str(event.get('text', ''))
+                        if tools == {'read_carbon', 'read_shipments'}:
+                            qualifying_output_text += ' ' + str(event.get('text', ''))
                 elif kind == 'tool_result':
                     if trace is not None:
                         require(len(trace['tool_results']) < 8, 'voice', 'voice_tool_result_limit')
                         trace['tool_results'].append({'payload': _voice_trace_payload(event.get('result'))})
                         note()
-                    tools.add(check_voice_result(event.get('result'), plan, context,
-                                                 carbon, dispatch))
+                    checked_tool = check_voice_result(event.get('result'), plan, context,
+                                                      carbon, dispatch)
+                    if checked_tool in {'read_carbon', 'read_shipments'}:
+                        tools.add(checked_tool)
                 elif kind == 'audio':
                     require(event.get('sample_rate_hertz') == 24000,
                             'voice', 'voice_audio_format')
                     try:
-                        audio_bytes += len(base64.b64decode(event['data'], validate=True))
+                        chunk_bytes = len(base64.b64decode(event['data'], validate=True))
+                        audio_bytes += chunk_bytes
+                        if tools == {'read_carbon', 'read_shipments'}:
+                            qualifying_audio_bytes += chunk_bytes
                     except (KeyError, ValueError):
                         raise AcceptanceError('voice', 'voice_audio_format') from None
                 elif kind == 'turn_complete':
+                    if (tools != {'read_carbon', 'read_shipments'}
+                            or not qualifying_output_text.strip()
+                            or qualifying_audio_bytes < 10000):
+                        intermediate_count += 1
+                        if trace is not None:
+                            trace['intermediate_count'] = intermediate_count
+                        note()
+                        continue
                     note()
                     require(tools == {'read_carbon', 'read_shipments'},
                             'voice', 'voice_missing_tools')
@@ -488,8 +533,8 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                             and re.search(r'\bship(?:ment|ping)s?\b|\bdispatch\b',
                                           input_text, re.I),
                             'voice', 'voice_wrong_spoken_prompt')
-                    require(audio_bytes >= 10000, 'voice', 'voice_no_output_audio')
-                    grounded = check_voice_caption(output_text.strip(), company_name,
+                    require(qualifying_audio_bytes >= 10000, 'voice', 'voice_no_output_audio')
+                    grounded = check_voice_caption(qualifying_output_text.strip(), company_name,
                                                    plan, carbon, dispatch)
                     await sender
                     if trace is not None:
@@ -497,7 +542,7 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                         note()
                     return {'tools_verified': sorted(tools),
                             'input_transcript_verified': True,
-                            'output_audio_bytes': audio_bytes,
+                            'output_audio_bytes': qualifying_audio_bytes,
                             'output_audio_semantics_verified': False,
                             'caption_grounded': grounded['caption_grounded'],
                             'numbers_checked': grounded['numbers_checked'],
@@ -529,23 +574,38 @@ async def voice_visit(base, client, csrf, context, company_name, plan, carbon, d
     from urllib.request import HTTPCookieProcessor
     from websockets.asyncio.client import connect
 
+    before = client.json('voice:before', '/api/demo/session')
+    require(before.get('company_id') == plan['company_id']
+            and before.get('context_version') == context
+            and before.get('plan', {}).get('plan_id') == plan['plan_id'],
+            'voice', 'voice_action_state_changed')
+    baseline = _operator_action_state(before)
     processors = [handler for handler in client.opener.handlers
                   if isinstance(handler, HTTPCookieProcessor)]
     require(len(processors) == 1 and isinstance(processors[0].cookiejar, CookieJar),
             'voice', 'voice_cookie_missing')
     cookie = '; '.join(item.name + '=' + item.value for item in processors[0].cookiejar)
     require(bool(cookie), 'voice', 'voice_cookie_missing')
-    async with connect(base.replace('https:', 'wss:') + '/api/demo/voice/live',
-                       origin=base, additional_headers={'Cookie': cookie},
-                       max_size=1_024_000, open_timeout=20) as socket:
-        await socket.send(json.dumps({'type': 'start', 'csrf_token': csrf,
-                                      'expected_context_version': context}))
-        ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
-        require(ready.get('type') == 'ready', 'voice', 'voice_not_ready')
-        result = await voice_turn(socket, audio, company_name, plan, context, carbon, dispatch,
-                                  trace=trace, checkpoint=checkpoint)
-        await socket.send(json.dumps({'type': 'stop'}))
-        return result
+    try:
+        async with connect(base.replace('https:', 'wss:') + '/api/demo/voice/live',
+                           origin=base, additional_headers={'Cookie': cookie},
+                           max_size=1_024_000, open_timeout=20) as socket:
+            await socket.send(json.dumps({'type': 'start', 'csrf_token': csrf,
+                                          'expected_context_version': context}))
+            ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
+            require(ready.get('type') == 'ready', 'voice', 'voice_not_ready')
+            result = await voice_turn(socket, audio, company_name, plan, context, carbon, dispatch,
+                                      trace=trace, checkpoint=checkpoint)
+            await socket.send(json.dumps({'type': 'stop'}))
+            return result
+    finally:
+        after = client.json('voice:after', '/api/demo/session')
+        unchanged = _operator_action_state(after) == baseline
+        if trace is not None:
+            trace['action_state_unchanged'] = unchanged
+            if checkpoint is not None:
+                checkpoint()
+        require(unchanged, 'voice', 'voice_action_state_changed')
 
 
 def _post(client, stage, path, csrf, context, data):
@@ -760,7 +820,8 @@ def prepare_company(base, profile, row, checkpoint, voice_audio=None):
     checkpoint()
 
 
-def run(base, expected_revision, output, *, voice_audio=None, voice_path=None):
+def run(base, expected_revision, output, *, voice_audio=None, voice_path=None,
+        companies=None):
     receipt = {'started_at': now(), 'expected_revision': expected_revision,
                'deployed_revision': None, 'mode': 'rules', 'automatic_retries': 0,
                'controlled_speech': voice_audio is not None or voice_path is not None,
@@ -795,6 +856,16 @@ def run(base, expected_revision, output, *, voice_audio=None, voice_path=None):
         require(isinstance(profiles, list) and len(profiles) == 10
                 and len({p['company_id'] for p in profiles}) == 10,
                 'catalogue', 'company_coverage_mismatch')
+        if companies is not None:
+            require(isinstance(companies, list) and bool(companies)
+                    and all(isinstance(item, str) and ID.fullmatch(item) for item in companies)
+                    and len(set(companies)) == len(companies)
+                    and set(companies) <= {profile['company_id'] for profile in profiles},
+                    'catalogue', 'company_subset_invalid')
+            selected = set(companies)
+            profiles = [profile for profile in profiles if profile['company_id'] in selected]
+        receipt['selected_company_ids'] = [profile['company_id'] for profile in profiles]
+        checkpoint()
         for profile in profiles:
             row = {'company_id': profile['company_id'], 'stage': 'started', 'ok': False}
             receipt['companies'].append(row); checkpoint()
@@ -811,9 +882,10 @@ def run(base, expected_revision, output, *, voice_audio=None, voice_path=None):
                 row.update(error_type=type(exc).__name__)
                 checkpoint()
                 raise
-        require(any(row.get('carbon', {}).get('calibration_8000kg_1000km_verified') is True
-                    for row in receipt['companies']),
-                'carbon', 'calibration_not_observed')
+        if 'solara-cables' in receipt['selected_company_ids'] or companies is None:
+            require(any(row.get('carbon', {}).get('calibration_8000kg_1000km_verified') is True
+                        for row in receipt['companies']),
+                    'carbon', 'calibration_not_observed')
         receipt.update(ok=True, stage='completed', completed_at=now())
         checkpoint()
         return 0
@@ -833,9 +905,12 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--voice-wav', type=Path,
                         help='Optional caller-owned 16 kHz mono PCM WAV asking for carbon and shipments')
+    parser.add_argument('--companies',
+                        help='Optional comma-separated company IDs to inspect manually; validates all ten catalogue entries')
     args = parser.parse_args()
     return run(args.base, args.expected_revision, args.output,
-               voice_path=args.voice_wav)
+               voice_path=args.voice_wav,
+               companies=args.companies.split(',') if args.companies is not None else None)
 
 
 if __name__ == '__main__':

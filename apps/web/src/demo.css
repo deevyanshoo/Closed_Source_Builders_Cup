@@ -21,6 +21,7 @@
 .demo-draft-record h3{margin:9px 0;font-size:18px}
 .demo-draft-record p{font-size:12px;line-height:1.5}
 .demo-draft-record pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;background:#f7f9fc;border:1px solid #dce3ec;font:12px/1.6 ui-monospace,monospace}
+#demo-drafts-workspace{scroll-margin-top:82px}
 .demo-results h2[tabindex="-1"]{scroll-margin-top:82px}
 .demo-results h2[tabindex="-1"]:focus{outline:3px solid #2159d6;outline-offset:5px}
 .demo-rfq-next{padding:18px 30px 24px;border-bottom:1px solid var(--zoorq-line,#dce3ec);background:var(--zoorq-white,#fff);color:var(--zoorq-ink,#142033);display:flex;align-items:center;justify-content:space-between;gap:18px}

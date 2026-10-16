@@ -389,7 +389,38 @@ def pcm(path):
         return audio.readframes(audio.getnframes())
 
 
-async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatch):
+def _voice_trace_payload(result):
+    """Keep synthetic workspace evidence while omitting transport/auth fields."""
+    if not isinstance(result, dict):
+        return {'invalid_result_type': type(result).__name__}
+    allowed = ('company_id', 'context_version', 'status', 'read_only', 'proposal',
+               'assistant_text', 'agent_steps', 'workspace')
+    excluded = ('token', 'cookie', 'secret', 'authorization', 'session_id',
+                'idempotency_key', 'turn_id', 'proposal_id')
+
+    def clean(value, depth=0):
+        if depth >= 12:
+            return '[depth limit]'
+        if isinstance(value, dict):
+            return {str(key): clean(item, depth + 1) for key, item in list(value.items())[:200]
+                    if not any(label in str(key).casefold() for label in excluded)}
+        if isinstance(value, list):
+            return [clean(item, depth + 1) for item in value[:100]]
+        if isinstance(value, str):
+            return value[:2000]
+        return value if value is None or type(value) in (bool, int, float) else str(type(value).__name__)
+
+    payload = clean({key: result[key] for key in allowed if key in result})
+    size = len(json.dumps(payload, default=str))
+    if size > 100_000:
+        return {'payload_omitted_oversize_bytes': size,
+                'workspace_keys': sorted(result.get('workspace', {}))
+                if isinstance(result.get('workspace'), dict) else []}
+    return payload
+
+
+async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatch,
+                     *, trace=None, checkpoint=None):
     async def send_audio():
         for at in range(0, len(audio), 3200):
             await socket.send(json.dumps({'type': 'audio', 'data':
@@ -403,11 +434,31 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
     input_text = ''
     output_text = ''
     audio_bytes = 0
+    if trace is not None:
+        trace.update(status='running', input_caption='', output_caption='',
+                     input_caption_truncated=False, output_caption_truncated=False,
+                     tool_results=[], tools_verified=[], audio_bytes=0, event_count=0)
+
+    def note():
+        if trace is None:
+            return
+        trace['input_caption'] = input_text.strip()[:2000]
+        trace['output_caption'] = output_text.strip()[:2000]
+        trace['input_caption_truncated'] = len(input_text.strip()) > 2000
+        trace['output_caption_truncated'] = len(output_text.strip()) > 2000
+        trace['tools_verified'] = sorted(tools)
+        trace['audio_bytes'] = audio_bytes
+        if checkpoint is not None:
+            checkpoint()
+
     try:
         async with asyncio.timeout(100):
             while True:
                 event = json.loads(await socket.recv())
                 kind = event.get('type')
+                if trace is not None:
+                    trace['event_count'] += 1
+                    require(trace['event_count'] <= 1000, 'voice', 'voice_event_limit')
                 require(kind != 'error', 'voice', 'voice_error')
                 if kind == 'transcript':
                     direction = event.get('direction')
@@ -416,6 +467,10 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                     elif direction == 'output':
                         output_text += ' ' + str(event.get('text', ''))
                 elif kind == 'tool_result':
+                    if trace is not None:
+                        require(len(trace['tool_results']) < 8, 'voice', 'voice_tool_result_limit')
+                        trace['tool_results'].append({'payload': _voice_trace_payload(event.get('result'))})
+                        note()
                     tools.add(check_voice_result(event.get('result'), plan, context,
                                                  carbon, dispatch))
                 elif kind == 'audio':
@@ -426,6 +481,7 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                     except (KeyError, ValueError):
                         raise AcceptanceError('voice', 'voice_audio_format') from None
                 elif kind == 'turn_complete':
+                    note()
                     require(tools == {'read_carbon', 'read_shipments'},
                             'voice', 'voice_missing_tools')
                     require(re.search(r'\bcarbon\b', input_text, re.I)
@@ -436,6 +492,9 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                     grounded = check_voice_caption(output_text.strip(), company_name,
                                                    plan, carbon, dispatch)
                     await sender
+                    if trace is not None:
+                        trace['status'] = 'completed'
+                        note()
                     return {'tools_verified': sorted(tools),
                             'input_transcript_verified': True,
                             'output_audio_bytes': audio_bytes,
@@ -444,14 +503,28 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                             'numbers_checked': grounded['numbers_checked'],
                             'elapsed_ms': round((time.monotonic() - started) * 1000)}
     except TimeoutError:
+        if trace is not None:
+            trace.update(status='failed', error_code='voice_timeout')
+            note()
         raise AcceptanceError('voice', 'voice_timeout') from None
+    except AcceptanceError as exc:
+        if trace is not None:
+            trace.update(status='failed', error_code=exc.code)
+            note()
+        raise
+    except Exception as exc:
+        if trace is not None:
+            trace.update(status='failed', error_type=type(exc).__name__)
+            note()
+        raise
     finally:
         if not sender.done():
             sender.cancel()
         await asyncio.gather(sender, return_exceptions=True)
 
 
-async def voice_visit(base, client, csrf, context, company_name, plan, carbon, dispatch, audio):
+async def voice_visit(base, client, csrf, context, company_name, plan, carbon, dispatch,
+                      audio, *, trace=None, checkpoint=None):
     from http.cookiejar import CookieJar
     from urllib.request import HTTPCookieProcessor
     from websockets.asyncio.client import connect
@@ -469,7 +542,8 @@ async def voice_visit(base, client, csrf, context, company_name, plan, carbon, d
                                       'expected_context_version': context}))
         ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
         require(ready.get('type') == 'ready', 'voice', 'voice_not_ready')
-        result = await voice_turn(socket, audio, company_name, plan, context, carbon, dispatch)
+        result = await voice_turn(socket, audio, company_name, plan, context, carbon, dispatch,
+                                  trace=trace, checkpoint=checkpoint)
         await socket.send(json.dumps({'type': 'stop'}))
         return result
 
@@ -657,9 +731,10 @@ def prepare_company(base, profile, row, checkpoint, voice_audio=None):
     checkpoint()
     if voice_audio is not None:
         row['stage'] = 'controlled_voice_pending'; checkpoint()
+        row['voice_trace'] = {}
         row['voice'] = asyncio.run(voice_visit(
             base, client, csrf, context, profile['name'], plan, carbon, dispatch,
-            voice_audio))
+            voice_audio, trace=row['voice_trace'], checkpoint=checkpoint))
         checkpoint()
     row['stage'] = 'recovery_pending'; checkpoint()
     delay_days = 60

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { DemoDispatchPanel, dispatchReviewAction, orderedDispatchRows } from './demo-dispatch';
+import { DemoDispatchPanel, dispatchReviewAction, dispatchSelection, orderedDispatchRows } from './demo-dispatch';
 import type { DispatchShipment, DispatchView } from './demo-api';
 
 const expected: DispatchShipment = { shipment_id: 'expected-1', company_id: 'company-a', material_id: 'copper', material_name: 'Copper', order_id: 'ORDER-1', quantity: '100', quantity_unit: 'kg', need_by: '2026-11-05', status: 'expected_order_scenario', expected_arrival: null, offer_id: null, offer_version: null, plan_id: null, recovery_available: false, recovery_reason: 'expected_order_only', delay_days: null, timeline: [], source: 'fictional_company_profile_expected_order' };
@@ -13,8 +13,18 @@ describe('dispatch review panel', () => {
     const mixed = { ...view, shipments: [expected, another, planned] };
     expect(orderedDispatchRows(mixed).map(row => row.shipment_id)).toEqual(['planned-1', 'expected-1', 'expected-2']);
     const html = renderToStaticMarkup(<DemoDispatchPanel view={mixed} busy={false} onRefresh={() => {}} onReviewDelay={() => {}} />);
-    expect(html.indexOf('plan-demand:plan-a')).toBeLessThan(html.indexOf('ORDER-1'));
+    const desktopList = html.split('class="demo-dispatch-list"')[1];
+    expect(desktopList.indexOf('plan-demand:plan-a')).toBeLessThan(desktopList.indexOf('ORDER-1'));
     expect(html).toContain('aria-current="true"');
+  });
+  it('offers every ordered row in a labeled mobile chooser and resets delay through one selection mapping', () => {
+    const many = Array.from({ length: 24 }, (_, index) => ({ ...expected, shipment_id: `expected-${index}`, order_id: `ORDER-${index}` }));
+    const html = renderToStaticMarkup(<DemoDispatchPanel view={{ ...view, shipments: [...many, planned] }} busy={false} onRefresh={() => {}} onReviewDelay={() => {}} />);
+    expect(html).toMatch(/<label[^>]*>Shipment<select[^>]*id="demo-dispatch-chooser"/);
+    expect((html.match(/<option /g) ?? []).length).toBe(25);
+    expect(html).toMatch(/<option value="planned-1" selected="">Copper · Plan-demand scenario<\/option>/);
+    expect(html).toContain('ORDER-23');
+    expect(dispatchSelection('company-a:4:plan-a', 'expected-3')).toEqual({ selected: { key: 'company-a:4:plan-a', shipmentId: 'expected-3' }, delay: { key: 'company-a:4:plan-a', shipmentId: 'expected-3', value: '0' } });
   });
   it('permits only one current plan-linked row and an explicit whole-day input', () => {
     expect(dispatchReviewAction(view, 'planned-1', '12')).toEqual({ shipmentId: 'planned-1', days: 12 });

@@ -434,11 +434,21 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
         async def recv(self):
             return json.dumps(events.pop(0))
 
+    trace = {}
+    checkpoints = []
     result = asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
-                                          'Solara Cables', PLAN, 7, carbon, view))
+                                          'Solara Cables', PLAN, 7, carbon, view,
+                                          trace=trace, checkpoint=lambda: checkpoints.append(deepcopy(trace))))
     assert result['tools_verified'] == ['read_carbon', 'read_shipments']
     assert result['output_audio_bytes'] == 10000
     assert result['output_audio_semantics_verified'] is False
+    assert trace['input_caption'] == 'Read my carbon estimate and shipments.'
+    assert trace['output_caption'] == caption
+    assert [entry['payload']['agent_steps'][0]['tool'] for entry in trace['tool_results']] == [
+        'read_carbon', 'read_shipments']
+    assert trace['tool_results'][0]['payload']['workspace']['carbon'] == carbon
+    assert trace['audio_bytes'] == 10000
+    assert trace['status'] == 'completed' and len(checkpoints) >= 3
 
     events[:] = [
         {'type': 'transcript', 'direction': 'input',
@@ -449,9 +459,46 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
          'data': base64.b64encode(b'\0' * 10000).decode('ascii')},
         {'type': 'turn_complete'},
     ]
+    trace = {}
+    checkpoints = []
     with pytest.raises(AcceptanceError, match='voice_missing_tools'):
         asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
-                                     'Solara Cables', PLAN, 7, carbon, view))
+                                     'Solara Cables', PLAN, 7, carbon, view,
+                                     trace=trace, checkpoint=lambda: checkpoints.append(deepcopy(trace))))
+    assert trace['error_code'] == 'voice_missing_tools'
+    assert trace['input_caption'] == 'Read my carbon estimate and shipments.'
+    assert trace['output_caption'] == caption
+    assert trace['audio_bytes'] == 10000
+    assert len(trace['tool_results']) == 1 and checkpoints[-1]['error_code'] == 'voice_missing_tools'
+
+
+def test_voice_failure_trace_sanitizes_tool_payload_and_caps_caption():
+    _, carbon = comparison()
+    view = dispatch()
+    result = {'company_id': 'other', 'context_version': 7, 'status': 'completed',
+              'read_only': True, 'proposal': None, 'csrf_token': 'secret-do-not-log',
+              'agent_steps': [{'agent': 'workspace', 'role': 'deterministic',
+                               'status': 'completed', 'model': 'none',
+                               'provider_call': 'none', 'tool': 'read_carbon'}],
+              'workspace': {'carbon': carbon}}
+    events = [{'type': 'transcript', 'direction': 'input', 'text': 'X' * 5000},
+              {'type': 'tool_result', 'result': result}]
+
+    class Socket:
+        async def send(self, _message):
+            pass
+
+        async def recv(self):
+            return json.dumps(events.pop(0))
+
+    trace = {}
+    with pytest.raises(AcceptanceError, match='voice_wrong_scope'):
+        asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
+                                     'Solara Cables', PLAN, 7, carbon, view, trace=trace))
+    assert len(trace['input_caption']) <= 2000 and trace['input_caption_truncated'] is True
+    assert trace['tool_results'][0]['payload']['company_id'] == 'other'
+    assert 'secret-do-not-log' not in json.dumps(trace)
+    assert trace['error_code'] == 'voice_wrong_scope'
 
 
 def test_optional_voice_audio_is_passed_to_every_company_visit(tmp_path, monkeypatch):

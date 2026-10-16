@@ -37,6 +37,10 @@ export function orderedDispatchRows(view: DispatchView | null): DispatchShipment
   return [...current, ...rows.filter(row => !current.includes(row))];
 }
 
+export function dispatchSelection(key: string, shipmentId: string) {
+  return { selected: { key, shipmentId }, delay: { key, shipmentId, value: '0' } };
+}
+
 function unavailableReason(row: DispatchShipment): string {
   switch (row.recovery_reason) {
     case 'expected_order_only': return 'This expected order has no accepted quote or current plan. Review sourcing before testing a delay.';
@@ -69,13 +73,18 @@ export function DemoDispatchPanel({ view, busy, error, onRefresh, onReviewDelay,
   const selectedId = selectedState?.key === key && rows.some(row => row.shipment_id === selectedState.shipmentId) ? selectedState.shipmentId : preferred?.shipment_id;
   const selected = rows.find(row => row.shipment_id === selectedId);
   const days = delayState?.key === key && delayState.shipmentId === selectedId ? delayState.value : '0';
+  function chooseShipment(shipmentId: string) {
+    const next = dispatchSelection(key, shipmentId);
+    setSelectedState(next.selected);
+    setDelayState(next.delay);
+  }
   return <section className="demo-dispatch" aria-label="Shipment scenarios">
     <header className="demo-dispatch-head"><div><span className="demo-dispatch-kicker">Supply / planning</span><h1>Planned arrivals and expected orders.</h1><p>Inspect company-linked demand and test an explicit delay on a current accepted plan.</p></div><button type="button" className="demo-dispatch-refresh" onClick={onRefresh} disabled={busy}>{busy ? 'Refreshing…' : 'Refresh shipments'}</button></header>
     {view?.as_of && <p className="demo-dispatch-asof">Company profile as of {view.as_of}</p>}
     {error && <p className="demo-dispatch-error" role="alert">{error}</p>}
     {busy && !view && <div className="demo-dispatch-loading" role="status"><span>Loading shipment scenarios…</span><span aria-hidden="true" /><span aria-hidden="true" /></div>}
     {!busy && !error && !rows.length && <div className="demo-dispatch-empty" role="status"><h2>No shipment scenarios</h2><p>There is no company-linked order or current plan-demand row to inspect. Review company orders or run a current quote comparison.</p></div>}
-    {rows.length > 0 && <div className="demo-dispatch-layout"><div className="demo-dispatch-list" role="group" aria-label="Select a shipment scenario"><div className="demo-dispatch-list-title"><strong>{rows.length} scenario{rows.length === 1 ? '' : 's'}</strong><span>Expected arrivals are planning dates</span></div>{rows.map(row => <button key={row.shipment_id} type="button" aria-current={row.shipment_id === selectedId ? 'true' : undefined} onClick={() => { setSelectedState({ key, shipmentId: row.shipment_id }); setDelayState({ key, shipmentId: row.shipment_id, value: '0' }); }}><span className="demo-dispatch-row-top"><strong>{row.material_name}</strong><span className="demo-dispatch-row-label"><small>{sourceLabel(row.source)}</small>{row.shipment_id === selectedId && <em>Selected</em>}</span></span><span>{row.order_id ? `Order ${row.order_id}` : row.demand_reference ?? 'Unlinked demand'}</span><span className="demo-dispatch-row-bottom"><span>{row.quantity} {row.quantity_unit} · needed {row.need_by || 'unknown'}</span><strong>{row.expected_arrival ? `Expected ${row.expected_arrival}` : 'Arrival unknown'}</strong></span></button>)}</div>{selected && view && <ShipmentDetail row={selected} view={view} days={days} onDays={value => setDelayState({ key, shipmentId: selected.shipment_id, value })} onReviewDelay={onReviewDelay} disabled={disabled || busy} />}</div>}
+    {rows.length > 0 && <div className="demo-dispatch-layout"><label className="demo-dispatch-chooser">Shipment<select id="demo-dispatch-chooser" value={selectedId} onChange={event => chooseShipment(event.target.value)}>{rows.map(row => <option key={row.shipment_id} value={row.shipment_id}>{row.material_name} · {sourceLabel(row.source)}{row.order_id ? ` · ${row.order_id}` : ''}</option>)}</select></label><div className="demo-dispatch-list" role="group" aria-label="Select a shipment scenario"><div className="demo-dispatch-list-title"><strong>{rows.length} scenario{rows.length === 1 ? '' : 's'}</strong><span>Expected arrivals are planning dates</span></div>{rows.map(row => <button key={row.shipment_id} type="button" aria-current={row.shipment_id === selectedId ? 'true' : undefined} onClick={() => chooseShipment(row.shipment_id)}><span className="demo-dispatch-row-top"><strong>{row.material_name}</strong><span className="demo-dispatch-row-label"><small>{sourceLabel(row.source)}</small>{row.shipment_id === selectedId && <em>Selected</em>}</span></span><span>{row.order_id ? `Order ${row.order_id}` : row.demand_reference ?? 'Unlinked demand'}</span><span className="demo-dispatch-row-bottom"><span>{row.quantity} {row.quantity_unit} · needed {row.need_by || 'unknown'}</span><strong>{row.expected_arrival ? `Expected ${row.expected_arrival}` : 'Arrival unknown'}</strong></span></button>)}</div>{selected && view && <ShipmentDetail row={selected} view={view} days={days} onDays={value => setDelayState({ key, shipmentId: selected.shipment_id, value })} onReviewDelay={onReviewDelay} disabled={disabled || busy} />}</div>}
     {view && view.limitations.length > 0 && <details className="demo-dispatch-limitations"><summary>Data limits</summary><ul>{view.limitations.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}</ul></details>}
   </section>;
 }

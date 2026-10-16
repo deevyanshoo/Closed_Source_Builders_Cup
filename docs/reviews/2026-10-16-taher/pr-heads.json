@@ -1,0 +1,122 @@
+[
+  {
+    "number": 117,
+    "title": "Serve the dispatch workspace on the live site (Closes #112)",
+    "headRefOid": "8ee55f3ccd8d5ee68c406fc36d65425b8c6f124b",
+    "baseRefName": "feature/hosted-quote-to-plan",
+    "headRefName": "feature/live-dispatch-route",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/117"
+  },
+  {
+    "number": 116,
+    "title": "Country-wise commodity pricing view in the hosted demo (Closes #110)",
+    "headRefOid": "cd595a21e8c3002d81c193e6557a81b43f063435",
+    "baseRefName": "feature/hosted-quote-to-plan",
+    "headRefName": "feature/country-pricing",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/116"
+  },
+  {
+    "number": 115,
+    "title": "Carbon schemes and green finance finder with approximate savings (Closes #109)",
+    "headRefOid": "4abc75b586b274e1d97be5a512d4d3706e9792c2",
+    "baseRefName": "feature/carbon-calculator",
+    "headRefName": "feature/carbon-schemes",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/115"
+  },
+  {
+    "number": 114,
+    "title": "Carbon footprint calculator for purchases and shipments in the hosted demo (Closes #108)",
+    "headRefOid": "2eb31e730b8f5df1981aed451048d73231b88db1",
+    "baseRefName": "feature/hosted-quote-to-plan",
+    "headRefName": "feature/carbon-calculator",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/114"
+  },
+  {
+    "number": 113,
+    "title": "Hosted demo polish: stock cover, title, date test, unit price, amounts, orders table (Closes #107)",
+    "headRefOid": "11c82c1db0bc8d80d7b1289c0593f2beedf10922",
+    "baseRefName": "feature/hosted-quote-to-plan",
+    "headRefName": "fix/demo-polish",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/113"
+  },
+  {
+    "number": 105,
+    "title": "[Awaiting approval] Dispatch gateway routes and local service mode on /dispatch (Part of #77)",
+    "headRefOid": "1a490dc95e9a2685e6e86c885e97fb084e107a3c",
+    "baseRefName": "main",
+    "headRefName": "feature/dispatch-gateway-routes",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/105"
+  },
+  {
+    "number": 104,
+    "title": "[Awaiting approval] Offline rule-based text proposals behind a default-off flag (Part of #96)",
+    "headRefOid": "604c2b746473b10194f378643ec37142a76f693a",
+    "baseRefName": "main",
+    "headRefName": "feature/offline-text-proposals",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/104"
+  },
+  {
+    "number": 103,
+    "title": "[Awaiting approval] One shared workspace header on all six pages (Part of #80)",
+    "headRefOid": "70d0da7554fc93fc4a451fe5b33d47997e49e62a",
+    "baseRefName": "main",
+    "headRefName": "feature/shared-workspace-nav",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/103"
+  },
+  {
+    "number": 102,
+    "title": "[Awaiting approval] Document the offers local quote service mode (Part of #99)",
+    "headRefOid": "a352abe907d3eba36ea59b9f689e5c14a8fd3339",
+    "baseRefName": "main",
+    "headRefName": "docs/offers-local-service",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/102"
+  },
+  {
+    "number": 101,
+    "title": "[Awaiting approval] Isolate offers-only app tests so the offers suite passes in any order (Part of #98)",
+    "headRefOid": "689c273623cef688dfb07ea79aab7ee1a3844b9c",
+    "baseRefName": "main",
+    "headRefName": "fix/offer-test-isolation",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/101"
+  },
+  {
+    "number": 100,
+    "title": "[Awaiting approval] Scenarios default example sends its arrival change on first run (Part of #78)",
+    "headRefOid": "01004e913792ff62953d5c6c74322d6989516946",
+    "baseRefName": "main",
+    "headRefName": "fix/scenarios-default-example",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/100"
+  },
+  {
+    "number": 95,
+    "title": "Export the dispatch fixtures at an explicit cutoff (Part of #5)",
+    "headRefOid": "4c5ffa19df5baf2a694bb0e18100ce91d81c113b",
+    "baseRefName": "docs/run-the-demo",
+    "headRefName": "feature/dispatch-fixture-cutoff",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/95"
+  },
+  {
+    "number": 94,
+    "title": "Proposal: read-only voice tools for offers and shipments (Part of #81)",
+    "headRefOid": "d086d26153da5ce29253864ee6c1ac8d9655f7a7",
+    "baseRefName": "main",
+    "headRefName": "feature/voice-read-tools-proposal",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/94"
+  },
+  {
+    "number": 93,
+    "title": "Run-the-demo guide, updated demo script and pitch notes (Part of #3 and #5)",
+    "headRefOid": "fd287e37e7be577cd99f3cb2132087d9b9e7d580",
+    "baseRefName": "main",
+    "headRefName": "docs/run-the-demo",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/93"
+  },
+  {
+    "number": 72,
+    "title": "Cite checked sources for hazard location coordinates (Part of #60)",
+    "headRefOid": "2f6c73056bd92163638e4dd51bf3f023f584d9f9",
+    "baseRefName": "main",
+    "headRefName": "feature/hazard-registry-sources",
+    "url": "https://github.com/deevyanshoo/Closed_Source_Builders_Cup/pull/72"
+  }
+]

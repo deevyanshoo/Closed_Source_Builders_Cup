@@ -296,6 +296,16 @@ def _render_answer(template, facts, citations):
     return _FACT_TOKEN.sub(lambda match: facts[match.group(1)], template)
 
 
+def _render_evidence_text(value, facts, citations, fallback):
+    """Ground optional model prose, omitting a clause whose tokens cannot be verified."""
+    if '{{' not in value and '}}' not in value:
+        return value
+    try:
+        return _render_answer(value, facts, citations)
+    except OperatorValidationError:
+        return fallback
+
+
 def _reviewed_supplier(offer):
     field = (offer.get('fields') or {}).get('supplier_name') or {}
     if (field.get('status') in {'extracted', 'corrected'} and
@@ -826,6 +836,17 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                              'changing a plan.')}
     grounded_answer = (_grounded_answer(snapshot, message, material_id, ev, facts, cited)
                        if coord['intent'] in {'inspect', 'explain', 'answer', 'analytics'} else None)
+    if coord['intent'] == 'explain':
+        ev = {**ev,
+              'implication': _render_evidence_text(
+                  ev['implication'], facts, cited,
+                  'Check current material and supplier evidence.'),
+              'confidence_reason': _render_evidence_text(
+                  ev['confidence_reason'], facts, cited,
+                  'The cited headline alone does not establish a material impact.'),
+              'next_steps': [_render_evidence_text(
+                  step, facts, cited, 'Check the original source and current supplier evidence.')
+                  for step in ev['next_steps']]}
     indirect = [(item_id, _news_relevance(news[item_id], snapshot['company'], relevance_material))
                 for item_id in cited if item_id in news and
                 _news_relevance(news[item_id], snapshot['company'], relevance_material)
@@ -1069,6 +1090,8 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
             status, answer = 'needs_clarification', 'A current selected purchase plan is needed for an unsent RFQ draft.'
     answer = present_answer(answer, message, [supplier['name'] for supplier in
                                              snapshot['company'].get('suppliers', [])])
+    if '{{' in answer or '}}' in answer:
+        raise OperatorValidationError('Answer contains an unresolved fact token.')
     return {'status': status, 'assistant_text': answer, 'agent_steps': steps,
             'evidence_ids': cited, 'candidate': candidate,
             'proposal_kind': candidate['kind'] if candidate else None,

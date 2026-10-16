@@ -1,6 +1,6 @@
 # ZOORQ hosted judge demo: deployment and operator guide
 
-**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). The older `closed-source-quote-demo` revision r74 remains a healthy fallback. Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. Final hosted acceptance of the native what-if and spoken research-consent paths is still in progress.
+**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). The older `closed-source-quote-demo` revision r74 remains a healthy fallback. Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. The native delay preview passed hosted acceptance. The consent/research/audio/history flow completed, while its strict final date-speaking quality check remains red; see the [release report](../../docs/releases/2026-10-17-zoorq-judge-experience.md).
 
 ## What the demo does
 
@@ -41,6 +41,6 @@ For one **controlled-speech** native Live turn, pass an owned mono PCM16, 16 kHz
 python deploy/judge-demo/judge_experience_audit.py --base "$BASE" --expected-revision "$REV" --output /private/tmp/zoorq-world-voice-new.json --voice-wav .superpowers/sdd/2026-10-17-zoorq-judge-experience/voice-world-news.wav --voice-kind world-news
 ```
 
-The separate `W/voice-consent-audit.py` utility (`W=.superpowers/sdd/2026-10-17-zoorq-judge-experience`) is the explicit, chargeable two-turn public-research check. It requires `--execute-public-research`, `--research-wav`, `--consent-wav`, `--base`, `--expected-revision` and a new `--output`; only the release owner should run it after review. It must observe a real proposal, spoken confirmation, research progress/completion and a sourced answer. Do not use an HTTP seed or a text confirmation as spoken-consent evidence.
+The separate `deploy/judge-demo/voice_research_consent_audit.py` utility is the explicit, chargeable two-turn public-research check. It requires `--execute-public-research`, `--research-wav`, `--consent-wav`, `--base`, `--expected-revision` and a new `--output`; only the release owner should run it after review. It must observe a real proposal, spoken confirmation, research progress/completion and a sourced answer. Do not use an HTTP seed or a text confirmation as spoken-consent evidence.
 
 Controlled WAV receipts prove only the submitted audio and hosted tool/answer path. A physical microphone, browser permission, playback and user-visible interruption check require separate hands-on browser evidence. The old recorded push-to-talk STT/TTS walkthrough is legacy evidence and does not establish acceptance of native Gemini Live. Provider calls, fresh source timestamps, consent and final answers require real hosted receipts and human review; local deterministic checks cannot establish them. Keep exact release receipts and history in the release report, not in this guide.

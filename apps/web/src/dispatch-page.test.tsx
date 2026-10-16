@@ -93,7 +93,7 @@ describe('dispatch workspace components', () => {
     expect(empty).not.toContain('role="alert"');
     const stale = render({ ...list, status: 'stale', reasons: ['data_older_than_max_age'] });
     expect(stale).toContain('Old data');
-    expect(stale).toContain('2026-10-08');
+    expect(stale).toContain('2026-10-16');
     expect(stale).toContain('SHP-SYN-004');
   });
 });

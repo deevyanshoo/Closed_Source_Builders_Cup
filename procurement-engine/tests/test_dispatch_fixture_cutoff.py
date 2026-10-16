@@ -53,11 +53,23 @@ def outcomes(out: dict) -> dict:
     return {"shipments": shipments, "replay": replay, "hazards": hazards}
 
 
-def test_default_build_is_unchanged(default):
-    committed = json.loads(COMMITTED.read_text(encoding="utf-8"))
-    drop = ("generated_from_revision",)
-    assert {k: v for k, v in default.items() if k not in drop} == {k: v for k, v in committed.items() if k not in drop}
+RECORDING = "2026-10-16T12:00:00Z"  # cutoff of the committed web fixtures (#119)
+
+
+def test_default_build_keeps_the_original_cutoff(default):
+    assert default["as_of"] == "2026-10-08T12:00:00+00:00"
     assert "cutoff_shift" not in default
+
+
+def test_committed_fixtures_are_the_recording_cutoff_export_with_identical_outcomes(default):
+    committed = json.loads(COMMITTED.read_text(encoding="utf-8"))
+    recording = export.build_export(as_of=RECORDING)
+    drop = ("generated_from_revision",)
+    assert {k: v for k, v in committed.items() if k not in drop} == {k: v for k, v in recording.items() if k not in drop}
+    assert committed["as_of"] == "2026-10-16T12:00:00+00:00"
+    assert committed["cutoff_shift"]["days"] == 8
+    # every status, signal, replay result and hazard state and distance matches the original export
+    assert outcomes(committed) == outcomes(default)
 
 
 def test_new_cutoff_keeps_statuses_replays_and_hazards(default, shifted):

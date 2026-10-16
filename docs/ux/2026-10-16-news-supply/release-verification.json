@@ -1,0 +1,76 @@
+{
+  "application_source_revision": "e395a0d",
+  "build_id": "988cbd65-2909-4172-a9c4-63bdfc0340b9",
+  "build_status": "SUCCESS",
+  "ready_revision": "closed-source-quote-demo-00064-kmp",
+  "traffic_percent": 100,
+  "image_digest": "sha256:0b6e2fead22a3c1ecf98a0998da8aa982b5865e4b44230fc61a7599e1edb7a29",
+  "health": [
+    {
+      "url": "https://closed-source-quote-demo-963802031195.asia-south1.run.app",
+      "revision": "closed-source-quote-demo-00064-kmp",
+      "health_status": 200,
+      "ready_status": 200,
+      "ready": true
+    },
+    {
+      "url": "https://closed-source-quote-demo-ryoeyuqvta-el.a.run.app",
+      "revision": "closed-source-quote-demo-00064-kmp",
+      "health_status": 200,
+      "ready_status": 200,
+      "ready": true
+    }
+  ],
+  "config_verification": {
+    "verified_at": "2026-10-16T07:43:36.357678+00:00",
+    "read_only": true,
+    "source_revision": "e395a0d",
+    "build_id": "988cbd65-2909-4172-a9c4-63bdfc0340b9",
+    "image_digest": "sha256:0b6e2fead22a3c1ecf98a0998da8aa982b5865e4b44230fc61a7599e1edb7a29",
+    "service": {
+      "ready_revision": "closed-source-quote-demo-00064-kmp",
+      "latest_created_revision": "closed-source-quote-demo-00064-kmp",
+      "ready": true,
+      "traffic_percent": 100,
+      "image_digest_matches": true,
+      "live_spec_matches_polish_receipt": true,
+      "runtime_identity_environment_scaling_unchanged_from_prerelease": true,
+      "runtime_identity_environment_scaling_unchanged_from_r63": true,
+      "cpu": "1",
+      "memory": "1Gi",
+      "max_instances": "1"
+    },
+    "news_job": {
+      "image_digest_matches": true,
+      "live_spec_matches_polish_receipt": true,
+      "runtime_identity_environment_scaling_unchanged_from_prerelease": true,
+      "runtime_identity_environment_scaling_unchanged_from_r63": true,
+      "cpu": "1",
+      "memory": "512Mi",
+      "timeout_seconds": 120,
+      "tasks": 1,
+      "parallelism": 1,
+      "max_retries": 0
+    },
+    "news_scheduler": {
+      "schedule": "0 * * * *",
+      "time_zone": "UTC",
+      "state": "ENABLED",
+      "schedule_target_identity_retry_unchanged_from_r63": true
+    },
+    "comparison_note": "Only image differs in runtime specifications; generated client nonce and operation metadata excluded. Environment values, identity addresses and tokens omitted.",
+    "all_requested_checks_passed": true
+  },
+  "tests": {
+    "web_passed": 479,
+    "web_existing_skips": 6,
+    "session_race_passed": true,
+    "final_css_focused_passed": 13,
+    "backend_demo_passed": 789,
+    "backend_gate_isolation": "Existing repository voice-process reset fixture reused as temporary plugin with --noconftest; unrelated analytics DB setup excluded.",
+    "production_typecheck_build": true,
+    "independent_review": "approved"
+  },
+  "cost_boundary": "Existing trial credits; no billing upgrade, IAM grant or new paid service.",
+  "hourly_snapshot_boundary": "Existing current-hour immutable object retained; updated collector takes effect at next scheduled execution."
+}

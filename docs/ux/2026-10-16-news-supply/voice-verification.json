@@ -1,0 +1,130 @@
+[
+  {
+    "revision": "closed-source-quote-demo-00062-gzq",
+    "controlled_speech": true,
+    "physical_microphone_test": false,
+    "ok": true,
+    "started_at": "2026-10-16T07:20:21.612496+00:00",
+    "completed_at": "2026-10-16T07:23:35.540163+00:00",
+    "companies": [
+      {
+        "company_id": "solara-cables",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 407520
+      },
+      {
+        "company_id": "terrapack",
+        "ok": true,
+        "tools": [
+          "analyze_inventory",
+          "analyze_inventory",
+          "analyze_inventory"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 644162
+      },
+      {
+        "company_id": "loomworks",
+        "ok": true,
+        "tools": [
+          "analyze_inventory",
+          "analyze_inventory",
+          "analyze_inventory"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 497762
+      },
+      {
+        "company_id": "harvest-foods",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 302882
+      },
+      {
+        "company_id": "meridian-pharma",
+        "ok": true,
+        "tools": [
+          "analyze_inventory",
+          "analyze_inventory",
+          "analyze_inventory"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 335042
+      },
+      {
+        "company_id": "forgeline-components",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 270242
+      },
+      {
+        "company_id": "gridspring-batteries",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 454562
+      },
+      {
+        "company_id": "circuitpeak-systems",
+        "ok": true,
+        "tools": [
+          "analyze_inventory",
+          "analyze_inventory",
+          "analyze_inventory"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 317762
+      },
+      {
+        "company_id": "atlas-petrochem",
+        "ok": true,
+        "tools": [
+          "read_risks",
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 583200
+      },
+      {
+        "company_id": "stonebridge-materials",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 592320
+      }
+    ]
+  },
+  {
+    "revision": "closed-source-quote-demo-00064-kmp",
+    "controlled_speech": true,
+    "physical_microphone_test": false,
+    "ok": true,
+    "started_at": "2026-10-16T07:42:55.095640+00:00",
+    "completed_at": "2026-10-16T07:43:20.485317+00:00",
+    "companies": [
+      {
+        "company_id": "solara-cables",
+        "ok": true,
+        "tools": [
+          "read_workspace"
+        ],
+        "facts_match_profile": true,
+        "output_audio_bytes": 643202
+      }
+    ]
+  }
+]

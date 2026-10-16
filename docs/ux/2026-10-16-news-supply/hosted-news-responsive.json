@@ -1,0 +1,261 @@
+{
+  "revision": "closed-source-quote-demo-00064-kmp",
+  "observations": [
+    {
+      "company": "Solara Cables workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "Solara Cables workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg",
+        "/assets/news/solara-cables.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "TerraPack Films workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/terrapack.jpg",
+        "/assets/news/terrapack.jpg",
+        "/assets/news/terrapack.jpg"
+      ],
+      "stories": 3,
+      "width": 1440
+    },
+    {
+      "company": "TerraPack Films workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/terrapack.jpg",
+        "/assets/news/terrapack.jpg",
+        "/assets/news/terrapack.jpg"
+      ],
+      "stories": 3,
+      "width": 390
+    },
+    {
+      "company": "LoomWorks Textiles workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "LoomWorks Textiles workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg",
+        "/assets/news/loomworks.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "Harvest Foods workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "Harvest Foods workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg",
+        "/assets/news/harvest-foods.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "Meridian Pharma workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "Meridian Pharma workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg",
+        "/assets/news/meridian-pharma.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "ForgeLine Components workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "ForgeLine Components workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg",
+        "/assets/news/forgeline-components.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "GridSpring Batteries workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "GridSpring Batteries workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg",
+        "/assets/news/gridspring-batteries.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "CircuitPeak Systems workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "CircuitPeak Systems workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg",
+        "/assets/news/circuitpeak-systems.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "Atlas Petrochem workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "Atlas Petrochem workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg",
+        "/assets/news/atlas-petrochem.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    },
+    {
+      "company": "StoneBridge Materials workspace",
+      "pageWidth": 1440,
+      "photos": [
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg"
+      ],
+      "stories": 5,
+      "width": 1440
+    },
+    {
+      "company": "StoneBridge Materials workspace",
+      "pageWidth": 390,
+      "photos": [
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg",
+        "/assets/news/stonebridge-materials.jpg"
+      ],
+      "stories": 5,
+      "width": 390
+    }
+  ]
+}

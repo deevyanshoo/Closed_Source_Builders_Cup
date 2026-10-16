@@ -9,6 +9,8 @@ import secrets
 import threading
 from typing import Callable
 
+from procure.carbon.assessment import validate_assessment
+
 from .company import DEFAULT_COMPANY_ID
 from .session_persistence import (FirestoreSessionPersistence, StorageConflict,
                                   StorageInvalid, StorageTooLarge, StorageUnavailable,
@@ -43,6 +45,7 @@ class Session:
     rfq: dict | None = None
     news: dict | None = None
     risk_report: dict | None = None
+    carbon_assessment: dict | None = None
     watch_items: list = field(default_factory=list)
     pending_proposal: dict | None = None
     operator_turns: int = 0
@@ -75,6 +78,7 @@ class Session:
             'buyer_draft': self.buyer_draft, 'selected_material_id': self.selected_material_id,
             'simulated_outbox': self.simulated_outbox,
             'drafts': self.drafts,
+            'carbon_assessment': self.carbon_assessment,
         }
         restored = self.workspaces.pop(company_id, None) or {}
         self.offers = restored.get('offers', {})
@@ -87,6 +91,7 @@ class Session:
         self.selected_material_id = restored.get('selected_material_id')
         self.simulated_outbox = restored.get('simulated_outbox', [])
         self.drafts = restored.get('drafts', [])
+        self.carbon_assessment = restored.get('carbon_assessment')
         self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
@@ -99,6 +104,7 @@ class SessionStore:
     _STATE_FIELDS = ('offers', 'idempotency', 'last_plan', 'plan_request', 'buyer_draft',
                      'selected_material_id', 'simulated_outbox', 'recovery', 'rfq', 'news',
                      'risk_report', 'watch_items', 'operator_turns', 'operator_generation',
+                     'carbon_assessment',
                      'voice_calls', 'live_voice_sessions', 'live_voice_starts_by_company',
                      'company_id', 'context_version', 'workspaces', 'live_calls',
                      'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts',
@@ -230,11 +236,30 @@ class SessionStore:
             raise StorageInvalid('Invalid research attempt count')
         if session.pending_proposal is not None and not cls._valid_proposal(session.pending_proposal, session):
             raise StorageInvalid('Invalid pending proposal')
+        cls._validate_carbon_state(session)
         state = {'schema_version': 1, 'session_id': session.session_id,
                  'csrf_token': session.csrf_token, 'expires_at': session.expires_at.isoformat(),
                  'requests': 0}
         state.update({name: getattr(session, name) for name in cls._STATE_FIELDS})
         return state
+
+    @staticmethod
+    def _validate_carbon_state(session: Session) -> None:
+        def check(record, company_id):
+            if record is None:
+                return
+            try:
+                validate_assessment(record)
+            except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+                raise StorageInvalid('Invalid carbon assessment') from exc
+            if record['company_id'] != company_id or record['context_version'] > session.context_version:
+                raise StorageInvalid('Carbon assessment belongs to another context')
+
+        check(session.carbon_assessment, session.company_id)
+        for company_id, workspace in session.workspaces.items():
+            if not isinstance(company_id, str) or not isinstance(workspace, dict):
+                raise StorageInvalid('Invalid company workspace')
+            check(workspace.get('carbon_assessment'), company_id)
 
     @staticmethod
     def _valid_replay_journal(journal: dict) -> bool:
@@ -323,6 +348,7 @@ class SessionStore:
                 raise ValueError()
             expires_at = expires_at.astimezone(timezone.utc)
             values = {name: state.get(name, []) if name == 'drafts' else
+                      state.get(name) if name == 'carbon_assessment' else
                       state.get(name) if name == 'pending_proposal' else state[name]
                       for name in cls._STATE_FIELDS}
             for name in ('offers', 'idempotency', 'live_voice_starts_by_company', 'workspaces',
@@ -350,6 +376,7 @@ class SessionStore:
                 if type(values[name]) is not int or values[name] < 0:
                     raise ValueError()
             restored = Session(session_id, state['csrf_token'], expires_at, **values)
+            cls._validate_carbon_state(restored)
             requests = state.get('requests', 0)
             if type(requests) is not int or requests < 0:
                 raise ValueError()
@@ -433,6 +460,7 @@ class SessionStore:
             session.rfq = None
             session.news = None
             session.risk_report = None
+            session.carbon_assessment = None
             session.watch_items.clear()
             session.pending_proposal = None
             session.operator_turns = 0

@@ -24,6 +24,7 @@
  "result": {
   "plan_id": "plan-1",
   "company_id": "solara-cables",
+  "context_version": 3,
   "synthetic_inputs": true,
   "registry_version": "carbon-factors-v1",
   "calculator_version": "carbon-calculator-v2",

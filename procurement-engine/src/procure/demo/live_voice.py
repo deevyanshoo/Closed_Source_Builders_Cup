@@ -89,6 +89,10 @@ INSTRUCTION = (
     "prepare_simulated_email only when the user explicitly requests a simulated email. "
     "For news, headlines, world events or what could affect this business, "
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
+    "Use read_carbon for the current saved emissions assessment and read_shipments for the current fictional dispatch view. "
+    "Never infer a carbon total, route, carrier status or shipment delay from other facts. "
+    "For an explicitly named current linked shipment and whole delay days, use prepare_shipment_recovery; "
+    "it only prepares a recovery proposal for on-screen human review and never applies the plan. "
     "Summarize two relevant developments with publication dates, named sources, conditional company impact "
     "and a practical next step in three or four short sentences. Never just report the number of signals. "
     "Describe missing or stale coverage honestly. Only when the user explicitly requests additional "
@@ -294,6 +298,12 @@ def _config(company=None):
         ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
+        ('read_carbon', 'Read the current saved emissions assessment and exact calculator sources; never estimate missing values.', {}, []),
+        ('read_shipments', 'Read the current company-owned fictional shipment and plan-demand view.', {}, []),
+        ('prepare_shipment_recovery', 'Prepare a reviewed recovery proposal for one current eligible shipment and an explicit whole-day delay; never applies it.',
+         {'shipment_id': {'type': 'string', 'minLength': 1, 'maxLength': 180},
+          'delay_days': {'type': 'integer', 'minimum': 0, 'maximum': 3650}},
+         ['shipment_id', 'delay_days']),
         ('read_workspace', 'Read current company, buyer form, current selected material, news, quotes and plan facts. Omit material_id to resolve the current selection.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
         ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
@@ -1006,7 +1016,8 @@ async def run_live_voice(
                             name = getattr(call, 'name', None)
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
                                      'prepare_research', 'confirm_research', 'read_research',
-                                     'read_risks', 'read_news',
+                                     'read_risks', 'read_news', 'read_carbon', 'read_shipments',
+                                     'prepare_shipment_recovery',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
                                      'navigate_workspace'}
@@ -1019,6 +1030,15 @@ async def run_live_voice(
                             if not isinstance(args, dict) or len(json.dumps(args)) > 8000:
                                 raise _Invalid()
                             if name == 'prepare_rfq' and args:
+                                raise _Invalid()
+                            if name in ('read_carbon', 'read_shipments') and args:
+                                raise _Invalid()
+                            if name == 'prepare_shipment_recovery' and (
+                                    set(args) != {'shipment_id', 'delay_days'} or
+                                    not isinstance(args['shipment_id'], str) or
+                                    not 0 < len(args['shipment_id']) <= 180 or
+                                    type(args['delay_days']) is not int or
+                                    not 0 <= args['delay_days'] <= 3650):
                                 raise _Invalid()
                             if name == 'operate_workspace' and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or

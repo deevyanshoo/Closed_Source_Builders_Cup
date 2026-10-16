@@ -71,6 +71,20 @@ describe('hosted demo API', () => {
     expect(JSON.parse(calls[1][1].body as string)).toEqual({ plan_id: 'p2', expected_versions: { q1: 2 }, reviewed: true, idempotency_key: 'generated' });
   });
 
+  it('reads company-scoped carbon and shipment views and carries an explicit shipment through recovery', async () => {
+    const send = vi.fn(async () => json({}));
+    const api = createDemoApi(send, () => 'review-key');
+    await api.carbonAssessment();
+    await api.dispatch();
+    await api.recovery('csrf', { baseline_plan_id: 'plan-a', expected_versions: { 'offer-a': 2 }, delay_days_by_offer: { 'offer-a': 7 }, shipment_id: 'shipment-a' }, 5);
+    const calls = send.mock.calls as unknown as [string, RequestInit][];
+    expect(calls.slice(0, 2)).toEqual([
+      ['/api/demo/carbon/assessment', { method: 'GET', credentials: 'same-origin', headers: {} }],
+      ['/api/demo/dispatch', { method: 'GET', credentials: 'same-origin', headers: {} }],
+    ]);
+    expect(JSON.parse(calls[2][1].body as string)).toEqual({ baseline_plan_id: 'plan-a', expected_versions: { 'offer-a': 2 }, delay_days_by_offer: { 'offer-a': 7 }, shipment_id: 'shipment-a', expected_context_version: 5, idempotency_key: 'review-key' });
+  });
+
   it('downloads only the requested draft as text', async () => {
     const send = vi.fn(async () => new Response('Synthetic RFQ draft'));
     const api = createDemoApi(send);

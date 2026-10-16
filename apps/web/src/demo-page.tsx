@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, RefObject } from 'react';
 import { createDemoApi, DemoApiError } from './demo-api';
-import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
+import type { BuyerDraft, CompanyProfile, DemoFixture, DemoSession, DispatchView, FieldResult, NewsItem, NewsView, OfferView, OperatorTurn, PlanRequest, PlanView, PreparedDraft, RecoveryView, RfqView, RiskReport, SimulatedOutboxMessage } from './demo-api';
 import { NewsWorkspace } from './demo-company-news';
 import { InventoryWorkspace } from './zoorq-inventory';
 import { OperatorPanel } from './demo-operator';
@@ -14,8 +14,14 @@ import type { RiskScope } from './demo-risk-monitor';
 import './demo.css';
 import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
-import { CompanyHub, ProcurementNavigation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceHeader, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
-import type { ProcurementStage, WorkspaceView } from './zoorq-workspace';
+import { CompanyHub, ProcurementNavigation, readSupplyLocation, readWorkspaceLocation, WorkspaceNavigation, WorkspaceHeader, WorkspaceOverview, workspaceSearch, showWorkspaceActivity } from './zoorq-workspace';
+import type { ProcurementStage, SupplyTab, WorkspaceView } from './zoorq-workspace';
+import { CarbonPanel, carbonCell } from './demo-carbon';
+import type { CarbonComparison } from './demo-carbon';
+import { DemoDispatchPanel } from './demo-dispatch';
+import { acceptScopedResult, currentCarbonAssessment, currentCarbonResult, currentDispatchView, eligibleShipmentDelay, linkedDelayRequest, sameTaherScope } from './demo-taher-workspace';
+import type { TaherScope } from './demo-taher-workspace';
+import './demo-taher-workspace.css';
 import './demo-theme.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -261,12 +267,13 @@ const planReason: Record<string, string> = {
 };
 const reasonText = (reason: string) => planReason[reason] ?? words(reason);
 
-export function PlanResults({ plan, offers, headingRef }: { plan: PlanView; offers: OfferView[]; headingRef?: RefObject<HTMLHeadingElement | null> }) {
+export function PlanResults({ plan, offers, carbon, headingRef }: { plan: PlanView; offers: OfferView[]; carbon?: CarbonComparison | null; headingRef?: RefObject<HTMLHeadingElement | null> }) {
   const selected = plan.alternatives.find(a => a.offer_id === plan.selected_offer_id);
   const stockCoversNeed = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
+  const currentCarbon = carbon?.plan_id === plan.plan_id ? carbon : null;
   return <section className="demo-results" aria-label="Comparison result"><span className="demo-kicker">Comparison result</span><h2 ref={headingRef} tabIndex={-1}>{stockCoversNeed ? 'Stock covers this need' : selected ? `${supplierDisplayName(selected.supplier)} is feasible` : 'No feasible quote for these inputs'}</h2><p>{displaySupplierMentions(plan.explanation, plan.alternatives.map(item => item.supplier))}</p>
     <div className="demo-result-numbers"><div><span>Purchase needed after stock</span><strong>{requiredPurchase(plan)} {planUnit(plan)}</strong></div><div><span>Selected total</span><strong>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</strong></div></div>
-    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Unit price</th><th>Total</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td><td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
+    {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Comparison unit price</th><th>Total</th>{currentCarbon && <th>Emissions<small>estimate, not certified</small></th>}<th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{(a.unit_price_per_unit ?? a.unit_price_per_kg) == null ? 'Unavailable' : `${a.unit_price_per_unit ?? a.unit_price_per_kg} ${plan.reporting_currency}/${planUnit(plan)}`}</td><td>{a.total_cost == null ? 'Unavailable' : `${a.total_cost} ${plan.reporting_currency}`}</td>{currentCarbon && <td>{carbonCell(currentCarbon, a.offer_id)}</td>}<td>{a.feasible ? a.offer_id === plan.selected_offer_id ? 'Selected' : 'Feasible' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}
     <p className="demo-muted">Total includes your extra cost per {planUnit(plan)}. It is not proof of full freight, tariffs or landed cost. Currency rates are synthetic assumptions in the export. Forecast action: {plan.forecast_action.toLowerCase()}. No customer savings are claimed.</p>
   </section>;
 }
@@ -276,6 +283,12 @@ function PlanSnapshot({ title, plan, offers }: { title: string; plan: PlanView; 
   const stock = /^0(?:\.0+)?$/.test(requiredPurchase(plan));
   return <article className="demo-snapshot"><h3>{title}</h3><dl><dt>Supplier</dt><dd>{stock ? 'No purchase needed; stock covers this need' : choice ? supplierDisplayName(choice.supplier) : 'No feasible quote'}</dd><dt>Arrival</dt><dd>{choice?.arrival_date ?? 'No selected arrival'}</dd><dt>Buyer total</dt><dd>{plan.total_cost == null ? 'No selection' : `${plan.total_cost} ${plan.reporting_currency}`}</dd><dt>Feasibility</dt><dd>{stock ? 'Stock covers need' : choice ? 'Feasible' : 'No feasible quote'}</dd></dl>
     {plan.alternatives.length > 0 && <div className="demo-table-wrap"><table><thead><tr><th>Supplier</th><th>Arrival</th><th>Decision</th></tr></thead><tbody>{plan.alternatives.map(a => <tr key={a.offer_id}><td>{supplierDisplayName(a.supplier)}<small>{offers.find(o => o.offer_id === a.offer_id)?.document.filename}</small></td><td>{a.arrival_date ?? 'Unknown'}</td><td>{a.offer_id === plan.selected_offer_id ? 'Selected' : a.feasible ? 'Feasible alternative' : a.reasons.map(reasonText).join('; ') || 'Infeasible'}</td></tr>)}</tbody></table></div>}</article>;
+}
+
+function ScopedCarbonPanel({ plan, csrf, scope, dirty, result, onResult, onInputsChange }: { plan: PlanView; csrf: string; scope: TaherScope; dirty: boolean; result: CarbonComparison | null; onResult: (result: CarbonComparison, scope: TaherScope) => void; onInputsChange: (scope: TaherScope) => void }) {
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  return <CarbonPanel plan={plan} csrf={csrf} contextVersion={scope.contextVersion} scope={scope} dirty={dirty} result={result} onResult={value => { if (mounted.current) onResult(value, scope); }} onInputsChange={() => { if (mounted.current) onInputsChange(scope); }} />;
 }
 
 export function RecoveryResults({ recovery, offers, headingRef }: { recovery: RecoveryView; offers: OfferView[]; headingRef?: RefObject<HTMLHeadingElement | null> }) {
@@ -333,6 +346,14 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const [newsBusy, setNewsBusy] = useState(false);
   const [view, setView] = useState<WorkspaceView>(() => initialView ?? (typeof window === 'undefined' ? 'hub' : readWorkspaceLocation(window.location.search).view));
   const [stage, setStage] = useState<ProcurementStage>(() => initialStage ?? (typeof window === 'undefined' ? 'add' : readWorkspaceLocation(window.location.search).stage));
+  const [supplyTab, setSupplyTab] = useState<SupplyTab>(() => typeof window === 'undefined' ? 'inventory' : readSupplyLocation(window.location.search));
+  const [comparisonTab, setComparisonTab] = useState<'cost' | 'emissions'>('cost');
+  const [carbonSnapshot, setCarbonSnapshot] = useState<{ scope: TaherScope; result: CarbonComparison | null } | null>(null);
+  const [carbonEditedScope, setCarbonEditedScope] = useState<TaherScope | null>(null);
+  const [dispatchSnapshot, setDispatchSnapshot] = useState<{ scope: TaherScope; view: DispatchView } | null>(null);
+  const [dispatchBusy, setDispatchBusy] = useState(false);
+  const [dispatchError, setDispatchError] = useState('');
+  const [shipmentHandoff, setShipmentHandoff] = useState<{ scope: TaherScope; shipmentId: string; offerId: string; days: number } | null>(null);
   const [riskOpen, setRiskOpen] = useState(false);
   const [portfolioOpen, setPortfolioOpen] = useState(false);
   const [preparedDrafts, setPreparedDrafts] = useState<{ scope: string; drafts: PreparedDraft[] } | null>(null);
@@ -365,11 +386,22 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const epochRef = useRef(initialState.epoch);
   const actionRef = useRef(0);
   const newsRequestRef = useRef(0);
+  const carbonRequestRef = useRef(0);
+  const carbonEditedScopeRef = useRef<TaherScope | null>(null);
+  const dispatchRequestRef = useRef(0);
   const draftSaveRef = useRef<{ epoch: number; promise: Promise<DemoSession> } | null>(null);
   const newsAutoRecoveryUsedRef = useRef(false);
   const selectedMaterialRef = useRef(selectedMaterialId);
   const materialScopeRef = useRef(initialState.session ? `${initialState.session.session_id}:${initialState.session.company?.company_id ?? ''}:${initialState.session.context_version ?? ''}` : '');
   const company = state.session?.company;
+  const taherScope: TaherScope | null = state.session && company && state.session.context_version !== undefined ?
+    { sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch, planId: state.plan?.plan_id ?? null } : null;
+  const taherScopeRef = useRef<TaherScope | null>(taherScope);
+  taherScopeRef.current = taherScope;
+  const currentCarbon = currentCarbonResult(state.session, state.plan, state.dirty, taherScope, carbonSnapshot, carbonEditedScope);
+  const carbonInputsEdited = sameTaherScope(carbonEditedScope, taherScope);
+  const currentDispatch = dispatchSnapshot && sameTaherScope(dispatchSnapshot.scope, taherScope) ? currentDispatchView(dispatchSnapshot.view, taherScope) : null;
+  const currentHandoff = shipmentHandoff && sameTaherScope(shipmentHandoff.scope, taherScope) ? shipmentHandoff : null;
   const riskScope = state.session && company && state.session.context_version !== undefined ? { sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version, epoch: state.epoch } : null;
   const currentRisks = riskScope && riskSnapshot && sameRiskScope(riskScope, riskSnapshot.scope) ? riskSnapshot.report : null;
   const currentRiskAlerts = currentRisks?.companies.find(item => item.company_id === company?.company_id)?.alerts ?? [];
@@ -414,14 +446,22 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   function navigate(nextView: WorkspaceView, nextStage: ProcurementStage = stage) {
     if (nextView === 'hub' && operatorOpen) closeOperator();
     setView(nextView); setStage(nextStage);
+    if (nextView === 'inventory') setSupplyTab('inventory');
     if (typeof window !== 'undefined') {
       const search = workspaceSearch(window.location.search, nextView, nextStage);
       window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`);
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
   }
+  function navigateSupply(next: SupplyTab) {
+    setSupplyTab(next);
+    if (typeof window !== 'undefined') {
+      const search = workspaceSearch(window.location.search, 'inventory', stage, next);
+      window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`);
+    }
+  }
   useEffect(() => {
-    const onPop = () => { const location = readWorkspaceLocation(window.location.search); setView(location.view); setStage(location.stage); if (location.view === 'hub') closeOperator(); };
+    const onPop = () => { const location = readWorkspaceLocation(window.location.search); setView(location.view); setStage(location.stage); setSupplyTab(readSupplyLocation(window.location.search)); if (location.view === 'hub') closeOperator(); };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -457,6 +497,10 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
 
   function restoreSession(session: DemoSession, epoch: number) {
     setPreparedDrafts(null);
+    carbonRequestRef.current += 1; dispatchRequestRef.current += 1;
+    taherScopeRef.current = null;
+    carbonEditedScopeRef.current = null;
+    setCarbonEditedScope(null); setCarbonSnapshot(null); setDispatchSnapshot(null); setShipmentHandoff(null);
     const scope = `${session.session_id}:${session.company?.company_id ?? ''}:${session.context_version ?? ''}`;
     const buyer = canonicalBuyerState(session, scope === materialScopeRef.current ? selectedMaterialRef.current : undefined);
     materialScopeRef.current = scope; selectedMaterialRef.current = buyer.materialId;
@@ -564,6 +608,66 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     return () => { cancelled = true; clearTimeout(timer); };
   }, [state.session?.session_id, state.session?.company?.company_id, state.session?.context_version, state.epoch]);
 
+  useEffect(() => {
+    if (view !== 'procurement' || stage !== 'compare' || comparisonTab !== 'emissions' || !taherScope || !state.session || !state.plan || state.dirty || sameTaherScope(carbonEditedScopeRef.current, taherScope)) return;
+    const captured = taherScope, session = state.session, plan = state.plan;
+    const requestId = ++carbonRequestRef.current;
+    api.carbonAssessment().then(response => {
+      if (!acceptScopedResult(captured, taherScopeRef.current, requestId, carbonRequestRef.current) ||
+          sameTaherScope(carbonEditedScopeRef.current, captured) ||
+          captured.epoch !== epochRef.current || response.company_id !== captured.companyId || response.context_version !== captured.contextVersion) return;
+      const record = currentCarbonAssessment({ ...session, carbon_assessment: response.assessment }, plan, false);
+      setCarbonSnapshot({ scope: captured, result: record?.result ?? null });
+    }).catch(() => { /* The session snapshot remains available when this read fails. */ });
+    return () => { carbonRequestRef.current += 1; };
+  }, [view, stage, comparisonTab, state.session, state.plan, state.dirty, state.epoch]);
+
+  async function loadDispatch(captured: TaherScope) {
+    const requestId = ++dispatchRequestRef.current;
+    setDispatchBusy(true); setDispatchError(''); setDispatchSnapshot(null);
+    try {
+      const result = await api.dispatch();
+      if (!acceptScopedResult(captured, taherScopeRef.current, requestId, dispatchRequestRef.current) || captured.epoch !== epochRef.current) return;
+      const current = currentDispatchView(result, captured);
+      if (!current) { setDispatchError('The shipment view changed. Refresh this company workspace.'); return; }
+      setDispatchSnapshot({ scope: captured, view: current });
+    } catch (reason) {
+      if (acceptScopedResult(captured, taherScopeRef.current, requestId, dispatchRequestRef.current) && captured.epoch === epochRef.current) setDispatchError(message(reason));
+    } finally {
+      if (acceptScopedResult(captured, taherScopeRef.current, requestId, dispatchRequestRef.current)) setDispatchBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (view === 'inventory' && supplyTab === 'shipments' && taherScope) void loadDispatch(taherScope);
+    else { dispatchRequestRef.current += 1; setDispatchBusy(false); }
+    return () => { dispatchRequestRef.current += 1; };
+  }, [view, supplyTab, state.session, state.plan, state.recovery, state.offers, state.epoch]);
+  function reviewShipmentDelay(shipmentId: string, days: number) {
+    if (!currentDispatch || !taherScope || !state.plan || busy) return;
+    const link = eligibleShipmentDelay(currentDispatch, shipmentId, days, taherScope, state.plan, state.offers, state.dirty);
+    if (!link) { setDispatchError('This planned shipment is no longer linked to the current comparison. Refresh Shipments.'); return; }
+    setShipmentHandoff({ scope: taherScope, ...link });
+    setDelayOfferId(link.offerId); setDelayDays(String(link.days));
+    setComparisonTab('cost'); navigate('procurement', 'compare');
+  }
+  function saveCarbonResult(result: CarbonComparison, captured: TaherScope) {
+    const stamped = result as CarbonComparison & { company_id?: string; context_version?: number };
+    if (!acceptScopedResult(captured, taherScopeRef.current, carbonRequestRef.current, carbonRequestRef.current) ||
+        captured.epoch !== epochRef.current || stamped.company_id !== captured.companyId ||
+        stamped.context_version !== captured.contextVersion || result.plan_id !== captured.planId) return;
+    carbonRequestRef.current += 1;
+    carbonEditedScopeRef.current = null;
+    setCarbonEditedScope(null);
+    setCarbonSnapshot({ scope: captured, result });
+  }
+  function noteCarbonInputsChanged(captured: TaherScope) {
+    if (!sameTaherScope(captured, taherScopeRef.current) || captured.epoch !== epochRef.current) return;
+    carbonRequestRef.current += 1;
+    carbonEditedScopeRef.current = captured;
+    setCarbonEditedScope(captured);
+    setCarbonSnapshot({ scope: captured, result: null });
+  }
+
   async function run<T>(name: string, operation: () => Promise<T>, success: (value: T, epoch: number) => void) {
     const epoch = epochRef.current, action = ++actionRef.current;
     setBusy(name); setError('');
@@ -586,9 +690,16 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     setFixtureId(companyScenarios(company).find(item => item.material_id === materialId)?.fixture_ids[0] ?? '');
     setDelayOfferId(''); setDelayDays('0');
   }
-  function editScenario() {
+  function editScenario(preserveShipment = false) {
+    const captured = taherScopeRef.current;
     epochRef.current += 1; actionRef.current += 1;
     dispatch({ type: 'scenario-edit' }); setBusy(''); setError('');
+    if (captured) {
+      const nextScope = { ...captured, epoch: epochRef.current };
+      setDispatchSnapshot(previous => previous && sameTaherScope(previous.scope, captured) ? { ...previous, scope: nextScope } : previous);
+      if (preserveShipment) setShipmentHandoff(previous => previous && sameTaherScope(previous.scope, captured) ? { ...previous, scope: nextScope } : previous);
+      else setShipmentHandoff(null);
+    }
   }
   async function switchCompany(companyId: string) {
     if (!state.session?.company || state.session.context_version === undefined || companyId === state.session.company.company_id) return;
@@ -673,13 +784,21 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
   const baseline = state.recovery?.baseline ?? state.plan;
   const delayOffers = baseline ? accepted.filter(o => baseline.offer_versions[o.offer_id] === o.version) : [];
   const selectedDelayOffer = delayOffers.some(o => o.offer_id === delayOfferId) ? delayOfferId : delayOffers[0]?.offer_id ?? '';
-  function compareDelay(days: Record<string, number>) {
+  const linkedDelay = currentHandoff ? linkedDelayRequest(currentHandoff, selectedDelayOffer, delayDays) : null;
+  function compareDelay(days: Record<string, number>, shipmentId?: string) {
     if (!state.session || !baseline) return;
+    if (shipmentId) {
+      const linked = currentDispatch && taherScope && eligibleShipmentDelay(currentDispatch, shipmentId, days[selectedDelayOffer], taherScope, baseline, state.offers, false);
+      if (!linked || linked.offerId !== selectedDelayOffer || Object.keys(days).some(id => id !== linked.offerId && days[id] > 0)) {
+        setError('The planned shipment link changed. Review the current shipment before comparing its delay.'); return;
+      }
+    }
     const expected_versions = baseline.offer_versions;
-    editScenario();
-    run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days }, state.session!.context_version), (recovery, epoch) => {
+    editScenario(!!shipmentId);
+    run('recovery', () => api.recovery(state.session!.csrf_token, { baseline_plan_id: baseline.plan_id, expected_versions, delay_days_by_offer: days, ...(shipmentId ? { shipment_id: shipmentId } : {}) }, state.session!.context_version), (recovery, epoch) => {
       pendingResultFocusRef.current = { kind: 'recovery', id: recovery.comparison_id, epoch, sessionId: state.session!.session_id, companyId: state.session!.company?.company_id ?? '', contextVersion: state.session!.context_version };
       dispatch({ type: 'recovery', recovery, epoch });
+      setShipmentHandoff(null);
       const controls = delayControlsForRecovery(recovery, selectedDelayOffer);
       setDelayOfferId(controls.offerId); setDelayDays(controls.days);
     });
@@ -725,7 +844,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
 
       {companyError && <p className="demo-alert" role="alert">Company catalogue unavailable: {companyError}. The current workspace remains visible.</p>}
       {view === 'overview' && <WorkspaceOverview company={company} news={state.news} newsLoading={newsBusy} newsError={newsError} quoteCount={state.offers.length} onView={navigate} onTalk={requestLiveVoice} report={currentRisks} onSource={busy ? undefined : materialId => { selectMaterial(materialId); navigate('procurement'); }} />}
-      {view === 'inventory' && <><InventoryWorkspace key={company.company_id} company={company} report={currentRisks} onSource={busy ? undefined : materialId => { selectMaterial(materialId); navigate('procurement'); }} onAsk={message => { if (riskScope) seedRiskMessage(message, company.company_id, riskScope); }} /><section className="zoorq-risk-disclosure"><button type="button" className="demo-link" aria-expanded={riskOpen} onClick={() => setRiskOpen(value => !value)}>{riskOpen ? 'Hide company risk details' : 'View company risk details'}</button></section></>}
+      {view === 'inventory' && <><div className="demo-taher-tabs" role="tablist" aria-label="Supply view"><button type="button" role="tab" aria-selected={supplyTab === 'inventory'} className={supplyTab === 'inventory' ? 'active' : ''} onClick={() => navigateSupply('inventory')}>Inventory</button><button type="button" role="tab" aria-selected={supplyTab === 'shipments'} className={supplyTab === 'shipments' ? 'active' : ''} onClick={() => navigateSupply('shipments')}>Shipments</button></div>{supplyTab === 'inventory' ? <><InventoryWorkspace key={company.company_id} company={company} report={currentRisks} onSource={busy ? undefined : materialId => { selectMaterial(materialId); navigate('procurement'); }} onAsk={message => { if (riskScope) seedRiskMessage(message, company.company_id, riskScope); }} /><section className="zoorq-risk-disclosure"><button type="button" className="demo-link" aria-expanded={riskOpen} onClick={() => setRiskOpen(value => !value)}>{riskOpen ? 'Hide company risk details' : 'View company risk details'}</button></section></> : <DemoDispatchPanel view={currentDispatch} busy={dispatchBusy} error={dispatchError} onRefresh={() => { if (taherScope) void loadDispatch(taherScope); }} onReviewDelay={reviewShipmentDelay} disabled={!!busy || state.dirty} />}</>}
       {view === 'drafts' && <><DraftsWorkspace company={company} drafts={preparedDrafts?.scope === `${state.session?.session_id}:${company.company_id}:${state.session?.context_version}` ? preparedDrafts.drafts : state.session?.drafts ?? []} rfq={state.rfq} messages={state.session?.simulated_outbox ?? []} dirty={state.dirty} onDownloadRfq={downloadRfq} /></>}
       {view === 'procurement' && <><div className="demo-material-picker"><label><span>Procurement material</span><select value={selectedMaterialId} disabled={!state.session || !coveredMaterials.length} onChange={event => selectMaterial(event.target.value)}>{!coveredMaterials.length && <option value="">No runnable material</option>}{coveredMaterials.map(item => <option key={item.material_id} value={item.material_id}>{item.name} · {item.quantity_unit}</option>)}</select></label><p>{currentDefaults ? `Synthetic scenario: ${currentDefaults.quantity} ${currentDefaults.quantity_unit} needed, ${currentDefaults.current_stock} ${currentDefaults.quantity_unit} in stock · ${currentDefaults.reporting_currency} ${currentDefaults.budget} budget.` : 'Choose a covered material to review its synthetic quote scenario.'}</p></div><ProcurementNavigation stage={stage} onStage={next => navigate('procurement', next)} /></>}
     </>}
@@ -748,7 +867,11 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     {view === 'procurement' && stage === 'review' && visibleOffers.length === 0 && <section className="zoorq-stage-empty"><h2>Add a supplier quote to begin review</h2><p>Read a listed sample quote or an accepted sample upload, then check its source values here before comparing.</p><button type="button" className="demo-button" onClick={() => navigate('procurement', 'add')}>Add quotes</button></section>}
     {view === 'procurement' && stage === 'review' && visibleOffers.length > 0 && <div className="demo-offer-tabs" role="group" aria-label="Quotes for selected material">{visibleOffers.map(o => <button key={o.offer_id} type="button" className={o.offer_id === offer?.offer_id ? 'active' : ''} onClick={() => dispatch({ type: 'focus', offerId: o.offer_id })}>{o.document.filename}<small>{words(o.status)}</small></button>)}</div>}
     {view === 'procurement' && stage === 'review' && offer && <><p className="demo-source-line">{offer.extractor === 'gemini' && offer.extractor_detail?.call === 'real' ? offer.served_from_cache ? 'This is a cached response from an earlier real Gemini extraction.' : 'Gemini processed this synthetic document.' : offer.extractor === 'rules' ? 'Rule extraction is shown separately from Gemini.' : 'The extraction source is unavailable.'}</p><OfferReview key={offer.offer_id} offer={offer} company={company} fixtures={supportedFixtures} busy={!!busy} cached={!!offer.served_from_cache} onCorrect={correct} onSave={save} /></>}
-    {view === 'procurement' && stage === 'compare' && <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Compare</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
+    {view === 'procurement' && stage === 'compare' && <div className="demo-taher-tabs" role="tablist" aria-label="Comparison view"><button type="button" role="tab" aria-selected={comparisonTab === 'cost'} className={comparisonTab === 'cost' ? 'active' : ''} onClick={() => setComparisonTab('cost')}>Cost</button><button type="button" role="tab" aria-selected={comparisonTab === 'emissions'} className={comparisonTab === 'emissions' ? 'active' : ''} onClick={() => setComparisonTab('emissions')}>Emissions</button></div>}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && (!state.plan || state.dirty) && <section className="demo-planning demo-alert"><h2>Run the cost comparison first</h2><p>Emissions use the current plan and accepted quote versions. Changed buyer inputs need a new comparison.</p><button type="button" className="demo-link" onClick={() => setComparisonTab('cost')}>Open cost comparison</button></section>}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && carbonInputsEdited && <p className="demo-assumption" role="status">Emissions inputs were edited. The saved assessment is hidden until you estimate again; re-enter any assumptions after leaving this tab.</p>}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && state.plan && state.session && taherScope && <ScopedCarbonPanel key={`${taherScope.sessionId}:${taherScope.companyId}:${taherScope.contextVersion}:${taherScope.planId}:${taherScope.epoch}`} plan={state.plan} csrf={state.session.csrf_token} scope={taherScope} dirty={state.dirty} result={currentCarbon} onResult={saveCarbonResult} onInputsChange={noteCarbonInputsChanged} />}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Compare</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{o.document.filename}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>
       <div className="demo-sample"><button type="button" className="demo-link" disabled={!state.session || (!!company && !currentDefaults)} onClick={() => { if (!state.session) return; invalidate(); setInputs(currentDefaults ?? sampleBuyerInputs()); }}>{company ? 'Use company buyer inputs' : 'Use sample buyer inputs'}</button><span>{company ? currentDefaults ? 'Dated synthetic buyer assumptions for the selected material. Edit any input below; quantities use its listed unit.' : 'No buyer defaults or runnable quote scenario are available for this material.' : 'Optional fictional scenario: 10,000 kg copper need, 2,000 kg in stock, needed by 5 Nov 2026, USD 100,000 budget. The sample decision date is 14 Oct 2026; quote acceptance still checks current validity. Edit any input below.'}</span></div>
@@ -756,15 +879,16 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       <form onSubmit={compare} className="demo-plan-form"><div className="demo-plan-grid">{company ? <div className="zoorq-material-context"><span>Material</span><strong>{coveredMaterials.find(item => item.material_id === selectedMaterialId)?.name ?? selectedMaterialId}</strong><small>Selected for this procurement workflow</small></div> : <label><span>Material</span><input required disabled={!state.session} value={inputs.material} onChange={e => { invalidate(); setInputs(old => ({ ...old, material: e.target.value })); }} /></label>}{([['quantity', `Needed quantity (${inputs.quantity_unit})`], ['current_stock', `Current stock (${inputs.quantity_unit})`], ['need_by', 'Needed by'], ['decision_date', 'Decision date'], ['reporting_currency', 'Reporting currency'], ['budget', 'Maximum budget'], ['additional_cost_per_unit', `Extra cost per ${inputs.quantity_unit}`]] as const).map(([name, title]) => <label key={name} className={highlightFields.includes(name) ? 'demo-agent-filled' : ''}><span>{title}</span><input type={name === 'need_by' || name === 'decision_date' ? 'date' : 'text'} required disabled={!state.session} value={inputs[name]} onChange={e => { if (!state.session) return; setHighlightFields([]); invalidate(); setInputs(old => ({ ...old, [name]: e.target.value })); }} inputMode={['quantity', 'current_stock', 'budget', 'additional_cost_per_unit'].includes(name) ? 'decimal' : undefined} /></label>)}</div>
         <p className="demo-assumption">Extra cost is your synthetic per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>}
-    {view === 'procurement' && stage === 'compare' && state.plan && !state.recovery && <><PlanResults plan={state.plan} offers={state.offers} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
-    {view === 'procurement' && stage === 'compare' && baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && state.plan && !state.recovery && <><PlanResults plan={state.plan} offers={state.offers} carbon={currentCarbon} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
       <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. Add or update a supplier delay; each comparison retains the other active supplier delays.</p>
+      {currentHandoff && <p className="demo-assumption" role="status">From Shipments: review a {delayDays || '0'}-day delay for the linked supplier quote, then compare its impact. This remains a planning scenario.</p>}
       {busy === 'recovery' && progress && <ActivityIndicator {...progress} />}
-      <div className="demo-delay-controls"><label><span>Accepted supplier</span><select value={selectedDelayOffer} onChange={e => { editScenario(); setDelayOfferId(e.target.value); setDelayDays(String(state.recovery?.scenario_request.delay_days_by_offer?.[e.target.value] ?? 0)); }}>{delayOffers.map(o => <option key={o.offer_id} value={o.offer_id}>{o.document.filename}</option>)}</select></label><label><span>Hypothetical delay (whole days)</span><input type="number" min="0" max="3650" step="1" value={delayDays} onChange={e => { editScenario(); setDelayDays(e.target.value); }} /></label></div>
+      <div className="demo-delay-controls"><label><span>Accepted supplier</span><select value={selectedDelayOffer} onChange={e => { editScenario(); setDelayOfferId(e.target.value); setDelayDays(String(state.recovery?.scenario_request.delay_days_by_offer?.[e.target.value] ?? 0)); }}>{delayOffers.map(o => <option key={o.offer_id} value={o.offer_id}>{o.document.filename}</option>)}</select></label><label><span>Hypothetical delay (whole days)</span><input type="number" min="0" max="3650" step="1" value={delayDays} onChange={e => { editScenario(!!currentHandoff); setDelayDays(e.target.value); }} /></label></div>
       <p className="demo-assumption">Edit scenario: {selectedDelayOffer ? `${delayOffers.find(o => o.offer_id === selectedDelayOffer)?.document.filename} delayed ${delayDays || '0'} days` : 'Choose an accepted supplier'}. Current comparison delays: {state.recovery && Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).length ? Object.entries(state.recovery.scenario_request.delay_days_by_offer ?? {}).map(([id, days]) => `${delayOffers.find(o => o.offer_id === id)?.document.filename ?? id} +${days} days`).join(', ') : 'none'}; the original quote and evidence remain unchanged.</p>
-      <div className="demo-actions"><button type="button" className="demo-button" disabled={!selectedDelayOffer || !/^\d+$/.test(delayDays) || Number(delayDays) > 3650 || !!busy} onClick={() => compareDelay(delayRequest(state.recovery?.scenario_request.delay_days_by_offer ?? {}, selectedDelayOffer, delayDays))}>{busy === 'recovery' ? 'Comparing delay…' : 'Compare hypothetical delay'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={() => compareDelay({})}>Remove all delays</button></div>
+      <div className="demo-actions"><button type="button" className="demo-button" disabled={!selectedDelayOffer || !/^\d+$/.test(delayDays) || Number(delayDays) > 3650 || !!busy || (!!currentHandoff && !linkedDelay)} onClick={() => compareDelay(linkedDelay ? linkedDelay.daysByOffer : delayRequest(state.recovery?.scenario_request.delay_days_by_offer ?? {}, selectedDelayOffer, delayDays), linkedDelay?.shipmentId)}>{busy === 'recovery' ? 'Comparing delay…' : currentHandoff ? 'Compare planned shipment delay' : 'Compare hypothetical delay'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={() => compareDelay({})}>Remove all delays</button></div>
     </section>}
-    {view === 'procurement' && stage === 'compare' && state.recovery && <><RecoveryResults recovery={state.recovery} offers={state.offers} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan!} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && state.recovery && <><RecoveryResults recovery={state.recovery} offers={state.offers} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan!} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
     {view === 'procurement' && stage === 'rfq' && <section className="demo-planning demo-rfq"><div className="demo-heading"><div><span className="demo-kicker">04 / Draft RFQ</span><h2>Review before you download</h2></div><span className="demo-session">Synthetic · unsent · no order commitment</span></div>
       {busy === 'rfq' && progress && <ActivityIndicator {...progress} />}
       <p className="demo-muted">The draft uses the current selected plan and quote. The buyer total is a scenario comparison, not the supplier's commercial quote.</p>

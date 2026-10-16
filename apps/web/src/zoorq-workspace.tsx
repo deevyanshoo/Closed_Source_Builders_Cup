@@ -12,6 +12,7 @@ import './zoorq-landing.css';
 
 export type WorkspaceView = 'hub' | 'overview' | 'news' | 'procurement' | 'inventory' | 'drafts';
 export type ProcurementStage = 'add' | 'review' | 'compare' | 'rfq';
+export type SupplyTab = 'inventory' | 'shipments';
 export const workspaceViews: Exclude<WorkspaceView, 'hub'>[] = ['overview', 'news', 'procurement', 'inventory', 'drafts'];
 export const procurementStages: ProcurementStage[] = ['add', 'review', 'compare', 'rfq'];
 const viewNames: Record<Exclude<WorkspaceView, 'hub'>, string> = { overview: 'Overview', news: 'News', procurement: 'Procurement', inventory: 'Inventory & supply', drafts: 'Drafts & activity' };
@@ -22,10 +23,13 @@ export function readWorkspaceLocation(search: string): { view: WorkspaceView; st
   const params = new URLSearchParams(search), rawView = params.get('view'), rawStage = params.get('stage');
   return { view: rawView && workspaceViews.includes(rawView as Exclude<WorkspaceView, 'hub'>) ? rawView as WorkspaceView : 'hub', stage: rawStage && procurementStages.includes(rawStage as ProcurementStage) ? rawStage as ProcurementStage : 'add' };
 }
-export function workspaceSearch(search: string, view: WorkspaceView, stage: ProcurementStage) {
-  const params = new URLSearchParams(search); params.delete('company');
+export function readSupplyLocation(search: string): SupplyTab {
+  return new URLSearchParams(search).get('supply') === 'shipments' ? 'shipments' : 'inventory';
+}
+export function workspaceSearch(search: string, view: WorkspaceView, stage: ProcurementStage, supply: SupplyTab = 'inventory') {
+  const params = new URLSearchParams(search); params.delete('company'); params.delete('supply');
   if (view === 'hub') { params.delete('view'); params.delete('stage'); }
-  else { params.set('view', view); if (view === 'procurement') params.set('stage', stage); else params.delete('stage'); }
+  else { params.set('view', view); if (view === 'procurement') params.set('stage', stage); else params.delete('stage'); if (view === 'inventory' && supply === 'shipments') params.set('supply', 'shipments'); }
   const next = params.toString(); return next ? `?${next}` : '';
 }
 export function showWorkspaceActivity(view: WorkspaceView, stage: ProcurementStage, busy: string): boolean {

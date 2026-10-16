@@ -26,7 +26,8 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
-from .carbon_api import carbon_export, register_carbon_routes
+from .carbon_api import carbon_export, current_carbon_assessment, register_carbon_routes
+from .dispatch_view import build_dispatch_view, resolve_recovery_shipment
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -255,6 +256,31 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 voice_service = VoiceService()
             return voice_service
 
+    def dispatch_view(value):
+        plan = active_plan(value)
+        if plan is not None:
+            try:
+                validate_plan_current(value, plan)
+            except SessionError:
+                plan = None
+        result = build_dispatch_view(get_company(value.company_id),
+            list(value.offers.values()), plan, value.recovery if plan is not None else None)
+        result['context_version'] = value.context_version
+        return result
+
+    def bound_shipment(value, shipment_id, baseline, delays):
+        if not isinstance(baseline, dict) or not isinstance(delays, dict):
+            raise SessionError('stale_plan', 'Current linked shipment is unavailable.', 409)
+        selected_id = baseline.get('selected_offer_id')
+        version = (baseline.get('offer_versions') or {}).get(selected_id)
+        row = resolve_recovery_shipment(dispatch_view(value), shipment_id,
+                                        baseline.get('plan_id'), version)
+        if row is None:
+            raise SessionError('shipment_not_found', 'Current linked shipment is unavailable.', 404)
+        if set(delays) != {selected_id}:
+            raise SessionError('invalid_delay', 'Delay must match the selected shipment offer.', 422)
+        return row
+
     def operator_snapshot(value, *, include_risks=True):
         snapshot = {'company_id': value.company_id, 'context_version': value.context_version,
                 'company': get_company(value.company_id), 'news': deepcopy(value.news),
@@ -265,6 +291,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'watch_items': deepcopy(value.watch_items), 'buyer_draft': deepcopy(value.buyer_draft),
                 'selected_material_id': value.selected_material_id,
                 'simulated_outbox': deepcopy(value.simulated_outbox)}
+        snapshot['carbon_assessment'] = current_carbon_assessment(
+            value, active_plan, validate_plan_current)
+        snapshot['shipments'] = dispatch_view(value)
         if include_risks:
             from .proactive_risks import assess_company
             snapshot['risk_report'] = assess_company(snapshot, value.news, store.now())
@@ -380,6 +409,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         fields = {key: snapshot[key] for key in ('company_id', 'context_version', 'news',
                   'offers', 'plan', 'baseline_plan', 'plan_request', 'recovery', 'watch_items',
                   'buyer_draft', 'selected_material_id', 'simulated_outbox')}
+        fields['carbon_assessment'] = snapshot.get('carbon_assessment')
+        fields['shipments'] = snapshot.get('shipments')
         return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
                                          default=str).encode()).hexdigest()
 
@@ -478,6 +509,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         value.recovery = None
         value.rfq = None
         value.pending_proposal = None
+        value.carbon_assessment = None
 
     def active_plan(value):
         return value.recovery['scenario'] if value.recovery is not None else value.last_plan
@@ -493,6 +525,25 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if offer.get('status') != 'saved' or blocking_reasons(offer, today):
                 raise SessionError('stale_plan', 'A reviewed quote is no longer current.', 409)
         return selected
+
+    def validate_plan_current(value, plan):
+        """One currentness gate for emissions, shipments and their agent tools."""
+        if not isinstance(plan, dict) or plan.get('company_id') != value.company_id:
+            raise SessionError('stale_plan', 'Compare reviewed quotes for the current company first.', 409)
+        current_offers(value, plan, plan.get('offer_versions'), today=store.now().date())
+        if value.buyer_draft is not None:
+            from .agent_tools import BUYER_FIELDS
+            request = value.plan_request or {}
+            aliases = {'quantity': 'quantity_kg', 'current_stock': 'current_stock_kg',
+                       'additional_cost_per_unit': 'additional_cost_per_kg'}
+            expected = {key: request.get(key, request.get(aliases.get(key))) for key in BUYER_FIELDS}
+            expected['quantity_unit'] = expected['quantity_unit'] or plan.get('quantity_unit', 'kg')
+            try:
+                matching = canonical_buyer(value, value.buyer_draft) == canonical_buyer(value, expected)
+            except SessionError:
+                matching = False
+            if not matching:
+                raise SessionError('stale_buyer', 'Buyer inputs changed. Run the comparison again.', 409)
 
     def canonical_buyer(value, draft):
         from .agent_tools import ToolValidationError, validate_buyer_draft
@@ -780,6 +831,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     'persistence': store.persistence, 'offers': deepcopy(list(value.offers.values())),
                     'provider': provider(), 'plan': deepcopy(active_plan(value)),
                     'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
+                    'carbon_assessment': current_carbon_assessment(value, active_plan, validate_plan_current),
+                    'dispatch': dispatch_view(value),
                     'rfq': deepcopy(value.rfq), 'company': get_company(value.company_id),
                     'company_id': value.company_id,
                     'buyer_draft': deepcopy(value.buyer_draft),
@@ -818,6 +871,23 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     @app.get('/api/demo/companies')
     async def companies():
         return {'companies': list_companies()}
+
+    @app.get('/api/demo/dispatch')
+    async def get_dispatch(request: Request):
+        value = session(request)
+        with value.lock:
+            return dispatch_view(value)
+
+    @app.get('/api/demo/dispatch/{shipment_id}')
+    async def get_dispatch_shipment(request: Request, shipment_id: str):
+        value = session(request)
+        with value.lock:
+            current = dispatch_view(value)
+            rows = [row for row in current['shipments'] if row['shipment_id'] == shipment_id]
+            if len(rows) != 1:
+                raise SessionError('shipment_not_found', 'Shipment is unavailable in this workspace.', 404)
+            return {'company_id': value.company_id, 'context_version': value.context_version,
+                    'shipment': rows[0]}
 
     @app.post('/api/demo/company')
     async def select_company(request: Request):
@@ -1053,7 +1123,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             marker = snapshot_marker(snapshot)
             # Canonical reads do not call a model. Keep the normal request,
             # session and concurrency limits, without reserving AI capacity.
-            prepared = prepared or _broad_inventory_scope(snapshot, message) is not None
+            from .integration_tools import integration_request
+            prepared = (prepared or integration_request(snapshot, message) is not None
+                        or _broad_inventory_scope(snapshot, message) is not None)
             adapter = operator_adapter()
             model = getattr(adapter, 'model', None) or os.getenv('GEMINI_OPERATOR_MODEL', DEFAULT_MODEL)
             if not prepared and not bool(getattr(adapter, 'available', True)):
@@ -1124,6 +1196,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     if kind == 'recovery':
                         from .recovery import compare
                         baseline = value.last_plan
+                        if 'shipment_id' in parameters:
+                            bound_shipment(value, parameters['shipment_id'], baseline,
+                                           parameters['delay_days_by_offer'])
                         selected = current_offers(value, baseline, baseline['offer_versions'],
                                                   today=store.now().date())
                         preview = compare(baseline, value.plan_request, selected,
@@ -1171,6 +1246,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     result['session'] = view(value)
                 if outcome.get('analytics') is not None:
                     result['analytics'] = deepcopy(outcome['analytics'])
+                if outcome.get('workspace') is not None:
+                    result['workspace'] = deepcopy(outcome['workspace'])
                 if proposal is not None and proposal['kind'] in ('rfq', 'simulate_email'):
                     result['workspace'] = {'drafts': deepcopy(value.drafts)}
                 complete(value, key, result)
@@ -1300,7 +1377,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             from .quote_service import company_for_offer
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
                        'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
-                       'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace'}
+                       'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace',
+                       'read_carbon', 'read_shipments', 'prepare_shipment_recovery'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
             with value.lock:
@@ -1336,7 +1414,46 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                   'status': 'completed', 'model': 'none', 'provider_call': 'none',
                                   'tool': name, 'summary': 'Validated owned workspace tool.'}],
                               'evidence_ids': [], 'proposal': None, 'read_only': True}
-                    if name in ('read_workspace', 'analyze_inventory'):
+                    if name in ('read_carbon', 'read_shipments'):
+                        shape(args, ())
+                        from .integration_tools import integration_read
+                        payload = integration_read(operator_snapshot(value), name)
+                        result.update(payload)
+                    elif name == 'prepare_shipment_recovery':
+                        shape(args, ('shipment_id', 'delay_days'))
+                        days = args['delay_days']
+                        if type(days) is not int or not 0 <= days <= 3650:
+                            raise SessionError('invalid_delay', 'Use explicit whole delay days.', 422)
+                        baseline = value.last_plan
+                        if baseline is None:
+                            raise SessionError('stale_plan', 'Compare reviewed quotes first.', 409)
+                        selected_id = baseline.get('selected_offer_id')
+                        delays = {selected_id: days}
+                        row = bound_shipment(value, args['shipment_id'], baseline, delays)
+                        from .recovery import compare
+                        selected = current_offers(value, baseline, baseline['offer_versions'],
+                                                  today=store.now().date())
+                        preview = compare(baseline, value.plan_request, selected, delays,
+                                          today=store.now().date())
+                        parameters = {'shipment_id': row['shipment_id'],
+                                      'delay_days_by_offer': delays,
+                                      'preview': {'outcome': preview['outcome'],
+                                          'cost_delta': preview['cost_delta'],
+                                          'selected_offer_id': preview['scenario']['selected_offer_id'],
+                                          'total_cost': preview['scenario']['total_cost'],
+                                          'reporting_currency': preview['scenario']['reporting_currency']}}
+                        proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'recovery',
+                                    'summary': f"Review recovery for {row['material_name']} with an assumed {days}-day delay. No plan change has run.",
+                                    'parameters': parameters, 'plan_id': baseline['plan_id'],
+                                    'offer_versions': deepcopy(baseline['offer_versions']),
+                                    'context_version': value.context_version,
+                                    'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                                    '_marker': marker, '_company_id': value.company_id,
+                                    '_session_id': value.session_id}
+                        value.pending_proposal = proposal
+                        result.update(status='proposal', proposal=public_proposal(proposal),
+                                      assistant_text=proposal['summary'])
+                    elif name in ('read_workspace', 'analyze_inventory'):
                         shape(args, (), ('material_id',))
                         material_id = args.get('material_id')
                         if material_id is not None:
@@ -1708,6 +1825,9 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     baseline = value.last_plan
                     if baseline is None or proposal['plan_id'] != baseline.get('plan_id'):
                         raise SessionError('stale_plan', 'Baseline plan changed.', 409)
+                    if 'shipment_id' in proposal['parameters']:
+                        bound_shipment(value, proposal['parameters']['shipment_id'], baseline,
+                                       proposal['parameters']['delay_days_by_offer'])
                     selected = current_offers(value, baseline, proposal['offer_versions'],
                                               today=store.now().date())
                     result = compare(baseline, value.plan_request, selected,
@@ -2051,7 +2171,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def recovery(request: Request):
         value = mutate(request)
         data = await body(request)
-        shape(data, ('baseline_plan_id', 'expected_versions', 'delay_days_by_offer', 'idempotency_key'), ('expected_context_version',))
+        shape(data, ('baseline_plan_id', 'expected_versions', 'delay_days_by_offer', 'idempotency_key'),
+              ('expected_context_version', 'shipment_id'))
         with value.lock:
             context(value, data)
             baseline, original_request = value.last_plan, value.plan_request
@@ -2070,6 +2191,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise SessionError('stale_plan', 'This comparison has been replaced.', 409)
                 return replay
             try:
+                if 'shipment_id' in data:
+                    bound_shipment(value, data['shipment_id'], baseline, delays)
                 from .recovery import compare
                 comparison = compare(baseline, original_request, selected, delays, today=store.now().date())
                 comparison['comparison_id'] = secrets.token_urlsafe(18)
@@ -2165,7 +2288,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
                                  'drafts': deepcopy(value.drafts),
                                  'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq),
-                                 'carbon': carbon_export(value, active_plan)},
+                                 'carbon': carbon_export(value, active_plan, validate_plan_current)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 
     @app.post('/api/demo/reset')
@@ -2179,7 +2302,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         return session_response(store.create())
 
     register_carbon_routes(app, session=session, mutate=mutate, body=body, shape=shape,
-                           context=context, active_plan=active_plan)
+                           context=context, active_plan=active_plan,
+                           validate_plan_current=validate_plan_current, now=store.now)
+
+    @app.get('/dispatch')
+    async def legacy_dispatch():
+        return RedirectResponse('/demo?view=inventory&supply=shipments', status_code=307)
 
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()
@@ -2187,7 +2315,6 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             app.mount('/assets', StaticFiles(directory=web_dir / 'assets'), name='assets')
         @app.get('/demo')
         @app.get('/demo/{path:path}')
-        @app.get('/dispatch')
         async def spa(path: str = ''):
             index = web_dir / 'index.html'
             if not index.is_file():

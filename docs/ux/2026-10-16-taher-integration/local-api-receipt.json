@@ -1,0 +1,781 @@
+{
+  "mode": "local_api_testclient",
+  "provider_calls": 0,
+  "companies": [
+    {
+      "company_id": "solara-cables",
+      "stage": "completed",
+      "material_id": "copper",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "8000",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "estimated": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 0,
+        "source_ids": [
+          "desnz-2026-full-set",
+          "ica-copper-environmental-profile-2023"
+        ],
+        "source_units": [
+          "kg CO2e per tonne",
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": true,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For Solara Cables, 8000 kg of Copper cathode, using Europa Copper SA: Production average: 31720 kg CO2e. Entered freight: 128.96 kg CO2e. Production average plus the entered freight leg: 31848.96 kg CO2e. Sources: International Copper Association; Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "Solara Cables: the current inbound planning scenario is 8000 kg of Copper cathode from Europa Copper SA. Demand reference: solara-cables-order-1. Planned arrival is 2026-10-24, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "6D4C_K8ml7sk0SxKVs1QgK8N",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "terrapack",
+      "stage": "completed",
+      "material_id": "pet-resin",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "28500",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "estimated": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 0,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne",
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For TerraPack Films, 28500 kg of PET resin, using TerraPack Films PET resin Selected Source Ltd: Production average: 110055.101535 kg CO2e. Entered freight: 459.42 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "TerraPack Films: the current inbound planning scenario is 28500 kg of PET resin from TerraPack Films PET resin Selected Source Ltd. Demand reference: terrapack-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "96t6RPPEFQUQ5JBLCf0Ev941",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "loomworks",
+      "stage": "completed",
+      "material_id": "cotton",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "960",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": true
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For LoomWorks Textiles, 960 bale of Cotton fibre, using LoomWorks Textiles Cotton fibre Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 16.12 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "LoomWorks Textiles: the current inbound planning scenario is 960 bale of Cotton fibre from LoomWorks Textiles Cotton fibre Selected Source Ltd. Demand reference: loomworks-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "0XFhW-V_eDxLprQY1smwkMjZ",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "harvest-foods",
+      "stage": "completed",
+      "material_id": "wheat",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "2220",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For Harvest Foods, 2220 tonne of Wheat grain, using Harvest Foods Wheat grain Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 35786.4 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "Harvest Foods: the current inbound planning scenario is 2220 tonne of Wheat grain from Harvest Foods Wheat grain Selected Source Ltd. Demand reference: harvest-foods-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "32SN704cggRMPVt_tm1efOai",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "meridian-pharma",
+      "stage": "completed",
+      "material_id": "api",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "1020",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For Meridian Pharma, 1020 kg of Active ingredient, using Meridian Pharma Active ingredient Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 16.4424 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "Meridian Pharma: the current inbound planning scenario is 1020 kg of Active ingredient from Meridian Pharma Active ingredient Selected Source Ltd. Demand reference: meridian-pharma-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "ITcCggnVzwIlYrwuccc6u4Ng",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "forgeline-components",
+      "stage": "completed",
+      "material_id": "steel",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "720",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "estimated": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 0,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne",
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For ForgeLine Components, 720 tonne of Cold-rolled steel, using ForgeLine Components Cold-rolled steel Selected Source Ltd: Production average: 2060339.4072 kg CO2e. Entered freight: 11606.4 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "ForgeLine Components: the current inbound planning scenario is 720 tonne of Cold-rolled steel from ForgeLine Components Cold-rolled steel Selected Source Ltd. Demand reference: forgeline-components-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "tdDU4cD6KnZv4HXeyzKl5r7B",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "stage": "completed",
+      "material_id": "lithium",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "120",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For GridSpring Batteries, 120 tonne of Lithium carbonate, using GridSpring Batteries Lithium carbonate Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 1934.4 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "GridSpring Batteries: the current inbound planning scenario is 120 tonne of Lithium carbonate from GridSpring Batteries Lithium carbonate Selected Source Ltd. Demand reference: gridspring-batteries-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "tSVDZARH8MbmgPIuCEA8t_hT",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "stage": "completed",
+      "material_id": "chips",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "63000",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": true
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For CircuitPeak Systems, 63000 unit of Power semiconductors, using CircuitPeak Systems Power semiconductors Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 16.12 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "CircuitPeak Systems: the current inbound planning scenario is 63000 unit of Power semiconductors from CircuitPeak Systems Power semiconductors Selected Source Ltd. Demand reference: circuitpeak-systems-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "QSHhsvabDOSGXU7O--5XmPrT",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "stage": "completed",
+      "material_id": "naphtha",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "213000",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": true
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For Atlas Petrochem, 213000 barrel of Naphtha feedstock, using Atlas Petrochem Naphtha feedstock Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 16.12 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "Atlas Petrochem: the current inbound planning scenario is 213000 barrel of Naphtha feedstock from Atlas Petrochem Naphtha feedstock Selected Source Ltd. Demand reference: atlas-petrochem-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "fIdTtUm8VUUrPXRcCVHt9H3L",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "stage": "completed",
+      "material_id": "clinker",
+      "reviewed_quote_count": 3,
+      "plan": {
+        "purchase": "14400",
+        "alternatives_checked": 3
+      },
+      "carbon": {
+        "supplier_count": 3,
+        "registry_version": "carbon-factors-v1",
+        "component_statuses": {
+          "material": {
+            "factor_unavailable": 3
+          },
+          "transport": {
+            "estimated": 3
+          },
+          "legs": {
+            "estimated": 3
+          }
+        },
+        "unknown_component_count": 3,
+        "source_ids": [
+          "desnz-2026-full-set"
+        ],
+        "source_units": [
+          "kg CO2e per tonne.km"
+        ],
+        "calibration_8000kg_1000km_verified": false,
+        "explicit_distance_km": "1000",
+        "mass_basis_explicit": false
+      },
+      "assessment": {
+        "readback_verified": true,
+        "plan_bound": true,
+        "offer_versions_bound": true
+      },
+      "shipment": {
+        "linked": true,
+        "own_company": true,
+        "selected_offer_version": true,
+        "source_present": true
+      },
+      "typed_operator_reads": [
+        {
+          "message": "What are the emissions for this purchase?",
+          "tool": "read_carbon",
+          "assistant_text": "For StoneBridge Materials, 14400 tonne of Cement clinker, using StoneBridge Materials Cement clinker Selected Source Ltd: A usable production factor or material mass is unavailable. Entered freight: 232128 kg CO2e. No whole-scenario total is supported; components remain separate. Sources: Department for Energy Security and Net Zero (UK government). This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        },
+        {
+          "message": "Show me the shipments for this company",
+          "tool": "read_shipments",
+          "assistant_text": "StoneBridge Materials: the current inbound planning scenario is 14400 tonne of Cement clinker from StoneBridge Materials Cement clinker Selected Source Ltd. Demand reference: stonebridge-materials-scenario-order. Planned arrival is 2026-10-26, against a need-by date of 2026-11-05. Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.",
+          "workspace_verified": true,
+          "action_state_unchanged": true
+        }
+      ],
+      "recovery": {
+        "changed": true,
+        "shipment_bound": true,
+        "delay_days": 60
+      },
+      "rfq": {
+        "draft_id": "o4nxNRVZLfhRo8kdGWJXehY6",
+        "unsent": true,
+        "outbox_empty": true
+      },
+      "ok": true,
+      "rfq_unsent": true,
+      "export_matches_current": true,
+      "shipment_detail_verified": true,
+      "stale_carbon_hidden": true
+    }
+  ],
+  "ok": true
+}

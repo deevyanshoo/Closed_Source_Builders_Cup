@@ -49,6 +49,16 @@ VOICE_LIVE_CLAIM = re.compile(
     r'\b(?:live\s+(?:carrier\s+)?tracking|confirmed\s+(?:live\s+)?'
     r'(?:shipment|delivery|arrival|carrier)|actual\s+(?:shipment|delivery|arrival)|'
     r'carrier\s+tracking\s+confirms?)\b', re.I)
+VOICE_ARRIVAL_CUE = re.compile(
+    r'\b(?:planned|expected)\s+(?:inbound\s+)?arrival\b|'
+    r'\bplanned\s+to\s+arrive\b|'
+    r'\b(?:the\s+)?(?:current|selected|this)\s+(?:inbound\s+)?shipment\s+arrives?\b',
+    re.I)
+VOICE_CALENDAR_DATE = re.compile(
+    r'(?P<iso>\b\d{4}-\d{2}-\d{2}\b)|'
+    r'\b(?P<month>January|February|March|April|May|June|July|August|September|'
+    r'October|November|December)\s+(?P<day>\d{1,2})'
+    r'(?:,?\s+(?P<year>\d{4}))?\b', re.I)
 
 
 def now() -> str:
@@ -352,6 +362,28 @@ def _guard_voice_facts(answer, carbon, dispatch):
     return claims
 
 
+def _claimed_arrival_dates(caption):
+    """Read explicit dates immediately following a planned-arrival phrase."""
+    for cue in VOICE_ARRIVAL_CUE.finditer(caption):
+        clause = re.split(r'[.;]|\bneed[- ]by\b', caption[cue.end():cue.end() + 100],
+                          maxsplit=1, flags=re.I)[0]
+        match = VOICE_CALENDAR_DATE.search(clause)
+        if match is None:
+            continue
+        try:
+            if match.group('iso'):
+                claimed = date.fromisoformat(match.group('iso'))
+                yield claimed.year, claimed.month, claimed.day
+            else:
+                month = datetime.strptime(match.group('month').title(), '%B').month
+                day = int(match.group('day'))
+                year = int(match.group('year')) if match.group('year') else None
+                date(year or 2000, month, day)
+                yield year, month, day
+        except ValueError:
+            yield None, None, None
+
+
 def check_voice_result(result, plan, context, carbon, dispatch):
     require(isinstance(result, dict) and result.get('company_id') == plan['company_id']
             and result.get('context_version') == context
@@ -402,12 +434,20 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
             known_arrival = date.fromisoformat(arrival).isoformat() == arrival
         except ValueError:
             pass
+    claimed_arrivals = list(_claimed_arrival_dates(normalized))
     if known_arrival:
         require(re.search(r'\b(?:no\s+(?:known\s+)?(?:planned|expected)\s+arrival|'
                           r'(?:planned|expected)\s+(?:inbound\s+)?arrival'
                           r'(?:\s+date)?\s+(?:is\s+)?(?:unavailable|unknown|missing|'
                           r'not\s+(?:available|known)))\b', normalized, re.I) is None,
                 stage, 'voice_false_unavailable_arrival')
+        selected_date = date.fromisoformat(arrival)
+        require(all((year is None or year == selected_date.year)
+                    and month == selected_date.month and day == selected_date.day
+                    for year, month, day in claimed_arrivals),
+                stage, 'voice_arrival_date_mismatch')
+    else:
+        require(not claimed_arrivals, stage, 'voice_arrival_date_unavailable')
     if re.search(r'\bno\s+(?:emissions?|carbon)\s+(?:data|estimate)\s+'
                  r'(?:was|is)\s+(?:calculated|available)\b', normalized, re.I):
         has_estimate = any(
@@ -438,7 +478,13 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
         re.search(r'\(\s*' + re.escape(name) + r'\s*\)', normalized, re.I)
         or re.search(r'\b(?:figures?|published\s+averages?)\s+from\b.{0,100}\b'
                      + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\bbased\s+on\s+(?:the\s+)?(?:UK\s+)?'
+                     + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\bsources?\s*:\s*(?:the\s+)?(?:UK\s+)?'
+                     + re.escape(name) + r'\b', normalized, re.I)
         or re.search(r'\b(?:sourced\s+from|source\s+is|from)\s+(?:the\s+)?(?:UK\s+)?'
+                     + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\bper\s+(?:the\s+)?(?:UK\s+)?'
                      + re.escape(name) + r'\b', normalized, re.I)
         for name in publisher_names)
     for claim in VOICE_LIVE_CLAIM.finditer(caption):
@@ -459,9 +505,9 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                           r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
                           r'planned\s+to\s+arrive|'
                           r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
-            and (re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b',
-                           normalized, re.I) or attributed_publication)
-            and re.search(r'\b(?:kg\s*CO2e|kilograms?\s+(?:of\s+)?'
+            and (attributed_publication or (not publishers and re.search(
+                r'\b(?:sources?|factors?|assumptions?|entered)\b', normalized, re.I)))
+            and re.search(r'\b(?:kg\s*(?:of\s+)?CO2e|kilograms?\s+(?:of\s+)?'
                           r'(?:CO2e|CO2\s+equivalent|carbon dioxide equivalent))\b',
                           caption, re.I)
             and len(claims) >= 1,

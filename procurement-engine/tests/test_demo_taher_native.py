@@ -65,14 +65,24 @@ def test_native_reads_and_preparation_share_current_evidence():
         saved = client.get('/api/demo/carbon/assessment').json()['assessment']['result']
         carbon, model = voice_tool(client, provider, 'read_carbon', {}, 'carbon-1')
         assert carbon['status'] == 'completed' and carbon['workspace'] == {'carbon': saved}
-        assert '31720' in carbon['assistant_text'] and model['workspace'] == {'carbon': saved}
+        assert '31720' in carbon['assistant_text']
+        selected_carbon = next(row for row in saved['suppliers']
+                               if row['offer_id'] == plan['selected_offer_id'])
+        assert model['workspace']['carbon']['suppliers'] == [selected_carbon]
+        assert model['workspace']['carbon']['selected_offer_id'] == plan['selected_offer_id']
+        assert model['selected_purchase_brief'] == carbon['assistant_text']
+        assert 'required_spoken_response' not in model
         assert carbon['agent_steps'][0]['provider_call'] == 'none'
         assert session['csrf_token'] not in str(model) and session['session_id'] not in str(model)
 
         view = client.get('/api/demo/dispatch').json()
         shipments, model = voice_tool(client, provider, 'read_shipments', {}, 'shipments-1')
         assert shipments['status'] == 'completed' and shipments['workspace'] == {'shipments': view}
-        assert model['workspace'] == {'shipments': view}
+        linked_rows = [row for row in view['shipments']
+                       if row.get('plan_id') == plan['plan_id']]
+        assert model['workspace']['shipments']['shipments'] == linked_rows
+        assert model['current_purchase_brief'] == shipments['assistant_text']
+        assert 'required_spoken_response' not in model
         row = next(row for row in view['shipments'] if row['recovery_available'])
 
         invalid, _ = voice_tool(client, provider, 'prepare_shipment_recovery',

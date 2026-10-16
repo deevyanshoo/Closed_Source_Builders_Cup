@@ -59,6 +59,138 @@ _START_LOCK = threading.Lock()
 _PROCESS_STARTS = 0
 _PROCESS_WINDOW_STARTED = monotonic()
 
+
+def _selected_purchase_model_result(name: str, result: dict, model_result: dict,
+                                    selected_plan: dict | None) -> None:
+    """Keep read evidence in the browser while grounding speech in one purchase."""
+    if name not in {'read_carbon', 'read_shipments'} or result['status'] != 'completed':
+        return
+    brief_key = 'selected_purchase_brief' if name == 'read_carbon' else 'current_purchase_brief'
+    model_result[brief_key] = model_result.pop('assistant_text')
+    workspace = result.get('workspace')
+    if not isinstance(workspace, dict):
+        return
+    if name == 'read_carbon':
+        carbon = workspace.get('carbon')
+        if not isinstance(carbon, dict):
+            model_result['workspace'] = {'carbon': {'selected_purchase_state': 'unavailable',
+                'suppliers': [], 'alternative_quote_estimates': [], 'alternative_quote_count': 0,
+                'alternative_quote_omitted': 0,
+                'carbon_scope': 'No current saved assessment is available; do not infer emissions.'}}
+            return
+        selected_id = (selected_plan.get('selected_offer_id')
+                       if isinstance(selected_plan, dict)
+                       and selected_plan.get('plan_id') == carbon.get('plan_id') else None)
+        plan_current = (isinstance(selected_plan, dict)
+                        and selected_plan.get('plan_id') == carbon.get('plan_id'))
+        feasible_by_offer = {row.get('offer_id'): row.get('feasible')
+                             for row in selected_plan.get('alternatives', [])
+                             if isinstance(row, dict)} if plan_current else {}
+        infeasible_selected = selected_id is not None and feasible_by_offer.get(selected_id) is False
+        current_id = None if infeasible_selected else selected_id
+        selected_rows = [row for row in carbon.get('suppliers', [])
+                         if isinstance(row, dict) and current_id is not None
+                         and row.get('offer_id') == current_id]
+        alternative_rows = [row for row in carbon.get('suppliers', [])
+                            if isinstance(row, dict) and row.get('offer_id') != current_id]
+        alternatives = []
+        for row in alternative_rows[:8]:
+            estimate = row.get('estimate') or {}
+            material = estimate.get('material') or {}
+            transport = estimate.get('transport') or {}
+            publishers = []
+            for factor in [material.get('factor')] + [leg.get('factor')
+                    for leg in transport.get('legs', []) if isinstance(leg, dict)]:
+                publisher = factor.get('publisher') if isinstance(factor, dict) else None
+                if publisher and publisher not in publishers:
+                    publishers.append(publisher)
+            summary = {'offer_id': row.get('offer_id'), 'supplier': row.get('supplier'),
+                'feasible': feasible_by_offer.get(row.get('offer_id')),
+                'quantity': estimate.get('quantity'), 'unit': estimate.get('unit'),
+                'production_kg_co2e': material.get('kg_co2e'),
+                'freight_kg_co2e': transport.get('kg_co2e'),
+                'total_kg_co2e': (estimate.get('total_kg_co2e')
+                                   if estimate.get('combined_status') == 'combined' else None),
+                'combined_status': estimate.get('combined_status'),
+                'combined_reason': estimate.get('combined_reason'),
+                'source_publishers': publishers}
+            for target_key, value in (
+                    ('production_status', material.get('status')),
+                    ('freight_status', transport.get('status')),
+                    ('product_match', material.get('product_match')),
+                    ('production_reason', material.get('reason'))):
+                if value is not None:
+                    summary[target_key] = value
+            alternatives.append(summary)
+        selected_state = ('no_feasible_selected_offer' if infeasible_selected else
+                          'selected' if selected_rows else
+                          'no_selected_offer' if plan_current and selected_id is None else 'unavailable')
+        model_result['workspace'] = {'carbon': {**carbon, 'selected_offer_id': current_id,
+            'selected_purchase_state': selected_state, 'suppliers': selected_rows[:1],
+            'alternative_quote_estimates': alternatives,
+            'alternative_quote_count': len(alternative_rows),
+            'alternative_quote_omitted': len(alternative_rows) - len(alternatives),
+            'carbon_scope': ('Answer selected-purchase emissions from suppliers only. '
+                'Alternative_quote_estimates are quote alternatives, not the current purchase. '
+                'Keep production and entered freight separate unless combined_status permits a total; '
+                'name source publishers and explain unavailable or overlapping components. '
+                'These emissions estimates contain no price or cost comparison. '
+                'Cost needs a validated plan joined by offer ID and version. '
+                'Disclose alternative_quote_omitted when enumerating quote alternatives.')}}
+    else:
+        view = workspace.get('shipments')
+        if not isinstance(view, dict):
+            return
+        selected_id = (selected_plan.get('selected_offer_id')
+                       if isinstance(selected_plan, dict)
+                       and selected_plan.get('plan_id') == view.get('plan_id') else None)
+        # Expected-order rows and their dates are separate profile demand.
+        # The selected plan row retains its exact IDs, provenance and recovery gate.
+        linked = [row for row in view.get('shipments', []) if isinstance(row, dict)
+                  and row.get('source') == 'synthetic_plan_demand_scenario'
+                  and selected_id is not None and row.get('offer_id') == selected_id
+                  and row.get('plan_id') in {view.get('plan_id'), view.get('baseline_plan_id')}]
+        baseline_rows = [row for row in view.get('shipments', []) if isinstance(row, dict)
+                         and row.get('source') == 'synthetic_plan_demand_scenario'
+                         and row.get('company_id') == view.get('company_id')
+                         and row.get('scenario_plan_id') == view.get('plan_id')
+                         and row.get('scenario_selected_offer_id') is None
+                         and view.get('baseline_plan_id') != view.get('plan_id')
+                         and row.get('baseline_plan_id') == view.get('baseline_plan_id')
+                         and row.get('plan_id') == view.get('baseline_plan_id')
+                         and row.get('offer_id') == row.get('baseline_offer_id')
+                         and row.get('scenario_status') == 'infeasible'
+                         and row.get('recovery_available') is False]
+        baseline_context = ({'selected_purchase': False,
+            'scope': 'reviewed_infeasible_baseline_context', 'row': baseline_rows[0]}
+            if isinstance(selected_plan, dict) and selected_plan.get('plan_id') == view.get('plan_id')
+            and selected_id is None and len(baseline_rows) == 1 else None)
+        expected_orders = [row for row in view.get('shipments', []) if isinstance(row, dict)
+                           and row.get('source') == 'fictional_company_profile_expected_order']
+        order_fields = ('shipment_id', 'company_id', 'order_id', 'material_id', 'material_name',
+                        'quantity', 'quantity_unit', 'need_by', 'expected_arrival', 'status', 'source')
+        order_summaries = [{'selected_purchase': False,
+                            **{key: row.get(key) for key in order_fields}}
+                           for row in expected_orders[:8]]
+        omitted_orders = len(expected_orders) - len(order_summaries)
+        selected_purchase_scope = ('Answer selected purchase questions from shipments only. '
+            'Answer company expected orders questions from expected_order_scenarios. '
+            'These are separate company demand records, never selected purchase arrival or recovery evidence. '
+            'Never use their dates as the selected purchase arrival.')
+        if omitted_orders:
+            selected_purchase_scope += (f' This is a partial expected-order list: {omitted_orders} additional '
+                'records are omitted. Disclose the omitted count when broadly enumerating orders; '
+                'do not present these entries as the full list.')
+        model_result['workspace'] = {'shipments': {
+            key: view.get(key) for key in ('company_id', 'plan_id', 'baseline_plan_id',
+                                           'synthetic', 'source', 'limitations')}
+            | {'shipments': linked[:1],
+               'baseline_reviewed_infeasible': baseline_context,
+               'selected_purchase_scope': selected_purchase_scope,
+               'expected_order_scenarios': order_summaries,
+               'expected_order_count': len(expected_orders),
+               'expected_order_omitted': omitted_orders}}
+
 INSTRUCTION = (
     "You are the procurement workspace operator. Speak in concise, composed English "
     "with light British wit; do not imitate a character or actor. Answer general business "
@@ -90,7 +222,10 @@ INSTRUCTION = (
     "For news, headlines, world events or what could affect this business, "
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
     "For a question combining emissions and planned arrivals, call both read_carbon and read_shipments before answering. "
-    "Use read_carbon.assistant_text as the brief, source-grounded carbon answer: if material production and entered "
+    "Use read_carbon.selected_purchase_brief as the selected source-grounded carbon reference. "
+    "For broader comparisons, use read_carbon.workspace.carbon.alternative_quote_estimates as quote scenarios, "
+    "never as current purchases or prices; costs need a validated offer-and-version plan join. "
+    "If material production and entered "
     "freight amounts are present, state both amounts and their named source publishers. A missing combined total "
     "does not mean emissions data is absent. When components_shown_separately, explain the recorded overlap or "
     "proxy reason, say no whole-scenario total is supported, and keep the component estimates separate. "
@@ -99,9 +234,14 @@ INSTRUCTION = (
     "Freight mode and distance "
     "come from entered legs; never call a distance standard or infer a route. The freight amount is for that entered "
     "leg, not a per-kilometre rate. If production is unavailable, state that only freight is estimated and no whole total is supported. "
+    "Use read_shipments.current_purchase_brief as a reference, then answer the requested scope. "
     "For current purchase arrivals, use only plan-linked rows from read_shipments. "
     "Report that row's expected_arrival when present; unknown dates on separate profile expected orders do not "
     "make the current plan arrival unavailable. "
+    "For company expected orders, use read_shipments.workspace.shipments.expected_order_scenarios as separate "
+    "demand records; disclose expected_order_omitted when the list is partial. "
+    "A reviewed infeasible recovery may retain baseline_reviewed_infeasible for context; it is not a selected purchase "
+    "and cannot support a new recovery action. "
     "read_workspace.plan.alternatives are quote scenarios, not planned shipments; mention unselected arrival dates "
     "only if asked and label them as quote alternatives, including infeasibility. "
     "Never infer a carbon total, route, carrier status or shipment delay from other facts. "
@@ -1249,6 +1389,9 @@ async def run_live_voice(
                             # The browser needs its authoritative session. The model never
                             # receives session identifiers, CSRF tokens or document payloads.
                             model_result = {key: value for key, value in result.items() if key != 'session'}
+                            active_plan = (session.recovery['scenario'] if session.recovery is not None
+                                           else session.last_plan)
+                            _selected_purchase_model_result(name, result, model_result, active_plan)
                             if name == 'prepare_research' and research_gate is not None:
                                 model_result['required_spoken_response'] = (
                                     'I can search the public web for: ' + research_gate['query']

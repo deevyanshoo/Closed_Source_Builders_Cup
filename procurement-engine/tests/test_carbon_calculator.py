@@ -12,7 +12,7 @@ def registry():
 
 
 def test_registry_cites_source_url_licence_year_and_unit_for_every_factor(registry):
-    assert registry['label'] == 'estimate, not a certified footprint'
+    assert registry['label'] == 'estimate from published average factors'
     for group in ('transport_modes', 'materials'):
         for key, factor in registry[group].items():
             source = registry['sources'][factor['source']]
@@ -47,10 +47,12 @@ def test_hand_calculated_material_and_transport(registry):
     assert [leg['tonne_km'] for leg in legs] == ['8000', '2000']
     assert [leg['kg_co2e'] for leg in legs] == ['128.96', '207.12']
     assert result['transport']['kg_co2e'] == '336.08'
-    assert result['total_kg_co2e'] == '31228.74008'
-    assert result['complete'] is True
-    assert result['label'] == 'estimate, not a certified footprint'
-    assert 'Cradle-to-gate' in result['scope']
+    # DESNZ material factors include transport to the point of sale: components only, no sum (review, 16 Oct)
+    assert result['total_kg_co2e'] is None
+    assert result['combined_status'] == 'components_shown_separately'
+    assert result['complete'] is False
+    assert result['label'] == 'estimate from published average factors'
+    assert 'separate components' in result['scope']
     assert result['factor_versions'] == {'carbon-factors-v1': {'desnz-2026-full-set': {
         'published_on': '2026-06-11', 'checked_on': '2026-10-15', 'factor_year': 2026,
         'file_sha256': registry['sources']['desnz-2026-full-set']['file_sha256']}}}
@@ -66,7 +68,7 @@ def test_tonne_quantities_are_used_as_mass_directly(registry):
 def test_unknown_material_and_mode_are_factor_unavailable_never_guessed(registry):
     result = estimate(registry=registry, material_id='polymer', quantity='1000', unit='kg',
                       legs=[{'mode': 'pipeline', 'distance_km': '10'}])
-    assert result['material'] == {'status': 'factor_unavailable', 'kg_co2e': None, 'factor': None,
+    assert result['material'] == {'status': 'factor_unavailable', 'kg_co2e': None, 'factor': None, 'product_match': None,
                                   'mass_tonnes': '1', 'reason': 'No published factor is registered for polymer.'}
     leg = result['transport']['legs'][0]
     assert leg['status'] == 'factor_unavailable' and leg['kg_co2e'] is None
@@ -80,7 +82,7 @@ def test_count_units_are_a_unit_mismatch_for_mass_factors(registry):
     assert result['material']['status'] == 'unit_mismatch'
     assert result['material']['kg_co2e'] is None
     assert 'unit' in result['material']['reason']
-    assert result['transport']['legs'][0]['status'] == 'unit_mismatch'
+    assert result['transport']['legs'][0]['status'] == 'mass_basis_required'
     assert result['total_kg_co2e'] is None
 
 
@@ -89,10 +91,10 @@ def test_zero_quantity_gives_zero_not_unavailable(registry):
                       legs=[{'mode': 'rail_freight', 'distance_km': '300'}])
     assert result['material']['kg_co2e'] == '0'
     assert result['transport']['kg_co2e'] == '0'
-    assert result['total_kg_co2e'] == '0'
+    assert result['total_kg_co2e'] is None and result['combined_status'] == 'components_shown_separately'
 
 
-@pytest.mark.parametrize('bad', [{'mode': 'road_hgv'}, {'mode': 'road_hgv', 'distance_km': '-1'},
+@pytest.mark.parametrize('bad', [{'distance_km': '10'}, {'mode': 'road_hgv', 'distance_km': '-1'},
                                  {'mode': 'road_hgv', 'distance_km': 12.5}, {'mode': 'road_hgv', 'distance_km': 'far'},
                                  {'mode': 'road_hgv', 'distance_km': '10', 'extra': 1}])
 def test_distances_must_be_explicit_non_negative_decimal_text(registry, bad):
@@ -109,7 +111,9 @@ def test_compare_plan_adds_one_estimate_per_supplier_with_versions(registry):
     assert result['synthetic_inputs'] is True
     assert result['registry_version'] == 'carbon-factors-v1'
     assert [row['offer_id'] for row in result['suppliers']] == ['q1', 'q2']
-    assert result['suppliers'][0]['estimate']['total_kg_co2e'] == '31021.62008'
+    first = result['suppliers'][0]['estimate']
+    assert (first['material']['kg_co2e'], first['transport']['kg_co2e']) == ('30892.66008', '128.96')
+    assert first['total_kg_co2e'] is None
     assert result['suppliers'][1]['estimate']['transport']['status'] == 'not_entered'
     with pytest.raises(CarbonInputError):
         compare_plan(registry, plan, {'q9': []})

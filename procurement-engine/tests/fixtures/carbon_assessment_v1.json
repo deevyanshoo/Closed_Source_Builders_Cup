@@ -1,0 +1,209 @@
+{
+ "schema": "carbon-assessment.v1",
+ "company_id": "solara-cables",
+ "context_version": 3,
+ "plan_id": "plan-1",
+ "offer_versions": {
+  "q1": 2,
+  "q2": 1
+ },
+ "material_id": "copper",
+ "registry_version": "carbon-factors-v1",
+ "calculator_version": "carbon-calculator-v2",
+ "inputs": {
+  "legs_by_offer": {
+   "q1": [
+    {
+     "mode": "sea_container",
+     "distance_km": "1000"
+    }
+   ]
+  },
+  "mass_by_offer": {}
+ },
+ "result": {
+  "plan_id": "plan-1",
+  "company_id": "solara-cables",
+  "synthetic_inputs": true,
+  "registry_version": "carbon-factors-v1",
+  "calculator_version": "carbon-calculator-v2",
+  "label": "estimate from published average factors",
+  "scope": "Material production and entered freight are separate components. A combined figure is shown only when the material factor is an exact product match and ends at the production gate, so entered freight cannot overlap it. UK DESNZ material factors include transport to the point of sale and are UK reporting averages, so they are never combined with entered freight. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+  "material_id": "copper",
+  "quantity_unit": "kg",
+  "coverage": {
+   "company_id": "solara-cables",
+   "material_id": "copper",
+   "name": "Copper cathode",
+   "unit": "kg",
+   "state": "exact",
+   "factor_key": "copper",
+   "reason": null
+  },
+  "suppliers": [
+   {
+    "offer_id": "q1",
+    "supplier": "Swift [SYNTHETIC]",
+    "estimate": {
+     "label": "estimate from published average factors",
+     "scope": "Material production and entered freight are separate components. A combined figure is shown only when the material factor is an exact product match and ends at the production gate, so entered freight cannot overlap it. UK DESNZ material factors include transport to the point of sale and are UK reporting averages, so they are never combined with entered freight. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+     "registry_version": "carbon-factors-v1",
+     "material_id": "copper",
+     "company_id": "solara-cables",
+     "quantity": "8000",
+     "unit": "kg",
+     "mass_basis": null,
+     "material": {
+      "status": "estimated",
+      "kg_co2e": "31720",
+      "factor": {
+       "category": "Copper cathode (99.99% Cu), global ICA member average",
+       "sheet": "Table 4: Results of the LCIA for Copper Concentrate and Copper Cathode According to EF 3.0 Method",
+       "row": "Climate Change / Results per metric tonne of Copper Cathode (99.99% Cu)",
+       "factor": "3965",
+       "unit": "kg CO2e per tonne",
+       "system_boundary": "Cradle-to-gate, from extraction at the mine to copper cathode at the refinery gate, primary and secondary routes; EF 3.0 climate change; ICA member data for reference year 2019 covering 23% of world cathode output; independently reviewed. Excludes rod drawing or other semi-fabrication and transport to the buyer.",
+       "note": "Industry average, not supplier-specific. For copper rod it covers the cathode only, so it understates rod production.",
+       "geography": "Global (ICA member sites, reference year 2019)",
+       "product_match": "exact",
+       "life_cycle_stages": [
+        "mining",
+        "concentration",
+        "smelting",
+        "converting",
+        "refining to cathode"
+       ],
+       "includes_transport_to_point_of_sale": false,
+       "source_id": "ica-copper-environmental-profile-2023",
+       "publisher": "International Copper Association",
+       "source_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+       "file_url": "https://internationalcopper.org/wp-content/uploads/2023/05/ICA-LCI-GlobalSummary-202305-F.pdf",
+       "licence": "Copyright International Copper Association, All rights reserved. One published figure is cited with attribution; the document is not redistributed.",
+       "factor_year": 2019,
+       "checked_on": "2026-10-16"
+      },
+      "product_match": "exact",
+      "mass_tonnes": "8",
+      "formula": "8 t x 3965 kg CO2e/t"
+     },
+     "transport": {
+      "status": "estimated",
+      "kg_co2e": "128.96",
+      "legs": [
+       {
+        "mode": "sea_container",
+        "distance_km": "1000",
+        "status": "estimated",
+        "tonne_km": "8000",
+        "kg_co2e": "128.96",
+        "factor": {
+         "label": "Sea, average container ship",
+         "sheet": "Freighting goods",
+         "row": "Cargo ship / Container ship / Average / kg CO2e",
+         "factor": "0.01612",
+         "unit": "kg CO2e per tonne.km",
+         "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included.",
+         "source_id": "desnz-2026-full-set",
+         "publisher": "Department for Energy Security and Net Zero (UK government)",
+         "source_url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026",
+         "file_url": "https://assets.publishing.service.gov.uk/media/6a29392bade52dc0882218a8/ghg-conversion-factors-2026-full-set.xlsx",
+         "licence": "Open Government Licence v3.0",
+         "factor_year": 2026,
+         "checked_on": "2026-10-15"
+        },
+        "formula": "8 t x 1000 km x 0.01612 kg CO2e/tonne.km"
+       }
+      ]
+     },
+     "total_kg_co2e": "31848.96",
+     "combined_status": "combined",
+     "combined_reason": "Exact product factor ending at the production gate, plus entered freight from the supplier.",
+     "complete": true,
+     "factor_versions": {
+      "carbon-factors-v1": {
+       "desnz-2026-full-set": {
+        "published_on": "2026-06-11",
+        "checked_on": "2026-10-15",
+        "factor_year": 2026,
+        "file_sha256": "b5c4f2f86cdc74707337b2fb013b44ded189a1b528f5e29ea99856ba65ae0205"
+       },
+       "ica-copper-environmental-profile-2023": {
+        "published_on": "2023-05-26",
+        "checked_on": "2026-10-16",
+        "factor_year": 2019,
+        "file_sha256": "828eee137de1c99280b46b1a3e3cd6e10a60ffbd819340e51466850e70434738"
+       }
+      }
+     }
+    }
+   },
+   {
+    "offer_id": "q2",
+    "supplier": "Europa [SYNTHETIC]",
+    "estimate": {
+     "label": "estimate from published average factors",
+     "scope": "Material production and entered freight are separate components. A combined figure is shown only when the material factor is an exact product match and ends at the production gate, so entered freight cannot overlap it. UK DESNZ material factors include transport to the point of sale and are UK reporting averages, so they are never combined with entered freight. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+     "registry_version": "carbon-factors-v1",
+     "material_id": "copper",
+     "company_id": "solara-cables",
+     "quantity": "8000",
+     "unit": "kg",
+     "mass_basis": null,
+     "material": {
+      "status": "estimated",
+      "kg_co2e": "31720",
+      "factor": {
+       "category": "Copper cathode (99.99% Cu), global ICA member average",
+       "sheet": "Table 4: Results of the LCIA for Copper Concentrate and Copper Cathode According to EF 3.0 Method",
+       "row": "Climate Change / Results per metric tonne of Copper Cathode (99.99% Cu)",
+       "factor": "3965",
+       "unit": "kg CO2e per tonne",
+       "system_boundary": "Cradle-to-gate, from extraction at the mine to copper cathode at the refinery gate, primary and secondary routes; EF 3.0 climate change; ICA member data for reference year 2019 covering 23% of world cathode output; independently reviewed. Excludes rod drawing or other semi-fabrication and transport to the buyer.",
+       "note": "Industry average, not supplier-specific. For copper rod it covers the cathode only, so it understates rod production.",
+       "geography": "Global (ICA member sites, reference year 2019)",
+       "product_match": "exact",
+       "life_cycle_stages": [
+        "mining",
+        "concentration",
+        "smelting",
+        "converting",
+        "refining to cathode"
+       ],
+       "includes_transport_to_point_of_sale": false,
+       "source_id": "ica-copper-environmental-profile-2023",
+       "publisher": "International Copper Association",
+       "source_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+       "file_url": "https://internationalcopper.org/wp-content/uploads/2023/05/ICA-LCI-GlobalSummary-202305-F.pdf",
+       "licence": "Copyright International Copper Association, All rights reserved. One published figure is cited with attribution; the document is not redistributed.",
+       "factor_year": 2019,
+       "checked_on": "2026-10-16"
+      },
+      "product_match": "exact",
+      "mass_tonnes": "8",
+      "formula": "8 t x 3965 kg CO2e/t"
+     },
+     "transport": {
+      "status": "not_entered",
+      "kg_co2e": null,
+      "legs": []
+     },
+     "total_kg_co2e": null,
+     "combined_status": "incomplete",
+     "combined_reason": "A component is missing or unavailable, so there is no whole-scenario total.",
+     "complete": false,
+     "factor_versions": {
+      "carbon-factors-v1": {
+       "ica-copper-environmental-profile-2023": {
+        "published_on": "2023-05-26",
+        "checked_on": "2026-10-16",
+        "factor_year": 2019,
+        "file_sha256": "828eee137de1c99280b46b1a3e3cd6e10a60ffbd819340e51466850e70434738"
+       }
+      }
+     }
+    }
+   }
+  ]
+ },
+ "created_at": "2026-10-16T09:00:00+00:00"
+}

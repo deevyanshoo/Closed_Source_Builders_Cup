@@ -12,7 +12,7 @@ def test_factor_registry_is_readable_with_sources(demo):
     assert response.status_code == 200
     body = response.json()
     assert body['registry_version'] == 'carbon-factors-v1'
-    assert body['label'] == 'estimate, not a certified footprint'
+    assert body['label'] == 'estimate from published average factors'
     assert body['transport_modes']['sea_container']['factor'] == '0.01612'
     assert body['sources']['desnz-2026-full-set']['licence'] == 'Open Government Licence v3.0'
 
@@ -92,3 +92,17 @@ def test_missing_registry_only_disables_carbon_routes(monkeypatch):
         response = client.get('/api/demo/carbon/factors')
         assert response.status_code == 503
         assert response.json()['error']['code'] == 'carbon_unavailable'
+
+
+def test_estimate_is_scoped_to_the_session_company_and_reports_coverage(demo):
+    client, headers, _offers, _request, plan = demo
+    body = client.post('/api/demo/carbon/estimate', headers=headers,
+                       json={'plan_id': plan['plan_id'], 'legs_by_offer': legs(plan)}).json()
+    assert body['company_id'] == 'solara-cables'
+    assert body['coverage']['state'] == 'exact'
+    assert body['suppliers'][0]['estimate']['combined_status'] == 'combined'
+    # copper is stated in kg, so a shipping mass is refused rather than silently replacing the quantity
+    refused = client.post('/api/demo/carbon/estimate', headers=headers, json={
+        'plan_id': plan['plan_id'], 'legs_by_offer': legs(plan),
+        'mass_by_offer': {plan['alternatives'][0]['offer_id']: {'mass_kg': '10', 'basis': 'guess'}}})
+    assert refused.status_code == 422

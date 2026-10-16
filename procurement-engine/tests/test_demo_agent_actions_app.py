@@ -500,7 +500,10 @@ def test_native_simulated_email_resolves_first_supplier_alias_and_exact_name(mon
                 while socket.receive_json()['type'] != 'turn_complete':
                     pass
             assert [result['status'] for result in results] == [
-                'proposal', 'proposal', 'proposal', 'proposal', 'needs_clarification']
+                'completed', 'completed', 'completed', 'completed', 'needs_clarification']
+            assert all(result['action_result']['tool'] == 'prepare_simulated_email'
+                       and result['session']['drafts'][-1]['status'] == 'draft_unsent'
+                       for result in results[:4])
             assert all(result['proposal']['parameters']['recipient_label'] == expected
                        for result in results[:4])
             assert all('synthetic' not in result['proposal']['parameters']['subject'].lower()

@@ -118,6 +118,10 @@ def test_read_only_utilities_and_simulated_email_are_bounded():
         assert result['candidate'] is None
     with pytest.raises(OperatorValidationError):
         turn(value, 'Navigate to news', SmartProvider('navigate', 'copper', parameters={'view': 'admin'}))
+    for view in ('overview', 'inventory', 'routes', 'shipments'):
+        navigation = turn(value, f'Open {view}', SmartProvider('navigate', 'copper',
+                         parameters={'view': view}))
+        assert navigation['utility'] == {'kind': 'navigate', 'parameters': {'view': view}}
     supplier = value['company']['suppliers'][0]['name']
     email = SmartProvider('simulate_email', 'copper', parameters={
         'subject': 'Copper quote inquiry', 'body': 'Please review our fictional request.',

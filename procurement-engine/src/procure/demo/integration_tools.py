@@ -24,6 +24,12 @@ _METHOD_QUESTION = re.compile(
     r'calculat(?:ion|ed)|how\s+(?:was|were|is|are))\b', re.I)
 
 
+def navigation_request(message: str) -> str | None:
+    match = re.fullmatch(r'\s*(?:open|show|navigate\s+to|go\s+to)\s+(?:our\s+|the\s+)?'
+                         r'(overview|inventory|routes|shipments)(?:\s+view)?[.!]?\s*', message, re.I)
+    return match.group(1).lower() if match else None
+
+
 def integration_request(snapshot: dict, message: str) -> str | None:
     """Recognize narrow fact reads or an explicit reviewable shipment delay."""
     text = message.casefold()
@@ -37,6 +43,8 @@ def integration_request(snapshot: dict, message: str) -> str | None:
     safe = re.sub(r'\b(?:do not|don.t|without)\s+(?:change|send|place|apply|submit|order)\w*\b[^.;]*', '', text)
     if re.search(r'\b(?:send|buy|purchase now|place|apply|submit|change|replan|estimate|calculate|set|approve|confirm)\b', safe):
         return None
+    if re.search(r'\b(?:our|current|this company.s|company)\b.{0,35}\b(?:routes?|lanes?|chokepoints?)\b', text):
+        return 'read_routes'
     current = bool(_CURRENT_SCOPE.search(text) or re.search(r'\bdemo-plan-demand:[\w:-]+\b', text))
     if not current:
         return None
@@ -102,6 +110,14 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     if named - own:
         return {'assistant_text': f'That material is outside the {company} workspace. Choose a material listed for this company.',
                 'workspace': {}}
+    if kind == 'read_routes':
+        routes = deepcopy(snapshot['company'].get('routes', []))
+        via = list(dict.fromkeys(point for route in routes for point in route.get('via', [])
+                                 if isinstance(point, str)))
+        answer = (f"{company} has {len(routes)} declared profile routes. "
+                  + (f"Named via points include {', '.join(via[:4])}. " if via else '')
+                  + 'These are profile routes; transport mode, distance and a selected supplier binding are not recorded here.')
+        return {'assistant_text': answer, 'workspace': {'routes': routes}}
     if kind == 'read_carbon':
         record = snapshot.get('carbon_assessment')
         result = deepcopy(record.get('result')) if isinstance(record, dict) else None
@@ -220,6 +236,14 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
 
 
 def integration_outcome(snapshot: dict, message: str) -> dict | None:
+    view = navigation_request(message)
+    if view is not None:
+        return {'status': 'completed', 'assistant_text': f'Open the {view} view.',
+                'agent_steps': [{'agent': 'workspace', 'role': 'deterministic', 'status': 'completed',
+                                 'model': 'none', 'provider_call': 'none', 'tool': 'navigate_workspace',
+                                 'summary': 'Selected a supported workspace view.'}],
+                'evidence_ids': [], 'candidate': None, 'proposal_kind': None,
+                'parameters': None, 'utility': {'kind': 'navigate', 'parameters': {'view': view}}}
     kind = integration_request(snapshot, message)
     if kind is None:
         return None

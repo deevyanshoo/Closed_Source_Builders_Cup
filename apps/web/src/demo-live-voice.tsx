@@ -3,6 +3,7 @@ import { createDemoApi, DemoApiError } from './demo-api';
 import type { DemoSession, OperatorTurn } from './demo-api';
 import { ZoorqLens } from './zoorq-lens';
 import { validatedResearchResult } from './demo-research';
+import { isCurrentSavedDraft } from './demo-operator-contract';
 
 const api = createDemoApi();
 const CONNECT_TIMEOUT_MS = 15000;
@@ -24,7 +25,7 @@ export async function restoreLiveSession(read: () => Promise<DemoSession>, captu
 export function acceptsLiveTurn(value: unknown, captured: LiveScope, current: LiveScope): value is OperatorTurn {
   if (!value || typeof value !== 'object') return false;
   const turn = value as Partial<OperatorTurn>;
-  const utility = !turn.proposal && !!turn.session && turn.session.session_id === captured.sessionId &&
+  const utility = (!turn.proposal || isCurrentSavedDraft(turn, captured)) && !!turn.session && turn.session.session_id === captured.sessionId &&
     turn.session.company?.company_id === captured.companyId && turn.session.context_version === captured.contextVersion &&
     !!turn.action_result && typeof turn.action_result.tool === 'string' && typeof turn.action_result.summary === 'string';
   const validResearch = turn.action_result?.tool !== 'confirm_research' || !!validatedResearchResult(turn.workspace?.research);

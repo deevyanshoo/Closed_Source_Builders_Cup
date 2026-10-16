@@ -27,10 +27,19 @@ describe('route display and local playback', () => {
     expect(html).toContain('aria-label="Simulation progress"');
     expect(html).toContain('Play');
     expect(html).toContain('Speed');
+    for (const [value,label] of [['0.5','0.5×'],['1','1×'],['2','2×']]) expect(html).toMatch(new RegExp(`<option value="${value}"[^>]*>${label}</option>`));
     expect(html).toContain('Map unavailable');
     expect(html).toContain('Current leg: Ship corridor via Suez Canal');
     expect(html).toContain('aria-current="step"');
     expect(html).not.toContain('maps.googleapis.com');
+  });
+
+  it('keeps route provenance available in a collapsed disclosure after the map', () => {
+    const html = renderToStaticMarkup(<ZoorqRouteMap view={view} apiKey={null} />);
+    expect(html).toContain('<details class="zoorq-route-source"');
+    expect(html.indexOf('zoorq-route-map-layout')).toBeLessThan(html.indexOf('Source &amp; precision'));
+    expect(html).toContain('Supplier, offer, and facility coordinates are unavailable');
+    expect(html.indexOf('Supplier, offer, and facility coordinates are unavailable')).toBeGreaterThan(html.indexOf('Source &amp; precision'));
   });
 
   it('shows a read-only disruption preview and supports reduced motion', () => {
@@ -40,6 +49,26 @@ describe('route display and local playback', () => {
     expect(html).toContain('aria-disabled="true"');
     expect(view.offer_id).toBeNull();
   });
+  it('keeps status and source readable while disclosing unavailable geometry', () => {
+    const schematic={...view,status:'unavailable' as const,segments:view.segments.map(segment=>({...segment,status:'unavailable' as const,geometry:null})),limitations:['Transport mode is not declared for this profile route.']};
+    const html=renderToStaticMarkup(<ZoorqRouteMap view={schematic} apiKey={null} />);
+    expect(html).toContain('Source &amp; precision');
+    expect(html).toContain('Transport mode is not declared');
+    expect(html).toContain('Unavailable');
+    expect(html).toContain('Map unavailable');
+    expect(html).not.toContain('🚢');
+  });
+  it('shows an ordered declared schematic with origin, via, and destination without invented geometry', () => {
+    const schematic={...view,status:'unavailable' as const,itinerary:{origin:'Dhaka',via:['Chattogram'],destination:'Pune',mode:'unknown' as const,display:'schematic' as const},segments:view.segments.map(segment=>({...segment,status:'unavailable' as const,geometry:null}))};
+    const html=renderToStaticMarkup(<ZoorqRouteMap view={schematic} apiKey={null} />);
+    const sequence=html.slice(html.indexOf('zoorq-route-schematic'),html.indexOf('zoorq-route-map-details'));
+    expect(sequence).toContain('Declared itinerary');
+    expect(sequence).toContain('<ol');
+    expect(sequence.indexOf('Dhaka')).toBeLessThan(sequence.indexOf('Chattogram'));
+    expect(sequence.indexOf('Chattogram')).toBeLessThan(sequence.indexOf('Pune'));
+    expect(sequence).toContain('No mapped path');
+    expect(sequence).not.toContain('lat');
+  });
 
   it('promotes a selected-buyer destination gap above generic limitations', () => {
     const mismatch = { ...view, limitations: [
@@ -48,7 +77,7 @@ describe('route display and local playback', () => {
     ] };
     const html = renderToStaticMarkup(<ZoorqRouteMap view={mismatch} apiKey={null} />);
     expect(html).toContain('Profile route ends at Mombasa, Kenya; selected buyer is Nairobi, Kenya');
-    expect(html).toContain('Partial corridor');
+    expect(html).toContain('Approximate · partial');
     expect(html.indexOf('Profile route ends')).toBeLessThan(html.indexOf('zoorq-route-map-layout'));
   });
 

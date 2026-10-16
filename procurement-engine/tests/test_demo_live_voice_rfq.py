@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from procure.demo.app import create_app
 from test_demo_live_voice import Provider
+from test_demo_operator import Provider as OperatorProvider
 
 
 class RfqProvider(Provider):
@@ -18,6 +19,14 @@ class RfqProvider(Provider):
         if kwargs.get('audio'):
             await self.events.put(NS(tool_call=NS(function_calls=[NS(
                 name='prepare_rfq', args={}, id='rfq-call')]), server_content=None))
+
+
+class ModelApprovalProvider(Provider):
+    async def send_realtime_input(self, **kwargs):
+        if kwargs.get('audio'):
+            await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                name='operate_workspace', args={'message': 'I approve this watch as shown'},
+                id='model-approval')]), server_content=None))
 
 
 def plan_for_copper(client, headers, *, budget='100000', current_stock='2000'):
@@ -96,7 +105,8 @@ class NativeVoiceRfqTests(unittest.TestCase):
         result, model_result = ask_for_rfq(self.client, self.provider)
         proposal = result['proposal']
         preview = proposal['parameters']['draft_preview']
-        assert result['status'] == 'proposal' and proposal['kind'] == 'rfq'
+        assert result['status'] == 'completed' and proposal['kind'] == 'rfq'
+        assert result['action_result']['tool'] == 'prepare_rfq'
         assert proposal['plan_id'] == plan['plan_id']
         assert proposal['offer_versions'] == plan['offer_versions']
         assert preview['kind'] == 'rfq' and preview['status'] == 'draft_unsent'
@@ -112,6 +122,37 @@ class NativeVoiceRfqTests(unittest.TestCase):
         assert applied.status_code == 200, applied.text
         assert applied.json()['result']['plan_id'] == plan['plan_id']
         assert self.client.get('/api/demo/session').json()['simulated_outbox'] == []
+
+    def test_model_supplied_operate_message_cannot_use_typed_approval(self):
+        voice_provider = ModelApprovalProvider()
+
+        @asynccontextmanager
+        async def factory():
+            yield voice_provider
+
+        with TestClient(create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                                   operator_provider=OperatorProvider(evidence=()),
+                                   live_client_factory=factory), base_url='https://demo.test') as client:
+            session = client.get('/api/demo/session').json()
+            headers = {'Origin': 'https://demo.test', 'X-CSRF-Token': session['csrf_token']}
+            prepared = client.post('/api/demo/operator', headers=headers, json={
+                'message': 'Watch copper', 'expected_context_version': 1,
+                'idempotency_key': 'prepare-watch'}).json()
+            assert prepared['proposal']['kind'] == 'watch'
+            with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                          headers={'origin': 'https://demo.test'}) as socket:
+                socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                                  'expected_context_version': 1})
+                while socket.receive_json()['type'] != 'ready':
+                    pass
+                socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+                event = socket.receive_json()
+                while event['type'] != 'tool_result':
+                    assert event['type'] != 'error', event
+                    event = socket.receive_json()
+                assert event['result'].get('action_result', {}).get('tool') != 'watch'
+                socket.send_json({'type': 'stop'})
+            assert client.get('/api/demo/operator').json()['watch_items'] == []
 
     def test_uses_active_recovery_scenario(self):
         baseline = plan_for_copper(self.client, self.headers)

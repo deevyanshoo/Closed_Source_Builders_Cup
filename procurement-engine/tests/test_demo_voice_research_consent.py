@@ -1016,7 +1016,12 @@ def test_finalized_consent_starts_one_research_without_model_call_and_drains_eve
             started.set()
             await release.wait()
             await on_progress('started')
-            return turn(session, 'completed', text='Three sourced findings are available.')
+            return turn(session, 'completed', text='Three sourced findings are available.',
+                workspace={'research': {'status': 'completed', 'checked_at':
+                    '2026-10-15T00:00:00+00:00', 'answer': 'Three sourced findings are available.',
+                    'sources': [{'publisher': 'Mining.com.au', 'title': 'Copper report',
+                                 'url': 'https://mining.com.au/copper-report'}]},
+                           'padding': 'x' * 70000})
 
         _, session, socket, provider, calls, task = await scenario(research=research)
         await prepare(socket, provider)
@@ -1042,6 +1047,9 @@ def test_finalized_consent_starts_one_research_without_model_call_and_drains_eve
         assert (await socket.next('research_progress'))['phase'] == 'completed'
         turns, complete = await asyncio.wait_for(provider.client_content.get(), 2)
         assert complete and 'Three sourced findings' in turns[0].parts[0].text
+        assert '15 October 2026' in turns[0].parts[0].text
+        assert 'Mining.com.au' in turns[0].parts[0].text
+        assert 'required_spoken_response' in turns[0].parts[0].text
         assert len(research_calls) == 1
         await finish(socket, task)
 
@@ -1086,10 +1094,11 @@ def test_model_confirm_during_server_research_attaches_to_same_result():
         response = await asyncio.wait_for(provider.responses.get(), 2)
         assert response.id == 'late-real-call' and response.response['status'] == 'completed'
         assert response.response['read_only'] is False
-        guidance = response.response['required_spoken_response'].lower()
-        assert 'checked_at' in guidance and 'lookup' in guidance
-        assert 'publisher' in guidance and 'publication date' in guidance
-        assert 'conditional' in guidance and 'verify' in guidance
+        guidance = response.response['required_spoken_response']
+        assert '15 October 2026' in guidance
+        assert 'Current sourced answer.' in guidance
+        assert 'Mining.com.au' in guidance
+        assert 'verify' in guidance.lower()
         assert provider.responses.empty()
         await provider.call('confirm_research', {'proposal_id': 'proposal-1'}, 'new-attempt')
         reused = await asyncio.wait_for(provider.responses.get(), 2)

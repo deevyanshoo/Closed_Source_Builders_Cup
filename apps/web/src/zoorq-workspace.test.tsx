@@ -24,7 +24,7 @@ describe('ZOORQ workspace shell', () => {
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('News');
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(6);
-    expect(html).toContain('aria-label="Inventory &amp; supply"');
+    expect(html).toContain('aria-label="Supply · Inventory &amp; supply"');
     expect(html).toContain('>Supply</span>');
     expect(html).toContain('>Procure</span>');
     expect(html).not.toContain('®');
@@ -52,7 +52,7 @@ describe('ZOORQ workspace shell', () => {
     const element = WorkspaceHeader({ company, view: 'overview', onTalk: () => {}, onChat: () => {}, onHub });
     element.props.children[0].props.onClick();
     expect(onHub).toHaveBeenCalledOnce();
-    expect(renderToStaticMarkup(element)).toContain('aria-label="All companies"');
+    expect(renderToStaticMarkup(element)).toContain('aria-label="All companies · Solara Cables / Overview"');
   });
 
   it('compares stock cover with the lead for the same material and labels the estimate', () => {

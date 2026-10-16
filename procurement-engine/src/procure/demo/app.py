@@ -5,7 +5,7 @@ import base64
 import asyncio
 from collections import OrderedDict
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -421,6 +421,21 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         return {key: deepcopy(proposal[key]) for key in ('proposal_id', 'kind', 'summary',
                 'parameters', 'plan_id', 'offer_versions', 'context_version', 'expires_at')}
 
+    def current_public_proposal(value):
+        """Project a current owned review card without exposing its private binding."""
+        proposal = value.pending_proposal
+        if proposal is None:
+            return None
+        try:
+            if (not store._valid_proposal(proposal, value) or
+                    datetime.fromisoformat(proposal['expires_at']).astimezone(timezone.utc)
+                        <= store.now().astimezone(timezone.utc) or
+                    proposal['_marker'] != snapshot_marker(operator_snapshot(value, include_risks=False))):
+                return None
+            return public_proposal(proposal)
+        except (TypeError, ValueError, KeyError, SessionError):
+            return None
+
     def news_view(value, payload, company_id, version):
         if not isinstance(payload, dict):
             raise SessionError('news_unavailable', 'News is unavailable right now.', 503)
@@ -513,6 +528,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         value.rfq = None
         value.pending_proposal = None
         value.carbon_assessment = None
+        value.pending_carbon = None
 
     def active_plan(value):
         return value.recovery['scenario'] if value.recovery is not None else value.last_plan
@@ -654,6 +670,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         value.recovery = None
         value.rfq = None
         value.pending_proposal = None
+        value.pending_carbon = None
         return plan
 
     def execute_utility(value, utility, message):
@@ -663,7 +680,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         kind, parameters = utility['kind'], utility['parameters']
         if kind == 'navigate':
             shape(parameters, ('view',))
-            if parameters['view'] not in ('company', 'news', 'procurement', 'outbox'):
+            if parameters['view'] not in ('company', 'overview', 'inventory', 'routes', 'shipments', 'news', 'procurement', 'outbox'):
                 raise SessionError('invalid_utility', 'Unknown workspace view.', 422)
             return {'tool': kind, 'summary': f"Open {parameters['view']} view.", 'view': parameters['view']}, True
         shape(parameters, ('material_id', 'values') if kind == 'fill_form' else ('material_id',))
@@ -842,6 +859,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     'selected_material_id': value.selected_material_id,
                     'simulated_outbox': deepcopy(value.simulated_outbox),
                     'drafts': deepcopy(value.drafts),
+                    'pending_operator_proposal': current_public_proposal(value),
                     'context_version': value.context_version}
 
     def session_response(value):
@@ -1197,7 +1215,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def operator_turn(request: Request):
         value = mutate(request)
         data = await body(request)
-        return await execute_operator_turn(value, data)
+        return await execute_operator_turn(value, data, trusted_typed_user=True)
 
     @app.get('/api/demo/operator/history')
     async def operator_history(request: Request):
@@ -1249,7 +1267,32 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             return complete(value, key, {'status': 'cancelled', 'company_id': value.company_id,
                                         'context_version': value.context_version})
 
-    async def execute_operator_turn(value, data, *, channel='text'):
+    def typed_proposal_approval(message, proposal):
+        """Only an exact human typed instruction can select the current reviewed card."""
+        words = re.sub(r'[^a-z0-9 ]+', ' ', message.casefold()).split()
+        phrase = ' '.join(words)
+        if not words or len(words) > 14 or any(word in words for word in
+                ('no', 'not', 'never', 'cancel', 'stop', 'dont', 'withdraw')):
+            return False
+        kind = proposal['kind'] if proposal else None
+        noun = {'watch': 'watch', 'recovery': 'recovery', 'review_quotes': 'quotes',
+                'simulate_email': 'simulated email', 'rfq': 'rfq draft'}.get(kind)
+        if noun is None:
+            return False
+        phrases = {f'confirm this {noun}', f'approve this {noun}',
+                          f'i approve this {noun} as shown',
+                          f'i approve the {noun} as shown',
+                          'i approve this proposal as shown',
+                          'i approve the current proposal as shown',
+                          'confirm this proposal',
+                          'i approve the draft as shown' if kind in {'rfq', 'simulate_email'} else ''}
+        if kind == 'review_quotes':
+            phrases.update({'confirm these quotes', 'approve these quotes',
+                            'i approve these quotes as shown',
+                            'i approve the reviewed quotes as shown'})
+        return phrase in phrases
+
+    async def execute_operator_turn(value, data, *, channel='text', trusted_typed_user=False):
         nonlocal operator_process_calls
         from .operator import (DEFAULT_MODEL, OperatorUnavailable, OperatorValidationError,
                                _broad_inventory_scope, run_turn)
@@ -1258,8 +1301,70 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
             raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
         from .experience_service import baseline_snapshot, judge_outcome, resolve_local_turn, has_local_evidence
+        from .carbon_operator import is_estimate_request, is_pending_reply, estimate_turn
         with value.lock:
             context(value, data, explicit=True)
+            proposal = value.pending_proposal
+            approval_phrase = ' '.join(re.sub(r'[^a-z0-9 ]+', ' ', message.casefold()).split())
+            approval_language = (typed_proposal_approval(message, proposal) or
+                approval_phrase in {'yes', 'no', 'approve', 'confirm', 'i approve', 'i confirm',
+                                    'approve it', 'confirm it', 'i approve it', 'i confirm it'} or
+                bool(re.fullmatch(
+                    r'(?:i )?(?:(?:don t|do not|never|no) )?(?:approve|confirm) '
+                    r'(?:this|the|the current|current|these) '
+                    r'(?:proposal|draft|rfq draft|watch|recovery|quotes|reviewed quotes|simulated email)'
+                    r'(?: as shown)?', approval_phrase)))
+            cancelling = message.strip().casefold().rstrip('.!') in {
+                'cancel this proposal', 'discard this proposal', 'cancel the proposal'}
+            if trusted_typed_user and (approval_language or cancelling):
+                key, replay = start(value, data, 'operator_turn')
+                if replay is not None:
+                    entry = value.idempotency[key]
+                    if (entry.get('state_marker') != snapshot_marker(operator_snapshot(value)) or
+                            entry.get('operator_generation') != value.operator_generation):
+                        raise SessionError('stale_context', 'Workspace changed since this approval.', 409)
+                    replay.pop('replayed', None)
+                    return replay
+                if cancelling and proposal is not None:
+                    value.pending_proposal = None
+                    value.operator_generation += 1
+                    result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': value.context_version, 'status': 'completed',
+                        'assistant_text': 'Cancelled the current proposal. No reviewed change was applied.',
+                        'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                        'read_only': False, 'action_result': {'tool': 'cancel_proposal',
+                            'summary': 'Cancelled the current proposal.'}, 'session': view(value)}
+                elif not typed_proposal_approval(message, proposal):
+                    result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': value.context_version, 'status': 'needs_clarification',
+                        'assistant_text': ('Please review the current proposal, then say which action you approve.'
+                                           if proposal else 'There is no current proposal to approve.'),
+                        'agent_steps': [], 'evidence_ids': [],
+                        'proposal': public_proposal(proposal) if proposal else None,
+                        'read_only': True}
+                else:
+                    apply_key = 'chat-' + hashlib.sha256((value.session_id + ':' + key).encode()).hexdigest()[:40]
+                    try:
+                        applied = apply_pending_proposal(value, proposal['proposal_id'],
+                                                         value.context_version, apply_key)
+                    except Exception:
+                        failed(value, key)
+                        raise
+                    place = {'watch': 'Watch', 'recovery': 'Recovery',
+                             'review_quotes': 'Procurement quotes',
+                             'simulate_email': 'Simulated outbox', 'rfq': 'Drafts'}[applied['kind']]
+                    result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': value.context_version, 'status': 'completed',
+                        'assistant_text': f"Applied the reviewed {applied['kind'].replace('_', ' ')}. You can find it in {place}.",
+                        'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                        'read_only': False, 'action_result': {'tool': applied['kind'],
+                            'summary': f'Applied reviewed {applied["kind"]}.'},
+                        'session': applied['session']}
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                value.idempotency[key]['operator_generation'] = value.operator_generation
+                remember_turn(value, message, result, channel=channel)
+                return result
         # Load the canonical cached News view for the utterance itself. On a
         # first turn the resolver can only see news=None and may propose public
         # research before these company-owned facts have been read.
@@ -1269,7 +1374,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             context(value, data, explicit=True)
             from .research import prepare_research, ResearchValidationError
             current_snapshot = operator_snapshot(value)
-            resolved = resolve_local_turn(current_snapshot, message, now=store.now())
+            carbon_turn = is_estimate_request(message, has_assessment=current_snapshot.get('carbon_assessment') is not None) or (
+                value.pending_carbon is not None and
+                is_pending_reply(message, value.pending_carbon, get_company(value.company_id)))
+            resolved = None if carbon_turn else resolve_local_turn(current_snapshot, message, now=store.now())
             local_news_resolution = None
             if news_outcome is not None:
                 local_snapshot = {**current_snapshot, 'news': None, 'completed_research': []}
@@ -1277,12 +1385,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if has_local_evidence(local, local_snapshot):
                     local_news_resolution = local
             try:
-                research_parameters = (None if briefing or resolved is not None else
+                research_parameters = (None if carbon_turn or briefing or resolved is not None else
                     prepare_research(message, get_company(value.company_id), store.now()))
                 research_invalid = None
             except ResearchValidationError as exc:
                 research_parameters, research_invalid = None, str(exc)
-            prepared = news_outcome is not None or resolved is not None or research_parameters is not None or research_invalid is not None
+            prepared = carbon_turn or news_outcome is not None or resolved is not None or research_parameters is not None or research_invalid is not None
             key, replay = start(value, data, 'operator_turn')
             if replay is not None:
                 if (value.idempotency[key].get('operator_generation') != value.operator_generation or
@@ -1298,15 +1406,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             marker = snapshot_marker(snapshot)
             # Canonical reads do not call a model. Keep the normal request,
             # session and concurrency limits, without reserving AI capacity.
-            from .integration_tools import integration_request
+            from .integration_tools import integration_request, navigation_request
             prepared = (prepared or integration_request(snapshot, message) is not None
+                        or navigation_request(message) is not None
                         or _broad_inventory_scope(snapshot, message) is not None)
             adapter = operator_adapter()
             model = getattr(adapter, 'model', None) or os.getenv('GEMINI_OPERATOR_MODEL', DEFAULT_MODEL)
             if not prepared and not bool(getattr(adapter, 'available', True)):
                 value.operator_generation += 1
                 value.idempotency[key]['operator_generation'] = value.operator_generation
-                value.pending_proposal = None
                 result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
                           'context_version': value.context_version, 'status': 'unavailable',
                           'assistant_text': 'The Vertex operator is unavailable; no action was taken.',
@@ -1334,10 +1442,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             value.operator_generation += 1
             generation = value.operator_generation
             value.idempotency[key]['operator_generation'] = generation
-            value.pending_proposal = None
         try:
             try:
-                if news_outcome is not None:
+                if carbon_turn:
+                    outcome = {'status': 'completed', 'assistant_text': '', 'agent_steps': [],
+                               'evidence_ids': [], 'candidate': None, 'carbon_turn': True}
+                elif news_outcome is not None:
                     outcome = {**combine_local_news(news_outcome, local_news_resolution), 'candidate': None}
                 else:
                     outcome = (judge_outcome(resolved) if resolved is not None else await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
@@ -1365,6 +1475,22 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 utility = outcome.get('utility')
                 action_result = None
                 changed = False
+                if outcome.get('carbon_turn'):
+                    carbon = estimate_turn(value, message, active_plan=active_plan,
+                        validate_plan_current=validate_plan_current, compare_quotes=compare_quotes,
+                        company=get_company(value.company_id), now=store.now())
+                    outcome.update(status=carbon['status'], assistant_text=carbon['assistant_text'],
+                        agent_steps=[{'agent': 'workspace', 'role': 'deterministic',
+                                      'status': 'completed', 'model': 'none', 'provider_call': 'none',
+                                      'tool': 'estimate_carbon',
+                                      'summary': 'Calculated against current owned plan and cited factors.'}])
+                    if carbon['comparison'] is not None:
+                        outcome['workspace'] = {'carbon': carbon['comparison']}
+                    if carbon['changed']:
+                        action_result = {'tool': 'estimate_carbon',
+                                         'summary': ('Saved current plan emissions assessment.'
+                                                     if carbon['comparison'] is not None else carbon['assistant_text'])}
+                        changed = True
                 if utility is not None:
                     action_result, changed = execute_utility(value, utility, message)
                 candidate = outcome.get('candidate')
@@ -1414,6 +1540,21 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 '_session_id': value.session_id}
                     remember_prepared_draft(value, proposal, rfq_preview=rfq_preview)
                     value.pending_proposal = proposal
+                    if kind == 'rfq':
+                        outcome['status'] = 'completed'
+                        outcome['assistant_text'] = 'Created an unsent RFQ draft. You can review and download it in Drafts.'
+                        action_result = {'tool': 'prepare_rfq', 'summary': 'Created an unsent RFQ draft in Drafts.'}
+                        changed = True
+                    elif (kind == 'simulate_email' and
+                          re.search(r'\b(draft|prepare|write|compose)\b', message, re.I) and
+                          not re.search(r'\b(send|sent|dispatch)\b',
+                                        re.split(r'\b(?:subject|body)\s*:', message, maxsplit=1,
+                                                 flags=re.I)[0], re.I)):
+                        outcome['status'] = 'completed'
+                        outcome['assistant_text'] = 'Created a simulated email draft in Drafts. No external message was sent.'
+                        action_result = {'tool': 'prepare_simulated_email',
+                                         'summary': 'Created a simulated email draft in Drafts.'}
+                        changed = True
                 result = {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
                           'context_version': value.context_version, 'status': outcome['status'],
                           'assistant_text': outcome['assistant_text'],
@@ -1508,6 +1649,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
         async def workspace_tools(name, args, context_version, key, *, on_research_progress=None):
+            if name == 'confirm_workspace_action':
+                shape(args, ('proposal_id',))
+                applied = apply_pending_proposal(value, args['proposal_id'], context_version, key)
+                place = 'Watch' if applied['kind'] == 'watch' else 'Recovery'
+                return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                    'context_version': context_version, 'status': 'completed',
+                    'assistant_text': f"Applied the reviewed {applied['kind']}. You can find it in {place}.",
+                    'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                    'read_only': False, 'action_result': {'tool': applied['kind'],
+                        'summary': f"Applied reviewed {applied['kind']}."}, 'session': applied['session']}
             if name == 'read_news':
                 shape(args, ())
                 return await voice_news(value, context_version)
@@ -1608,7 +1759,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',
                        'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
                        'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace',
-                       'read_carbon', 'read_shipments', 'preview_supplier_delay',
+                       'read_carbon', 'read_routes', 'read_shipments', 'preview_supplier_delay',
+                       'estimate_carbon',
                        'prepare_shipment_recovery'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
@@ -1645,7 +1797,24 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                   'status': 'completed', 'model': 'none', 'provider_call': 'none',
                                   'tool': name, 'summary': 'Validated owned workspace tool.'}],
                               'evidence_ids': [], 'proposal': None, 'read_only': True}
-                    if name == 'preview_supplier_delay':
+                    if name == 'estimate_carbon':
+                        shape(args, ('message',))
+                        if not isinstance(args['message'], str) or not 1 <= len(args['message'].strip()) <= 1200:
+                            raise SessionError('invalid_message', 'State the carbon request or freight details.', 422)
+                        from .carbon_operator import estimate_turn
+                        carbon = estimate_turn(value, args['message'], active_plan=active_plan,
+                            validate_plan_current=validate_plan_current, compare_quotes=compare_quotes,
+                            company=get_company(value.company_id), now=store.now())
+                        result.update(status=carbon['status'], assistant_text=carbon['assistant_text'])
+                        if carbon['comparison'] is not None:
+                            result['workspace'] = {'carbon': carbon['comparison']}
+                        if carbon['changed']:
+                            result['action_result'] = {'tool': 'estimate_carbon',
+                                'summary': ('Saved current plan emissions assessment.'
+                                            if carbon['comparison'] is not None else carbon['assistant_text'])}
+                            result['session'] = view(value)
+                            result['read_only'] = False
+                    elif name == 'preview_supplier_delay':
                         shape(args, ('message',))
                         message = args['message']
                         if not isinstance(message, str) or not 1 <= len(message.strip()) <= 1200:
@@ -1667,10 +1836,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 evidence_ids=outcome['evidence_ids'])
                             if outcome.get('workspace') is not None:
                                 result['workspace'] = outcome['workspace']
-                    elif name in ('read_carbon', 'read_shipments'):
-                        shape(args, ())
+                    elif name in ('read_carbon', 'read_shipments', 'read_routes'):
+                        shape(args, ('message',) if name == 'read_routes' else ())
                         from .integration_tools import integration_read
-                        payload = integration_read(operator_snapshot(value), name)
+                        payload = integration_read(operator_snapshot(value), name,
+                                                   args['message'] if name == 'read_routes' else '')
                         result.update(payload)
                     elif name == 'prepare_shipment_recovery':
                         shape(args, ('shipment_id', 'delay_days'))
@@ -1775,10 +1945,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                     '_session_id': value.session_id}
                         remember_prepared_draft(value, proposal, rfq_preview=preview)
                         value.pending_proposal = proposal
-                        result['status'] = 'proposal'
+                        result['status'] = 'completed'
                         result['proposal'] = public_proposal(proposal)
-                        result['assistant_text'] = proposal['summary']
+                        result['assistant_text'] = 'Created an unsent RFQ draft. You can review and download it in Drafts.'
                         result['workspace'] = {'drafts': deepcopy(value.drafts)}
+                        result['read_only'] = False
+                        result['action_result'] = {'tool': 'prepare_rfq',
+                                                   'summary': 'Created an unsent RFQ draft in Drafts.'}
+                        result['session'] = view(value)
                     elif name == 'prepare_simulated_email':
                         parameters = simulated_email_parameters(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'simulate_email',
@@ -1790,10 +1964,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                     '_session_id': value.session_id}
                         remember_prepared_draft(value, proposal)
                         value.pending_proposal = proposal
-                        result['status'] = 'proposal'
+                        result['status'] = 'completed'
                         result['proposal'] = public_proposal(proposal)
-                        result['assistant_text'] = proposal['summary']
+                        result['assistant_text'] = 'Created a simulated email draft in Drafts. No external message was sent.'
                         result['workspace'] = {'drafts': deepcopy(value.drafts)}
+                        result['read_only'] = False
+                        result['action_result'] = {'tool': 'prepare_simulated_email',
+                                                   'summary': 'Created a simulated email draft in Drafts.'}
+                        result['session'] = view(value)
                     elif name == 'review_sample_quotes':
                         parameters = reviewed_quote_preview(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'review_quotes',
@@ -2012,25 +2190,15 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         finally:
             research_workers.release()
 
-    @app.post('/api/demo/operator/confirm')
-    async def operator_confirm(request: Request):
-        value = mutate(request)
-        data = await body(request)
-        shape(data, ('proposal_id', 'reviewed', 'expected_context_version', 'idempotency_key'))
-        if data['reviewed'] is not True:
-            raise SessionError('review_required', 'Review the exact proposal before applying it.', 422)
-        if not isinstance(data['proposal_id'], str) or not data['proposal_id']:
+    def apply_pending_proposal(value, proposal_id, expected_context_version, idempotency_key):
+        """The single durable apply boundary for UI and verified conversations."""
+        data = {'proposal_id': proposal_id, 'reviewed': True,
+                'expected_context_version': expected_context_version,
+                'idempotency_key': idempotency_key}
+        if not isinstance(proposal_id, str) or not proposal_id:
             raise SessionError('invalid_proposal', 'A proposal ID is required.', 422)
-        if not isinstance(data['idempotency_key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', data['idempotency_key']):
+        if not isinstance(idempotency_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', idempotency_key):
             raise SessionError('invalid_idempotency', 'A short alphanumeric retry key is required.', 422)
-        with value.lock:
-            previous = value.idempotency.get(data['idempotency_key'], {}).get('result')
-            is_research = (value.pending_proposal is not None and value.pending_proposal['kind'] == 'research'
-                           and value.pending_proposal['proposal_id'] == data['proposal_id']
-                           or data['proposal_id'] in value.research_records
-                           or isinstance(previous, dict) and previous.get('kind') == 'research')
-        if is_research:
-            return await confirm_research(value, data)
         with value.lock:
             context(value, data, explicit=True)
             key, replay = start(value, data, 'operator_confirm')
@@ -2126,6 +2294,28 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             except Exception:
                 failed(value, key)
                 raise
+
+    @app.post('/api/demo/operator/confirm')
+    async def operator_confirm(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('proposal_id', 'reviewed', 'expected_context_version', 'idempotency_key'))
+        if data['reviewed'] is not True:
+            raise SessionError('review_required', 'Review the exact proposal before applying it.', 422)
+        if not isinstance(data['proposal_id'], str) or not data['proposal_id']:
+            raise SessionError('invalid_proposal', 'A proposal ID is required.', 422)
+        if not isinstance(data['idempotency_key'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', data['idempotency_key']):
+            raise SessionError('invalid_idempotency', 'A short alphanumeric retry key is required.', 422)
+        with value.lock:
+            previous = value.idempotency.get(data['idempotency_key'], {}).get('result')
+            is_research = (value.pending_proposal is not None and value.pending_proposal['kind'] == 'research'
+                           and value.pending_proposal['proposal_id'] == data['proposal_id']
+                           or data['proposal_id'] in value.research_records
+                           or isinstance(previous, dict) and previous.get('kind') == 'research')
+        if is_research:
+            return await confirm_research(value, data)
+        return apply_pending_proposal(value, data['proposal_id'], data['expected_context_version'],
+                                      data['idempotency_key'])
 
     async def voice_call(request, operation):
         nonlocal voice_process_calls

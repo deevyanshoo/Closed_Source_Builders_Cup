@@ -15,6 +15,37 @@ from pathlib import Path
 import sys
 import time
 
+import pytest
+
+
+_DENIED_MODULES = ("procure.service_app", "procure.api", "procure.service_cache",
+                   "google.genai", "google.generativeai")
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_state(monkeypatch):
+    """Keep the dedicated service's process state local to each test."""
+    from procure import db, settings
+
+    environment = dict(os.environ)
+    modules = dict(sys.modules)
+    strict = db._OFFERS_ONLY_STRICT
+    db.close()
+    settings.reset_caches()
+    try:
+        yield
+    finally:
+        monkeypatch.undo()
+        db._OFFERS_ONLY_STRICT = strict
+        db.close()
+        os.environ.clear()
+        os.environ.update(environment)
+        for name in tuple(sys.modules):
+            if name not in modules:
+                del sys.modules[name]
+        sys.modules.update(modules)
+        settings.reset_caches()
+
 
 def _paths(tmp_path: Path):
     data = tmp_path / "data"
@@ -164,8 +195,10 @@ def test_offers_only_fresh_import_denies_normal_service(tmp_path, monkeypatch):
     from procure import settings
 
     data, config, db_path, key_file, _ = _paths(tmp_path)
-    denied = ("procure.service_app", "procure.api", "procure.service_cache",
-              "google.genai", "google.generativeai")
+    denied = _DENIED_MODULES
+    for name in tuple(sys.modules):
+        if any(name == root or name.startswith(root + ".") for root in denied):
+            monkeypatch.delitem(sys.modules, name)
     assert all(name not in sys.modules for name in denied)
 
     class DenyNormal(importlib.abc.MetaPathFinder):

@@ -76,3 +76,37 @@ def test_reset_clears_carbon_record():
     value.carbon_assessment = assessment()
     store.invalidate(value)
     assert value.carbon_assessment is None
+
+
+def test_pending_carbon_restores_only_in_its_original_company_and_session():
+    backend = MemorySessionPersistence()
+    store = SessionStore(clock=lambda: NOW, persistence_backend=backend)
+    value = store.create()
+    value.pending_carbon = {'kind': 'material_selection', 'session_id': value.session_id, 'company_id': value.company_id,
+        'context_version': value.context_version, 'plan_id': None,
+        'offer_versions': {}, 'expires_at': '2026-10-16T00:10:00+00:00',
+        'material_ids': ['copper'], 'targets': [], 'legs_by_offer': {}, 'mass_by_offer': {}}
+    store.save(value)
+    restored = SessionStore(clock=lambda: NOW, persistence_backend=backend).get(value.session_id)
+    assert restored.pending_carbon == value.pending_carbon
+    restored.select_company('terrapack')
+    assert restored.pending_carbon is None
+
+
+@pytest.mark.parametrize('change', [
+    lambda row: row.update(expires_at='2099-01-01T00:00:00+00:00'),
+    lambda row: row.update(expires_at='2026-10-16T00:10:00+05:30'),
+    lambda row: row.update(plan_id='foreign-plan'),
+    lambda row: row.update(legs_by_offer={'foreign': [{'mode': 'road_hgv', 'distance_km': '10'}]}),
+    lambda row: row.update(material_ids=['foreign-material']),
+])
+def test_malformed_pending_carbon_fails_closed(change):
+    store = SessionStore(clock=lambda: NOW, persistence_backend=MemorySessionPersistence())
+    value = store.create()
+    value.pending_carbon = {'kind': 'material_selection', 'session_id': value.session_id,
+        'company_id': value.company_id, 'context_version': value.context_version,
+        'plan_id': None, 'offer_versions': {}, 'expires_at': '2026-10-16T00:10:00+00:00',
+        'material_ids': ['copper'], 'targets': [], 'legs_by_offer': {}, 'mass_by_offer': {}}
+    change(value.pending_carbon)
+    with pytest.raises(StorageInvalid):
+        store._snapshot(value)

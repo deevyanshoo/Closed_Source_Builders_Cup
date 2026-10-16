@@ -449,7 +449,8 @@ def test_source_shape_style_only_xml_indentation_is_not_an_observation():
     def edit(name,raw):
         if name=='xl/worksheets/sheet2.xml':
             import re
-            raw,count=re.subn(br'<c r="B1362"[^>]*/>',lambda m:m[0][:-2]+b'>\n  </c>',raw)
+            raw,count=re.subn(br'(<c r="B1362"[^>]*?)(?:/>|></c>)',
+                              lambda m:m[1]+b'>\n  </c>',raw)
             assert count==1
         return raw
     snap=build(shape_xml(shape_wb(),edit),generated_bis())

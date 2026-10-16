@@ -160,3 +160,9 @@
   .demo-assistant-panel .demo-voice-context-heading { margin-bottom:8px; }
 }
 @media(prefers-reduced-motion:reduce) { .demo-assistant-panel * { scroll-behavior:auto!important; transition:none!important; } }
+/* One composer border and equal action targets across narrow docks. */
+.demo-operator-dock .demo-assistant-panel .demo-assistant-composer .demo-composer-box{grid-template-columns:minmax(0,1fr) 44px 58px;align-items:center;gap:6px;min-height:60px}
+.demo-operator-dock .demo-assistant-panel .demo-assistant-composer .demo-composer-box textarea{appearance:none;box-shadow:none!important;outline:none;border:0!important;border-radius:0!important;min-height:44px;padding:10px 6px;background:transparent!important}
+.demo-operator-dock .demo-assistant-panel .demo-assistant-composer .demo-composer-box:focus-within{outline:3px solid #2159d6;outline-offset:2px}
+.demo-operator-dock .demo-assistant-panel .demo-assistant-composer .demo-composer-box :is(.demo-composer-mic,.demo-button){align-self:center;min-height:44px;height:44px;margin:0}
+@media(max-width:390px){.demo-operator-dock .demo-assistant-panel .demo-assistant-composer .demo-composer-box{grid-template-columns:minmax(0,1fr) 44px 58px}}

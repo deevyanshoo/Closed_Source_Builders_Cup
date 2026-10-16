@@ -22,13 +22,15 @@ import csv
 import datetime as dt
 import io
 import json
+import os
 import re
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 from fpdf import FPDF
-from openpyxl import Workbook
+from openpyxl import LXML, Workbook
 from openpyxl.styles import Font
 
 HERE = Path(__file__).resolve().parent
@@ -1085,6 +1087,17 @@ QUOTES = [
 
 def generate(out_dir: Path = HERE) -> dict:
     out_dir = Path(out_dir)
+    if LXML:
+        # openpyxl selects its XML serializer at import time. Generate in a fresh
+        # process so optional lxml cannot change the committed XLSX bytes, even
+        # when a caller has already imported openpyxl with lxml enabled.
+        subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), str(out_dir.resolve())],
+            env={**os.environ, "OPENPYXL_LXML": "False"},
+            stdout=subprocess.DEVNULL,
+            check=True,
+        )
+        return json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
     for split in ("train", "heldout"):  # drop files from an earlier split so no quote exists twice
         for stale in (out_dir / split).glob("SYN-Q*"):
             stale.unlink()

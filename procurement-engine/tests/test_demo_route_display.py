@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from procure.demo.company import get_company, list_companies
+from procure.demo import route_display
 from procure.demo.route_display import build_route_display
 
 
@@ -127,6 +128,9 @@ def test_unknown_mode_is_unavailable_not_illustrative():
     view = build_route_display(get_company('meridian-pharma'), 'meridian-pharma-route-1', 'api')
     assert view['status'] == 'unavailable'
     assert not any(s['geometry'] for s in view['segments'])
+    assert view['itinerary']['mode'] == 'unknown'
+    assert any(s['kind'] == 'transport' and 'Frankfurt' in s['label'] for s in view['segments'])
+    assert not any(s['kind'] in {'road', 'sea'} for s in view['segments'])
     assert 'transport mode' in view['limitations'][0].lower()
 
 
@@ -148,3 +152,82 @@ def test_pacific_and_indian_corridors_include_coastal_approaches():
         labels = [p['label'] for p in record['points']]
         assert all(label in labels for label in expected), company_id
         assert len(sea['geometry']) >= 5, company_id
+
+
+def test_every_declared_route_has_an_owned_readable_itinerary():
+    for company in list_companies():
+        for route in company['routes']:
+            for material_id in route['materials']:
+                view = build_route_display(company, route['route_id'], material_id)
+                itinerary = view['itinerary']
+                assert itinerary['origin'] == route['origin']
+                assert itinerary['via'] == route['via']
+                assert itinerary['destination'] == route['destination']
+                assert itinerary['mode'] in {'sea', 'land', 'unknown'}
+                assert itinerary['display'] in {'map', 'schematic'}
+                assert view['segments']
+                assert view['coverage']['declared_routes'] == len(company['routes'])
+                assert view['coverage']['declared_route_material_pairs'] == sum(
+                    len(owned['materials']) for owned in company['routes'])
+
+
+def test_uncurated_route_explains_missing_mode_without_inventing_road_or_sea():
+    company = get_company('solara-cables')
+    view = build_route_display(company, 'solara-cables-route-3', 'aluminium')
+    assert view['itinerary'] == {
+        'origin': 'Dubai, UAE', 'via': [], 'destination': 'Pune, India',
+        'mode': 'unknown', 'display': 'schematic'}
+    assert view['status'] == 'unavailable'
+    assert not any(segment['geometry'] for segment in view['segments'])
+    assert not any(segment['kind'] in {'sea', 'road'} for segment in view['segments'])
+    assert any('mode' in note.lower() for note in view['limitations'])
+    assert {key: value for key, value in view['coverage'].items() if key != 'options'} == {
+        'declared_routes': 9, 'declared_route_material_pairs': 9,
+        'mapped_route_material_pairs': 2, 'schematic_route_material_pairs': 7}
+
+
+def test_declared_maritime_via_has_schematic_but_no_fabricated_geometry():
+    view = build_route_display(get_company('loomworks'), 'loomworks-route-2', 'dyes', 1)
+    assert view['itinerary']['mode'] == 'unknown'
+    assert view['itinerary']['via'] == ['Singapore']
+    assert view['itinerary']['display'] == 'schematic'
+    assert all(segment['geometry'] is None for segment in view['segments'])
+    assert any('Singapore' in segment['label'] for segment in view['segments'])
+
+
+def test_identical_owned_corridor_can_reuse_approximate_geometry_across_materials(monkeypatch):
+    company = get_company('solara-cables')
+    same_corridor = {**company['routes'][0], 'route_id': 'solara-cables-polymer-corridor',
+                     'materials': ['polymer']}
+    company['routes'].append(same_corridor)
+    monkeypatch.setattr(route_display, 'get_company', lambda company_id: company)
+    view = build_route_display(company, same_corridor['route_id'], 'polymer')
+    assert view['itinerary']['display'] == 'map'
+    assert view['itinerary']['mode'] == 'sea'
+    sea = next(segment for segment in view['segments'] if segment['kind'] == 'sea')
+    assert sea['status'] == 'approximate' and len(sea['geometry']) > 2
+    assert 'reused' in sea['source'].lower()
+    assert view['coverage']['mapped_route_material_pairs'] == 3
+
+
+def test_land_corridor_does_not_claim_map_when_other_buyer_is_selected():
+    view = build_route_display(get_company('loomworks'), 'loomworks-route-1', 'cotton', 1)
+    assert view['itinerary']['display'] == 'schematic'
+    assert view['status'] == 'unavailable'
+    assert all(segment['geometry'] is None for segment in view['segments'])
+
+
+def test_coverage_options_describe_every_owned_route_without_individual_requests():
+    company = get_company('solara-cables')
+    view = build_route_display(company, 'solara-cables-route-1', 'copper')
+    options = view['coverage']['options']
+    assert len(options) == 9
+    assert {'route_id': 'solara-cables-route-1', 'material_id': 'copper',
+            'mode': 'sea', 'display': 'map'} in options
+    assert {'route_id': 'solara-cables-route-2', 'material_id': 'copper',
+            'mode': 'sea', 'display': 'map'} in options
+    assert {'route_id': 'solara-cables-route-3', 'material_id': 'aluminium',
+            'mode': 'unknown', 'display': 'schematic'} in options
+    assert {(option['route_id'], option['material_id']) for option in options} == {
+        (route['route_id'], material_id)
+        for route in company['routes'] for material_id in route['materials']}

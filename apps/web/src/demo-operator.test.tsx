@@ -455,8 +455,9 @@ describe('operator response boundary', () => {
       riskSummary={{ high: 1, medium: 0, low: 0, checkedAt: '2026-10-15' }} onSession={() => {}} onUnknown={() => {}} />);
     expect(html.indexOf('>ZOORQ operator</h2>')).toBeLessThan(html.indexOf('Current company risks:'));
     expect(html.indexOf('Current company risks:')).toBeLessThan(html.indexOf('Your message'));
-    expect(html).toContain('The agent provider is unavailable');
+    expect(html).toContain('AI model temporarily unavailable; workspace calculations and saved data still work.');
     expect(html).toContain('Your message');
+    expect(html).toMatch(/id="demo-operator-message"[^>]*><\/textarea>/);
     expect(html).toMatch(/aria-label="Open voice conversation"[^>]* disabled=""/);
   });
   it('keeps attention compact after the active proposal while review controls stay outside closed traces', () => {

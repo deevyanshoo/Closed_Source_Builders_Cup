@@ -33,7 +33,7 @@ _PARAMETERS = {'type': 'object', 'additionalProperties': False, 'properties': {
     'values': {'type': 'object', 'additionalProperties': False, 'properties': {
         key: {'type': 'string', 'maxLength': 48} for key in
         ('quantity', 'current_stock', 'budget', 'additional_cost_per_unit', 'need_by')}},
-    'view': {'type': 'string', 'enum': ['company', 'news', 'procurement', 'outbox']},
+    'view': {'type': 'string', 'enum': ['company', 'overview', 'inventory', 'routes', 'shipments', 'news', 'procurement', 'outbox']},
     'subject': {'type': 'string', 'maxLength': 120},
     'body': {'type': 'string', 'maxLength': 1000},
     'recipient_label': {'type': 'string', 'maxLength': 160},
@@ -818,7 +818,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                         'compare|load_quotes|simulate_email|navigate|review_quotes. '
                         'For fill_form parameters MUST be exactly {values: {quantity/current_stock/budget/'
                         'additional_cost_per_unit/need_by: explicit string values}}. For navigate '
-                        'parameters MUST be exactly {view: company|news|procurement|outbox}. For '
+                        'parameters MUST be exactly {view: company|overview|inventory|routes|shipments|news|procurement|outbox}. For '
                         'simulate_email parameters MUST contain exactly subject, body and recipient_label; '
                         'copy explicitly supplied subject/body, otherwise draft brief text without invented '
                         'numbers. recipient_label MUST be an exact current supplier name including the '
@@ -1084,7 +1084,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
             raise OperatorValidationError('Specialists disagreed on utility.')
         if intent == 'navigate':
             view = parameters.get('view')
-            if (set(parameters) != {'view'} or view not in {'company', 'news', 'procurement', 'outbox'}
+            if (set(parameters) != {'view'} or view not in {'company', 'overview', 'inventory', 'routes', 'shipments', 'news', 'procurement', 'outbox'}
                     or not re.search(r'\b(?:navigate|go\s+to|open|show)\b', message, re.IGNORECASE)):
                 raise OperatorValidationError('Invalid navigation request.')
             utility = {'kind': 'navigate', 'parameters': {'view': view}}

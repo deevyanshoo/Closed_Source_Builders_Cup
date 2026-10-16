@@ -12,7 +12,7 @@ from procure.demo.company import get_company
 
 
 _REGISTRY = Path(__file__).resolve().parents[3] / 'config' / 'route_display_v1.json'
-_KINDS = {'vendor', 'road', 'origin_port', 'sea', 'destination_port', 'buyer'}
+_KINDS = {'vendor', 'road', 'origin_port', 'sea', 'destination_port', 'buyer', 'transport'}
 
 
 def _segment(segment_id, kind, status, label, geometry=None, source='company profile', precision='unknown'):
@@ -26,6 +26,35 @@ def _point(node):
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)) or not -90 <= lat <= 90 or not -180 <= lng <= 180:
         raise ValueError('invalid display coordinate')
     return {'lat': lat, 'lng': lng}
+
+
+def _display_record(registry, company_id, route, material_id):
+    """Use a curated line only for its owned route or an identical declared corridor."""
+    direct = next((item for item in registry['routes']
+                   if item['company_id'] == company_id and item['route_id'] == route['route_id']
+                   and item['material_id'] == material_id), None)
+    if direct:
+        if any(direct[key] != route[key] for key in ('origin', 'destination', 'via')):
+            raise ValueError('stale route display registry')
+        return direct
+    identical = [item for item in registry['routes'] if item['company_id'] == company_id
+                 and all(item[key] == route[key] for key in ('origin', 'destination', 'via'))
+                 and item['mode'] in {'sea', 'land'}]
+    return identical[0] if len({item['mode'] for item in identical}) == 1 and identical else None
+
+
+def _declared_mode(route):
+    via = ' '.join(route['via']).lower()
+    return 'sea' if any(word in via for word in (' ocean', ' sea', ' gulf', ' strait', ' canal')) else 'unknown'
+
+
+def _mapped(record):
+    if not record:
+        return False
+    nodes = record['points']
+    return ((record['mode'] == 'sea' and bool(nodes) and nodes[0]['kind'] == 'origin_port'
+             and any(node['kind'] == 'destination_port' for node in nodes))
+            or (record['mode'] == 'land' and len(nodes) >= 2))
 
 
 def build_route_display(company, route_id, material_id, buyer_location_index=0):
@@ -58,10 +87,25 @@ def build_route_display(company, route_id, material_id, buyer_location_index=0):
     registry = json.loads(_REGISTRY.read_text(encoding='utf-8'))
     if registry.get('schema') != 1:
         raise ValueError('unsupported route display registry')
-    record = next((item for item in registry['routes'] if item['company_id'] == company['company_id']
-                   and item['route_id'] == route_id and item['material_id'] == material_id), None)
-    if record and any(record[key] != route[key] for key in ('origin', 'destination', 'via')):
-        raise ValueError('stale route display registry')
+    record = _display_record(registry, company['company_id'], route, material_id)
+    pairs = [(owned, owned_material) for owned in canonical['routes'] for owned_material in owned['materials']]
+    options = []
+    for owned, owned_material in pairs:
+        owned_record = _display_record(registry, company['company_id'], owned, owned_material)
+        options.append({'route_id': owned['route_id'], 'material_id': owned_material,
+                        'mode': (owned_record['mode'] if owned_record and owned_record['mode'] in {'sea', 'land'}
+                                 else _declared_mode(owned)),
+                        'display': 'map' if _mapped(owned_record) else 'schematic'})
+    mapped_pairs = sum(option['display'] == 'map' for option in options)
+    coverage = {'declared_routes': len(canonical['routes']),
+                'declared_route_material_pairs': len(pairs),
+                'mapped_route_material_pairs': mapped_pairs,
+                'schematic_route_material_pairs': len(pairs) - mapped_pairs,
+                'options': options}
+    mode = record['mode'] if record and record['mode'] in {'sea', 'land'} else _declared_mode(route)
+    selected_has_map = _mapped(record) and (record['mode'] != 'land' or destination_matches)
+    itinerary = {'origin': route['origin'], 'via': route['via'], 'destination': route['destination'],
+                 'mode': mode, 'display': 'map' if selected_has_map else 'schematic'}
 
     segments = [_segment('vendor', 'vendor', 'unavailable', 'Vendor or facility not located',
                          source='profile does not bind route to a supplier or facility', precision='no coordinate')]
@@ -71,6 +115,9 @@ def build_route_display(company, route_id, material_id, buyer_location_index=0):
     if record:
         nodes = record['points']
         mode = record['mode']
+        geometry_source = ('company profile via; hand-curated illustrative waypoints'
+                           if record['route_id'] == route_id else
+                           f'company profile via; reused approximate display corridor from {record["route_id"]}; no supplier or shipment binding')
         if mode == 'sea' and nodes[0]['kind'] == 'origin_port' and any(node['kind'] == 'destination_port' for node in nodes):
             dest_index = next(i for i, node in enumerate(nodes) if node['kind'] == 'destination_port')
             origin, port = nodes[0], nodes[dest_index]
@@ -82,7 +129,7 @@ def build_route_display(company, route_id, material_id, buyer_location_index=0):
             via = ', '.join(route['via']) if route['via'] else 'declared corridor'
             segments.append(_segment('sea', 'sea', 'approximate', f'Ship corridor via {via}',
                                      [_point(node) for node in sea_nodes],
-                                     'company profile via; hand-curated illustrative waypoints', 'broad corridor, not maritime routing'))
+                                     geometry_source, 'broad corridor, not maritime routing'))
             segments.append(_segment('destination-port', 'destination_port', 'approximate', port['label'],
                                      [_point(port)], port['source'], port['precision']))
             if len(nodes) > dest_index + 1 and destination_matches:
@@ -99,15 +146,19 @@ def build_route_display(company, route_id, material_id, buyer_location_index=0):
             segments.append(_segment('road', 'road', 'approximate',
                                      'Truck corridor via ' + (', '.join(route['via']) if route['via'] else 'profile origin and destination'),
                                      [_point(node) for node in nodes],
-                                     'company profile via; hand-curated illustrative city/border points', 'broad corridor, not road routing'))
+                                     geometry_source + '; illustrative city/border points', 'broad corridor, not road routing'))
         else:
-            segments.append(_segment('road', 'road', 'unavailable', 'Transport mode or matching buyer corridor unavailable',
-                                     source='profile does not declare a usable transport mode', precision='no route geometry'))
-            limitations.append('Transport mode or corridor unavailable for this profile route.')
+            stops = ' → '.join([route['origin'], *route['via'], route['destination']])
+            segments.append(_segment('transport', 'transport', 'unavailable', f'Declared itinerary: {stops}',
+                                     source='company profile origin, via, and destination', precision='no route geometry'))
+            limitations.append('Transport mode is not declared or display coordinates are unavailable for this profile route.')
     else:
-        segments.append(_segment('road', 'road', 'unavailable', 'No curated display corridor for this profile route',
-                                 source='route_display_v1 registry has no matching entry', precision='no route geometry'))
-        limitations.append('This profile route has no curated display geometry.')
+        stops = ' → '.join([route['origin'], *route['via'], route['destination']])
+        segments.append(_segment('transport', 'transport', 'unavailable',
+                                 f'Declared itinerary: {stops}',
+                                 source='company profile origin, via, and destination', precision='no route geometry'))
+        limitations.append('Transport mode is not declared for this profile route.' if mode == 'unknown'
+                           else 'Transport mode is indicated by the declared via, but no display coordinates are available.')
 
     if not limitations:
         limitations.append('Supplier, offer, and facility coordinates are unavailable; this is an illustrative profile route.')
@@ -119,6 +170,7 @@ def build_route_display(company, route_id, material_id, buyer_location_index=0):
     return {'schema': 1, 'company_id': company['company_id'], 'route_id': route_id,
             'material_id': material_id, 'buyer_location_index': buyer_location_index,
             'supplier_id': None, 'offer_id': None,
+            'itinerary': itinerary, 'coverage': coverage,
             'status': ('partial' if any(s['geometry'] and s['kind'] in {'road', 'sea'} for s in segments)
                        else 'unavailable'), 'segments': segments,
             'limitations': limitations}

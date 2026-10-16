@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import json
 import os
+import re
 import secrets
 import threading
 from typing import Callable
@@ -46,6 +48,7 @@ class Session:
     news: dict | None = None
     risk_report: dict | None = None
     carbon_assessment: dict | None = None
+    pending_carbon: dict | None = None
     watch_items: list = field(default_factory=list)
     pending_proposal: dict | None = None
     operator_turns: int = 0
@@ -94,6 +97,7 @@ class Session:
         self.simulated_outbox = restored.get('simulated_outbox', [])
         self.drafts = restored.get('drafts', [])
         self.carbon_assessment = restored.get('carbon_assessment')
+        self.pending_carbon = None
         self.pending_proposal = None
         # A news wrapper names a context version; a revisit always receives a new one.
         self.news = None
@@ -107,6 +111,7 @@ class SessionStore:
                      'selected_material_id', 'simulated_outbox', 'recovery', 'rfq', 'news',
                      'risk_report', 'watch_items', 'operator_turns', 'operator_generation',
                      'carbon_assessment',
+                     'pending_carbon',
                      'voice_calls', 'live_voice_sessions', 'live_voice_starts_by_company',
                      'company_id', 'context_version', 'workspaces', 'live_calls',
                      'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts',
@@ -281,6 +286,80 @@ class SessionStore:
                 raise StorageInvalid('Carbon assessment belongs to another context')
 
         check(session.carbon_assessment, session.company_id)
+        pending = session.pending_carbon
+        if pending is not None:
+            from .company import get_company
+            from .quote_service import company_for_offer
+            decimal = re.compile(r'^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,6})?$')
+            valid_modes = {'road_hgv', 'rail_freight', 'sea_container', 'sea_bulk', 'air_freight'}
+            try:
+                if (not isinstance(pending, dict) or set(pending) != {
+                        'kind', 'session_id', 'company_id', 'context_version', 'expires_at',
+                        'plan_id', 'offer_versions', 'material_ids', 'targets',
+                        'legs_by_offer', 'mass_by_offer'} or
+                        pending['kind'] not in {'material_selection', 'freight'} or
+                        pending['session_id'] != session.session_id or
+                        pending['company_id'] != session.company_id or
+                        type(pending['context_version']) is not int or
+                        pending['context_version'] != session.context_version or
+                        not isinstance(pending['expires_at'], str) or
+                        len(json.dumps(pending)) > 5000):
+                    raise ValueError
+                expiry = datetime.fromisoformat(pending['expires_at'])
+                if (expiry.tzinfo is None or expiry.utcoffset() != timedelta(0) or
+                        expiry > session.expires_at):
+                    raise ValueError
+                versions = pending['offer_versions']
+                if (not isinstance(versions, dict) or len(versions) > 30 or
+                        any(not isinstance(key, str) or not 1 <= len(key) <= 128 or
+                            type(version) is not int or version < 1
+                            for key, version in versions.items())):
+                    raise ValueError
+                if (not isinstance(pending['material_ids'], list) or
+                        not isinstance(pending['targets'], list) or
+                        not isinstance(pending['legs_by_offer'], dict) or
+                        not isinstance(pending['mass_by_offer'], dict)):
+                    raise ValueError
+                if pending['kind'] == 'material_selection':
+                    catalogue = {row['material_id'] for row in get_company(session.company_id)['materials']}
+                    owned = {offer_id: offer['version'] for offer_id, offer in session.offers.items()
+                             if offer.get('status') == 'saved' and
+                             company_for_offer(offer) == session.company_id}
+                    if (pending['plan_id'] is not None or pending['targets'] or
+                            pending['legs_by_offer'] or pending['mass_by_offer'] or
+                            not pending['material_ids'] or
+                            len(set(pending['material_ids'])) != len(pending['material_ids']) or
+                            not set(pending['material_ids']) <= catalogue or versions != owned):
+                        raise ValueError
+                else:
+                    plan = session.recovery['scenario'] if session.recovery else session.last_plan
+                    ids = {row['offer_id'] for row in plan['alternatives']} if isinstance(plan, dict) else set()
+                    targets = pending['targets']
+                    if (not isinstance(pending['plan_id'], str) or not pending['plan_id'] or
+                            not isinstance(plan, dict) or pending['plan_id'] != plan.get('plan_id') or
+                            versions != plan.get('offer_versions') or ids != set(versions) or
+                            pending['material_ids'] or not targets or
+                            len(set(targets)) != len(targets) or not set(targets) <= ids or
+                            not set(pending['legs_by_offer']) <= ids or
+                            not set(pending['mass_by_offer']) <= ids):
+                        raise ValueError
+                    for legs in pending['legs_by_offer'].values():
+                        if (not isinstance(legs, list) or not 1 <= len(legs) <= 5 or any(
+                                not isinstance(leg, dict) or set(leg) != {'mode', 'distance_km'} or
+                                leg['mode'] not in valid_modes or
+                                not isinstance(leg['distance_km'], str) or
+                                not decimal.fullmatch(leg['distance_km']) for leg in legs)):
+                            raise ValueError
+                    for mass in pending['mass_by_offer'].values():
+                        if (not isinstance(mass, dict) or set(mass) != {'mass_kg', 'basis'} or
+                                not isinstance(mass['mass_kg'], str) or
+                                not decimal.fullmatch(mass['mass_kg']) or
+                                Decimal(mass['mass_kg']) <= 0 or
+                                not isinstance(mass['basis'], str) or
+                                not 1 <= len(mass['basis'].strip()) <= 200):
+                            raise ValueError
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise StorageInvalid('Invalid pending carbon state') from exc
         for company_id, workspace in session.workspaces.items():
             if not isinstance(company_id, str) or not isinstance(workspace, dict):
                 raise StorageInvalid('Invalid company workspace')
@@ -375,6 +454,7 @@ class SessionStore:
             values = {name: state.get(name, {}) if name == 'judge_receipts' else
                       state.get(name, 0) if name == 'judge_attempts' else state.get(name, []) if name == 'drafts' else
                       state.get(name) if name == 'carbon_assessment' else
+                      state.get(name) if name == 'pending_carbon' else
                       state.get(name) if name == 'pending_proposal' else state[name]
                       for name in cls._STATE_FIELDS}
             for name in ('offers', 'idempotency', 'live_voice_starts_by_company', 'workspaces',
@@ -491,6 +571,7 @@ class SessionStore:
             session.news = None
             session.risk_report = None
             session.carbon_assessment = None
+            session.pending_carbon = None
             session.watch_items.clear()
             session.pending_proposal = None
             session.operator_turns = 0

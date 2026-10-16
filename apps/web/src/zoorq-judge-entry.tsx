@@ -39,13 +39,13 @@ export function ZoorqJudgeEntry({ company, session, visit, prepared, companyCoun
       {!continuing && <><p>Supply signals matter when they reach a material, route and sourcing decision. Trace the evidence, then compare a possible response.</p>
       <div className="zoorq-judge-entry-status" role="status">{ready ? 'Prepared scenario · ready to explore' : prepared.status === 'loading' ? 'Preparing the scenario…' : 'Prepared scenario unavailable; you can still explore this company.'}</div></>}
     </div>
-    {!continuing && ready && prepared.facts.length > 0 && <dl className="zoorq-judge-entry-facts" aria-label="Scenario facts">
-      {prepared.facts.map(fact => {
+    {!continuing && <div className="zoorq-judge-entry-facts-shell">
+      {ready && prepared.facts.length > 0 ? <dl className="zoorq-judge-entry-facts" aria-label="Scenario facts">{prepared.facts.map(fact => {
         const display = formatJudgeFact(fact.value);
         const parts = /^(.*) (days|[A-Z]{3})$/.exec(display);
-        return <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd aria-label={display}>{parts ? <><span className="zoorq-judge-entry-fact-value">{parts[1]}</span> <span className="zoorq-judge-entry-fact-unit">{parts[2]}</span></> : display}</dd><small title={fact.basis}><span aria-hidden="true">{compactFactBasis(fact.label, fact.basis)}</span><span className="sr-only">Source basis: {fact.basis}</span></small></div>;
-      })}
-    </dl>}
+        return <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd>{parts ? <><span className="zoorq-judge-entry-fact-value">{parts[1]}</span> <span className="zoorq-judge-entry-fact-unit">{parts[2]}</span></> : display}<small title={fact.basis}><span aria-hidden="true">{compactFactBasis(fact.label, fact.basis)}</span><span className="sr-only">Source basis: {fact.basis}</span></small></dd></div>;
+      })}</dl> : prepared.status === 'loading' ? <div className="zoorq-judge-entry-facts-skeleton" aria-hidden="true">{[0,1,2].map(index => <div key={index}><span /><strong /><span /></div>)}</div> : <p className="zoorq-judge-entry-facts-unavailable">Scenario figures are unavailable for this profile.</p>}
+    </div>}
     <nav className="zoorq-judge-entry-actions" aria-label="Explore the scenario">
       <button type="button" onClick={() => onNavigate('route')}>Route <span aria-hidden="true">↗</span></button>
       <button type="button" onClick={() => onNavigate('news')}>News <span aria-hidden="true">↗</span></button>

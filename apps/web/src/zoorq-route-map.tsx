@@ -3,7 +3,7 @@ import './zoorq-route-map.css';
 
 export type RoutePoint = { lat: number; lng: number };
 export type RouteSegment = {
-  id: string; kind: 'vendor' | 'road' | 'origin_port' | 'sea' | 'destination_port' | 'buyer';
+  id: string; kind: 'vendor' | 'road' | 'origin_port' | 'sea' | 'destination_port' | 'buyer' | 'transport';
   status: 'supported' | 'approximate' | 'unavailable'; label: string;
   geometry: RoutePoint[] | null; source: string; precision: string;
 };
@@ -11,6 +11,8 @@ export type RouteDisplayView = {
   schema: 1; company_id: string; route_id: string; material_id: string;
   buyer_location_index: number; supplier_id: string | null; offer_id: string | null;
   status: 'supported' | 'partial' | 'unavailable'; segments: RouteSegment[]; limitations: string[];
+  itinerary?: { origin: string; via: string[]; destination: string; mode: 'sea' | 'land' | 'unknown'; display: 'schematic' | 'map' };
+  coverage?: { declared_routes: number; declared_route_material_pairs: number; mapped_route_material_pairs: number; schematic_route_material_pairs: number; options?: {route_id:string;material_id:string;mode:'sea'|'land'|'unknown';display:'map'|'schematic'}[] };
 };
 export type RoutePreview = { kind: 'disruption' | 'recovery'; label: string };
 export type ZoorqRouteMapProps = {
@@ -333,15 +335,19 @@ export function ZoorqRouteMap({ view, apiKey = null, reducedMotion, preview = nu
   }, [playing, speed, isReduced, hasMotion, view]);
   useEffect(() => { if (isReduced) dispatchPlayback({ type: 'pause' }); }, [isReduced]);
 
+  const first = view.itinerary?.origin ?? view.segments.find(segment=>segment.kind==='origin_port')?.label ?? 'Declared origin';
+  const last = view.itinerary?.destination ?? view.segments.find(segment=>segment.kind==='buyer')?.label ?? 'Declared destination';
+  const declaredStops = view.itinerary ? [view.itinerary.origin,...view.itinerary.via,view.itinerary.destination] :
+    [first,...view.segments.filter(segment=>segment.kind==='transport').map(segment=>segment.label),last];
   return <section className="zoorq-route-map" aria-label="Illustrative route itinerary">
     <header className="zoorq-route-map-head">
-      <div><span className="zoorq-route-map-kicker">Route simulation</span><h2>Profile itinerary</h2><p>Approximate corridor for {view.material_id.replaceAll('-', ' ')}. No supplier or shipment route is selected.</p></div>
-      <span className="zoorq-route-map-status">{view.status === 'unavailable' ? 'No mapped corridor' : view.status === 'partial' ? 'Partial corridor' : 'Illustrative'}</span>
+      <div><span className="zoorq-route-map-kicker">Route simulation · {view.itinerary?.mode === 'sea' ? 'Sea' : view.itinerary?.mode === 'land' ? 'Land' : 'Mode unconfirmed'}</span><h3>{first} → {last}</h3></div>
+      <span className="zoorq-route-map-status">{view.status === 'unavailable' ? 'Schematic · Map unavailable' : view.status === 'partial' ? 'Approximate · partial' : 'Approximate'}</span>
     </header>
-    {primaryLimitation && <p className="zoorq-route-map-note" role="status">{primaryLimitation}</p>}
+    {primaryLimitation?.toLowerCase().includes('selected buyer') && <p className="zoorq-route-map-note" role="status">{primaryLimitation}</p>}
     {preview && <div className={`zoorq-route-map-preview is-${preview.kind}`} role="status"><strong>{preview.kind === 'disruption' ? 'Disruption preview' : 'Recovery preview'}</strong><span>{preview.label}</span>{onAsk && <button type="button" onClick={() => onAsk(`Explain ${preview.label} for ${view.company_id} route ${view.route_id}`)}>Ask operator</button>}</div>}
     <div className="zoorq-route-map-layout">
-      <div className="zoorq-route-map-stage">
+      {hasMotion ? <div className="zoorq-route-map-stage">
         <div className="zoorq-route-map-canvas" ref={hostRef} aria-hidden="true" />
         {mapState !== 'ready' && <RouteMapFallback state={mapState} retries={retries} onRetry={() => setRetryState({ contextId, count: retries + 1 })} />}
         <div className="zoorq-route-map-controls" aria-label="Route simulation controls">
@@ -350,8 +356,8 @@ export function ZoorqRouteMap({ view, apiKey = null, reducedMotion, preview = nu
           <label className="zoorq-route-map-scrub"><span className="zoorq-visually-hidden">Simulation progress</span><input type="range" min="0" max="100" value={Math.round(progress * 100)} onChange={event => dispatchPlayback({ type: 'scrub', progress: Number(event.target.value) / 100 })} aria-label="Simulation progress" disabled={!hasMotion} /></label>
         </div>
         {isReduced && <p className="zoorq-route-map-motion">Animation paused for reduced motion; use the progress slider to inspect the corridor.</p>}
-      </div>
-      <div className="zoorq-route-map-details"><h3>Along the route</h3>{activeSegment && <p className="zoorq-route-map-current" aria-live="polite">Current leg: {activeSegment.label}</p>}<ol>{view.segments.map(segment => <li key={segment.id} data-kind={segment.kind} aria-current={activeSegment?.id === segment.id ? 'step' : undefined}><span className="zoorq-route-map-dot" aria-hidden="true"/><div><strong>{segment.label}</strong><small>{segment.precision} · {segment.source}</small></div></li>)}</ol></div>
+      </div> : <div className="zoorq-route-schematic" role="group" aria-label="Declared itinerary schematic"><strong>Declared itinerary</strong><ol aria-label="Declared stops">{declaredStops.map((stop,index)=><li key={`${stop}:${index}`}><span className="zoorq-route-schematic-node" aria-hidden="true"/><div><small>{index===0?'Origin':index===declaredStops.length-1?'Destination':'Declared via'}</small><b>{stop}</b></div></li>)}</ol><p>No mapped path or moving marker is shown. This sequence reflects declared profile stops, without a verified transport path.</p></div>}
+      <div className="zoorq-route-map-details"><h3>Along the route</h3>{activeSegment && <p className="zoorq-route-map-current" aria-live="polite">Current leg: {activeSegment.label}</p>}<ol>{view.segments.map(segment => <li key={segment.id} data-kind={segment.kind} aria-current={activeSegment?.id === segment.id ? 'step' : undefined}><span className="zoorq-route-map-dot" aria-hidden="true"/><div><strong>{segment.label}</strong><span className="zoorq-route-leg-status">{segment.status === 'unavailable' ? 'Unavailable' : segment.status === 'approximate' ? 'Approximate' : 'Supported'}</span></div></li>)}</ol><details className="zoorq-route-source"><summary>Source &amp; precision</summary><ul>{view.segments.map(segment=><li key={segment.id}><strong>{segment.label}</strong><span>{segment.precision} · {segment.source}</span></li>)}</ul>{view.limitations.length>0 && <div><strong>Limitations</strong><ul>{view.limitations.map((note,index)=><li key={index}>{note}</li>)}</ul></div>}</details></div>
     </div>
   </section>;
 }

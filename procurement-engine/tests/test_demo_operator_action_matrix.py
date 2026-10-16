@@ -38,7 +38,8 @@ def test_simulated_email_review_replay_history_and_company_isolation(company_id)
             'idempotency_key': 'email-proposal'})
         assert response.status_code == 200, response.text
         result = response.json()
-        assert result['status'] == 'proposal'
+        assert result['status'] == 'completed'
+        assert result['action_result']['tool'] == 'prepare_simulated_email'
         assert result['proposal']['kind'] == 'simulate_email'
         assert len(provider.prompts) == 3
         draft = client.get('/api/demo/session').json()['drafts'][-1]

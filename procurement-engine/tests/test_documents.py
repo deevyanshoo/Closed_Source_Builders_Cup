@@ -9,7 +9,10 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -328,5 +331,23 @@ def test_generator_reproduces_committed_fixtures(tmp_path):
     spec.loader.exec_module(module)
     module.generate(tmp_path)
     assert json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8")) == MANIFEST
+    for q in MANIFEST["quotes"]:
+        assert (tmp_path / q["file"]).read_bytes() == (FIXTURES / q["file"]).read_bytes(), q["file"]
+
+
+@pytest.mark.parametrize("use_lxml", [True, False])
+def test_generator_reproduces_committed_fixtures_with_either_xml_serializer(tmp_path, use_lxml):
+    if use_lxml:
+        pytest.importorskip("lxml")
+    env = {**os.environ, "OPENPYXL_LXML": str(use_lxml)}
+    subprocess.run(
+        [sys.executable, "-c",
+         "import openpyxl, runpy, sys; "
+         f"assert openpyxl.LXML is {use_lxml}; "
+         "sys.argv = [sys.argv[1], sys.argv[2]]; runpy.run_path(sys.argv[0], run_name='__main__')",
+         str(FIXTURES / "generate_quotes.py"), str(tmp_path)],
+        env=env, check=True, capture_output=True, text=True,
+    )
+    assert (tmp_path / "manifest.json").read_bytes() == (FIXTURES / "manifest.json").read_bytes()
     for q in MANIFEST["quotes"]:
         assert (tmp_path / q["file"]).read_bytes() == (FIXTURES / q["file"]).read_bytes(), q["file"]

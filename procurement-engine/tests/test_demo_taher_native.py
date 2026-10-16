@@ -26,6 +26,7 @@ class NamedProvider(Provider):
 def voice_tool(client, provider, name, args, call_id):
     session = client.get('/api/demo/session').json()
     provider.next_call = (name, args, call_id)
+    provider.last_frames = []
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
                                   headers={'origin': 'https://demo.test'}) as socket:
         socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
@@ -35,12 +36,16 @@ def voice_tool(client, provider, name, args, call_id):
         socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
         while True:
             event = socket.receive_json()
+            provider.last_frames.append(event['type'])
             assert event['type'] != 'error', event
             if event['type'] == 'tool_result':
                 result = event['result']
                 break
-        while socket.receive_json()['type'] != 'turn_complete':
-            pass
+        while True:
+            event = socket.receive_json()
+            provider.last_frames.append(event['type'])
+            if event['type'] == 'turn_complete':
+                break
         socket.send_json({'type': 'stop'})
     return result, provider.tool_response.response
 
@@ -82,6 +87,75 @@ def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_pro
             'explicit-recovery')
         assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
         assert value.recovery is None
+
+
+def test_native_carbon_calculation_uses_same_saved_result_as_text():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        session = client.get('/api/demo/session').json()
+        plan = plan_for_copper(client, {'Origin': 'https://demo.test',
+                                       'X-CSRF-Token': session['csrf_token']})
+        result, model = voice_tool(client, provider, 'estimate_carbon',
+            {'message': 'Calculate carbon for our current copper purchase'}, 'carbon-native')
+        assert result['status'] == 'completed'
+        assert result['action_result']['tool'] == 'estimate_carbon'
+        assert result['session']['carbon_assessment']['result']['plan_id'] == plan['plan_id']
+        assert model['required_spoken_response'] == result['assistant_text']
+        assert 'session' not in model
+        assert provider.last_frames.index('tool_result') < provider.last_frames.index('audio')
+        assert app.state.sessions.get(session['session_id']).pending_carbon is not None
+
+
+def test_native_routes_read_uses_owned_profile_without_distance():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        result, model = voice_tool(client, provider, 'read_routes',
+            {'message': 'What are our current routes?'}, 'routes-native')
+        assert result['read_only'] is True
+        assert result['workspace']['routes']
+        assert 'distance' in result['assistant_text']
+        assert 'routes' in model['workspace']
+
+
+def test_native_carbon_missing_material_asks_with_real_live_audio():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        result, model = voice_tool(client, provider, 'estimate_carbon',
+            {'message': 'Assess our carbon footprint'}, 'carbon-select')
+        assert result['status'] == 'needs_clarification'
+        assert result['session']['company_id'] == 'solara-cables'
+        assert 'material' in model['required_spoken_response'].lower()
+        assert provider.last_frames.index('tool_result') < provider.last_frames.index('audio')
+
+
+def test_native_navigation_accepts_operations_views():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        for view in ('overview', 'inventory', 'routes', 'shipments'):
+            result, _ = voice_tool(client, provider, 'navigate_workspace',
+                                   {'view': view}, f'nav-{view}')
+            assert result['action_result']['view'] == view
+            assert result['session']['company_id'] == 'solara-cables'
 
 
 def test_native_supplier_preview_uses_original_baseline_after_accepted_recovery():

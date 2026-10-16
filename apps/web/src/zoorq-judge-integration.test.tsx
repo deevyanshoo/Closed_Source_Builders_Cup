@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it, vi } from 'vitest';
 import { createDemoApi } from './demo-api';
+import type { CompanyProfile } from './demo-api';
 import { ZoorqAiReceipts } from './zoorq-ai-receipts';
 import { ZoorqJudgeEntry } from './zoorq-judge-entry';
 it('uses canonical judge endpoints with context and CSRF only for explicit actions', async () => {
@@ -26,11 +27,46 @@ it('renders public source title and date for generic receipts and rejects userin
 
 import { applyDemoResult, initialDemoState, judgeEntryAdmission, prepareJudgeEntrance } from './demo-page';
 import type { DemoSession, JudgeStart } from './demo-api';
-import { JudgeRoutes, sameJudgeScope, replayEvidenceAt } from './zoorq-judge-workspace';
-import { readWorkspaceLocation, workspaceSearch } from './zoorq-workspace';
+import { JudgeRoutes, sameJudgeScope, replayEvidenceAt, routeChoices, matchingBuyerIndex, describeRouteChoiceStatus } from './zoorq-judge-workspace';
+import { pushWorkspaceDestination, readSupplyLocation, readWorkspaceLocation, workspaceSearch } from './zoorq-workspace';
 it('opens overview by default and preserves an explicit companies URL', () => {
   expect(readWorkspaceLocation('').view).toBe('overview');
   expect(readWorkspaceLocation(workspaceSearch('', 'hub','add')).view).toBe('hub');
+});
+it('routes the quick link to Routes and keeps it in browser history', () => {
+  const search = workspaceSearch('', 'inventory', 'add', 'routes');
+  expect(readWorkspaceLocation(search).view).toBe('inventory');
+  expect(readSupplyLocation(search)).toBe('routes');
+});
+it('writes one supply destination history entry so Back returns to the prior view', () => {
+  const entries=['/demo?view=overview'];
+  const history={pushState:(_state:unknown,_title:string,url:string)=>entries.push(url)};
+  pushWorkspaceDestination(history,{pathname:'/demo',search:'?view=overview',hash:''},'inventory','add','routes');
+  expect(entries).toEqual(['/demo?view=overview','/demo?view=inventory&supply=routes']);
+  expect(entries.at(-2)).toBe('/demo?view=overview');
+});
+it('uses the selected buyer response for the selected route status and restores the map label on matching buyer', () => {
+  const profile={mode:'land' as const,display:'map' as const};
+  const mismatched={route_id:'r1',material_id:'cotton',itinerary:{mode:'land',display:'schematic'}} as never;
+  const matched={route_id:'r1',material_id:'cotton',itinerary:{mode:'land',display:'map'}} as never;
+  expect(describeRouteChoiceStatus(profile,true,mismatched,false,'')).toBe('Land · schematic for selected buyer');
+  expect(describeRouteChoiceStatus(profile,true,matched,false,'')).toBe('Land · approximate map for selected buyer');
+  expect(describeRouteChoiceStatus(profile,false,mismatched,false,'')).toBe('Land · mapped profile corridor');
+  expect(describeRouteChoiceStatus(profile,true,null,false,'')).toBe('Checking selected buyer');
+});
+it('groups identical corridors while preserving each owned material and route identity', () => {
+  const company={company_id:'a', routes:[
+    {route_id:'r1',origin:'Singapore',destination:'Pune',via:['Chennai'],materials:['copper'],direction:'import'},
+    {route_id:'r2',origin:'Singapore',destination:'Pune',via:['Chennai'],materials:['polymer'],direction:'import'},
+    {route_id:'r3',origin:'Hamburg',destination:'Chennai',via:['Suez'],materials:['copper'],direction:'import'},
+  ],materials:[{material_id:'copper',name:'Copper'},{material_id:'polymer',name:'Polymer'}],locations:[{city:'Pune',country:'India'},{city:'Chennai',country:'India'}]} as unknown as CompanyProfile;
+  const choices=routeChoices(company, 'all');
+  expect(choices).toHaveLength(2);
+  expect(choices[0].options.map(option=>[option.routeId,option.materialId])).toEqual([['r1','copper'],['r2','polymer']]);
+  expect(routeChoices(company,'polymer')).toHaveLength(1);
+  expect(matchingBuyerIndex(company,'Chennai, India')).toBe(1);
+  expect(matchingBuyerIndex({...company,locations:[{city:'Chennai',country:'India'},{city:'Chennai',country:'India'}]},'Chennai, India')).toBeNull();
+  expect(matchingBuyerIndex(company,'Unknown')).toBeNull();
 });
 it('posts startup only for an empty flagship and retains a restored nonflagship', async () => {
   const fresh={session_id:'s',csrf_token:'csrf',company:{company_id:'solara-cables'},context_version:1,offers:[],plan:null} as unknown as DemoSession;
@@ -63,10 +99,12 @@ it('moves from prepared first Solara to current Atlas without showing a failed S
 it('discards company, plan and epoch changes and shows accessible profile fallback on first render', () => {
   const scope={sessionId:'s',companyId:'a',contextVersion:1,planId:'p',epoch:1};
   for(const patch of [{companyId:'b'},{planId:'p2'},{epoch:2},{contextVersion:2}])expect(sameJudgeScope(scope,{...scope,...patch})).toBe(false);
-  const company={company_id:'a',routes:[{route_id:'r',origin:'Hamburg',destination:'Chennai',via:['Suez'],materials:['cotton']}],materials:[{material_id:'cotton',name:'Cotton'}],locations:[{city:'Chennai',country:'India'}]} as never;
+  const company={company_id:'a',routes:[{route_id:'r',origin:'Hamburg',destination:'Chennai, India',via:['Suez'],materials:['cotton'],direction:'import'}],materials:[{material_id:'cotton',name:'Cotton'}],locations:[{city:'Chennai',country:'India'}]} as never;
   const session={session_id:'s',company,context_version:1} as unknown as DemoSession;
   const html=renderToStaticMarkup(<JudgeRoutes company={company} session={session} epoch={1} onAsk={()=>{}} />);
-  expect(html).toContain('<ol>');expect(html).toContain('Hamburg');expect(html).toContain('not bound');
+  expect(html).toContain('class="zoorq-judge-schematic"');expect(html).toContain('Hamburg');expect(html).toContain('No supplier, accepted offer or tracked shipment is linked');
+  expect(html.indexOf('zoorq-judge-schematic')).toBeLessThan(html.indexOf('zoorq-judge-network'));
+  expect(html).toContain('Browse declared routes');
   expect(html).not.toContain('maps.googleapis.com');
 });
 it('gates historical advisories by date and keeps subsequent dates hidden', () => {

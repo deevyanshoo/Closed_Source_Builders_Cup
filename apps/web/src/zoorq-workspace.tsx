@@ -1,18 +1,19 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import type { CompanyProfile, NewsView, RiskReport } from './demo-api';
 import { assessMaterialSupply, displayDays, displayGap, SupplyTimeline } from './zoorq-supply-timeline';
 import { ZoorqOverviewSignal } from './zoorq-overview-signal';
 import { ZoorqLens } from './zoorq-lens';
 import { ThemeControl } from './demo-theme';
-import { ZoorqEcosystem } from './zoorq-ecosystem';
 import { ZoorqBrand } from './zoorq-brand';
 import { destinationIcon, ArrowLeftIcon, ArrowRightIcon, ChatBubbleIcon, CompanyIcon, MagnifyingGlassIcon, SpeakerLoudIcon } from './zoorq-icons';
 import './zoorq-workspace.css';
 import './zoorq-landing.css';
 
+const ZoorqEcosystem = lazy(() => import('./zoorq-ecosystem').then(module => ({ default: module.ZoorqEcosystem })));
+
 export type WorkspaceView = 'hub' | 'overview' | 'news' | 'procurement' | 'inventory' | 'drafts';
 export type ProcurementStage = 'add' | 'review' | 'compare' | 'rfq';
-export type SupplyTab = 'inventory' | 'shipments';
+export type SupplyTab = 'inventory' | 'routes' | 'shipments';
 export const workspaceViews: Exclude<WorkspaceView, 'hub'>[] = ['overview', 'news', 'procurement', 'inventory', 'drafts'];
 export const procurementStages: ProcurementStage[] = ['add', 'review', 'compare', 'rfq'];
 const viewNames: Record<Exclude<WorkspaceView, 'hub'>, string> = { overview: 'Overview', news: 'News', procurement: 'Procurement', inventory: 'Inventory & supply', drafts: 'Drafts & activity' };
@@ -24,13 +25,19 @@ export function readWorkspaceLocation(search: string): { view: WorkspaceView; st
   return { view: rawView && workspaceViews.includes(rawView as Exclude<WorkspaceView, 'hub'>) ? rawView as WorkspaceView : rawView === 'hub' ? 'hub' : 'overview', stage: rawStage && procurementStages.includes(rawStage as ProcurementStage) ? rawStage as ProcurementStage : 'add' };
 }
 export function readSupplyLocation(search: string): SupplyTab {
-  return new URLSearchParams(search).get('supply') === 'shipments' ? 'shipments' : 'inventory';
+  const supply = new URLSearchParams(search).get('supply');
+  return supply === 'shipments' || supply === 'routes' ? supply : 'inventory';
 }
 export function workspaceSearch(search: string, view: WorkspaceView, stage: ProcurementStage, supply: SupplyTab = 'inventory') {
   const params = new URLSearchParams(search); params.delete('company'); params.delete('supply');
   if (view === 'hub') { params.set('view', 'hub'); params.delete('stage'); }
-  else { params.set('view', view); if (view === 'procurement') params.set('stage', stage); else params.delete('stage'); if (view === 'inventory' && supply === 'shipments') params.set('supply', 'shipments'); }
+  else { params.set('view', view); if (view === 'procurement') params.set('stage', stage); else params.delete('stage'); if (view === 'inventory' && supply !== 'inventory') params.set('supply', supply); }
   const next = params.toString(); return next ? `?${next}` : '';
+}
+export function pushWorkspaceDestination(history: Pick<History,'pushState'>, location: Pick<Location,'pathname'|'search'|'hash'>,
+  view: WorkspaceView, stage: ProcurementStage, supply: SupplyTab = 'inventory') {
+  const search = workspaceSearch(location.search,view,stage,supply);
+  history.pushState(null,'',`${location.pathname}${search}${location.hash}`);
 }
 export function showWorkspaceActivity(view: WorkspaceView, stage: ProcurementStage, busy: string): boolean {
   const stages: Record<string, ProcurementStage> = { extract: 'add', plan: 'compare', recovery: 'compare', rfq: 'rfq' };
@@ -56,7 +63,7 @@ export function CompanyHub({ companies, current, busy, onOpen }: { companies: Co
           {current && <a className="zoorq-entrance-link" href="#zoorq-companies">Choose another company <ArrowRightIcon /></a>}
         </div>
       </div>
-      <div className="zoorq-entrance-visual"><ZoorqEcosystem /><div className="zoorq-sculpture-callouts" aria-label="The resilience loop: world signal, supply exposure, reviewed response"><span className="zoorq-callout-signal"><b>01</b> World signal</span><span className="zoorq-callout-break"><b>02</b> Supply exposure</span><span className="zoorq-callout-route"><b>03</b> Reviewed response</span></div></div>
+      <div className="zoorq-entrance-visual"><Suspense fallback={<div className="zoorq-ecosystem" aria-hidden="true" />}><ZoorqEcosystem /></Suspense><div className="zoorq-sculpture-callouts" aria-label="The resilience loop: world signal, supply exposure, reviewed response"><span className="zoorq-callout-signal"><b>01</b> World signal</span><span className="zoorq-callout-break"><b>02</b> Supply exposure</span><span className="zoorq-callout-route"><b>03</b> Reviewed response</span></div></div>
     </div>
     <div className="zoorq-hub-list" id="zoorq-companies">
       <div className="zoorq-hub-list-head"><div><h2>Choose your company.<small>{companies.length} companies. A world of decisions.</small></h2></div>
@@ -72,12 +79,12 @@ export function CompanyHub({ companies, current, busy, onOpen }: { companies: Co
 }
 
 export function WorkspaceNavigation({ company, view, onView, disabled = false }: { company?: CompanyProfile; view: WorkspaceView; onView: (view: WorkspaceView) => void; disabled?: boolean }) {
-  return <nav className="zoorq-nav" aria-label="Workspace destinations"><div className="zoorq-nav-brand"><button type="button" className="zoorq-brand-button" aria-label="ZOORQ home" disabled={disabled} onClick={() => onView('hub')}><ZoorqBrand compact /><small>A product by ClosedSource</small></button></div>{company && <div className="zoorq-nav-company"><CompanyIcon className="zoorq-nav-company-icon" aria-hidden="true" /><div><strong>{company.name}</strong><small>{company.sector}</small></div></div>}<button type="button" className="zoorq-all-companies" disabled={disabled} onClick={() => onView('hub')}><ArrowLeftIcon /> All companies</button><div className="zoorq-nav-links">{workspaceViews.map(destination => { const Icon = destinationIcon[destination]; return <button type="button" key={destination} className={`zoorq-nav-link ${view === destination ? 'active' : ''}`} aria-label={viewNames[destination]} aria-current={view === destination ? 'page' : undefined} disabled={disabled || !company} onClick={() => onView(destination)}><Icon />{destination === 'news' ? 'News' : <><span className="zoorq-nav-full">{viewNames[destination]}</span><span className="zoorq-nav-short" aria-hidden="true">{mobileViewNames[destination]}</span></>}</button>; })}</div><div className="zoorq-nav-foot"><span>Sharper procurement.</span><span>A more resilient tomorrow.</span></div></nav>;
+  return <nav className="zoorq-nav" aria-label="Workspace destinations"><div className="zoorq-nav-brand"><button type="button" className="zoorq-brand-button" aria-label="ZOORQ home" disabled={disabled} onClick={() => onView('hub')}><ZoorqBrand compact /><small>A product by ClosedSource</small></button></div>{company && <div className="zoorq-nav-company"><CompanyIcon className="zoorq-nav-company-icon" aria-hidden="true" /><div><strong>{company.name}</strong><small>{company.sector}</small></div></div>}<button type="button" className="zoorq-all-companies" disabled={disabled} onClick={() => onView('hub')}><ArrowLeftIcon aria-hidden="true" /> All companies</button><div className="zoorq-nav-links">{workspaceViews.map(destination => { const Icon = destinationIcon[destination]; return <button type="button" key={destination} className={`zoorq-nav-link ${view === destination ? 'active' : ''}`} aria-label={destination === 'news' ? 'News' : `${mobileViewNames[destination]} · ${viewNames[destination]}`} aria-current={view === destination ? 'page' : undefined} disabled={disabled || !company} onClick={() => onView(destination)}><Icon aria-hidden="true" />{destination === 'news' ? 'News' : <><span className="zoorq-nav-full">{viewNames[destination]}</span><span className="zoorq-nav-short" aria-hidden="true">{mobileViewNames[destination]}</span></>}</button>; })}</div><div className="zoorq-nav-foot"><span>Sharper procurement.</span><span>A more resilient tomorrow.</span></div></nav>;
 }
 
 export function WorkspaceHeader({ company, view, onTalk, onChat, onHub, disabled = false }: { company?: CompanyProfile; view: WorkspaceView; onTalk: () => void; onChat: () => void; onHub?: () => void; disabled?: boolean }) {
   if (view === 'hub') return <header className="zoorq-landing-nav"><button type="button" className="zoorq-landing-brand" aria-label="ZOORQ home" onClick={onHub}><ZoorqBrand /><span>A product by ClosedSource</span></button><a className="zoorq-company-jump" href="#zoorq-companies">Explore companies</a><ThemeControl /></header>;
-  return <header className="zoorq-workspace-header">{onHub ? <button type="button" className="zoorq-header-location zoorq-header-hub" aria-label="All companies" disabled={disabled} onClick={onHub}><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></button> : <div className="zoorq-header-location"><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></div>}<button id="zoorq-talk-live" type="button" className="zoorq-header-talk" aria-label="Talk to ZOORQ" disabled={disabled || !company} onClick={onTalk}><SpeakerLoudIcon /><span className="zoorq-header-full">Talk to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Talk</span></button><button type="button" className="zoorq-header-chat" aria-label="Type to ZOORQ" disabled={disabled || !company} onClick={onChat}><ChatBubbleIcon /><span className="zoorq-header-full">Type to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Type</span></button><ThemeControl /></header>;
+  return <header className="zoorq-workspace-header">{onHub ? <button type="button" className="zoorq-header-location zoorq-header-hub" aria-label={`All companies · ${company?.name ?? 'All companies'} / ${viewNames[view]}`} disabled={disabled} onClick={onHub}><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></button> : <div className="zoorq-header-location"><span>{company?.name ?? 'All companies'}</span><span aria-hidden="true">/</span><strong>{viewNames[view]}</strong></div>}<button id="zoorq-talk-live" type="button" className="zoorq-header-talk" aria-label="Talk to ZOORQ" disabled={disabled || !company} onClick={onTalk}><SpeakerLoudIcon aria-hidden="true" /><span className="zoorq-header-full">Talk to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Talk</span></button><button type="button" className="zoorq-header-chat" aria-label="Type to ZOORQ" disabled={disabled || !company} onClick={onChat}><ChatBubbleIcon aria-hidden="true" /><span className="zoorq-header-full">Type to ZOORQ</span><span className="zoorq-header-short" aria-hidden="true">Type</span></button><ThemeControl /></header>;
 }
 
 export function ProcurementNavigation({ stage, onStage }: { stage: ProcurementStage; onStage: (stage: ProcurementStage) => void }) {

@@ -17,7 +17,7 @@ _EXTERNAL_TOPIC = re.compile(
 _CURRENT_SCOPE = re.compile(
     r'\b(?:this|my|our|the\s+current|current|selected|saved|reviewed)\s+'
     r'(?:company|workspace|purchase|plan|comparison|assessment|order|'
-    r'carbon|emissions?|footprint|shipments?|inbound|consignments?)\b', re.I)
+    r'carbon|emissions?|footprint|(?:planned\s+)?shipments?|inbound|consignments?)\b', re.I)
 
 
 def integration_request(snapshot: dict, message: str) -> str | None:
@@ -170,6 +170,17 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     if planned:
         row = planned[0]
         reference = row.get('order_id') or row.get('demand_reference')
+        comparison = ''
+        if row.get('scenario_plan_id') and row.get('baseline_plan_id'):
+            comparison = (f"Reviewed recovery: original baseline supplier "
+                          f"{supplier_display_name(row.get('baseline_supplier') or 'not recorded')}, "
+                          f"planned arrival {row['original_expected_arrival']}; ")
+            if row.get('scenario_status') == 'infeasible':
+                comparison += 'reviewed scenario has no feasible supplier or selected arrival. '
+            elif row.get('scenario_selected_offer_id'):
+                comparison += (f"reviewed scenario supplier "
+                               f"{supplier_display_name(row.get('scenario_supplier') or 'not recorded')}, "
+                               f"planned arrival {row['scenario_expected_arrival']}. ")
         if row.get('scenario_status') == 'infeasible':
             answer = (f'{company}: the reviewed disruption has no feasible supplier. '
                       f"The retained baseline planning context was {row['quantity']} "
@@ -183,6 +194,7 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                       f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the selected supplier')}. "
                       f"This is not a confirmed order. Demand reference: {reference}. "
                       f"Planned arrival is {row['expected_arrival']}, against a need-by date of {row['need_by']}. ")
+        answer = comparison + answer
         answer += 'Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. '
         answer += ('Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.'
                    if row.get('recovery_available') else 'Review the saved recovery comparison before preparing another action.')

@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.staticfiles import StaticFiles
 
 from .sessions import SessionError, SessionStore
@@ -2761,7 +2762,30 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()
         if (web_dir / 'assets').is_dir():
-            app.mount('/assets', StaticFiles(directory=web_dir / 'assets'), name='assets')
+            compressed_assets = GZipMiddleware(
+                StaticFiles(directory=web_dir / 'assets'), minimum_size=1024, compresslevel=5)
+
+            async def asset_headers(scope, receive, send):
+                # StaticFiles computes an identity ETag before gzip. Do not send
+                # that strong validator for a different byte representation.
+                # Last-Modified remains valid for either representation.
+                scope = {**scope, 'headers': [(key, val) for key, val in scope['headers']
+                                             if key.lower() != b'if-none-match']}
+
+                async def send_headers(message):
+                    if message['type'] == 'http.response.start':
+                        headers = [(key, val) for key, val in message['headers']
+                                   if key.lower() != b'etag']
+                        vary = next((val for key, val in headers if key.lower() == b'vary'), b'')
+                        if b'accept-encoding' not in vary.lower():
+                            headers = [(key, val) for key, val in headers if key.lower() != b'vary']
+                            headers.append((b'vary', vary + b', Accept-Encoding' if vary else b'Accept-Encoding'))
+                        message = {**message, 'headers': headers}
+                    await send(message)
+
+                await compressed_assets(scope, receive, send_headers)
+
+            app.mount('/assets', asset_headers, name='assets')
         @app.get('/demo')
         @app.get('/demo/{path:path}')
         async def spa(path: str = ''):

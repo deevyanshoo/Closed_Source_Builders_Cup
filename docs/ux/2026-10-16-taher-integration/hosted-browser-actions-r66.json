@@ -1,0 +1,57 @@
+{
+  "revision": "closed-source-quote-demo-00066-vtm",
+  "company": "solara-cables",
+  "quotes": {
+    "fixtures": [
+      "express-copper",
+      "eu-copper"
+    ],
+    "mode": "rules",
+    "reviewed": true
+  },
+  "baseline": {
+    "selectedSupplier": "Europa Copper SA",
+    "purchaseKg": "8000",
+    "totalUsd": "82000"
+  },
+  "emissions": {
+    "explicitSeaKm": {
+      "Swift": "1000",
+      "Europa": "5000"
+    },
+    "displayedKgCO2e": {
+      "Swift": "31849.0",
+      "Europa": "32364.8"
+    },
+    "typedOperator": {
+      "grounded": true,
+      "productionKgCO2e": "31720",
+      "freightKgCO2e": "644.8",
+      "totalKgCO2e": "32364.8",
+      "sourcesNamed": true
+    }
+  },
+  "shipmentRecovery": {
+    "initialDelayDays": 20,
+    "editedDelayDays": 21,
+    "baselineSupplier": "Europa Copper SA",
+    "scenarioSupplier": "Swift Copper Trading Ltd",
+    "scenarioArrival": "2026-10-28",
+    "scenarioTotalUsd": "86000",
+    "costDeltaUsd": "4000"
+  },
+  "rfq": {
+    "reviewGateObserved": true,
+    "status": "draft_unsent",
+    "visibleInDrafts": true,
+    "supplier": "Swift Copper Trading Ltd",
+    "purchaseKg": "8000",
+    "externalSupplierDelivery": false
+  },
+  "mobile": {
+    "width": 390,
+    "horizontalOverflow": false,
+    "compactChooser": true
+  },
+  "scope": "Actual browser interactions and visible results; separate all-company HTTP and controlled-speech receipts"
+}

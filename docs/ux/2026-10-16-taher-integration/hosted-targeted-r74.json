@@ -1,0 +1,64 @@
+{
+  "revision": "closed-source-quote-demo-00074-sjn",
+  "source_label": "b3797c2",
+  "inherited_r73": {
+    "all_ten_http_text": "10/10 raw pass",
+    "controlled_voice": "5/10 raw automated pass",
+    "scope": "Historical r73 evidence; not final-revision ten-company speech."
+  },
+  "r74_targeted_http_text": {
+    "companies": [
+      "solara-cables",
+      "forgeline-components"
+    ],
+    "passed": true,
+    "raw_sha256": "d5064d7af2628a6f6e3ef6e1fd5ec9eed782f37053dd820dfd40b86145cc4214"
+  },
+  "r74_explicit_forgeline_method_text": {
+    "passed": true,
+    "deterministic_read_carbon": true,
+    "proxy_category": "Metal: steel cans",
+    "publisher": "Department for Energy Security and Net Zero (UK government)",
+    "unsupported_total_reason_disclosed": true,
+    "action_state_unchanged": true,
+    "raw_sha256": "fca75baa15258d868bff8a6f0acbdf103df18c963e91e66c7fba2fd95e4da11e"
+  },
+  "r74_forgeline_source_requesting_speech": {
+    "raw_automated_pass": true,
+    "recognized_input_requested_sources": true,
+    "production_kg_co2e": "2060339.41",
+    "freight_kg_co2e": "11606.4",
+    "combined_total_supported": false,
+    "planned_arrival": "2026-10-26",
+    "source_publisher": "Department for Energy Security and Net Zero",
+    "qualifying_audio_bytes": 1352162,
+    "action_state_unchanged": true,
+    "answer_scope_limit": "Volunteered a news-coverage sentence not verified by the two native carbon/shipment reads.",
+    "raw_sha256": "62f25617e2d3848901c8c1d196c5435a074e574bac3a146a920e60d796ef6c62"
+  },
+  "r74_solara_ordinary_speech": {
+    "recognized_input_requested_sources_or_method": false,
+    "raw_automated_pass": false,
+    "raw_error": "voice_caption_not_grounded",
+    "independent_same_turn_factual_review": "accepted",
+    "supported_total_kg_co2e": "31848.96",
+    "production_kg_co2e": "31720",
+    "freight_kg_co2e": "128.96",
+    "planned_arrival": "2026-10-24",
+    "need_by": "2026-11-05",
+    "qualifying_audio_bytes": 1480322,
+    "action_state_unchanged": true,
+    "wording_limit": "Said shipment is expected to arrive rather than explicitly planned shipment.",
+    "raw_sha256": "f7694891546b16e1fc7f8bfa641a807a15e022c3a3da9cb07814d3ecd153dcca"
+  },
+  "r74_solara_proposal_only": {
+    "raw_pass": true,
+    "delay_days": 20,
+    "read_only_review_caption": true,
+    "post_proposal_audio_bytes": 418560,
+    "action_state_unchanged": true,
+    "no_apply_confirm_rfq_send": true,
+    "raw_sha256": "c29f989d3d8284bc728d036685147569faa226a26af5bb222a9de27a77bdc0b1"
+  },
+  "limits": "Controlled caller-owned WAV, not physical microphone. No independent generated-output waveform transcription. Raw receipts remain private and unchanged; no voice retry."
+}

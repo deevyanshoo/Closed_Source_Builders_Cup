@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, shouldLoadFixtures, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
@@ -43,9 +43,24 @@ const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', m
 const naphthaRequest: PlanRequest = { ...request, material: 'naphtha', quantity: '240', current_stock: '40', quantity_unit: 'barrel', budget: '6500', reporting_currency: 'EUR', additional_cost_per_unit: '3' };
 const multiCompany = { ...company, materials: [...company.materials, { ...company.materials[0], material_id: 'naphtha', name: 'Naphtha', quantity_unit: 'barrel', stock: '40' }], quote_coverage: { materials: ['copper', 'naphtha'], fixture_ids: ['quote-a', 'naphtha-a'], note: 'Two runnable materials.', scenarios: [{ material_id: 'copper', fixture_ids: ['quote-a'], buyer_defaults: request }, { material_id: 'naphtha', fixture_ids: ['naphtha-a'], buyer_defaults: naphthaRequest }] }, buyer_defaults: request };
 const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', filename: 'copper.csv', description: '', download_url: '/api/demo/fixtures/quote-a' }, { id: 'naphtha-a', name: 'Naphtha quote', filename: 'naphtha.csv', description: '', download_url: '/api/demo/fixtures/naphtha-a' }];
+
+it('loads fixture catalogue only on procurement workflows, including a direct quote route', () => {
+  expect(shouldLoadFixtures('hub', 'add')).toBe(false);
+  expect(shouldLoadFixtures('overview', 'add')).toBe(false);
+  expect(shouldLoadFixtures('procurement', 'compare')).toBe(true);
+  expect(shouldLoadFixtures('procurement', 'add')).toBe(true);
+  expect(shouldLoadFixtures('procurement', 'review')).toBe(true);
+});
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('ZOORQ workspace routes', () => {
+  it('includes the visible brand byline in both brand button names', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    for (const view of ['overview', 'hub'] as const) {
+      const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView={view} />);
+      expect(html).toContain('aria-label="ZOORQ home · A product by ClosedSource"');
+    }
+  });
   it('shows one accessible disclosure at the top of each company workspace, but not the company hub', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     for (const view of ['overview', 'inventory', 'news', 'drafts', 'procurement'] as const) {

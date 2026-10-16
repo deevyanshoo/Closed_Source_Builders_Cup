@@ -146,6 +146,9 @@ export function fixturesForMaterial(fixtures: DemoFixture[], company: CompanyPro
   const scenario = companyScenarios(company).find(item => item.material_id === materialId);
   return scenario ? fixtures.filter(fixture => scenario.fixture_ids.includes(fixture.id)) : [];
 }
+export function shouldLoadFixtures(view: WorkspaceView, _stage: ProcurementStage): boolean {
+  return view === 'procurement';
+}
 export function offersForMaterial(offers: OfferView[], fixtures: DemoFixture[], company: CompanyProfile | undefined, materialId: string) {
   if (!company) return offers;
   const scenario = companyScenarios(company).find(item => item.material_id === materialId);
@@ -365,6 +368,11 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 export function DemoPage({ initialState = initialDemoState, initialCompanies = [], initialView, initialStage }: { initialState?: DemoState; initialCompanies?: CompanyProfile[]; initialView?: WorkspaceView; initialStage?: ProcurementStage }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
+  const [fixtureLoading, setFixtureLoading] = useState(false);
+  const [fixtureError, setFixtureError] = useState('');
+  const [fixtureAttempt, setFixtureAttempt] = useState(0);
+  const fixtureLoadRef = useRef<'idle' | 'loading' | 'loaded' | 'failed'>('idle');
+  const fixtureMountedRef = useRef(true);
   const [judgePrepared, setJudgePrepared] = useState<JudgeStart | null>(null);
   const [judgeStartState, setJudgeStartState] = useState<'loading'|'done'|'failed'>(initialState.session ? 'done' : 'loading');
   const [companies, setCompanies] = useState<CompanyProfile[]>(initialCompanies);
@@ -623,10 +631,28 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
       if (entrance.session.company?.company_id !== session.company?.company_id || entrance.session.context_version !== session.context_version) return;
       setJudgePrepared(entrance.prepared); setJudgeStartState('done'); restoreSession(entrance.session,epoch);
     }).catch(e => { if (!cancelled && epoch === epochRef.current) { setJudgeStartState('failed'); setError(message(e)); } });
-    api.fixtures().then(list => { if (!cancelled) { setFixtures(list); setFixtureId(list[0]?.id ?? ''); } }).catch(e => { if (!cancelled) setError(message(e)); });
     api.companies().then(list => { if (!cancelled) setCompanies(list); }).catch(e => { if (!cancelled) setCompanyError(message(e)); });
     return () => { cancelled = true; };
   }, [initialState.session]);
+
+  useEffect(() => {
+    fixtureMountedRef.current = true;
+    return () => { fixtureMountedRef.current = false; };
+  }, []);
+  useEffect(() => {
+    if (!shouldLoadFixtures(view, stage) || fixtureLoadRef.current !== 'idle') return;
+    fixtureLoadRef.current = 'loading';
+    setFixtureLoading(true); setFixtureError('');
+    api.fixtures().then(list => {
+      if (!fixtureMountedRef.current) return;
+      fixtureLoadRef.current = 'loaded';
+      setFixtures(list); setFixtureId(list[0]?.id ?? ''); setFixtureLoading(false);
+    }).catch(cause => {
+      if (!fixtureMountedRef.current) return;
+      fixtureLoadRef.current = 'failed';
+      setFixtureError(message(cause)); setFixtureLoading(false);
+    });
+  }, [view, stage, fixtureAttempt]);
 
   useEffect(() => {
     if (!state.session?.company || state.session.context_version === undefined || state.news) return;
@@ -893,12 +919,14 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     {riskScope && <div className="zoorq-risk-container" hidden={view !== 'inventory' || !riskOpen}><RiskMonitor scope={riskScope} enabled={view !== 'hub' && busy !== 'company'} onReport={(report, scope) => setRiskSnapshot({ scope, report })} onOpenCompany={switchCompany} onSeedPrompt={seedRiskMessage} /></div>}
     {view === 'procurement' && stage === 'add' && <section className="demo-start"><div className="demo-heading"><div><span className="demo-kicker">01 / Choose a document</span><h2>Start with a supplier quote</h2></div><span className="demo-session">{state.session ? `Session expires ${new Date(state.session.expires_at).toLocaleString()}` : error ? 'Session unavailable' : busy === 'company' ? 'Switching company…' : 'Opening session…'}</span></div>
       {busy === 'extract' && progress && <ActivityIndicator {...progress} />}
-      <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={selectedFixtureId} disabled={!!company && !supportedFixtures.length} onChange={e => { setFixtureId(e.target.value); clearUpload(); }}><option value="">Choose a document</option>{supportedFixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
-        <label><span>Or upload one of these sample files</span><input ref={uploadRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" disabled={!!company && !supportedFixtures.length} onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
+      {fixtureLoading && <p className="demo-muted" role="status">Loading sample quotes…</p>}
+      {fixtureError && <p className="demo-alert" role="alert">Sample quotes could not load: {fixtureError}. <button type="button" className="demo-link" onClick={() => { fixtureLoadRef.current = 'idle'; setFixtureAttempt(value => value + 1); }}>Retry sample quotes</button></p>}
+      <form onSubmit={extract} className="demo-extract-form"><label><span>Sample quote</span><select value={selectedFixtureId} disabled={fixtureLoadRef.current !== 'loaded' || (!!company && !supportedFixtures.length)} onChange={e => { setFixtureId(e.target.value); clearUpload(); }}><option value="">Choose a document</option>{supportedFixtures.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
+        <label><span>Or upload one of these sample files</span><input ref={uploadRef} type="file" accept=".pdf,.csv,application/pdf,text/csv" disabled={fixtureLoadRef.current !== 'loaded' || (!!company && !supportedFixtures.length)} onChange={e => setFile(e.target.files?.[0] ?? null)} /><small>Only the exact listed sample documents are accepted. Maximum 500 KB.</small></label>
         <label><span>Extraction method</span><select value={mode} onChange={e => setMode(e.target.value as 'gemini' | 'rules')}><option value="gemini">Gemini · live extraction</option><option value="rules">Rules · comparison fallback</option></select></label>
-        <button className="demo-button" disabled={!state.session || !!busy || (!!company && !supportedFixtures.length)}>{busy === 'extract' ? 'Reading quote…' : 'Read quote'}</button></form>
+        <button className="demo-button" disabled={!state.session || !!busy || fixtureLoadRef.current !== 'loaded' || (!!company && !supportedFixtures.length)}>{busy === 'extract' ? 'Reading quote…' : 'Read quote'}</button></form>
       {file && <p className="zoorq-retained-upload" role="status">Selected upload: <strong>{file.name}</strong>. This file will be read. <button type="button" className="demo-link" onClick={() => clearUpload()}>Use sample quote instead</button></p>}
-      {company && !supportedFixtures.length && <p className="demo-alert">This company has no runnable quote fixture. Explore its fictional operations and observed news; quote comparison is unavailable here.</p>}
+      {company && fixtureLoadRef.current === 'loaded' && !supportedFixtures.length && <p className="demo-alert">This company has no runnable quote fixture. Explore its fictional operations and observed news; quote comparison is unavailable here.</p>}
       {supportedFixtures.length > 0 && <div className="demo-fixtures"><span>Sample documents</span>{supportedFixtures.map(f => <a key={f.id} href={f.download_url} download>{f.filename} ↗</a>)}</div>}
       {state.session && !state.session.provider.available && <p className="demo-provider">Gemini is currently unavailable. Rule extraction can still be tried and will be labelled separately.</p>}
     </section>}

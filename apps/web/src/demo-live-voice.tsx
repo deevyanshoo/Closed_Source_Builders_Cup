@@ -100,6 +100,10 @@ export function voiceResearchLabel(phase: VoiceResearchPhase | null | undefined)
 type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null; outputMeter?: AnalyserNode; inputLevel?: number };
 type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
 type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
+export function liveVoiceStatusLabel(status: 'idle' | VoiceVisualState, permissionPending: boolean): string | null {
+  if (status !== 'connecting') return null;
+  return permissionPending ? 'Allow microphone access in Chrome to start voice. You can end this request.' : 'Connecting live voice…';
+}
 const CAPTION_LIMIT = 24;
 const CAPTION_TEXT_LIMIT = 16000;
 
@@ -207,6 +211,7 @@ export function claimLiveVoiceStart(starting: { current: boolean }, active: bool
 type LiveVoiceProps = { scope: LiveScope; csrf: string; disabled: boolean; beforeStart?: () => Promise<DemoSession>; onTurn: (turn: OperatorTurn, scope: LiveScope) => void; onSession: (session: DemoSession) => void; onUnknown: () => void; onExit?: () => void };
 export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function LiveVoice({ scope, csrf, disabled, beforeStart, onTurn, onSession, onUnknown, onExit }, ref) {
   const [status, setStatus] = useState<'idle' | VoiceVisualState>('idle');
+  const [permissionPending, setPermissionPending] = useState(false);
   const [microphoneMuted, setMicrophoneMuted] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [researchPhase, setResearchPhase] = useState<VoiceResearchPhase | null>(null);
@@ -217,6 +222,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const starting = useRef(false);
   const thinking = useRef(false);
   const generation = useRef(0);
+  const permissionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const onTurnRef = useRef(onTurn);
@@ -249,6 +255,8 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     current.nextTime = current.output.currentTime;
   }
   function end() {
+    if (permissionTimer.current) { clearTimeout(permissionTimer.current); permissionTimer.current = null; }
+    setPermissionPending(false);
     setAudioLevel(0);
     generation.current += 1;
     starting.current = false;
@@ -281,6 +289,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     let input: AudioContext | null = null;
     let output: AudioContext | null = null;
     let socket: WebSocket | null = null;
+    let requestTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const synchronized = beforeStart ? await beforeStart() : null;
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
@@ -292,7 +301,12 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         setStatus('idle');
         return;
       }
+      setPermissionPending(true);
+      requestTimer = setTimeout(() => { if (attempt !== generation.current) return; setError('Microphone permission is still pending. Allow access in Chrome, then start again.'); end(); }, 30000);
+      permissionTimer.current = requestTimer;
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      if (permissionTimer.current === requestTimer) { clearTimeout(requestTimer); permissionTimer.current = null; }
+      if (attempt === generation.current) setPermissionPending(false);
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) { stream.getTracks().forEach(track => track.stop()); return; }
       input = new AudioContext({ sampleRate: 16000 });
       output = new AudioContext({ sampleRate: 24000 });
@@ -405,6 +419,8 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
       socket.onerror = () => { if (active.current === current) { setError('The live voice connection failed. Check your connection, refresh the demo session, then try again.'); end(); } };
       socket.onclose = () => { if (active.current === current) { setError(current.ready ? 'The live voice connection ended. Start another conversation.' : 'The live voice connection closed before it became ready. Refresh the demo session, then try again.'); end(); } };
     } catch (cause) {
+      if (requestTimer && permissionTimer.current === requestTimer) { clearTimeout(requestTimer); permissionTimer.current = null; }
+      if (attempt === generation.current) setPermissionPending(false);
       stream?.getTracks().forEach(track => track.stop());
       if (socket) socket.close();
       if (input) void input.close(); if (output) void output.close();
@@ -433,7 +449,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
   const visible = visibleLiveVoiceState(status, error, captionScope, scope);
   const orbState = visible.error ? 'error' : visible.status;
   const researchLabel = captionScope && sameLiveScope(captionScope, scope) ? voiceResearchLabel(researchPhase) : null;
-  const statusLabel = researchLabel && visible.status !== 'idle' && visible.status !== 'connecting' && visible.status !== 'speaking' && visible.status !== 'muted' ? researchLabel : visible.status === 'connecting' ? 'Connecting live voice…' :
+  const statusLabel = researchLabel && visible.status !== 'idle' && visible.status !== 'connecting' && visible.status !== 'speaking' && visible.status !== 'muted' ? researchLabel : visible.status === 'connecting' ? liveVoiceStatusLabel(visible.status, permissionPending) :
     visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? active.current?.responsePending && !thinking.current ? 'Finishing response…' : 'Thinking' :
     visible.status === 'speaking' ? microphoneMuted ? 'Speaking · microphone muted' : 'Speaking' :
     visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';

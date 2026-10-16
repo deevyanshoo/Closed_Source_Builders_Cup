@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { OperatorTurn } from './demo-api';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRef } from 'react';
-import { voiceAudioLevel, smoothVoiceLevel, acceptedResearchProgress, settleLiveResearch, voiceResearchLabel, acceptsLiveTurn, appendLiveCaption, claimLiveVoiceStart, endActiveVoice, finalizedLiveCaptions, LiveVoice, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState } from './demo-live-voice';
+import { voiceAudioLevel, smoothVoiceLevel, acceptedResearchProgress, settleLiveResearch, voiceResearchLabel, acceptsLiveTurn, appendLiveCaption, claimLiveVoiceStart, endActiveVoice, finalizedLiveCaptions, LiveVoice, matchesLiveSession, pcm16Base64, preflightLiveVoice, queueLivePlayback, releaseLiveVoice, restoreLiveSession, updateLiveCaptions, visibleLiveCaptions, visibleLiveVoiceState, voiceResponsePendingAfterEvent, voiceThinkingAfterEvent, voiceVisualState, liveVoiceStatusLabel } from './demo-live-voice';
 
 vi.mock('./demo-activity', () => ({ AssistantOrb: () => null, ActivityIndicator: () => null }));
 
@@ -10,6 +10,10 @@ const scope = { sessionId: 's1', companyId: 'solara', contextVersion: 1, epoch: 
 const turn = { turn_id: 't1', company_id: 'solara', context_version: 1, status: 'proposal', assistant_text: 'Review this first.', agent_steps: [], evidence_ids: [], proposal: { proposal_id: 'p1', kind: 'watch', summary: 'Watch', parameters: {}, plan_id: null, offer_versions: {}, context_version: 1, expires_at: '2099-01-01T00:00:00Z' }, read_only: true } satisfies OperatorTurn;
 
 describe('live conversation boundary', () => {
+  it('distinguishes the browser microphone prompt from provider connection', () => {
+    expect(liveVoiceStatusLabel('connecting', true)).toContain('Allow microphone access');
+    expect(liveVoiceStatusLabel('connecting', false)).toBe('Connecting live voice…');
+  });
   it('renders the spatial lens for the existing live voice instance', () => {
     const html = renderToStaticMarkup(<LiveVoice ref={createRef()} scope={scope} csrf="csrf" disabled={false} onTurn={() => {}} onSession={() => {}} onUnknown={() => {}} />);
     expect(html).toContain('class="zoorq-lens');

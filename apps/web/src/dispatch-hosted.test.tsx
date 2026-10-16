@@ -1,23 +1,38 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DispatchPage, RecoveryLink } from './dispatch-page';
-import { HostedDemoContext } from './dispatch-hosted';
+import { HostedDemoContext, readCapabilities } from './dispatch-hosted';
 import { DemoPage } from './demo-page';
 
 describe('dispatch on the hosted demo (#112)', () => {
-  it('opened from the demo, links back to /demo and hides pages the hosted site does not serve', () => {
-    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch?from=demo']}><DispatchPage /></MemoryRouter>);
-    expect(html).toMatch(/href="\/demo"[^>]*>Back to the demo<\/a>/);
-    expect(html).not.toContain('href="/planning"');
-    expect(html).not.toContain('href="/scenarios"');
-    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
+  const hosted = { hosted: true, served_pages: ['/demo', '/dispatch'], recovery_link: null };
+
+  it('uses server capabilities, so bare /dispatch and /dispatch?from=demo render the same hosted header', () => {
+    const bare = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage capabilities={hosted} /></MemoryRouter>);
+    const query = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch?from=demo']}><DispatchPage capabilities={hosted} /></MemoryRouter>);
+    expect(bare).toBe(query);
+    expect(bare).toMatch(/href="\/demo"[^>]*>Back to the demo<\/a>/);
+    expect(bare).not.toContain('href="/planning"');
+    expect(bare).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
   });
 
-  it('keeps the full local workspace navigation otherwise', () => {
-    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage /></MemoryRouter>);
-    expect(html).toContain('href="/planning"');
-    expect(html).not.toContain('Back to the demo');
+  it('keeps the full local navigation without server capabilities, whatever the query says', () => {
+    for (const entry of ['/dispatch', '/dispatch?from=demo']) {
+      const html = renderToStaticMarkup(<MemoryRouter initialEntries={[entry]}><DispatchPage capabilities={null} /></MemoryRouter>);
+      expect(html).toContain('href="/planning"');
+      expect(html).not.toContain('Back to the demo');
+    }
+  });
+
+  it('reads capabilities only from a JSON server answer', async () => {
+    const json = vi.fn(async () => new Response(JSON.stringify(hosted), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    expect(await readCapabilities(json as unknown as typeof fetch)).toEqual(hosted);
+    expect(json).toHaveBeenCalledWith('/api/demo/capabilities', { credentials: 'same-origin' });
+    const spa = vi.fn(async () => new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } }));
+    expect(await readCapabilities(spa as unknown as typeof fetch)).toBeNull();
+    const missing = vi.fn(async () => new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } }));
+    expect(await readCapabilities(missing as unknown as typeof fetch)).toBeNull();
   });
 
   it('replaces the recovery link with a plain note on the hosted demo', () => {

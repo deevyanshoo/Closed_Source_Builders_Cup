@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, NavLink, useSearchParams } from 'react-router-dom';
-import { HOSTED_RECOVERY_NOTE, HostedDemoContext } from './dispatch-hosted';
+import { Link, NavLink } from 'react-router-dom';
+import { HOSTED_RECOVERY_NOTE, HostedDemoContext, readCapabilities } from './dispatch-hosted';
+import type { HostedCapabilities } from './dispatch-hosted';
 import {
   createDispatchFixtureAdapter, dispatchReport, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness,
   hazardStateLabel, humanize, replayReason, statusLabel,
@@ -24,7 +25,7 @@ const WORKSPACE_PAGES: [string, string][] = [
 function HostedNav() {
   return <nav className="workspace-nav" aria-label="Workspace pages">
     <a className="recovery-back" href="/demo">Back to the demo</a>
-    <NavLink className="recovery-back" to="/dispatch?from=demo" end>Synthetic dispatch workspace</NavLink>
+    <NavLink className="recovery-back" to="/dispatch" end>Synthetic dispatch workspace</NavLink>
   </nav>;
 }
 
@@ -346,9 +347,12 @@ export function HazardPanel({ hazards }: { hazards: HazardResponse }) {
   </section>;
 }
 
-export function DispatchPage() {
-  const [params] = useSearchParams();
-  const hostedDemo = params.get('from') === 'demo';
+export function DispatchPage({ capabilities: given }: { capabilities?: HostedCapabilities | null } = {}) {
+  // Hosted navigation comes from the server's capabilities, never from the URL (review, 16 Oct).
+  const [fetched, setFetched] = useState<HostedCapabilities | null>(null);
+  useEffect(() => { if (given === undefined) readCapabilities().then(setFetched); }, [given]);
+  const capabilities = given === undefined ? fetched : given;
+  const hostedDemo = !!capabilities?.hosted && capabilities.served_pages.includes('/dispatch');
   const adapter = useMemo(() => createDispatchFixtureAdapter(), []);
   const [list, setList] = useState<Load<ListResponse>>({ kind: 'loading' });
   const [selected, setSelected] = useState<string | null>(null);

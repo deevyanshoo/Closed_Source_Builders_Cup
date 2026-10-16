@@ -111,7 +111,48 @@ def _benchmark(material: dict, snapshot: dict, fx: list, currencies: list[str], 
     return row
 
 
-def _quote(offer: dict) -> dict | None:
+QUOTE_NOTE = 'Demo quotes are synthetic and not calibrated to market prices'
+COMPARE_LABEL = 'synthetic quote compared with a public benchmark'
+
+
+def _comparable(offer: dict, units: dict) -> dict | None:
+    """The quote's own currency per one material unit, from the reviewed normalized offer."""
+    pricing = (((offer.get('normalized') or {}).get('items') or [{}])[0]).get('pricing') or {}
+    if (pricing.get('per_kg') or {}).get('amount'):
+        return {'amount': pricing['per_kg']['amount'], 'currency': pricing['per_kg']['currency'], 'per_unit': 'kg'}
+    material = ((offer.get('items') or [{}])[0].get('material') or {}).get('value')
+    per_unit = pricing.get('per_unit') if isinstance(pricing.get('per_unit'), dict) else None
+    if per_unit and per_unit.get('amount') and material in units:
+        return {'amount': per_unit['amount'], 'currency': per_unit['currency'], 'per_unit': units[material]}
+    return None
+
+
+def _versus(comparable: dict | None, benchmark: dict | None, fx: list) -> dict:
+    if benchmark is None:
+        return {'status': 'no_public_benchmark', 'difference_percent': None, 'label': COMPARE_LABEL}
+    if comparable is None or comparable['per_unit'] not in _KG_PER or benchmark['per_unit'] not in _KG_PER:
+        return {'status': 'unit_not_comparable', 'difference_percent': None, 'label': COMPARE_LABEL}
+    latest = benchmark['observations'][-1]
+    with localcontext() as context:
+        context.prec = nz.ARITHMETIC_PRECISION
+        base = Decimal(latest['value']) * _KG_PER[comparable['per_unit']] / _KG_PER[benchmark['per_unit']]
+        note = ''
+        if comparable['currency'] != benchmark['currency']:
+            rate = _usd_rate(fx, comparable['currency']) if benchmark['currency'] == 'USD' else None
+            if rate is None:
+                return {'status': 'fx_unavailable', 'difference_percent': None, 'label': COMPARE_LABEL,
+                        'reason': f"No same-day ECB reference rate for {benchmark['currency']} to {comparable['currency']} is loaded."}
+            base = base * rate['_exact']
+            note = f"; benchmark converted with {rate['formula']}"
+        quote = Decimal(comparable['amount'])
+        percent = ((quote - base) / base * 100).quantize(Decimal('0.1'), rounding='ROUND_HALF_UP')
+    return {'status': 'compared', 'difference_percent': format(percent, 'f'), 'benchmark_per_unit': nz.fmt(base),
+            'currency': comparable['currency'], 'per_unit': comparable['per_unit'], 'benchmark_month': latest['month'],
+            'series': benchmark['series'], 'label': COMPARE_LABEL,
+            'formula': f"({nz.fmt(quote)} - {nz.fmt(base)}) / {nz.fmt(base)} x 100, rounded to 0.1{note}"}
+
+
+def _quote(offer: dict, snapshot: dict, fx: list, units: dict) -> dict | None:
     if offer.get('status') != 'saved' or not offer.get('items'):
         return None
     item = offer['items'][0]
@@ -119,15 +160,20 @@ def _quote(offer: dict) -> dict | None:
     unit_price = pricing.get('unit_price') or {}
     if not unit_price.get('amount'):
         return None
+    material = (item.get('material') or {}).get('value')
+    comparable = _comparable(offer, units)
     return {'offer_id': offer['offer_id'], 'supplier': (offer['fields'].get('supplier_name') or {}).get('value'),
             'origin_country_code': (offer.get('normalized') or {}).get('origin_country_code'),
-            'material_id': (item.get('material') or {}).get('value'), 'unit_price': unit_price['amount'],
+            'material_id': material, 'unit_price': unit_price['amount'],
             'currency': unit_price.get('currency'), 'per_unit': pricing.get('per_unit'), 'as_of': offer.get('as_of'),
-            'synthetic': offer.get('synthetic') is True, 'document': (offer.get('document') or {}).get('filename')}
+            'synthetic': offer.get('synthetic') is True, 'document': (offer.get('document') or {}).get('filename'),
+            'comparable': comparable,
+            'vs_benchmark': _versus(comparable, snapshot['benchmarks'].get(material), fx)}
 
 
 def build_country_pricing(company: dict, offers: list, fx: list, snapshot: dict, *, today: date) -> dict:
     currencies = _currencies(company)
+    units = {material['material_id']: material['quantity_unit'] for material in company.get('materials', [])}
     limitations = ['Benchmarks are monthly averages in nominal US dollars from the World Bank Pink Sheet, '
                    'not quotes for your grade, origin or delivery terms.',
                    'Quotes are synthetic demo documents and are shown separately from public benchmarks.']
@@ -137,7 +183,8 @@ def build_country_pricing(company: dict, offers: list, fx: list, snapshot: dict,
             'currencies': currencies, 'source': snapshot['source'], 'snapshot_version': snapshot['snapshot_version'],
             'benchmarks_synthetic': snapshot['synthetic'], 'synthetic_quotes': True,
             'benchmarks': [_benchmark(material, snapshot, fx, currencies, today) for material in company.get('materials', [])],
-            'quotes': [row for row in (_quote(offer) for offer in offers) if row is not None],
+            'quote_note': QUOTE_NOTE,
+            'quotes': [row for row in (_quote(offer, snapshot, fx, units) for offer in offers) if row is not None],
             'fx_rates_used': sorted({(row['observation_date'], row['provider']) for row in _eur_rates(fx).values()}),
             'limitations': limitations}
 

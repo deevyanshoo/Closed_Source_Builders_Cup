@@ -14,7 +14,13 @@ const view = {
         { currency: 'EUR', status: 'converted', rate: '0.8', amount: '11579.2', per_unit: 'tonne', observation_date: '2026-10-14', provider: 'ECB', formula: 'USD->EUR = 1 / EUR->USD 1.25 (ECB reference rate, 2026-10-14)' }] },
     { material_id: 'aluminium', name: 'Aluminium conductor', unit: 'kg', status: 'benchmark', series: 'Aluminum', month: '2026-06', value: '3000', currency: 'USD', per_unit: 'tonne', note: 'Ingot.', age_days: 107, stale: true, conversions: [] },
     { material_id: 'polymer', name: 'Cable insulation polymer', unit: 'kg', status: 'no_public_benchmark', message: 'no public benchmark' }],
-  quotes: [{ offer_id: 'q1', supplier: 'Swift Copper Trading Ltd [SYNTHETIC]', origin_country_code: 'IN', material_id: 'copper', unit_price: '10.50', currency: 'USD', per_unit: 'kg', as_of: '2026-10-14', synthetic: true, document: 'SYN-express-copper.pdf' }],
+  quote_note: 'Demo quotes are synthetic and not calibrated to market prices',
+  quotes: [{ offer_id: 'q1', supplier: 'Swift Copper Trading Ltd [SYNTHETIC]', origin_country_code: 'IN', material_id: 'copper', unit_price: '10.50', currency: 'USD', per_unit: 'kg', as_of: '2026-10-14', synthetic: true, document: 'SYN-express-copper.pdf',
+      comparable: { amount: '10.5', currency: 'USD', per_unit: 'kg' }, vs_benchmark: { status: 'compared', difference_percent: '-27.5', benchmark_per_unit: '14.474', currency: 'USD', per_unit: 'kg', benchmark_month: '2026-09', series: 'Copper', label: 'synthetic quote compared with a public benchmark', formula: '(10.5 - 14.474) / 14.474 x 100, rounded to 0.1' } },
+    { offer_id: 'q2', supplier: 'Atacama Red Metals SpA [SYNTHETIC]', origin_country_code: 'CL', material_id: 'copper', unit_price: '9412.50', currency: 'USD', per_unit: 'tonne', as_of: '2026-10-14', synthetic: true, document: 'SYN-late-copper.pdf',
+      comparable: { amount: '9.4125', currency: 'USD', per_unit: 'kg' }, vs_benchmark: { status: 'compared', difference_percent: '-35.0', benchmark_per_unit: '14.474', currency: 'USD', per_unit: 'kg', benchmark_month: '2026-09', series: 'Copper', label: 'synthetic quote compared with a public benchmark', formula: 'f' } },
+    { offer_id: 'q3', supplier: 'Europa Copper SA [SYNTHETIC]', origin_country_code: 'DE', material_id: 'copper', unit_price: '8.00', currency: 'EUR', per_unit: 'kg', as_of: '2026-10-14', synthetic: true, document: 'SYN-eu-copper.csv',
+      comparable: { amount: '8', currency: 'EUR', per_unit: 'kg' }, vs_benchmark: { status: 'fx_unavailable', difference_percent: null, label: 'synthetic quote compared with a public benchmark', reason: 'No same-day ECB reference rate for USD to EUR is loaded.' } }],
   fx_rates_used: [['2026-10-14', 'ECB']], limitations: ['Benchmarks are monthly averages.'],
 } as unknown as CountryPricing;
 
@@ -49,5 +55,16 @@ describe('country-wise commodity pricing (#110)', () => {
     const result = await requestCountryPricing(send as unknown as typeof fetch);
     expect(result.company_id).toBe('solara-cables');
     expect(send).toHaveBeenCalledWith('/api/demo/country-pricing', { credentials: 'same-origin' });
+  });
+
+  it('says quotes are not calibrated and shows each one in one unit with its labelled difference', () => {
+    const html = renderToStaticMarkup(<CountryPricingPanel view={view} onLoad={() => {}} />);
+    expect(html).toContain('Demo quotes are synthetic and not calibrated to market prices');
+    expect(html).toContain('<th>Comparable price</th>');
+    expect(html).toContain('9412.50 USD per tonne');
+    expect(html).toContain('9.4125 USD per kg');
+    expect(html).toContain('-35.0% vs Copper 2026-09 (synthetic quote)');
+    expect(html).toContain('-27.5% vs Copper 2026-09 (synthetic quote)');
+    expect(html).toContain('Not compared: No same-day ECB reference rate for USD to EUR is loaded.');
   });
 });

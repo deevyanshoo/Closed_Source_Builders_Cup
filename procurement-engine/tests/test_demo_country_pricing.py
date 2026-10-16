@@ -82,11 +82,57 @@ def test_accepted_quotes_are_listed_by_origin_and_stay_synthetic(snapshot):
     saved = saved_offer('express-copper')
     draft = {**saved_offer('eu-copper'), 'status': 'needs_review'}
     view = build_country_pricing(get_company('solara-cables'), [saved, draft], FX, snapshot, today=TODAY)
-    assert view['quotes'] == [{'offer_id': 'express-copper', 'supplier': 'Swift Copper Trading Ltd [SYNTHETIC]',
-                               'origin_country_code': 'IN', 'material_id': 'copper', 'unit_price': '10.50',
-                               'currency': 'USD', 'per_unit': 'kg', 'as_of': '2026-10-14', 'synthetic': True,
-                               'document': 'SYN-express-copper.pdf'}]
+    [quote] = view['quotes']
+    assert {key: quote[key] for key in ('offer_id', 'supplier', 'origin_country_code', 'material_id', 'unit_price',
+                                        'currency', 'per_unit', 'as_of', 'synthetic', 'document')} == {
+        'offer_id': 'express-copper', 'supplier': 'Swift Copper Trading Ltd [SYNTHETIC]', 'origin_country_code': 'IN',
+        'material_id': 'copper', 'unit_price': '10.50', 'currency': 'USD', 'per_unit': 'kg', 'as_of': '2026-10-14',
+        'synthetic': True, 'document': 'SYN-express-copper.pdf'}
     assert view['synthetic_quotes'] is True and view['benchmarks_synthetic'] is False
+    assert view['quote_note'] == 'Demo quotes are synthetic and not calibrated to market prices'
+
+
+def test_quotes_get_one_consistent_unit_next_to_the_original(snapshot):
+    tonne, kg = saved_offer('late-copper'), saved_offer('express-copper')
+    view = build_country_pricing(get_company('solara-cables'), [tonne, kg], FX, snapshot, today=TODAY)
+    atacama, swift = view['quotes']
+    assert (atacama['unit_price'], atacama['per_unit']) == ('9412.50', 'tonne')
+    assert atacama['comparable'] == {'amount': '9.4125', 'currency': 'USD', 'per_unit': 'kg'}
+    assert swift['comparable'] == {'amount': '10.5', 'currency': 'USD', 'per_unit': 'kg'}
+
+
+def test_difference_from_the_benchmark_is_a_labelled_synthetic_percentage(snapshot):
+    view = build_country_pricing(get_company('solara-cables'), [saved_offer('late-copper'), saved_offer('express-copper')],
+                                 FX, snapshot, today=TODAY)
+    atacama, swift = view['quotes']
+    # (10.5 - 14.474) / 14.474 x 100 = -27.456...; (9.4125 - 14.474) / 14.474 x 100 = -34.969...
+    assert swift['vs_benchmark'] == {
+        'status': 'compared', 'difference_percent': '-27.5', 'benchmark_per_unit': '14.474', 'currency': 'USD',
+        'per_unit': 'kg', 'benchmark_month': '2026-09', 'series': 'Copper',
+        'label': 'synthetic quote compared with a public benchmark',
+        'formula': '(10.5 - 14.474) / 14.474 x 100, rounded to 0.1'}
+    assert atacama['vs_benchmark']['difference_percent'] == '-35.0'
+
+
+def test_quote_in_another_currency_uses_the_dated_reference_rate_or_says_unavailable(snapshot):
+    euro = saved_offer('eu-copper')
+    # benchmark 14.474 USD/kg x USD->EUR 0.8 = 11.5792 EUR/kg; (8 - 11.5792) / 11.5792 x 100 = -30.91...
+    compared = build_country_pricing(get_company('solara-cables'), [euro], FX, snapshot, today=TODAY)['quotes'][0]
+    assert compared['vs_benchmark']['difference_percent'] == '-30.9'
+    assert compared['vs_benchmark']['benchmark_per_unit'] == '11.5792'
+    assert 'ECB reference rate' in compared['vs_benchmark']['formula']
+    missing = build_country_pricing(get_company('solara-cables'), [euro], [], snapshot, today=TODAY)['quotes'][0]
+    assert missing['vs_benchmark'] == {'status': 'fx_unavailable', 'difference_percent': None,
+                                       'label': 'synthetic quote compared with a public benchmark',
+                                       'reason': 'No same-day ECB reference rate for USD to EUR is loaded.'}
+
+
+def test_quote_for_a_material_without_benchmark_is_not_compared(snapshot):
+    company = get_company('terrapack')
+    view = build_country_pricing(company, [saved_offer('terrapack-pet-resin-selected')], FX, snapshot, today=TODAY)
+    [quote] = view['quotes']
+    assert quote['vs_benchmark']['status'] == 'no_public_benchmark'
+    assert quote['comparable'] == {'amount': '130', 'currency': 'INR', 'per_unit': 'kg'}
 
 
 def test_route_returns_view_with_fx_unavailable_when_offline():

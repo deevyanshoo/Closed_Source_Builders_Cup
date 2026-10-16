@@ -80,6 +80,26 @@ describe('news presentation', () => {
     expect(status.label).toContain(new Date('2026-10-15T08:00:00Z').toLocaleString());
     expect(status.label).not.toContain(new Date(view.checked_at).toLocaleString());
   });
+  it('uses a successful source time for manual refresh with no news success clock', () => {
+    const view = { ...base, items: [{} as NewsItem], collection: { ...base.collection!, mode: 'manual', status: 'manual', news_success_at: null }, sources: [
+      { ...base.sources[0], source_id: 'rss', state: 'fresh', last_checked_at: '2026-10-16T11:00:00Z' },
+      { ...base.sources[0], source_id: 'gdelt', state: 'unavailable', last_checked_at: '2026-10-16T11:45:00Z', reason: 'Timeout' },
+    ] };
+    const status = newsPresentationStatus(view, now);
+    expect(status.kind).toBe('updated');
+    expect(status.label).toContain(new Date('2026-10-16T11:00:00Z').toLocaleString());
+    expect(status.label).not.toContain(new Date(view.checked_at).toLocaleString());
+  });
+  it('dates saved manual stories from an old trusted source when all current checks fail', () => {
+    const view = { ...base, items: [{} as NewsItem], collection: { ...base.collection!, mode: 'manual', status: 'manual', news_success_at: null }, sources: [
+      { ...base.sources[0], source_id: 'rss', state: 'stale', last_checked_at: '2026-10-15T08:00:00Z' },
+      { ...base.sources[0], source_id: 'gdelt', state: 'unavailable', last_checked_at: '2026-10-16T11:45:00Z', reason: 'Timeout' },
+    ] };
+    const status = newsPresentationStatus(view, now);
+    expect(status.kind).toBe('saved');
+    expect(status.label).toContain(new Date('2026-10-15T08:00:00Z').toLocaleString());
+    expect(status.label).not.toContain(new Date(view.checked_at).toLocaleString());
+  });
   it('accepts only public HTTPS image URLs and keeps attribution separate', () => {
     expect(safeNewsImageUrl('https://www.eia.gov/story.jpg')).toBe('https://www.eia.gov/story.jpg');
     expect(safeNewsImageUrl('https://www.ecb.europa.eu/story.jpg')).toBe('https://www.ecb.europa.eu/story.jpg');

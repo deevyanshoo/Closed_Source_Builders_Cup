@@ -191,6 +191,13 @@ describe('company news workspace', () => {
     const settled = renderToStaticMarkup(<NewsWorkspace company={company} view={news} loading={false} error="Timeout" onRefresh={() => {}} />);
     expect(settled).not.toContain('<canvas');
     expect(settled).toContain('Source check unavailable');
+    expect(settled).toMatch(/<details class="demo-news-more"><summary>Collection details<\/summary>[\s\S]*Source check unavailable/);
+    expect(settled).not.toMatch(/<div class="demo-alert" role="alert">Source check unavailable/);
+    const firstFailure = renderToStaticMarkup(<NewsWorkspace company={company} view={null} loading={false} error="Timeout" onRefresh={() => {}} />);
+    expect(firstFailure).toContain('Refresh sources');
+    expect(firstFailure).toContain('Collection details');
+    expect(firstFailure).not.toContain('<canvas');
+    expect(firstFailure).not.toMatch(/role="alert"/);
   });
   it('filters observed items by both material and category without treating source reliability as relevance', () => {
     expect(filterNewsItems(news.items, 'copper', 'trade').map(item => item.item_id)).toEqual(['a']);

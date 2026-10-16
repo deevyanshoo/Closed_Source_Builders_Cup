@@ -12,6 +12,9 @@ export function newsPresentationStatus(view: NewsView | null, now = Date.now()):
   if (!view) return { kind: 'collecting', label: 'Collecting relevant stories', detail: '' };
   const newsStamp = view.collection?.news_success_at ? Date.parse(view.collection.news_success_at) : NaN;
   const checkedStamp = Date.parse(view.checked_at);
+  const sourceClockAllowed = !Number.isFinite(newsStamp) && (!view.collection ||
+    ['manual', 'live_fallback'].includes(view.collection.mode ?? '') ||
+    ['manual', 'live_fallback'].includes(view.collection.status));
   const newsSources = view.sources.filter(source => source.source_id !== 'ecb_fx');
   const sourceStamp = (states: string[]) => Math.max(...newsSources
     .filter(source => states.includes(source.state))
@@ -20,15 +23,15 @@ export function newsPresentationStatus(view: NewsView | null, now = Date.now()):
   const healthyStamp = sourceStamp(['fresh', 'cached', 'empty']);
   const trustedStamp = sourceStamp(['fresh', 'cached', 'empty', 'stale']);
   const newsTime = displayTime(view.collection?.news_success_at) ??
-    (!view.collection && Number.isFinite(trustedStamp) ? new Date(trustedStamp).toLocaleString() : null);
+    (sourceClockAllowed && Number.isFinite(trustedStamp) ? new Date(trustedStamp).toLocaleString() : null);
   const fxSource = view.sources.find(source => source.source_id === 'ecb_fx');
   const fxIssue = !!fxSource && unhealthy(fxSource.state);
   const newsIssue = newsSources.some(source => unhealthy(source.state));
   const healthyNewsSource = newsSources.some(source => ['fresh', 'cached', 'empty'].includes(source.state));
   const recentNewsSuccess = Number.isFinite(newsStamp) && now - newsStamp >= 0 && now - newsStamp <= 2 * 60 * 60 * 1000;
-  const recentLegacyCheck = !view.collection && (
+  const recentLegacyCheck = sourceClockAllowed && (
     (Number.isFinite(healthyStamp) && now - healthyStamp <= 2 * 60 * 60 * 1000) ||
-    (newsSources.length === 0 && ['fresh', 'empty'].includes(view.cache_state) &&
+    (!view.collection && newsSources.length === 0 && ['fresh', 'empty'].includes(view.cache_state) &&
       Number.isFinite(checkedStamp) && now - checkedStamp >= 0 && now - checkedStamp <= 2 * 60 * 60 * 1000));
   const currentNews = !['unavailable', 'offline'].includes(view.cache_state) &&
     ((recentNewsSuccess && healthyNewsSource) || recentLegacyCheck);

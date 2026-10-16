@@ -1,0 +1,15 @@
+.zoorq-outlook{margin:24px 0;padding:20px;border:1px solid var(--zoorq-line,#d9dce3);background:var(--zoorq-white,#fff);color:var(--zoorq-ink,#16181d);border-radius:12px}
+.zoorq-outlook-head span{display:block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--zoorq-blue,#2852d8)}
+.zoorq-outlook-head h3{margin:4px 0 8px;font-size:20px}
+.zoorq-outlook-label{font-weight:700;margin:0 0 12px}
+.zoorq-outlook-series{border-top:1px solid var(--zoorq-line,#d9dce3);padding-top:14px;margin-top:14px}
+.zoorq-outlook-series h4{margin:0 0 4px;font-size:15px}
+.zoorq-outlook-meta,.zoorq-outlook-source,.zoorq-outlook-muted{font-size:12px;line-height:1.5;color:var(--zoorq-muted,#5d6270);margin:4px 0;overflow-wrap:anywhere}
+.zoorq-outlook-source a{color:var(--zoorq-blue,#2852d8)}
+.zoorq-outlook-stale{display:inline-block;margin:6px 0;padding:4px 8px;border-radius:6px;background:var(--zoorq-warning,#fff3de);color:var(--zoorq-warning-ink,#a95d00);font-size:12px;font-weight:600}
+.zoorq-outlook-table{overflow-x:auto}
+.zoorq-outlook-table table{width:100%;min-width:560px;border-collapse:collapse;font-size:12px}
+.zoorq-outlook-table th,.zoorq-outlook-table td{text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid var(--zoorq-line,#d9dce3)}
+.zoorq-outlook .zoorq-outlook-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--zoorq-muted,#5d6270);background:var(--zoorq-soft,#f7f9fc)}
+.zoorq-outlook-table td small{display:block;color:var(--zoorq-muted,#5d6270);margin-top:3px}
+.zoorq-outlook-table td[data-status]{text-transform:capitalize;font-weight:600}

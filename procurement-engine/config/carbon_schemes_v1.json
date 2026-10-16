@@ -1,0 +1,503 @@
+{
+  "registry_version": "carbon-schemes-v1",
+  "checked_on": "2026-10-16",
+  "label": "indicative, not financial or legal advice",
+  "match_wording": "possibly eligible, check conditions",
+  "eu_member_states": [
+    "Austria",
+    "Belgium",
+    "Bulgaria",
+    "Croatia",
+    "Cyprus",
+    "Czechia",
+    "Denmark",
+    "Estonia",
+    "Finland",
+    "France",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "Ireland",
+    "Italy",
+    "Latvia",
+    "Lithuania",
+    "Luxembourg",
+    "Malta",
+    "Netherlands",
+    "Poland",
+    "Portugal",
+    "Romania",
+    "Slovakia",
+    "Slovenia",
+    "Spain",
+    "Sweden"
+  ],
+  "schemes": [
+    {
+      "scheme_id": "in-ccts-offset",
+      "country": "India",
+      "official_name": "Carbon Credit Trading Scheme (CCTS), offset mechanism",
+      "publisher": "Bureau of Energy Efficiency, Ministry of Power, Government of India",
+      "official_url": "https://beeindia.gov.in/show_content.php?lang=1&level=1&ls_id=116&lid=294",
+      "checked_on": "2026-10-15",
+      "offers": "certificates",
+      "offers_text": "BEE issues Carbon Credit Certificates to registered projects after verification under the offset procedure. One certificate represents one tonne of CO2e.",
+      "who": "Entities not obligated under the compliance mechanism that register an eligible project in an approved offset sector and follow the published detailed procedure.",
+      "match": {
+        "company_country": "India"
+      },
+      "numbers_used": [
+        "1 Carbon Credit Certificate = 1 tCO2e (BEE carbon market page)."
+      ],
+      "benefit": {
+        "status": "available",
+        "kind": "hypothetical_gross_certificate_value",
+        "currency": "INR",
+        "label": "hypothetical gross certificate value, not issued credit or a sale",
+        "formula": "issued certificates x your stated certificate price, before fees and without a confirmed buyer",
+        "inputs": [
+          {
+            "name": "issued_certificates",
+            "label": "Carbon Credit Certificates actually issued to you",
+            "unit": "certificates (1 = 1 tCO2e)"
+          },
+          {
+            "name": "price_per_certificate",
+            "label": "Certificate price you assume, with its date",
+            "unit": "INR per certificate",
+            "note": "No official price is published."
+          }
+        ]
+      }
+    },
+    {
+      "scheme_id": "in-ccts-compliance",
+      "country": "India",
+      "official_name": "Carbon Credit Trading Scheme (CCTS), compliance mechanism",
+      "publisher": "Bureau of Energy Efficiency, Ministry of Power, Government of India",
+      "official_url": "https://beeindia.gov.in/show_content.php?lang=1&level=1&ls_id=116&lid=294",
+      "checked_on": "2026-10-15",
+      "offers": "certificates",
+      "offers_text": "Obligated entities with emission intensity below their notified target may be issued Carbon Credit Certificates; entities above it surrender or buy certificates for the shortfall.",
+      "who": "Entities notified as obligated entities. BEE lists aluminium, chlor alkali, cement, fertiliser, iron and steel, pulp and paper, petrochemicals, petroleum refinery and textile for gradual transition.",
+      "match": {
+        "company_country": "India",
+        "sector_keywords": [
+          "aluminium",
+          "chlor",
+          "cement",
+          "fertiliser",
+          "fertilizer",
+          "iron",
+          "steel",
+          "pulp",
+          "paper",
+          "petrochemical",
+          "refinery",
+          "textile"
+        ]
+      },
+      "numbers_used": [
+        "1 Carbon Credit Certificate = 1 tCO2e.",
+        "Nine sectors named for gradual transition (BEE carbon market page)."
+      ],
+      "benefit": {
+        "status": "available",
+        "kind": "hypothetical_gross_certificate_value",
+        "currency": "INR",
+        "label": "hypothetical gross certificate value, not issued credit or a sale",
+        "formula": "issued certificates x your stated certificate price, before fees and without a confirmed buyer",
+        "inputs": [
+          {
+            "name": "issued_certificates",
+            "label": "Carbon Credit Certificates actually issued to you",
+            "unit": "certificates (1 = 1 tCO2e)"
+          },
+          {
+            "name": "price_per_certificate",
+            "label": "Certificate price you assume, with its date",
+            "unit": "INR per certificate",
+            "note": "No official price is published."
+          }
+        ]
+      }
+    },
+    {
+      "scheme_id": "in-msme-zed",
+      "country": "India",
+      "official_name": "MSME Sustainable (ZED) Certification Scheme",
+      "publisher": "Ministry of Micro, Small and Medium Enterprises, Government of India",
+      "official_url": "https://zed.msme.gov.in/subsidy-on-cost-of-certification",
+      "checked_on": "2026-10-16",
+      "offers": "subsidy",
+      "offers_text": "A subsidy on the official cost of Zero Defect Zero Effect (ZED) certification, plus other incentives listed on the scheme site.",
+      "who": "Micro, small and medium enterprises with Udyam Registration; each unit applies for certification separately.",
+      "match": {
+        "company_country": "India"
+      },
+      "numbers_used": [
+        "Subsidy on the cost of certification: micro 80%, small 60%, medium 50% (zed.msme.gov.in/subsidy-on-cost-of-certification).",
+        "Women-owned MSMEs: free ZED certification (notice \"Free ZED Certification For Women Owned MSMEs\" on zed.msme.gov.in, checked 16 Oct 2026). The subsidy page still lists women owners under the extra 10%; the later notice is followed here.",
+        "An additional 10% for SC/ST entrepreneurs or MSMEs in NER, Himalayan, LWE, island territories or aspirational districts; an additional 5% for SFURTI or MSE-CDP participants.",
+        "A one-time joining reward of Rs 10,000 after taking the ZED Pledge, deducted from the certification cost first."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "No current official ZED fee schedule is archived here (the scheme guidelines PDF was not read), and the subsidy applies only to that official fee, so no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "in-sidbi-green-finance",
+      "country": "India",
+      "official_name": "SIDBI Green Finance Scheme (GFS)",
+      "publisher": "Small Industries Development Bank of India (SIDBI)",
+      "official_url": "https://www.sidbi.in/en/green-finance",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available. SIDBI's Green Finance Scheme page states term loans up to Rs 50 crore, at most 75% of project cost, repayment up to 10 years with up to 18 months moratorium, at an MCLR-linked rate.",
+      "who": "Manufacturers, service providers and MSMEs on the supply or demand side of the green value chain, for activities such as energy efficiency, renewable energy, e-mobility and waste management.",
+      "match": {
+        "company_country": "India"
+      },
+      "numbers_used": [
+        "Financing up to Rs 50 crore, subject to at most 75% of total project cost (sidbi.in/en/green-finance, re-read 16 Oct 2026).",
+        "Repayment up to 10 years with moratorium up to 18 months; MCLR-linked interest.",
+        "No rate concession is published."
+      ],
+      "benefit": {
+        "status": "available",
+        "kind": "first_year_simple_interest_difference",
+        "currency": "INR",
+        "max_loan": "500000000",
+        "label": "first-year simple interest difference, not an offer",
+        "formula": "loan amount x (your current rate - the rate you were offered), first year, simple interest",
+        "inputs": [
+          {
+            "name": "loan_amount",
+            "label": "Loan amount",
+            "unit": "INR"
+          },
+          {
+            "name": "current_rate_percent",
+            "label": "Your current borrowing rate",
+            "unit": "% per year"
+          },
+          {
+            "name": "offered_rate_percent",
+            "label": "Rate in an offer you actually received",
+            "unit": "% per year"
+          }
+        ]
+      }
+    },
+    {
+      "scheme_id": "eu-cbam",
+      "country": "European Union",
+      "official_name": "Carbon Border Adjustment Mechanism (CBAM), definitive regime",
+      "publisher": "European Commission, Directorate-General for Taxation and Customs Union",
+      "official_url": "https://taxation-customs.ec.europa.eu/carbon-border-adjustment-mechanism_en",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: from 1 January 2026 EU importers buy and surrender CBAM certificates for the embedded emissions of covered goods.",
+      "who": "Exporters of cement, iron and steel, aluminium, fertilisers, electricity or hydrogen to the EU, through their EU importer. Check the CN code of the exact product.",
+      "match": {
+        "export_to_eu": true,
+        "material_ids": [
+          "aluminium",
+          "aluminium-foil",
+          "steel",
+          "rebar",
+          "clinker",
+          "hydrogen"
+        ]
+      },
+      "numbers_used": [
+        "CBAM certificate prices by import quarter: Q1 2026 EUR 75.36 (published 7 April 2026), Q2 2026 EUR 75.28 (6 July 2026), Q3 2026 EUR 82.32 (5 October 2026); Q4 2026 not yet published.",
+        "Certificate numbers also depend on the free-allocation adjustment and any carbon price already paid, which are not modelled here."
+      ],
+      "benefit": {
+        "status": "available",
+        "kind": "gross_cbam_sensitivity",
+        "currency": "EUR",
+        "quarter_prices": {
+          "2026-Q1": "75.36",
+          "2026-Q2": "75.28",
+          "2026-Q3": "82.32"
+        },
+        "label": "gross sensitivity for imports in {quarter}, before the free-allocation adjustment, carbon price already paid and importer obligations; not a buyer saving",
+        "formula": "embedded tonnes x the published CBAM certificate price for that import quarter",
+        "inputs": [
+          {
+            "name": "import_quarter",
+            "label": "Import quarter (2026-Q1 to 2026-Q3)",
+            "unit": "quarter"
+          },
+          {
+            "name": "embedded_tonnes",
+            "label": "Embedded emissions of the goods",
+            "unit": "tCO2e"
+          }
+        ]
+      }
+    },
+    {
+      "scheme_id": "ie-eu-ets",
+      "country": "Ireland",
+      "official_name": "EU Emissions Trading System (EU ETS) in Ireland",
+      "publisher": "Environmental Protection Agency (Ireland)",
+      "official_url": "https://www.epa.ie/our-services/licensing/climate-change/eu-emissions-trading-system-/",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a cap-and-trade scheme where installations surrender emission allowances and can trade them.",
+      "who": "Operators of covered installations such as power stations and larger industrial plants (for example cement, lime and chemicals), as listed by the EPA.",
+      "match": {
+        "company_country": "Ireland"
+      },
+      "numbers_used": [
+        "The EPA page says the EU ETS limits emissions from more than 11,000 installations."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Allowance needs depend on whether a site is a covered installation and its verified emissions; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "za-carbon-tax",
+      "country": "South Africa",
+      "official_name": "Carbon Tax (Carbon Tax Act), administered by SARS",
+      "publisher": "South African Revenue Service (SARS)",
+      "official_url": "https://www.sars.gov.za/customs-and-excise/excise/environmental-levy-products/carbon-tax/",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a carbon tax with annual accounts and payments filed with SARS.",
+      "who": "Entities liable under the Carbon Tax Act, as set out by SARS; check the Act and SARS guidance for thresholds.",
+      "match": {
+        "company_country": "South Africa"
+      },
+      "numbers_used": [
+        "SARS lists annual carbon tax accounts and payments filed on eFiling (EXD 180)."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Liability depends on facility activities, thresholds and allowances in the Act; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "ke-green-finance-taxonomy",
+      "country": "Kenya",
+      "official_name": "Kenya Green Finance Taxonomy (April 2025)",
+      "publisher": "Central Bank of Kenya",
+      "official_url": "https://www.centralbank.go.ke/kenya-green-finance-taxonomy-climate-risk-disclosure-framework/",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: the taxonomy is the Central Bank of Kenya's classification banks use for green finance. It is guidance, not a loan or subsidy.",
+      "who": "Projects and activities that banks classify as green under the taxonomy; check with a lender.",
+      "match": {
+        "company_country": "Kenya"
+      },
+      "numbers_used": [
+        "Published as the Kenya Green Finance Taxonomy, April 2025."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The taxonomy classifies activities; it states no rate, amount or subsidy."
+      }
+    },
+    {
+      "scheme_id": "ch-co2-levy-reduction-obligation",
+      "country": "Switzerland",
+      "official_name": "Exemption from the CO2 levy subject to a reduction obligation",
+      "publisher": "Federal Office for the Environment (FOEN), Switzerland",
+      "official_url": "https://www.bafu.admin.ch/en/reduction-obligation",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: the CO2 levy applies to heating fuels; operators of installations outside the ETS can apply for exemption by committing to a reduction obligation based on a target agreement with the federal government.",
+      "who": "Operators of installations that are not in the Swiss ETS and carry out an economic activity or certain public-law activities, as described by the FOEN; check the CO2 Ordinance for conditions.",
+      "match": {
+        "company_country": "Switzerland"
+      },
+      "numbers_used": [
+        "The FOEN business page states a CO2 levy of CHF 120 per tonne of CO2 from heating fuels.",
+        "A reduction obligation lasts until 2040, with an annual monitoring report and a decarbonisation plan updated every three years."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The exemption value depends on fuel use, the target agreement and the levy redistribution rules; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "ch-ets",
+      "country": "Switzerland",
+      "official_name": "Swiss Emissions Trading System (ETS) for installation operators",
+      "publisher": "Federal Office for the Environment (FOEN), Switzerland",
+      "official_url": "https://www.bafu.admin.ch/en/ets-installation-operators",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: high-emitting installations must take part in the Swiss ETS, which has been linked with the EU ETS since 1 January 2020.",
+      "who": "Installation operators carrying out an activity in Annex 6 of the CO2 Ordinance (the FOEN lists cement, chemicals and pharmaceuticals, refineries, paper, district heating and steel).",
+      "match": {
+        "company_country": "Switzerland"
+      },
+      "numbers_used": [
+        "Sites whose emissions consistently fall below 25,000 tonnes CO2e a year may apply to opt out.",
+        "Voluntary participation needs a total rated thermal input of at least 10 MW at the site."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Allowance needs depend on site activities, benchmarks and verified emissions; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "kr-k-ets",
+      "country": "South Korea",
+      "official_name": "Korea Emissions Trading Scheme (K-ETS)",
+      "publisher": "Ministry of Climate, Energy and Environment, Republic of Korea",
+      "official_url": "https://mcee.go.kr/eng/web/index.do?menuId=463",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a nationwide emissions trading scheme for industry, with a rising share of auctioned permits.",
+      "who": "Entities covered by the K-ETS Act; the ministry page states no threshold, so check the Act and its Enforcement Decree.",
+      "match": {
+        "company_country": "South Korea"
+      },
+      "numbers_used": [
+        "The ministry page says nationwide implementation began in 2015 and more than 70% of national GHG emissions are covered."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Coverage thresholds are not stated on the page and permit needs depend on verified emissions; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "mx-ets-pilot",
+      "country": "Mexico",
+      "official_name": "Programa de Prueba del Sistema de Comercio de Emisiones (pilot emissions trading system)",
+      "publisher": "Secretaría de Medio Ambiente y Recursos Naturales (SEMARNAT)",
+      "official_url": "https://www.gob.mx/semarnat/acciones-y-programas/programa-de-prueba-del-sistema-de-comercio-de-emisiones-179414",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a pilot cap-and-trade programme for energy and industry facilities. The page (22 Oct 2021) gives no later status.",
+      "who": "Facilities in the energy and industrial sectors with direct CO2 emissions of at least 100,000 tonnes a year, as stated by SEMARNAT.",
+      "match": {
+        "company_country": "Mexico"
+      },
+      "numbers_used": [
+        "Threshold: at least 100,000 tonnes of direct CO2 emissions a year.",
+        "Preliminary bases published in the Diario Oficial de la Federación on 1 October 2019."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The pilot was set up without economic effects for participants and its current phase is not confirmed; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "my-bnm-lctf",
+      "country": "Malaysia",
+      "official_name": "Low Carbon Transition Facility (LCTF), BNM's Fund for SMEs",
+      "publisher": "Bank Negara Malaysia",
+      "official_url": "https://www.bnm.gov.my/documents/20124/6025157/lctf_faq_en.pdf",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: a facility for SMEs moving to low carbon and sustainable operations, through participating banks. Available from 3 February 2022 until full utilisation; current availability is not confirmed.",
+      "who": "SMEs in all sectors committed to low carbon and sustainable operations, subject to assessment by a participating financial institution.",
+      "match": {
+        "company_country": "Malaysia"
+      },
+      "numbers_used": [
+        "Financing up to RM10 million per SME, tenure up to 10 years.",
+        "Maximum financing rate 5.0% per annum, including guarantee fee; no collateral required."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The rate offered depends on the lender and the facility may be fully used; no interest difference is calculated without an offered rate and a current loan rate."
+      }
+    },
+    {
+      "scheme_id": "bd-green-transformation-fund",
+      "country": "Bangladesh",
+      "official_name": "Green Transformation Fund (GTF)",
+      "publisher": "Bangladesh Bank (Sustainable Finance Department)",
+      "official_url": "https://www.bb.org.bd/pub/quaterly/greenbanking/sf%20report%20december%2025.pdf",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: a long-term refinance fund through participating banks for importing capital machinery for specified green initiatives.",
+      "who": "Manufacturer-exporters in any sector, for capital machinery and accessories for specified green initiatives, through a participating bank.",
+      "match": {
+        "company_country": "Bangladesh"
+      },
+      "numbers_used": [
+        "Launched January 2016 with USD 200 million; EUR 200 million added; BDT 50 billion local-currency fund introduced December 2022 (Bangladesh Bank quarterly review, Oct to Dec 2025)."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The review does not state borrower rates or loan limits; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "bd-environment-friendly-refinance",
+      "country": "Bangladesh",
+      "official_name": "Refinance Scheme for Environment Friendly Products/Initiatives",
+      "publisher": "Bangladesh Bank (Sustainable Finance Department)",
+      "official_url": "https://www.bb.org.bd/pub/quaterly/greenbanking/sf%20report%20december%2025.pdf",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: a revolving refinance scheme through banks for listed green products such as solar, biogas, effluent treatment and energy auditor certified machinery.",
+      "who": "Borrowers financing a product on the scheme list (70 products in 11 categories), through a participating bank or finance company.",
+      "match": {
+        "company_country": "Bangladesh"
+      },
+      "numbers_used": [
+        "Fund size BDT 10 billion since 2023 (SFD Circular No. 02, 30 August 2023)."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The review does not state borrower rates or loan limits; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "vn-green-taxonomy",
+      "country": "Vietnam",
+      "official_name": "Decision 21/2025/QD-TTg on environmental criteria and confirmation of projects in the green classification list",
+      "publisher": "Prime Minister of Vietnam (Government legal document portal)",
+      "official_url": "https://vanban.chinhphu.vn/?pageid=27160&docid=214447",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: the decision sets environmental criteria and how investment projects are confirmed as green. It is a classification, not a loan or subsidy.",
+      "who": "Investment projects seeking confirmation under the green classification list; check the decision text with a lender.",
+      "match": {
+        "company_country": "Vietnam"
+      },
+      "numbers_used": [
+        "Issued 4 July 2025, effective 22 August 2025."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The decision classifies projects; it states no rate, amount or subsidy."
+      }
+    },
+    {
+      "scheme_id": "om-cbo-green-practices",
+      "country": "Oman",
+      "official_name": "Promoting Sustainable and Green Financial Practices (Circular BM 1208)",
+      "publisher": "Central Bank of Oman",
+      "official_url": "https://cbo.gov.om/sites/assets/Documents/Global/Circulars/2024/2024-10-13%20BM%201208-%20%20Promoting%20Sustainable%20and%20Green%20Finanical%20Practices%20%20-%20Annex%20(Searchable).pdf",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be discussed with your bank: the circular asks banks to engage significant customers, including oil and gas and industry, on transition plans. It is a requirement on banks, not a loan or subsidy.",
+      "who": "Customers of banks licensed in Oman, especially large borrowers in Net Zero 2050 priority sectors (industry, oil and gas, transport, buildings and power).",
+      "match": {
+        "company_country": "Oman"
+      },
+      "numbers_used": [
+        "Circular BM 1208, annex dated 13 October 2024."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The circular sets requirements for banks; it states no rate, amount or subsidy."
+      }
+    }
+  ],
+  "not_verified": {
+    "UAE": "Central Bank of the UAE sustainable finance pages returned HTTP 403 and the MOCCAE framework PDF was rejected on 16 Oct 2026."
+  }
+}

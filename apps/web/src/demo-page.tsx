@@ -13,6 +13,8 @@ import { ActivityIndicator, workspaceActivity } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
 import { CarbonPanel, carbonCell } from './demo-carbon';
 import type { CarbonComparison } from './demo-carbon';
+import { SchemesPanel } from './demo-schemes';
+import type { SchemeResult } from './demo-schemes';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
 export const initialDemoState: DemoState = { epoch: 0, session: null, offers: [], plan: null, planRequest: null, recovery: null, rfq: null, news: null, reviewed: false, dirty: false, focusedId: null };
@@ -290,6 +292,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 export function DemoPage({ initialState = initialDemoState }: { initialState?: DemoState }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [carbon, setCarbon] = useState<CarbonComparison | null>(null);
+  const [schemes, setSchemes] = useState<SchemeResult | null>(null);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);
   const [companyError, setCompanyError] = useState('');
@@ -659,6 +662,7 @@ export function DemoPage({ initialState = initialDemoState }: { initialState?: D
     </section>
     {state.plan && !state.recovery && <PlanResults plan={state.plan} offers={state.offers} carbon={carbon} />}
     {state.plan && !state.recovery && state.session && <CarbonPanel plan={state.plan} csrf={state.session.csrf_token} contextVersion={state.session.context_version} result={carbon} onResult={setCarbon} />}
+    {state.session && company && <SchemesPanel key={`${company.company_id}:${state.session.context_version}`} csrf={state.session.csrf_token} contextVersion={state.session.context_version} companyName={company.name} result={schemes?.company_id === company.company_id ? schemes : null} onResult={setSchemes} />}
     {baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">05 / Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Synthetic what-if · no confirmed shipment event</span></div>
       <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. A delay changes only the selected supplier arrival assumption.</p>
       {busy === 'recovery' && progress && <ActivityIndicator {...progress} />}

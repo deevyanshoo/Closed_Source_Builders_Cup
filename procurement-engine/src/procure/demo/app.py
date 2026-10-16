@@ -26,7 +26,7 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
-from .carbon_api import carbon_export, register_carbon_routes
+from .carbon_api import carbon_export, register_carbon_routes, schemes_export
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -2122,7 +2122,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
                                  'drafts': deepcopy(value.drafts),
                                  'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq),
-                                 'carbon': carbon_export(value, active_plan)},
+                                 'carbon': carbon_export(value, active_plan),
+                                 'carbon_schemes': schemes_export(value)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 
     @app.post('/api/demo/reset')

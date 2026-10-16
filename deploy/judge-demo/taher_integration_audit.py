@@ -387,14 +387,17 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
         publishers.update(factor['publisher'] for factor in factors
                           if isinstance(factor, dict)
                           and isinstance(factor.get('publisher'), str))
-    attributed_figures = any(
-        re.search(r'\bfigures?\s+from\b.{0,100}\b' + re.escape(publisher) + r'\b',
+    attributed_publication = any(
+        re.search(r'\b(?:figures?|published\s+averages?)\s+from\b.{0,100}\b'
+                  + re.escape(publisher) + r'\b',
                   normalized, re.I)
         for publisher in publishers)
     for claim in VOICE_LIVE_CLAIM.finditer(caption):
-        prefix = caption[max(0, claim.start() - 16):claim.start()]
+        prefix = caption[max(0, claim.start() - 80):claim.start()]
         require(re.search(r'\b(?:no|not|never|without)\s+(?:a\s+|any\s+)?$',
-                          prefix, re.I) is not None,
+                          prefix, re.I) is not None
+                or re.search(r'\bnot\s+(?:confirmed|verified)\s+by\s+$',
+                             prefix, re.I) is not None,
                 stage, 'voice_live_tracking_claim')
     require(company_name.lower() in lowered
             and (plan['material'].lower() in lowered
@@ -406,7 +409,7 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                           r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
                           r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
             and (re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b',
-                           normalized, re.I) or attributed_figures)
+                           normalized, re.I) or attributed_publication)
             and re.search(r'\b(?:kg\s*CO2e|kilograms?\s+(?:of\s+)?'
                           r'(?:CO2e|CO2\s+equivalent|carbon dioxide equivalent))\b',
                           caption, re.I)
@@ -545,7 +548,8 @@ async def voice_turn(socket, audio, company_name, plan, context, carbon, dispatc
                     note()
                     require(tools == {'read_carbon', 'read_shipments'},
                             'voice', 'voice_missing_tools')
-                    require(re.search(r'\bcarbon\b', input_text, re.I)
+                    require(re.search(r'\b(?:carbon|emissions?|footprint)\b',
+                                      input_text, re.I)
                             and re.search(r'\bship(?:ment|ping)s?\b|\bdispatch\b',
                                           input_text, re.I),
                             'voice', 'voice_wrong_spoken_prompt')
@@ -609,7 +613,17 @@ async def voice_visit(base, client, csrf, context, company_name, plan, carbon, d
             await socket.send(json.dumps({'type': 'start', 'csrf_token': csrf,
                                           'expected_context_version': context}))
             ready = json.loads(await asyncio.wait_for(socket.recv(), 25))
-            require(ready.get('type') == 'ready', 'voice', 'voice_not_ready')
+            ready_type = ready.get('type') if isinstance(ready, dict) else None
+            ready_code = ready.get('code') if isinstance(ready, dict) else None
+            if trace is not None:
+                trace['ready_event'] = {
+                    'type': ready_type if isinstance(ready_type, str)
+                            and ID.fullmatch(ready_type) else None,
+                    'code': ready_code if isinstance(ready_code, str)
+                            and ID.fullmatch(ready_code) else None}
+                if checkpoint is not None:
+                    checkpoint()
+            require(ready_type == 'ready', 'voice', 'voice_not_ready')
             result = await voice_turn(socket, audio, company_name, plan, context, carbon, dispatch,
                                       trace=trace, checkpoint=checkpoint)
             await socket.send(json.dumps({'type': 'stop'}))

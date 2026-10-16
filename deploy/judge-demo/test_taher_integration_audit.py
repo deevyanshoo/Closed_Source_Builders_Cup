@@ -503,6 +503,25 @@ def test_r67_generic_prompt_caption_accepts_spoken_co2_equivalent_unit():
                                      view)['caption_grounded'] is True
 
 
+def test_r67_both_tools_caption_negates_live_carrier_confirmation():
+    _, carbon = comparison()
+    plan = {**PLAN, 'selected_offer_id': 'q2'}
+    view = dispatch()
+    view['shipments'][0]['offer_id'] = 'q2'
+    view['shipments'][0]['expected_arrival'] = '2026-10-24'
+    caption = ("For Solara Cables'  current purchase  of Copper cathode,  the total estimated  "
+               'emissions  are 31,848.96  kilograms  of CO2e.  This  is based  on published  '
+               "averages  from the International  Copper Association  and the UK's  "
+               'Department for Energy  Security and Net  Zero,  assuming 1,000  kilometers  '
+               'of sea freight. The planned  arrival  for this shipment  is October 24,  '
+               '2026,  although this is an  estimate, not  confirmed by live  carrier tracking.')
+    assert audit.check_voice_caption(caption, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_live_tracking_claim'):
+        audit.check_voice_caption(caption.replace('not  confirmed', 'confirmed'),
+                                  'Solara Cables', plan, carbon, view)
+
+
 def test_voice_turn_requires_both_actual_read_results_and_audio():
     _, carbon = comparison()
     view = dispatch()
@@ -545,6 +564,7 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
          'data': base64.b64encode(b'\0' * 10000).decode('ascii')},
         {'type': 'turn_complete'},
     ]
+    complete_events = deepcopy(events)
 
     class Socket:
         async def send(self, message):
@@ -573,6 +593,13 @@ def test_voice_turn_requires_both_actual_read_results_and_audio():
     assert trace['qualifying_audio_bytes'] == 10000
     assert trace['status'] == 'completed' and len(checkpoints) >= 3
     assert trace['intermediate_count'] == 3
+
+    for spoken_term in ('emissions', 'footprint'):
+        events[:] = deepcopy(complete_events)
+        events[0]['text'] = f'Read my {spoken_term} estimate and shipments.'
+        result = asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200,
+                                              'Solara Cables', PLAN, 7, carbon, view))
+        assert result['input_transcript_verified'] is True
 
     events[:] = [
         {'type': 'transcript', 'direction': 'input',
@@ -644,6 +671,50 @@ def test_voice_failure_trace_sanitizes_tool_payload_and_caps_caption():
     assert trace['tool_results'][0]['payload']['company_id'] == 'other'
     assert 'secret-do-not-log' not in json.dumps(trace)
     assert trace['error_code'] == 'voice_wrong_scope'
+
+
+def test_voice_not_ready_records_only_safe_initial_error_and_checks_state(monkeypatch):
+    from http.cookiejar import CookieJar
+    from urllib.request import HTTPCookieProcessor
+    from websockets.asyncio import client as ws_client
+
+    class Jar(CookieJar):
+        def __iter__(self):
+            yield types.SimpleNamespace(name='session', value='owned-session')
+
+    class FakeClient:
+        opener = types.SimpleNamespace(handlers=[HTTPCookieProcessor(Jar())])
+
+        def json(self, _stage, _path):
+            return {'company_id': 'solara-cables', 'context_version': 7,
+                    'plan': PLAN, 'simulated_outbox': []}
+
+    class Socket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def send(self, _message):
+            pass
+
+        async def recv(self):
+            return json.dumps({'type': 'error', 'code': 'voice_unavailable',
+                               'csrf_token': 'secret-do-not-log',
+                               'detail': 'private-provider-detail'})
+
+    monkeypatch.setattr(ws_client, 'connect', lambda *_args, **_kwargs: Socket())
+    trace = {}
+    _, carbon = comparison()
+    with pytest.raises(AcceptanceError, match='voice_not_ready'):
+        asyncio.run(audit.voice_visit('https://demo.example', FakeClient(), 'secret-csrf',
+                                      7, 'Solara Cables', PLAN, carbon, dispatch(),
+                                      b'\0' * 3200, trace=trace))
+    assert trace['ready_event'] == {'type': 'error', 'code': 'voice_unavailable'}
+    assert trace['action_state_unchanged'] is True
+    assert 'secret-do-not-log' not in json.dumps(trace)
+    assert 'private-provider-detail' not in json.dumps(trace)
 
 
 def test_optional_voice_audio_is_passed_to_every_company_visit(tmp_path, monkeypatch):

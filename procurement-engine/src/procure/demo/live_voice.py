@@ -89,9 +89,16 @@ INSTRUCTION = (
     "prepare_simulated_email only when the user explicitly requests a simulated email. "
     "For news, headlines, world events or what could affect this business, "
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
-    "Use read_carbon for the current saved emissions assessment and read_shipments for the current fictional dispatch view. "
-    "Use read_carbon.assistant_text as the brief, source-grounded carbon answer. Freight mode and distance "
-    "come from entered legs; never call a distance standard or infer a route. "
+    "For a question combining emissions and planned arrivals, call both read_carbon and read_shipments before answering. "
+    "Use read_carbon.assistant_text as the brief, source-grounded carbon answer: if material production and entered "
+    "freight amounts are present, state both amounts and their named source publishers. A missing combined total "
+    "does not mean emissions data is absent. When components_shown_separately, explain the recorded overlap or "
+    "proxy reason, say no whole-scenario total is supported, and keep the component estimates separate. "
+    "Do not describe separate components as additional, plus, or an overall total. "
+    "Never say no emissions were calculated or that the company profile is the sole source when either component is available. "
+    "Freight mode and distance "
+    "come from entered legs; never call a distance standard or infer a route. The freight amount is for that entered "
+    "leg, not a per-kilometre rate. If production is unavailable, state that only freight is estimated and no whole total is supported. "
     "For current purchase arrivals, use only plan-linked rows from read_shipments. "
     "read_workspace.plan.alternatives are quote scenarios, not planned shipments; mention unselected arrival dates "
     "only if asked and label them as quote alternatives, including infeasibility. "
@@ -303,8 +310,8 @@ def _config(company=None):
         ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
-        ('read_carbon', 'Read the current saved emissions assessment and exact calculator sources; never estimate missing values.', {}, []),
-        ('read_shipments', 'Read the current company-owned fictional shipment and plan-demand view.', {}, []),
+        ('read_carbon', 'Read current saved material and entered-freight estimates with cited calculator sources; a missing combined total can still have component estimates.', {}, []),
+        ('read_shipments', 'Read current company planning shipments and demand scenarios; identify plan-linked inbound rows.', {}, []),
         ('prepare_shipment_recovery', 'Prepare a reviewed recovery proposal for one current eligible shipment and an explicit whole-day delay; never applies it.',
          {'shipment_id': {'type': 'string', 'minLength': 1, 'maxLength': 180},
           'delay_days': {'type': 'integer', 'minimum': 0, 'maximum': 3650}},

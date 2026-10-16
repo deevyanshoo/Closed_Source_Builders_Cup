@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RiskReport } from './demo-api';
-import { acceptsRiskReport, RiskMonitor, startRiskPolling } from './demo-risk-monitor';
+import { acceptsRiskReport, RiskMonitor, selectRiskReports, summarizeRiskReports, startRiskPolling } from './demo-risk-monitor';
 
 const scope = { sessionId: 's1', companyId: 'atlas', contextVersion: 2, epoch: 4 };
 const alert = { alert_id: 'stable-1', company_id: 'atlas', category: 'inventory' as const, severity: 'high' as const,
@@ -18,6 +18,17 @@ const report: RiskReport = { company_id: 'atlas', context_version: 2, checked_at
 
 afterEach(() => vi.useRealTimers());
 describe('proactive risk monitor', () => {
+  it('defaults to this company and derives counts from the visible alerts', () => {
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={report} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    expect(html).toContain('Company risks');
+    expect(html).toContain('Atlas');
+    expect(html).not.toContain('LoomWorks');
+    expect(html).not.toContain('Across all company workspaces');
+    const selected = selectRiskReports(report, scope.companyId, 'current', 'inventory', 'high');
+    expect(summarizeRiskReports(selected)).toEqual({ high: 1, medium: 0, low: 0, companies_with_alerts: 1 });
+    expect(summarizeRiskReports(selectRiskReports(report, scope.companyId, 'all', 'news', 'all'))).toEqual({ high: 0, medium: 0, low: 0, companies_with_alerts: 0 });
+    expect(summarizeRiskReports(selectRiskReports(report, scope.companyId, 'all', 'all', 'high')).high).toBe(2);
+  });
   it('rests before the first actual risk request rather than claiming an active scan', () => {
     const html = renderToStaticMarkup(<RiskMonitor scope={scope} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
     expect(html).toContain('<canvas');
@@ -60,7 +71,7 @@ describe('proactive risk monitor', () => {
     expect(errors).not.toHaveBeenCalled();
   });
   it('shows impact, confidence, evidence and source gaps, and keeps other-company actions behind Open company', () => {
-    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={report} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={report} mode="portfolio" onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
     expect(html).toContain('Proactive risk monitor');
     expect(html).toContain('Atlas');
     expect(html).toContain('LoomWorks');
@@ -75,7 +86,7 @@ describe('proactive risk monitor', () => {
   });
   it('keeps ten company summaries compact by default and nests complete alert details behind disclosures', () => {
     const ten = { ...report, companies: Array.from({ length: 10 }, (_, index) => ({ ...report.companies[0], company_id: `company-${index}`, company_name: `Company ${index}`, alerts: [{ ...alert, alert_id: `alert-${index}`, company_id: `company-${index}` }] })) };
-    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={ten} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={ten} mode="portfolio" onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
     expect(html.match(/<details class="demo-risk-company"/g)).toHaveLength(10);
     expect(html).not.toMatch(/<details class="demo-risk-company"[^>]* open/);
     expect(html).toContain('5 materials evaluated');

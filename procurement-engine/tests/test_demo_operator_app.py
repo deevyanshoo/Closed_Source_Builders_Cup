@@ -64,6 +64,9 @@ def test_operator_overview_and_watch_requires_review_then_applies_once():
 def test_csp_allows_generated_mp3_blob_media_without_relaxing_scripts_or_connect():
     with demo(Provider(evidence=())) as client:
         policy = client.get('/api/demo/session').headers['content-security-policy']
+        image_policy = next(part for part in policy.split(';') if part.strip().startswith('img-src ')).split()
+        assert 'https://www.eia.gov' in image_policy and 'https://www.ecb.europa.eu' in image_policy
+        assert 'https:' not in image_policy and '*' not in image_policy
         assert "media-src 'self' blob:" in policy
         assert "script-src 'self'" in policy
         assert "connect-src 'self'" in policy

@@ -1,4 +1,5 @@
 """Deterministic company fit ordering for headline metadata."""
+from collections import Counter
 from datetime import datetime, timezone
 import re
 
@@ -82,4 +83,35 @@ def rank_items(items, company, cap=None, *, as_of=None):
     ranked.sort(key=lambda x: (_ORDER[x['relevance_strength']], *_date(x, as_of),
                                str(x.get('title') or '').casefold(), str(x.get('url') or '')),
                 reverse=True)
+    seen, distinct = set(), []
+    for item in ranked:
+        title = re.sub(r'[\W_]+', ' ', str(item.get('title') or '').casefold()).strip()
+        publisher = re.sub(r'[\W_]+', ' ', str(item.get('publisher') or '').casefold()).strip()
+        # An unknown publisher does not establish that two links report the
+        # same article. The sorted first copy has the best dated evidence.
+        if title and publisher and publisher != 'google news discovery':
+            key = (title, publisher)
+            if key in seen:
+                continue
+            seen.add(key)
+        distinct.append(item)
+    ranked = distinct
+    # Let the first visible stories represent distinct recorded exposures when
+    # their relevance tier is equal. Original date/title ordering breaks ties.
+    counts = Counter()
+    front = []
+    remaining = list(ranked)
+    for _ in range(min(5, len(remaining))):
+        strongest = _ORDER[remaining[0]['relevance_strength']]
+        candidates = [item for item in remaining if _ORDER[item['relevance_strength']] == strongest]
+        def facet(item):
+            for key in ('matched_materials', 'matched_routes', 'matched_currencies'):
+                if item.get(key):
+                    return (key, item[key][0])
+            return ('category', item.get('category'))
+        chosen = min(candidates, key=lambda item: counts[facet(item)])
+        front.append(chosen)
+        counts[facet(chosen)] += 1
+        remaining.remove(chosen)
+    ranked = front + remaining
     return ranked if cap is None else ranked[:cap]

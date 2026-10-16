@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { CompanyProfile } from './demo-api';
+import type { CompanyProfile, RiskReport } from './demo-api';
 import { CompanyHub, filterWorkspaceCompanies, WorkspaceHeader, WorkspaceNavigation, WorkspaceOverview } from './zoorq-workspace';
 
 const company: CompanyProfile = {
@@ -80,5 +80,14 @@ describe('ZOORQ workspace shell', () => {
     const html = renderToStaticMarkup(<WorkspaceOverview company={changed} news={null} quoteCount={0} onView={() => {}} />);
     expect(html).toContain('Polymer cover needs review');
     expect(html).toContain('approximately 5 days');
+  });
+
+  it('shows only alerts for the current company beside the shared timeline', () => {
+    const report = { company_id: 'solara', companies: [{ company_id: 'solara', alerts: [{ company_id: 'solara' }] }, { company_id: 'other', alerts: [{ company_id: 'other' }, { company_id: 'other' }] }] } as RiskReport;
+    const html = renderToStaticMarkup(<WorkspaceOverview company={company} report={report} news={null} quoteCount={0} onView={() => {}} />);
+    expect(html).toContain('1 current-company monitor alert');
+    expect(html).toContain('role="img"');
+    const stale = renderToStaticMarkup(<WorkspaceOverview company={{ ...company, company_id: 'another' }} report={report} news={null} quoteCount={0} onView={() => {}} />);
+    expect(stale).not.toContain('current-company monitor alert');
   });
 });

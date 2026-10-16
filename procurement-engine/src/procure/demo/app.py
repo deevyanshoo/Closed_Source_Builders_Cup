@@ -142,7 +142,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com https://www.eia.gov https://www.ecb.europa.eu; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         request_outcome(diagnostics, request.method, request.url.path,
                         response.status_code, (monotonic() - started) * 1000)
         return response
@@ -304,15 +304,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         return {'checked_at': report['checked_at'], 'companies': rows,
                 'limitations': report['limitations']}
 
-    async def scan_risks(value, expected_version=None):
-        """Read ten trusted catalogues without switching company or changing proposals."""
+    async def scan_risks(value, expected_version=None, scan_scope='all'):
+        """Read trusted catalogues without switching company or changing proposals."""
         from .proactive_risks import assess_company
         with value.lock:
             active(value)
             company_id, version = value.company_id, value.context_version
             if expected_version is not None:
                 context(value, {'expected_context_version': expected_version}, explicit=True)
-        profiles = list_companies()
+        profiles = [row for row in list_companies()
+                    if scan_scope == 'all' or row['company_id'] == company_id]
         news = {}
         async def fetch_news(company):
             try:
@@ -939,7 +940,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
     @app.get('/api/demo/risks')
     async def get_risks(request: Request):
-        return await scan_risks(session(request))
+        scan_scope = request.query_params.get('scope', 'all')
+        if scan_scope not in ('all', 'current'):
+            raise SessionError('invalid_scope', 'Choose current company or portfolio risks.', 400)
+        return await scan_risks(session(request), scan_scope=scan_scope)
 
     @app.get('/api/demo/operator')
     async def operator_overview(request: Request):

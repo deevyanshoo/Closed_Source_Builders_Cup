@@ -299,7 +299,7 @@ def test_company_discovery_isolated_and_sector_does_not_invent_material_match():
     service = NewsService(clock=lambda: NOW, transport=fetch, offline=False)
     first = service.get(copper)
     second = service.get(textile)
-    assert 1 <= len(calls) <= 6
+    assert 1 <= len(calls) <= 8
     assert len(set(calls)) == len(calls)
     assert any(item['relevance_kind'] == 'direct_material' and item['matched_materials'] == ['copper'] for item in first['items'])
     assert any(item['relevance_kind'] in ('sector', 'route') and not item['matched_materials'] for item in second['items'])
@@ -364,7 +364,7 @@ def test_simultaneous_company_news_reads_share_one_provider_refresh():
         release.set()
         assert first.result(timeout=2)['items']
         assert second.result(timeout=2)['items']
-    assert len(calls) == 3
+    assert len(calls) == 4  # One shared refresh; its low coverage triggers one route query.
 
 
 def test_waiting_company_news_read_returns_unavailable_at_refresh_deadline(monkeypatch):
@@ -441,3 +441,112 @@ def test_material_homonyms_require_physical_procurement_context(company_id, titl
     item = _company_item({'title': title}, get_company(company_id))
     assert item['matched_materials'] == ([expected_material] if expected_material else [])
     assert (item['relevance_kind'] == 'direct_material') == bool(expected_material)
+
+
+def test_discovery_queries_cover_later_materials_and_route_fallback():
+    from urllib.parse import parse_qs, urlsplit
+    from procure.demo.company import get_company
+    from procure.demo.news import _google_queries
+
+    queries = [parse_qs(urlsplit(url).query)['q'][0].lower()
+               for url in _google_queries(get_company('gridspring-batteries'))]
+    assert len(queries) == 4
+    assert any('graphite' in query for query in queries[:2])
+    assert any('lithium' in query for query in queries[:2])
+    assert any('battery' in query for query in queries[:3])
+    assert 'busan' in queries[3] or 'hai phong' in queries[3]
+
+
+def test_rss_image_requires_public_https_and_publisher_domain():
+    from procure.demo.news import _rss
+    rss = b'''<rss xmlns:media="http://search.yahoo.com/mrss/"><channel>
+      <item><title>Copper supply update</title><link>https://news.google.com/rss/articles/one</link>
+        <source url="https://publisher.example.com">Publisher</source>
+        <media:thumbnail url="https://cdn.publisher.example.com/copper.jpg"/></item>
+      <item><title>Copper output update</title><link>https://news.google.com/rss/articles/two</link>
+        <source url="https://publisher.example.com">Publisher</source>
+        <media:thumbnail url="https://127.0.0.1/internal.jpg"/></item>
+      <item><title>Copper shipment update</title><link>https://news.google.com/rss/articles/three</link>
+        <source url="https://publisher.example.com">Publisher</source>
+        <media:thumbnail url="https://other.example.com/tracker.jpg"/></item>
+    </channel></rss>'''
+    found = _rss(rss, 'Google News RSS', '2026-10-15T10:00:00+00:00')
+    assert found[0]['image_url'] == 'https://cdn.publisher.example.com/copper.jpg'
+    assert found[0]['image_source'] == 'publisher_feed'
+    assert all('image_url' not in row for row in found[1:])
+
+
+def test_gdelt_social_image_keeps_original_publisher_attribution():
+    from procure.demo.news import _gdelt
+    payload = b'{"articles":[{"title":"Copper mine output falls","url":"https://publisher.example.com/story","socialimage":"https://cdn.publisher.example.com/photo.jpg"},{"title":"Copper output improves","url":"https://publisher.example.com/other","socialimage":"https://unrelated.example.net/photo.jpg"}]}'
+    found = _gdelt(payload, '2026-10-15T10:00:00+00:00')
+    assert found[0]['image_url'] == 'https://cdn.publisher.example.com/photo.jpg'
+    assert found[0]['image_source'] == 'discovery_metadata'
+    assert 'image_url' not in found[1]
+
+
+@pytest.mark.parametrize('thin', [True, False])
+def test_route_discovery_runs_only_when_initial_company_fit_is_thin(thin):
+    from procure.demo.company import get_company
+    company = get_company('gridspring-batteries')
+    urls = [f'https://news.google.com/rss/search?q={index}' for index in range(4)]
+    calls = []
+    def fetch(url, **limits):
+        index = urls.index(url)
+        calls.append(index)
+        if index == 3:
+            title = 'Busan port shipping delay disrupts battery supply'
+        elif thin:
+            title = 'Unrelated market headline'
+        else:
+            title = ('Lithium carbonate supply tightens' if index == 0 else
+                     'Nickel sulfate production halted' if index == 1 else 'Unrelated market headline')
+        date = 'Wed, 14 Oct 2026 09:00:00 GMT' if not thin and index in (0, 1) else ''
+        return (f'<rss><channel><item><title>{title}</title>'
+                f'<link>https://news.google.com/rss/articles/{index}</link>'
+                f'<pubDate>{date}</pubDate></item></channel></rss>').encode()
+    result = NewsService(clock=lambda: NOW, transport=fetch, offline=False)._refresh_company_news(company, urls)
+    assert (3 in calls) is thin
+    if thin:
+        assert any(item['source_id'] == 'google_news_4' and item['relevance_kind'] in ('route', 'sector')
+                   for item in result['items'])
+
+
+@pytest.mark.parametrize('pub_date', ['', 'Tue, 01 Sep 2026 09:00:00 GMT',
+                                          'Fri, 16 Oct 2026 09:00:00 GMT'])
+def test_old_undated_or_future_stories_do_not_suppress_recent_route_fallback(pub_date):
+    from procure.demo.company import get_company
+    company = get_company('gridspring-batteries')
+    urls = [f'https://news.google.com/rss/search?q={index}' for index in range(4)]
+    calls = []
+    def fetch(url, **limits):
+        index = urls.index(url)
+        calls.append(index)
+        title = ('Busan port shipping delay disrupts battery supply' if index == 3 else
+                 f'Lithium carbonate supply tightens at plant {index}')
+        date = 'Wed, 14 Oct 2026 09:00:00 GMT' if index == 3 else pub_date
+        return (f'<rss><channel><item><title>{title}</title>'
+                f'<link>https://news.google.com/rss/articles/{index}</link>'
+                f'<pubDate>{date}</pubDate></item></channel></rss>').encode()
+    result = NewsService(clock=lambda: NOW, transport=fetch, offline=False)._refresh_company_news(company, urls)
+    assert 3 in calls
+    assert any(item['source_id'] == 'google_news_4' for item in result['items'])
+
+
+def test_duplicate_publisher_stories_do_not_suppress_route_fallback():
+    from procure.demo.company import get_company
+    company = get_company('atlas-petrochem')
+    urls = [f'https://news.google.com/rss/search?q={index}' for index in range(4)]
+    calls = []
+    def fetch(url, **limits):
+        index = urls.index(url)
+        calls.append(index)
+        title = ('Sohar port shipping disruption affects petrochemical cargo' if index == 3 else
+                 'Naphtha cracker shutdown delays petrochemical production')
+        return (f'<rss><channel><item><title>{title}</title>'
+                f'<link>https://news.google.com/rss/articles/{index}</link>'
+                '<source url="https://wtsp.com">WTSP.com</source>'
+                '<pubDate>Wed, 14 Oct 2026 09:00:00 GMT</pubDate></item></channel></rss>').encode()
+    result = NewsService(clock=lambda: NOW, transport=fetch, offline=False)._refresh_company_news(company, urls)
+    assert 3 in calls
+    assert any(item['source_id'] == 'google_news_4' for item in result['items'])

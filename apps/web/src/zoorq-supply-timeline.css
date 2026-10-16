@@ -1,0 +1,22 @@
+.zoorq-page .zoorq-timeline{min-width:0;padding:12px 0 4px}
+.zoorq-page .zoorq-timeline-origin{display:block;margin:0 0 6px;color:var(--zoorq-muted);font-size:10px;line-height:1.3}
+.zoorq-page .zoorq-timeline-track{position:relative;width:100%;height:16px;overflow:hidden;border-radius:4px;background:var(--zoorq-line)}
+.zoorq-page .zoorq-timeline-cover{position:absolute;left:0;top:0;height:100%;background:var(--zoorq-blue)}
+.zoorq-page .zoorq-timeline-gap{position:absolute;top:0;height:100%;background:repeating-linear-gradient(135deg,var(--zoorq-warning-ink) 0 5px,var(--zoorq-warning) 5px 10px)}
+.zoorq-page .zoorq-timeline-marker{position:absolute;z-index:1;top:0;bottom:0;width:2px;background:var(--zoorq-ink)}
+.zoorq-page .zoorq-timeline-cover-marker{background:var(--zoorq-surface);box-shadow:1px 0 0 var(--zoorq-ink)}
+.zoorq-page .zoorq-timeline-lead-marker{background:var(--zoorq-ink)}
+.zoorq-page .zoorq-timeline-unknown{position:absolute;inset:0;background:repeating-linear-gradient(135deg,var(--zoorq-line) 0 6px,var(--zoorq-canvas) 6px 12px)}
+.zoorq-page .zoorq-timeline-milestones{position:relative;height:49px;margin-top:6px;color:var(--zoorq-muted);font-size:11px;line-height:1.3;font-variant-numeric:tabular-nums}
+.zoorq-page .zoorq-timeline-milestone{position:absolute;display:block;max-width:min(160px,48%);white-space:normal}
+.zoorq-page .zoorq-milestone-first{top:0}
+.zoorq-page .zoorq-milestone-second{top:25px}
+.zoorq-page .zoorq-milestone-start{transform:none;text-align:left}
+.zoorq-page .zoorq-milestone-middle{transform:translateX(-50%);text-align:center}
+.zoorq-page .zoorq-milestone-end{transform:translateX(-100%);text-align:right}
+.zoorq-page .zoorq-timeline-unknown-labels{display:flex;justify-content:space-between;gap:12px;margin-top:8px;color:var(--zoorq-muted);font-size:11px;line-height:1.3}
+.zoorq-page .zoorq-timeline-unknown-labels span:last-child{text-align:right}
+.zoorq-page .zoorq-timeline-readout{margin:8px 0 0;color:var(--zoorq-ink);font-size:12px;line-height:1.45}
+.zoorq-page .zoorq-timeline-compact{padding:11px 0 0}
+.zoorq-page .zoorq-timeline-compact .zoorq-timeline-track{height:10px}
+@media(max-width:620px){.zoorq-page .zoorq-timeline-milestones{height:57px}.zoorq-page .zoorq-milestone-second{top:29px}.zoorq-page .zoorq-timeline-milestone{font-size:10px;max-width:min(125px,48%)}}

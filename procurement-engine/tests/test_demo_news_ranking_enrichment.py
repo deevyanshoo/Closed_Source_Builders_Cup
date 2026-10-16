@@ -29,6 +29,43 @@ def test_operational_event_precedes_incidental_material_mentions_and_cap():
     assert 'operating event' in ranked[0]['ranking_reason']
 
 
+def test_first_five_relevant_stories_include_other_recorded_materials():
+    company = get_company('gridspring-batteries')
+    titles = [f'Lithium carbonate supply price rises at plant {index}' for index in range(5)]
+    titles.append('Nickel sulfate supply price rises at plant')
+    rows = [_company_item({'title': title, 'url': f'https://example.org/story-{index}',
+                           'published_at': (NOW - timedelta(minutes=index)).isoformat()}, company)
+            for index, title in enumerate(titles)]
+    ranked = rank_items(rows, company, 5, as_of=NOW)
+    assert len(ranked) == 5
+    assert any(row['matched_materials'] == ['nickel'] for row in ranked)
+    assert all(row['relevance_strength'] in ('strong', 'related') for row in ranked)
+
+
+def test_same_publisher_duplicate_headline_keeps_best_date_and_other_publishers():
+    title = 'Naphtha cracker shutdown delays petrochemical production'
+    rows = [_company_item({'title': title, 'publisher': publisher,
+                           'url': f'https://news.google.com/rss/articles/{index}',
+                           'published_at': published}, ATLAS)
+            for index, (publisher, published) in enumerate((
+                ('WTSP.com', None),
+                ('wtsp.COM', (NOW - timedelta(hours=1)).isoformat()),
+                ('Reuters', (NOW - timedelta(hours=2)).isoformat())))]
+    ranked = rank_items(rows, ATLAS, as_of=NOW)
+    assert len(ranked) == 2
+    assert ranked[0]['publisher'] == 'wtsp.COM'
+    assert ranked[0]['published_at'] == (NOW - timedelta(hours=1)).isoformat()
+    assert ranked[1]['publisher'] == 'Reuters'
+
+
+def test_unknown_discovery_publisher_does_not_collapse_independent_links():
+    title = 'Naphtha cracker shutdown delays petrochemical production'
+    rows = [_company_item({'title': title, 'publisher': 'Google News discovery',
+                           'url': f'https://news.google.com/rss/articles/{index}'}, ATLAS)
+            for index in range(2)]
+    assert len(rank_items(rows, ATLAS, as_of=NOW)) == 2
+
+
 def test_financial_catalyst_metaphors_do_not_outrank_physical_material_news():
     titles = [
         'Plasma (XPL) Price Movement: BVNK Catalyst and Volatility - CoinMarketCap',
@@ -153,6 +190,19 @@ def test_article_reader_caps_excerpt_budget_and_never_guesses_eia_footer_date():
     second = enricher.attach(rows)
     assert len(calls) == 2
     assert second[0]['article']['fetched_at'] == first[0]['article']['fetched_at']
+
+
+def test_existing_allowlisted_article_fetch_adds_publisher_og_image():
+    html = ('<html><head><meta property="og:image" content="https://media.eia.gov/chart.jpg"></head>'
+            '<body><p>' + 'Copper supply and production constraints persist. ' * 4 + '</p></body></html>')
+    def fetch(url):
+        return SimpleNamespace(status=200, body=html.encode(), css=Selector(content=html).css)
+    enricher = ArticleEnricher(fetcher=fetch, clock=lambda: NOW)
+    [row] = enricher.attach([{'url': 'https://www.eia.gov/todayinenergy/detail.php?id=1',
+                              'relevance_strength': 'strong'}])
+    assert row['image_url'] == 'https://media.eia.gov/chart.jpg'
+    assert row['image_source'] == 'publisher_page'
+    assert row['article']['status'] == 'enriched'
 
 
 def test_ecb_date_uses_official_release_url_and_respects_crawl_delay():

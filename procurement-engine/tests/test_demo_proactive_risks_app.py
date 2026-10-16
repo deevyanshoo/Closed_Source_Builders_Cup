@@ -25,6 +25,23 @@ class News:
                 'synthetic': False, 'matched_operations': ['supply'], 'relevance_kind': 'direct_material'}]}
 
 
+def test_current_company_risk_scan_does_not_fetch_other_company_news():
+    seen = []
+    class RecordingNews(News):
+        def get(self, company, force=False):
+            seen.append(company['company_id'])
+            return super().get(company, force=force)
+    with TestClient(create_app(clock=lambda: NOW, news_service=RecordingNews()), base_url='https://demo.test') as client:
+        before = client.get('/api/demo/session').json()
+        response = client.get('/api/demo/risks?scope=current')
+        assert response.status_code == 200
+        result = response.json()
+        assert seen == [before['company_id']]
+        assert [row['company_id'] for row in result['companies']] == [before['company_id']]
+        assert all(alert['company_id'] == before['company_id'] for row in result['companies'] for alert in row['alerts'])
+        assert client.get('/api/demo/session').json() == before
+
+
 def test_risk_scan_is_owned_bounded_deduplicated_and_preserves_session_and_proposal():
     app = create_app(clock=lambda: NOW, news_service=News())
     with TestClient(app, base_url='https://demo.test') as client:

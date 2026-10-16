@@ -57,6 +57,35 @@ def test_rejects_private_oversize_and_catalog_incompatible():
         if kind == 'catalog': row['company_ids'][0] = 'wrong'
         with pytest.raises(ValueError): validate_bundle(row, profiles)
 
+
+def test_snapshot_accepts_only_bounded_public_publisher_images():
+    item = {'item_id': 'one', 'title': 'Copper shipment disrupted',
+            'url': 'https://publisher.example.com/story',
+            'image_url': 'https://cdn.publisher.example.com/image.jpg',
+            'image_source': 'publisher_feed'}
+    row = bundle()
+    row['views']['solara-cables']['items'] = [item]
+    validate_bundle(row)
+    for bad in ('http://cdn.publisher.example.com/image.jpg',
+                'https://127.0.0.1/image.jpg', 'https://other.example.com/image.jpg'):
+        row['views']['solara-cables']['items'] = [{**item, 'image_url': bad}]
+        with pytest.raises(ValueError):
+            validate_bundle(row)
+
+
+def test_snapshot_preserves_google_feed_image_publisher_provenance():
+    from procure.demo.news import _rss
+    rss = b'''<rss xmlns:media="http://search.yahoo.com/mrss/"><channel><item>
+      <title>Copper port shipment delayed</title><link>https://news.google.com/rss/articles/one</link>
+      <source url="https://publisher.example.com">Publisher</source>
+      <media:thumbnail url="https://cdn.publisher.example.com/port.jpg"/>
+    </item></channel></rss>'''
+    [item] = _rss(rss, 'Google News RSS', NOW.isoformat())
+    row = bundle()
+    row['views']['solara-cables']['items'] = [item]
+    validate_bundle(row)
+    assert item['image_publisher_url'] == 'https://publisher.example.com/'
+
 def test_reader_keeps_last_valid_snapshot_when_storage_transport_fails():
     import requests
     store = Store(bundle())

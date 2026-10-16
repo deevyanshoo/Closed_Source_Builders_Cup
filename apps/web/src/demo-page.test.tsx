@@ -163,7 +163,7 @@ describe('ZOORQ workspace routes', () => {
       expect(html).not.toContain('Undated copper headline');
     } finally { vi.useRealTimers(); }
   });
-  it.each(['stale', 'partial', 'source-stale'])('retains an eligible headline with a separate warning for %s coverage', condition => {
+  it.each(['stale', 'partial', 'source-stale'])('retains an eligible headline with a dated saved-story status for %s coverage', condition => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
     try {
@@ -172,7 +172,8 @@ describe('ZOORQ workspace routes', () => {
       ] };
       const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={news as never} quoteCount={1} onView={() => {}} />);
       expect(html).not.toContain('Coverage needs review');
-      expect(html).toContain('Coverage may be incomplete or dated');
+      expect(html).not.toContain('Coverage may be incomplete or dated');
+      expect(html).toContain('Showing saved stories');
       expect(html).toContain('Published ');
       expect(html).toContain('Unconfirmed copper headline');
     } finally { vi.useRealTimers(); }

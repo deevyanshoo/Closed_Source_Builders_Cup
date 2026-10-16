@@ -14,7 +14,7 @@ import requests
 from google.auth.transport.requests import AuthorizedSession
 
 from .company import list_companies
-from .news import _now, _company_item, _safe_url, MAX_ITEMS
+from .news import _now, _company_item, _safe_url, _safe_publisher_image, MAX_ITEMS
 from .news_ranking import rank_items
 
 MAX_BUNDLE_BYTES = 2 * 1024 * 1024
@@ -26,7 +26,8 @@ _ALLOWED_ITEM = {'item_id', 'title', 'url', 'publisher', 'provider', 'published_
                  'source_id', 'matched_materials', 'matched_routes', 'matched_currencies',
                  'matched_operations', 'relevance_kind', 'relevance_score', 'category',
                  'relevance_reason', 'implication', 'implication_confidence', 'next_steps',
-                 'relevance_strength', 'ranking_reason', 'article'}
+                 'relevance_strength', 'ranking_reason', 'article',
+                 'image_url', 'image_source', 'image_publisher_url'}
 _ARTICLE_FIELDS = {'status', 'method', 'fetched_at', 'title', 'published_at',
                    'excerpt', 'content_chars', 'reason'}
 _ALLOWED_SOURCE = {'source_id', 'name', 'state', 'last_checked_at', 'reason'}
@@ -163,6 +164,16 @@ def validate_bundle(bundle, profiles=None):
                 if item.get(key): _stamp(item[key])
             if not isinstance(item.get('url'), str) or not item['url'].startswith('https://'):
                 raise ValueError('Invalid article URL')
+            image = item.get('image_url')
+            if image is not None:
+                publisher_url = item.get('image_publisher_url') or item['url']
+                if (item.get('image_source') not in ('publisher_feed', 'publisher_page', 'discovery_metadata')
+                        or _safe_publisher_image(image, publisher_url) != image
+                        or (item.get('image_publisher_url') is not None
+                            and item.get('provider') != 'Google News RSS')):
+                    raise ValueError('Invalid publisher image')
+            elif 'image_source' in item or 'image_publisher_url' in item:
+                raise ValueError('Image attribution without image')
             if 'relevance_strength' in item and item['relevance_strength'] not in (
                     'strong', 'related', 'background', 'unmatched'):
                 raise ValueError('Invalid relevance strength')

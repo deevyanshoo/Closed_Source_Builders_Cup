@@ -23,12 +23,23 @@ describe('Overview news signal', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-16T12:00:00Z')); });
   afterEach(() => vi.useRealTimers());
 
-  it('keeps a current published story visible alongside a partial coverage warning', () => {
+  it('uses calm dated status for partial FX-only coverage without a prominent warning', () => {
+    const html = render({ ...news, cache_state: 'stale', sources: [
+      { source_id: 'eia', name: 'EIA', state: 'fresh', last_checked_at: '2026-10-16T11:00:00Z', reason: null },
+      { source_id: 'ecb_fx', name: 'ECB FX', state: 'stale', last_checked_at: '2026-10-15T11:00:00Z', reason: 'Timeout' },
+    ], collection: { status: 'partial', attempted_at: '2026-10-16T11:00:00Z', news_success_at: '2026-10-16T11:00:00Z', fx_success_at: '2026-10-15T11:00:00Z' } });
+    expect(html).toContain(`Updated ${new Date('2026-10-16T11:00:00Z').toLocaleString()}`);
+    expect(html).toContain('FX reference needs a separate source check');
+    expect(html).not.toContain('Showing saved stories');
+    expect(html).not.toContain('class="demo-news-warning');
+  });
+
+  it('keeps a current published story visible with a saved collection time', () => {
     const html = render({ ...news, cache_state: 'partial', collection: { status: 'partial', attempted_at: '2026-10-16T10:00:00Z', news_success_at: '2026-10-16T09:00:00Z', fx_success_at: '2026-10-16T09:00:00Z' } });
     expect(html).toContain('Copper shipping update');
     expect(html).toContain('Port Journal');
     expect(html).toContain('Published ');
-    expect(html).toMatch(/Coverage may be incomplete or dated/);
+    expect(html).toMatch(/Showing saved stories/);
     expect(html).toContain('View all signals');
     expect(html).not.toContain('Published 2026-10-15T08:30:00Z');
   });
@@ -36,32 +47,32 @@ describe('Overview news signal', () => {
   it('keeps a current published story visible when its source is stale', () => {
     const html = render({ ...news, sources: [{ source_id: 'port', name: 'Port source', state: 'stale', last_checked_at: '2026-10-15T10:00:00Z', reason: 'Refresh failed' }] });
     expect(html).toContain('Copper shipping update');
-    expect(html).toContain('Coverage may be incomplete or dated');
+    expect(html).toContain('Showing saved stories');
   });
 
-  it('warns for a failed FX collection even when news sources are healthy', () => {
+  it('dates current news separately when an FX source needs review', () => {
     const html = render({ ...news, cache_state: 'stale', sources: [
       { source_id: 'eia', name: 'EIA', state: 'fresh', last_checked_at: '2026-10-16T11:00:00Z', reason: null },
       { source_id: 'ecb_fx', name: 'ECB FX', state: 'stale', last_checked_at: '2026-10-15T11:00:00Z', reason: 'Refresh failed' },
     ], collection: { status: 'partial', attempted_at: '2026-10-16T11:00:00Z', news_success_at: '2026-10-16T11:00:00Z', fx_success_at: '2026-10-15T11:00:00Z' } });
     expect(html).toContain('Copper shipping update');
-    expect(html).toContain('FX reference unavailable');
-    expect(html).not.toContain('Coverage may be incomplete or dated');
+    expect(html).toContain('FX reference needs a separate source check');
+    expect(html).not.toContain('Showing saved stories');
   });
 
   it('does not infer an FX-only failure from partial status without source evidence', () => {
     const html = render({ ...news, collection: { status: 'partial', attempted_at: '2026-10-16T11:00:00Z', news_success_at: '2026-10-16T11:00:00Z', fx_success_at: '2026-10-15T11:00:00Z' } });
-    expect(html).toContain('Coverage may be incomplete or dated');
-    expect(html).not.toContain('FX reference unavailable');
+    expect(html).toContain('Showing saved stories');
+    expect(html).not.toContain('FX reference needs a separate source check');
   });
 
-  it('warns about news coverage when a news source and FX source both fail', () => {
+  it('dates saved news when both news and FX sources need review', () => {
     const html = render({ ...news, sources: [
       { source_id: 'eia', name: 'EIA', state: 'unavailable', last_checked_at: '2026-10-16T11:00:00Z', reason: 'Timeout' },
       { source_id: 'ecb_fx', name: 'ECB FX', state: 'unavailable', last_checked_at: '2026-10-16T11:00:00Z', reason: 'Timeout' },
     ], collection: { status: 'partial', attempted_at: '2026-10-16T11:00:00Z', news_success_at: '2026-10-16T11:00:00Z', fx_success_at: null } });
     expect(html).toContain('Copper shipping update');
-    expect(html).toContain('Coverage may be incomplete or dated');
+    expect(html).toContain('Showing saved stories');
   });
 
   it.each([
@@ -87,13 +98,13 @@ describe('Overview news signal', () => {
     expect(html).not.toContain('No company story in the past 7 days');
   });
 
-  it('warns when the last successful news collection is over two hours old', () => {
+  it('dates saved news when the last successful collection is over two hours old', () => {
     const html = render({ ...news, collection: { status: 'fresh', attempted_at: '2026-10-16T11:50:00Z', news_success_at: '2026-10-16T09:30:00Z', fx_success_at: '2026-10-16T11:50:00Z' } });
     expect(html).toContain('Copper shipping update');
-    expect(html).toContain('Coverage may be incomplete or dated');
+    expect(html).toContain('Showing saved stories');
   });
 
-  it('shows a warning and no invented headline when partial coverage has no eligible story', () => {
+  it('shows saved status and no invented headline when no eligible story exists', () => {
     const html = render({ ...news, cache_state: 'stale', items: [
       { ...story, title: 'Old story', published_at: '2026-10-01T08:30:00Z' },
       { ...story, item_id: 'undated', title: 'Undated story', published_at: null },
@@ -101,7 +112,7 @@ describe('Overview news signal', () => {
       { ...story, item_id: 'unmatched', title: 'Unmatched story', relevance_strength: 'unmatched' },
     ] });
     expect(html).toContain('No company story in the past 7 days');
-    expect(html).toContain('Coverage may be incomplete or dated');
+    expect(html).toContain('Showing saved stories');
     expect(html).not.toContain('Old story');
     expect(html).not.toContain('Undated story');
     expect(html).not.toContain('Background story');

@@ -137,6 +137,7 @@ class ArticleEnricher:
 
     def _read(self, url, provider, now):
         try:
+            from .news import _safe_publisher_image
             page = self.fetcher(url)
             if page.status != 200 or not isinstance(page.body, bytes) or len(page.body) > MAX_ARTICLE_BYTES:
                 raise ValueError('http_or_size')
@@ -146,13 +147,16 @@ class ArticleEnricher:
             if not body:
                 raise ValueError('body_missing')
             title = _clean(page.css('title::text').get())[:240] or None
-            return {'status': 'enriched', 'method': 'scrapling-static', 'fetched_at': now.isoformat(),
-                    'title': title, 'published_at': _date(page, provider, url),
-                    'excerpt': body[0][:MAX_EXCERPT], 'content_chars': sum(map(len, body)), 'reason': None}
+            image = next((_safe_publisher_image(node.attrib.get('content'), url)
+                          for node in page.css("meta[property='og:image']")[:2]
+                          if _safe_publisher_image(node.attrib.get('content'), url)), None)
+            return ({'status': 'enriched', 'method': 'scrapling-static', 'fetched_at': now.isoformat(),
+                     'title': title, 'published_at': _date(page, provider, url),
+                     'excerpt': body[0][:MAX_EXCERPT], 'content_chars': sum(map(len, body)), 'reason': None}, image)
         except Exception as exc:
-            return {'status': 'unavailable', 'method': 'scrapling-static', 'fetched_at': now.isoformat(),
-                    'title': None, 'published_at': None, 'excerpt': None, 'content_chars': 0,
-                    'reason': type(exc).__name__ if not isinstance(exc, ValueError) else str(exc)[:60]}
+            return ({'status': 'unavailable', 'method': 'scrapling-static', 'fetched_at': now.isoformat(),
+                     'title': None, 'published_at': None, 'excerpt': None, 'content_chars': 0,
+                     'reason': type(exc).__name__ if not isinstance(exc, ValueError) else str(exc)[:60]}, None)
 
     def attach(self, items, *, max_new=2):
         """Enrich ranked selected stories; process-wide hourly budget and six-hour cache."""
@@ -177,6 +181,8 @@ class ArticleEnricher:
                     cached = self._cache.get(row['url'])
                     if cached and now - cached[0] < _CACHE_TTL:
                         row['article'] = dict(cached[1])
+                        if cached[2]:
+                            row['image_url'], row['image_source'] = cached[2], 'publisher_page'
                         self._cache.move_to_end(row['url'])
                     elif provider == 'ecb' and self._last_ecb_fetch is not None and time.monotonic() - self._last_ecb_fetch < 5:
                         row['article'] = {'status': 'unavailable', 'method': 'scrapling-static',
@@ -187,8 +193,11 @@ class ArticleEnricher:
                         new += 1
                         if provider == 'ecb':
                             self._last_ecb_fetch = time.monotonic()
-                        row['article'] = self._read(row['url'], provider, now)
-                        self._cache[row['url']] = (now, dict(row['article']))
+                        article, image = self._read(row['url'], provider, now)
+                        row['article'] = article
+                        if image:
+                            row['image_url'], row['image_source'] = image, 'publisher_page'
+                        self._cache[row['url']] = (now, dict(article), image)
                         self._cache.move_to_end(row['url'])
                         while len(self._cache) > 64:
                             self._cache.popitem(last=False)

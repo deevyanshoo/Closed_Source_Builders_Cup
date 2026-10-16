@@ -155,6 +155,35 @@ def _child_text(node, name):
     return ''
 
 
+def _safe_publisher_image(raw, publisher_url):
+    image = _safe_url(raw)
+    publisher = _safe_url(publisher_url)
+    if not image or not publisher:
+        return None
+    publisher_host = urlsplit(publisher).hostname.removeprefix('www.')
+    host = urlsplit(image).hostname
+    return image if host == publisher_host or host.endswith('.' + publisher_host) else None
+
+
+def _publisher_image(node, article_url, provider):
+    """Use image metadata already in a feed, tied to that item's publisher."""
+    publisher_url = article_url
+    if provider == 'Google News RSS':
+        publisher_url = next((child.attrib.get('url', '') for child in node
+                              if _local_name(child.tag) == 'source'), '')
+    for child in node:
+        tag = _local_name(child.tag)
+        if tag not in ('thumbnail', 'content', 'enclosure'):
+            continue
+        media_type = child.attrib.get('type', '').lower()
+        if tag in ('content', 'enclosure') and not media_type.startswith('image/'):
+            continue
+        image = _safe_publisher_image(child.attrib.get('url'), publisher_url)
+        if image:
+            return image
+    return None
+
+
 def _metadata(title, url, provider, publisher, published_at, seen_at, retrieved_at, tier, reason):
     title = re.sub(r'\s+', ' ', str(title or '')).strip()[:240]
     url = _safe_url(url, primary_host={'EIA': 'www.eia.gov', 'ECB': 'www.ecb.europa.eu'}.get(provider))
@@ -191,6 +220,12 @@ def _rss(payload, provider, retrieved_at):
                          ('Google News RSS discovered publisher metadata; the underlying claim is unverified.'
                           if provider == 'Google News RSS' else 'Official publisher feed; the headline is evidence of a publication, not an exposure outcome.'))
         if item:
+            image = _publisher_image(node, item['url'], provider)
+            if image:
+                item['image_url'], item['image_source'] = image, 'publisher_feed'
+                if provider == 'Google News RSS':
+                    item['image_publisher_url'] = _safe_url(next((child.attrib.get('url', '') for child in node
+                                                                  if _local_name(child.tag) == 'source'), ''))
             out.append(item)
         if len(out) >= MAX_ITEMS_PER_SOURCE:
             break
@@ -215,6 +250,9 @@ def _gdelt(payload, retrieved_at):
                          _iso(row.get('seendate')) or retrieved_at, retrieved_at,
                          'discovery', 'GDELT discovered this publisher link; the underlying claim has not been independently verified.')
         if item:
+            image = _safe_publisher_image(row.get('socialimage'), url)
+            if image:
+                item['image_url'], item['image_source'] = image, 'discovery_metadata'
             out.append(item)
         if len(out) >= MAX_ITEMS_PER_SOURCE:
             break
@@ -303,7 +341,7 @@ def filter_material_homonyms(title, materials):
 def _company_item(raw, company):
     item = dict(raw)
     source_id = item.pop('_discovery_source_id', None)
-    if source_id in {'google_news_1', 'google_news_2', 'google_news_3'}:
+    if source_id in {'google_news_1', 'google_news_2', 'google_news_3', 'google_news_4'}:
         item['source_id'] = source_id
     materials, routes, currencies = _matches(item['title'], company)
     materials = filter_material_homonyms(item['title'], materials)
@@ -363,8 +401,22 @@ def _term_in(text, term):
     return bool(term and re.search(r'(?<!\w)' + re.escape(term.casefold()) + r'(?!\w)', text))
 
 
+def _published_within_week(item, now):
+    raw = item.get('published_at')
+    if not isinstance(raw, str):
+        return False
+    try:
+        published = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        if published.tzinfo is None:
+            return False
+        age = now - published.astimezone(timezone.utc)
+        return timedelta(0) <= age <= timedelta(days=7)
+    except (ValueError, OverflowError):
+        return False
+
+
 def _google_queries(company):
-    """At most three bounded queries from server-owned fictional exposure metadata."""
+    """Three balanced discovery queries plus a route query for thin coverage."""
     if not company.get('company_id'):
         return []
     from .company import get_company
@@ -381,15 +433,25 @@ def _google_queries(company):
             terms.append(distinctive)
     sector = re.sub(r'[^a-zA-Z0-9 -]', '', str(company['sector'])).strip().lower()[:60]
     queries = []
-    for group in (terms[:2], terms[2:6]):
+    for group in (terms[::2][:5], terms[1::2][:5]):
         if group:
             queries.append('(' + ' OR '.join('"' + x + '"' for x in group) + ') (supply OR shortage OR price OR production)')
     aliases = SECTOR_TERMS.get(sector, ())
     if aliases:
         queries.append('(' + ' OR '.join('"' + x + '"' for x in aliases[:2]) + ') (supply chain OR production OR shipping)')
+    places = []
+    for route in company.get('routes', [])[:8]:
+        for place in (route.get('origin', ''), route.get('destination', '')):
+            name = re.sub(r'[^a-zA-Z0-9 -]', '', str(place).split(',')[0]).strip().lower()[:40]
+            if name and name not in places:
+                places.append(name)
+    if places:
+        anchor = aliases[0] if aliases else terms[0] if terms else sector
+        queries.append('(' + ' OR '.join('"' + x + '"' for x in places[:2]) +
+                       ') "' + anchor + '" (port OR shipping OR disruption)')
     return [urlunsplit(('https', GOOGLE_NEWS_HOST, '/rss/search',
                        urlencode({'q': q[:220], 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'}), ''))
-            for q in queries[:3]]
+            for q in queries[:4]]
 
 
 class NewsService:
@@ -551,16 +613,19 @@ class NewsService:
                         'items': [_company_item(item, company) for item in old['items']]}
         stamp = now.isoformat()
         sources, items = [], []
-        pool = ThreadPoolExecutor(max_workers=min(3, len(urls)), thread_name_prefix='demo-company-news')
+        deadline = time.monotonic() + REFRESH_DEADLINE_SECONDS
+        initial_urls = urls[:3]
+        pool = ThreadPoolExecutor(max_workers=min(3, len(initial_urls)), thread_name_prefix='demo-company-news')
         try:
-            futures = [pool.submit(self.transport, url, timeout=TIMEOUT, max_bytes=MAX_BYTES) for url in urls]
-            done, _ = wait(futures, timeout=REFRESH_DEADLINE_SECONDS)
+            futures = [pool.submit(self.transport, url, timeout=TIMEOUT, max_bytes=MAX_BYTES) for url in initial_urls]
+            done, _ = wait(futures, timeout=max(0, deadline - time.monotonic()))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        for index, future in enumerate(futures, 1):
+
+        def record(index, future, completed):
             sid = f'google_news_{index}'
             try:
-                if future not in done:
+                if future not in completed:
                     raise TimeoutError('Refresh deadline exceeded')
                 payload = future.result()
                 if not isinstance(payload, bytes) or len(payload) > MAX_BYTES:
@@ -580,6 +645,24 @@ class NewsService:
                 sources.append({'source_id': sid, 'name': 'Google News RSS discovery',
                                 'state': 'unavailable', 'last_checked_at': stamp,
                                 'reason': _unavailable_reason(error)})
+
+        for index, future in enumerate(futures, 1):
+            record(index, future, done)
+
+        # A fourth, route-anchored request is worthwhile only when the first
+        # three feeds yielded fewer than two operationally relevant stories.
+        if len(urls) > 3 and time.monotonic() < deadline:
+            fit = rank_items((_company_item(item, company) for item in items), company, as_of=now)
+            if len({item['url'] for item in fit
+                    if item['relevance_strength'] in ('strong', 'related')
+                    and _published_within_week(item, now)}) < 2:
+                pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='demo-route-news')
+                try:
+                    fallback = pool.submit(self.transport, urls[3], timeout=TIMEOUT, max_bytes=MAX_BYTES)
+                    completed, _ = wait([fallback], timeout=max(0, deadline - time.monotonic()))
+                finally:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                record(4, fallback, completed)
         unique = {item['url']: item for item in items}
         with self._lock:
             for item in unique.values():

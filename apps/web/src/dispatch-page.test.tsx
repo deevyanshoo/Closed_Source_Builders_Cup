@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import { AffectedPanel, DispatchPage, HazardPanel, ReplayResult, ReplaySamplePicker, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice } from './dispatch-page';
+import { AffectedPanel, DispatchPage, HazardPanel, ReplayResult, ReplaySamplePicker, RouteEvidencePanel, ShipmentDetail, ShipmentList, StateNotice, DispatchSourceBanner } from './dispatch-page';
 import { createDispatchFixtureAdapter } from './dispatch';
 
 const adapter = createDispatchFixtureAdapter();
@@ -198,5 +198,21 @@ describe('accessibility', () => {
       .toContain('<span class="sr-only">Assessment: </span>');
     const page = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage /></MemoryRouter>);
     expect(page).toContain('<span class="red-dot" aria-hidden="true">');
+  });
+});
+
+describe('dispatch data source switch (#77)', () => {
+  it('defaults to the labelled fixture adapter and offers the local dispatch service', () => {
+    const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/dispatch']}><DispatchPage /></MemoryRouter>);
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>Synthetic fixtures<\/button>/);
+    expect(html).toMatch(/<button[^>]*aria-pressed="false"[^>]*>Local dispatch service<\/button>/);
+    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
+  });
+
+  it('names the gateway source when the service mode is active', () => {
+    const html = renderToStaticMarkup(<DispatchSourceBanner mode="service" onMode={() => {}} />);
+    expect(html).toContain('SYNTHETIC DATA · LOCAL DISPATCH SERVICE · THROUGH THE GATEWAY');
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Local dispatch service/);
+    expect(html).not.toContain('NOT CONNECTED TO THE GATEWAY');
   });
 });

@@ -29,6 +29,7 @@ type stateConfig struct {
 	ShipmentContextsPath, ShipmentPythonPath, ShipmentSourcePath            string
 	VoicePythonPath, VoiceSourcePath                                        string
 	QuoteLocalKeyFile, QuoteLocalUpstream                                   string
+	DispatchLocalUpstream                                                   string
 	DBURLFile, IdentitiesFile, AllowedOrigin, Upstream, Examples, Schema    string
 	Mode, GatewayAudience, PythonAudience, MachineIdentitiesFile, AssetsDir string
 	Verifier                                                                machineVerifier
@@ -53,6 +54,7 @@ type stateServer struct {
 	shipment         *shipmentAdapter
 	voice            *voiceHTTPAdapter
 	quote            *quoteAdapter
+	dispatch         *dispatchAdapter
 	cfg              stateConfig
 	db               *pgx.ConnConfig
 	identities       []identity
@@ -143,6 +145,7 @@ func newLocalStateServer(cfg stateConfig) *stateServer {
 	}
 	s.shipment = initShipmentHTTP(cfg)
 	s.quote = initQuoteHTTP(cfg)
+	s.dispatch = initDispatchHTTP(cfg)
 	s.voice = initVoiceHTTP(cfg)
 	if s.voice != nil {
 		s.voice.production = s
@@ -162,6 +165,10 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if quoteRouteCandidate(r.URL.Path) {
 		s.quoteHTTPRoute(w, r)
+		return
+	}
+	if dispatchRouteCandidate(r.URL.Path) {
+		s.dispatchHTTPRoute(w, r)
 		return
 	}
 	if quoteShipmentRouteCandidate(r.URL.Path) {

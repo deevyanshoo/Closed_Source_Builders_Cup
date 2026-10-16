@@ -100,6 +100,8 @@ INSTRUCTION = (
     "come from entered legs; never call a distance standard or infer a route. The freight amount is for that entered "
     "leg, not a per-kilometre rate. If production is unavailable, state that only freight is estimated and no whole total is supported. "
     "For current purchase arrivals, use only plan-linked rows from read_shipments. "
+    "Report that row's expected_arrival when present; unknown dates on separate profile expected orders do not "
+    "make the current plan arrival unavailable. "
     "read_workspace.plan.alternatives are quote scenarios, not planned shipments; mention unselected arrival dates "
     "only if asked and label them as quote alternatives, including infeasibility. "
     "Never infer a carbon total, route, carrier status or shipment delay from other facts. "

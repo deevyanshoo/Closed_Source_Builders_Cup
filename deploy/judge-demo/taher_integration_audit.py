@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import json
 import os
@@ -27,6 +27,7 @@ from smoke import AcceptanceError, Client, base_url, key, require
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'procurement-engine' / 'src'))
 from procure.carbon import compare_plan, load_registry
 from procure.carbon.assessment import validate_assessment
+from procure.demo.agent_tools import BUYER_FIELDS
 
 
 ID = re.compile(r'[A-Za-z0-9_.:-]{1,128}\Z')
@@ -322,6 +323,22 @@ def _fact_numbers(carbon, dispatch):
 
     visit(carbon)
     visit(dispatch)
+    for supplier in carbon.get('suppliers', []):
+        estimate = supplier.get('estimate', {})
+        components = [estimate.get('material', {}).get('kg_co2e'),
+                      estimate.get('transport', {}).get('kg_co2e'),
+                      estimate.get('total_kg_co2e')]
+        components.extend(leg.get('kg_co2e') for leg in
+                          estimate.get('transport', {}).get('legs', []))
+        for raw in components:
+            if raw is None:
+                continue
+            try:
+                value = Decimal(str(raw))
+                if value.is_finite():
+                    allowed.add(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+            except InvalidOperation:
+                continue
     return allowed
 
 
@@ -378,6 +395,27 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
     material_name = linked.get('material_name', '') if isinstance(linked, dict) else ''
     normalized = ' '.join(caption.split())
     lowered = normalized.lower()
+    arrival = linked.get('expected_arrival') if isinstance(linked, dict) else None
+    known_arrival = False
+    if isinstance(arrival, str):
+        try:
+            known_arrival = date.fromisoformat(arrival).isoformat() == arrival
+        except ValueError:
+            pass
+    if known_arrival:
+        require(re.search(r'\b(?:no\s+(?:known\s+)?(?:planned|expected)\s+arrival|'
+                          r'(?:planned|expected)\s+(?:inbound\s+)?arrival'
+                          r'(?:\s+date)?\s+(?:is\s+)?(?:unavailable|unknown|missing|'
+                          r'not\s+(?:available|known)))\b', normalized, re.I) is None,
+                stage, 'voice_false_unavailable_arrival')
+    if re.search(r'\bno\s+(?:emissions?|carbon)\s+(?:data|estimate)\s+'
+                 r'(?:was|is)\s+(?:calculated|available)\b', normalized, re.I):
+        has_estimate = any(
+            component.get('kg_co2e') is not None
+            for supplier in carbon.get('suppliers', [])
+            for component in (supplier.get('estimate', {}).get('material', {}),
+                              supplier.get('estimate', {}).get('transport', {})))
+        require(not has_estimate, stage, 'voice_false_unavailable_claim')
     publishers = set()
     for supplier in carbon.get('suppliers', []):
         estimate = supplier.get('estimate', {})
@@ -387,11 +425,22 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
         publishers.update(factor['publisher'] for factor in factors
                           if isinstance(factor, dict)
                           and isinstance(factor.get('publisher'), str))
+    publisher_names = set()
+    for publisher in publishers:
+        canonical = ' '.join(publisher.split())
+        publisher_names.add(canonical)
+        publisher_names.add(re.sub(r'\s*\(UK government\)$', '', canonical, flags=re.I))
+        if canonical == 'International Copper Association':
+            publisher_names.add('ICA')
+        if canonical.startswith('Department for Energy Security and Net Zero'):
+            publisher_names.update(('DESNZ', 'UK DESNZ'))
     attributed_publication = any(
-        re.search(r'\b(?:figures?|published\s+averages?)\s+from\b.{0,100}\b'
-                  + re.escape(publisher) + r'\b',
-                  normalized, re.I)
-        for publisher in publishers)
+        re.search(r'\(\s*' + re.escape(name) + r'\s*\)', normalized, re.I)
+        or re.search(r'\b(?:figures?|published\s+averages?)\s+from\b.{0,100}\b'
+                     + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\b(?:sourced\s+from|source\s+is|from)\s+(?:the\s+)?(?:UK\s+)?'
+                     + re.escape(name) + r'\b', normalized, re.I)
+        for name in publisher_names)
     for claim in VOICE_LIVE_CLAIM.finditer(caption):
         prefix = caption[max(0, claim.start() - 80):claim.start()]
         require(re.search(r'\b(?:no|not|never|without)\s+(?:a\s+|any\s+)?$',
@@ -402,11 +451,13 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
     require(company_name.lower() in lowered
             and (plan['material'].lower() in lowered
                  or (material_name and material_name.lower() in lowered))
-            and re.search(r'\b(?:carbon|co2e|greenhouse gas emissions?)\b', caption, re.I)
+            and re.search(r'\b(?:carbon|co2e|co2\s+equivalent|'
+                          r'greenhouse gas emissions?)\b', normalized, re.I)
             and re.search(r'\b(?:ship(?:ment|ping)|dispatch|inbound delivery|'
-                          r'planned\s+arrival)\b', normalized, re.I)
+                          r'planned\s+arrival|planned\s+to\s+arrive)\b', normalized, re.I)
             and re.search(r'\b(?:synthetic|fictional|planning scenario|hypothetical plan|'
                           r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
+                          r'planned\s+to\s+arrive|'
                           r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
             and (re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b',
                            normalized, re.I) or attributed_publication)
@@ -723,6 +774,22 @@ def check_typed_operator_reads(client, stage, company_name, material_name, csrf,
     return observed
 
 
+def save_buyer_draft(client, stage, csrf, context, scenario):
+    defaults = scenario['buyer_defaults']
+    draft = {field: defaults[field] for field in BUYER_FIELDS}
+    result = _post(client, stage, '/api/demo/buyer-draft', csrf, context,
+                   {'buyer_draft': draft, 'idempotency_key': key()})
+    require(result.get('company_id') == stage
+            and result.get('company', {}).get('company_id') == stage
+            and result.get('context_version') == context
+            and result.get('selected_material_id') == scenario['material_id']
+            and result.get('buyer_draft') == draft
+            and result.get('offers') == [] and result.get('plan') is None
+            and result.get('rfq') is None,
+            stage, 'buyer_draft_mismatch')
+    return draft
+
+
 def prepare_company(base, profile, row, checkpoint, voice_audio=None):
     """Prepare one company's reviewed quote, authoritative plan and evidence."""
     from procure.demo.quote_service import fixture_bytes, fixture_review_values
@@ -747,6 +814,9 @@ def prepare_company(base, profile, row, checkpoint, voice_audio=None):
     material = scenario['material_id']
     require(material in {item['material_id'] for item in profile['materials']}
             and len(scenario['fixture_ids']) == 3, stage, 'scenario_invalid')
+    row['stage'] = 'buyer_draft_pending'; checkpoint()
+    save_buyer_draft(client, stage, csrf, context, scenario)
+    row['buyer_draft'] = {'saved': True, 'selected_material_id': material}
     row.update(stage='quotes_pending', material_id=material); checkpoint()
     offers = []
     for fixture_id in scenario['fixture_ids']:

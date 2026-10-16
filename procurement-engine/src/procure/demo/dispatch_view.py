@@ -232,7 +232,8 @@ def build_dispatch_view(company: dict, offers: list[dict], plan: dict | None,
             elif recovery is not None:
                 row["recovery_available"] = False
                 row["recovery_reason"] = "stale_recovery_context"
-            rows.append(row)
+            # Foreground the current reviewed purchase; profile demand is not its arrival evidence.
+            rows.insert(0, row)
         elif display_plan.get("selected_offer_id"):
             limitations.append("Selected plan shipment unavailable: quote, unit, date, or ownership mismatch.")
     if not any(row["source"] == _PLAN_SOURCE for row in rows):

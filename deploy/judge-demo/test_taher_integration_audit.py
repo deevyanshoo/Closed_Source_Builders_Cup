@@ -214,6 +214,80 @@ def test_recovery_rfq_uses_reviewed_endpoint_and_checks_unsent_readback():
                                   revised, PLAN['offer_versions'])
 
 
+def test_buyer_draft_setup_persists_selected_material_before_quotes():
+    defaults = {'material': 'copper', 'quantity': '10000', 'current_stock': '2000',
+                'quantity_unit': 'kg', 'budget': '100000',
+                'additional_cost_per_unit': '0.25', 'decision_date': '2026-10-14',
+                'need_by': '2026-11-05', 'reporting_currency': 'USD'}
+
+    class Client:
+        def __init__(self):
+            self.calls = []
+            self.foreign = False
+
+        def json(self, stage, path, **kwargs):
+            self.calls.append((stage, path, kwargs))
+            return {'company_id': 'other' if self.foreign else stage,
+                    'company': {'company_id': stage}, 'context_version': 7,
+                    'selected_material_id': 'copper', 'buyer_draft': deepcopy(defaults),
+                    'offers': [], 'plan': None, 'rfq': None}
+
+    client = Client()
+    assert audit.save_buyer_draft(client, 'solara-cables', 'csrf', 7,
+                                  {'buyer_defaults': defaults, 'material_id': 'copper'}) == defaults
+    _, path, kwargs = client.calls[0]
+    assert path == '/api/demo/buyer-draft'
+    assert kwargs['body']['buyer_draft'] == defaults
+    assert kwargs['body']['expected_context_version'] == 7
+    assert kwargs['body']['idempotency_key']
+    client.foreign = True
+    with pytest.raises(AcceptanceError, match='buyer_draft_mismatch'):
+        audit.save_buyer_draft(client, 'solara-cables', 'csrf', 7,
+                               {'buyer_defaults': defaults, 'material_id': 'copper'})
+
+
+def test_company_preparation_saves_buyer_selection_before_first_quote(monkeypatch):
+    from procure.demo import quote_service
+
+    defaults = {'material': 'copper', 'quantity': '10000', 'current_stock': '2000',
+                'quantity_unit': 'kg', 'budget': '100000',
+                'additional_cost_per_unit': '0.25', 'decision_date': '2026-10-14',
+                'need_by': '2026-11-05', 'reporting_currency': 'USD'}
+    profile = {'company_id': 'solara-cables', 'materials': [{'material_id': 'copper'}],
+               'quote_coverage': {'scenarios': [{'material_id': 'copper',
+                                                 'fixture_ids': ['one', 'two', 'three'],
+                                                 'buyer_defaults': defaults}]}}
+    calls = []
+
+    class Client:
+        def __init__(self, _base):
+            pass
+
+        def json(self, stage, path, **kwargs):
+            calls.append(path)
+            if path == '/api/demo/session':
+                return {'csrf_token': 'csrf', 'context_version': 7,
+                        'company': {'company_id': stage}, 'offers': [],
+                        'plan': None, 'rfq': None}
+            assert path == '/api/demo/buyer-draft'
+            assert kwargs['body']['buyer_draft'] == defaults
+            return {'company_id': stage, 'company': {'company_id': stage},
+                    'context_version': 7, 'selected_material_id': 'copper',
+                    'buyer_draft': defaults, 'offers': [], 'plan': None, 'rfq': None}
+
+    def first_quote(_fixture_id):
+        calls.append('first_quote')
+        raise RuntimeError('stop_after_order_check')
+
+    monkeypatch.setattr(audit, 'Client', Client)
+    monkeypatch.setattr(quote_service, 'fixture_bytes', first_quote)
+    row = {}
+    with pytest.raises(RuntimeError, match='stop_after_order_check'):
+        audit.prepare_company('https://demo.example', profile, row, lambda: None)
+    assert calls == ['/api/demo/session', '/api/demo/buyer-draft', 'first_quote']
+    assert row['buyer_draft'] == {'saved': True, 'selected_material_id': 'copper'}
+
+
 def test_typed_operator_reads_use_normal_endpoint_and_preserve_action_state():
     _, carbon = comparison()
     view = dispatch()
@@ -520,6 +594,72 @@ def test_r67_both_tools_caption_negates_live_carrier_confirmation():
     with pytest.raises(AcceptanceError, match='voice_live_tracking_claim'):
         audit.check_voice_caption(caption.replace('not  confirmed', 'confirmed'),
                                   'Solara Cables', plan, carbon, view)
+
+
+def test_r68_publisher_parenthetical_and_planned_to_arrive_are_grounded():
+    _, carbon = comparison()
+    plan = {**PLAN, 'selected_offer_id': 'q2'}
+    view = dispatch()
+    view['shipments'][0]['offer_id'] = 'q2'
+    view['shipments'][0]['expected_arrival'] = '2026-10-24'
+    caption = ('For Solara Cables  and the current  Copper cathode  purchase, production  '
+               'emissions are estimated  at 31,720  kg  CO2e  (International  Copper  '
+               'Association)  and freight  at 128.96  kg  CO2e  (UK DESNZ).  The planned  '
+               'arrival for the  Europa Copper  SA shipment is October  24,  2026,  '
+               'with supplier-specific  footprints  missing from the data.')
+    assert audit.check_voice_caption(caption, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+    direct = ('Solara Cables Copper cathode shipment is planned to arrive on '
+              'October 24, 2026. Freight is 128.96 kg CO2e sourced from the UK '
+              'Department for Energy Security and Net Zero.')
+    assert audit.check_voice_caption(direct, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+    spoken_unit = direct.replace('kg CO2e', 'kilograms of CO2 equivalent')
+    assert audit.check_voice_caption(spoken_unit, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(caption.replace('(International  Copper  Association)', '')
+                                  .replace('(UK DESNZ)', ''), 'Solara Cables', plan, carbon, view)
+    with pytest.raises(AcceptanceError, match='voice_false_unavailable_claim'):
+        audit.check_voice_caption(caption + ' No emissions data was calculated.',
+                                  'Solara Cables', plan, carbon, view)
+
+
+def test_only_canonical_carbon_values_gain_two_decimal_rounding():
+    _, carbon = comparison()
+    carbon = deepcopy(carbon)
+    carbon['suppliers'][0]['estimate']['material']['kg_co2e'] = '110055.101535'
+    carbon['suppliers'][0]['estimate']['material']['factor']['factor'] = '3965.1234'
+    view = dispatch()
+    assert audit._guard_voice_facts('Production is 110,055.10 kg CO2e.',
+                                   carbon, view) == [audit.Decimal('110055.10')]
+    with pytest.raises(AcceptanceError, match='voice_unverified_number'):
+        audit._guard_voice_facts('Production is 110,055.11 kg CO2e.', carbon, view)
+    with pytest.raises(AcceptanceError, match='voice_unverified_number'):
+        audit._guard_voice_facts('The factor is 3,965.12.', carbon, view)
+
+
+def test_atlas_known_plan_arrival_cannot_be_called_unavailable():
+    _, carbon = comparison()
+    carbon = deepcopy(carbon)
+    for supplier in carbon['suppliers']:
+        supplier['estimate']['material']['kg_co2e'] = None
+        supplier['estimate']['total_kg_co2e'] = None
+        supplier['estimate']['transport']['kg_co2e'] = '16.12'
+    plan = {**PLAN, 'material': 'naphtha'}
+    view = dispatch()
+    view['shipments'][0]['material_name'] = 'Naphtha feedstock'
+    view['shipments'][0]['expected_arrival'] = '2026-10-26'
+    caption = ('For Atlas Petrochem,  Naphtha feedstock  emissions are separate:  '
+               'only freight  is estimated at  16.12 kg  CO2e  with no  whole-scenario  '
+               'total supported.  A usable production  factor is missing,  and the '
+               'planned arrival  is unavailable.  Sources: Department  for Energy '
+               'Security  and Net Zero.')
+    with pytest.raises(AcceptanceError, match='voice_false_unavailable_arrival'):
+        audit.check_voice_caption(caption, 'Atlas Petrochem', plan, carbon, view)
+    view['shipments'][0]['expected_arrival'] = None
+    assert audit.check_voice_caption(caption, 'Atlas Petrochem', plan, carbon,
+                                     view)['caption_grounded'] is True
 
 
 def test_voice_turn_requires_both_actual_read_results_and_audio():

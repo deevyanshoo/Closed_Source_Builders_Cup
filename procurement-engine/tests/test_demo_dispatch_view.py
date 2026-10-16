@@ -85,6 +85,9 @@ def test_all_fifty_two_materials_can_bind_only_their_own_reviewed_quote_and_same
             assert plan["selected_offer_id"] == offer["offer_id"]
             view = build_dispatch_view(company, [offer], plan, None)
             row, = plan_rows(view)
+            assert view["shipments"][0] == row
+            assert [record["order_id"] for record in view["shipments"][1:]] == [
+                order["order_id"] for order in company["orders"]]
             assert row["company_id"] == company["company_id"]
             assert row["material_id"] == scenario["material_id"]
             assert row["quantity_unit"] == defaults["quantity_unit"]

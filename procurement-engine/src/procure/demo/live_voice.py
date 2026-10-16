@@ -496,7 +496,8 @@ def _config(company=None):
                         'Never describe a failed tool as successful.')
     declarations = [types.FunctionDeclaration(name=name, description=description,
         parameters_json_schema={'type': 'object', 'additionalProperties': False,
-                                'properties': properties, 'required': required})
+                                'properties': properties, 'required': required},
+        behavior=(types.Behavior.BLOCKING if name in {'read_carbon', 'read_shipments'} else None))
         for name, description, properties, required in specs]
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],

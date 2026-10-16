@@ -119,7 +119,7 @@ def hindi_payload():
     source = fixture('judge_hindi_case_v1.json')
     return {'source_id': source['source_id'], 'title': source['original_title'],
             'source_url': source['source_url'], 'publication_at': source['publication_at'],
-            'instruction': 'Interpret only this curated Hindi title in short English. Explain regional cotton sourcing implications and limitations. Do not infer supplier price, stock or Bangladesh duty. Return JSON output and model_reviewed_flags (public_policy_change, regional_import_exposure, review_source). No tools or URL fetch.'}
+            'instruction': 'Interpret only this curated Hindi title. Return exactly one JSON object with an "output" string and a "model_reviewed_flags" array. In output, give a short English rendering, conditional regional cotton sourcing implications, and the limits of what the title establishes. Example shape only: {"output":"English rendering: <your rendering>. Conditional implication: <your cautious implication>. Limitation: <what the title cannot establish>.","model_reviewed_flags":["review_source"]}. Replace the example placeholders with your own interpretation. Choose at most three applicable flags from public_policy_change, regional_import_exposure, review_source. Do not infer supplier price, stock or Bangladesh duty. No tools or URL fetch.'}
 
 def sanitize_receipt(raw, now):
     if not isinstance(raw,dict):
@@ -141,6 +141,18 @@ def sanitize_receipt(raw, now):
                                              {'regional_import_exposure','public_policy_change','review_source'})}
     return record if summarize_gemini_receipts([record])['interpreted_articles'] == 1 else None
 
+_HINDI_RESPONSE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'output': {'type': 'string'},
+        'model_reviewed_flags': {'type': 'array', 'maxItems': 3,
+                                 'items': {'type': 'string', 'enum': [
+                                     'public_policy_change', 'regional_import_exposure', 'review_source']}},
+    },
+    'required': ['output', 'model_reviewed_flags'],
+}
+
+
 class VertexHindiProvider:
     """Same lazy, offline-aware Vertex boundary as the workspace operator."""
     def __call__(self,payload):
@@ -157,6 +169,7 @@ class VertexHindiProvider:
         try:
             response = client.models.generate_content(model=boundary.model, contents=json.dumps(payload,ensure_ascii=False),
                 config=types.GenerateContentConfig(temperature=0,max_output_tokens=640,response_mime_type='application/json',
+                    response_json_schema=_HINDI_RESPONSE_SCHEMA,
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
             candidates = response.candidates or []
             if len(candidates)!=1 or str(candidates[0].finish_reason).split('.')[-1].upper()!='STOP':

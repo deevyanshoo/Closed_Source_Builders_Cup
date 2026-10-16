@@ -41,12 +41,19 @@ describe('judge entry', () => {
 
   it('formats actual high-precision cover and spend for display without changing source facts', () => {
     const facts = [
-      {label:'Profile stock cover', value:'6.0000600006000060000600006 days', basis:'Profile stock / daily consumption'},
-      {label:'Reviewed baseline spend', value:'82000 USD', basis:'Deterministic bundled quote comparison'},
+      {label:'Profile stock cover', value:'6.0000600006000060000600006 days', basis:'Fictional profile stock / daily consumption'},
+      {label:'Shortest profile lead', value:'10 days', basis:'Matching material supplier profile; not a shipment ETA'},
+      {label:'Reviewed baseline spend', value:'82000 USD', basis:'Deterministic bundled quote comparison; not realized loss or savings'},
     ];
     const html=renderToStaticMarkup(<ZoorqJudgeEntry company={company} session={null} visit="first" prepared={{status:'ready',facts}} companyCount={10} {...actions}/>);
     expect(html).toContain('about 6 days');
     expect(html).toContain('82,000 USD');
+    expect(html).toContain('Recorded stock / daily use');
+    expect(html).toContain('Profile estimate');
+    expect(html).toContain('Reviewed quote total');
+    expect(html).toContain('Matching material supplier profile; not a shipment ETA');
+    expect(html).not.toContain('>Fictional profile stock');
+    expect(html).toMatch(/class="zoorq-judge-entry-fact-value"[^>]*>82,000<\/span> <span class="zoorq-judge-entry-fact-unit"[^>]*>USD<\/span>/);
     expect(html).not.toContain('6.0000600006000060000600006');
     expect(facts[0].value).toBe('6.0000600006000060000600006 days');
     expect(formatJudgeFact('unavailable')).toBe('unavailable');
@@ -62,9 +69,11 @@ describe('judge entry', () => {
     expect(html).toContain('Route');expect(html).toContain('News');expect(html).toContain('What if');
   });
 
-  it('keeps narrow fact columns and returning actions inside the mobile container', () => {
+  it('gives first-visit facts full-width columns while preserving the continuing mobile actions', () => {
     const css=readFileSync(new URL('./zoorq-judge-entry.css',import.meta.url),'utf8');
-    expect(css).toMatch(/\.zoorq-judge-entry-facts dd\{[^}]*overflow-wrap:anywhere/);
+    expect(css).toMatch(/\.zoorq-judge-entry-facts\{[^}]*grid-column:1\/-1;[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+    expect(css).toMatch(/\.zoorq-judge-entry-fact-value\{[^}]*white-space:nowrap/);
+    expect(css).toMatch(/@media\(max-width:760px\)\{[^}]*\}\.zoorq-judge-entry-facts\{[^}]*grid-template-columns:1fr/);
     expect(css).toMatch(/\.zoorq-judge-entry\{[^}]*max-width:100%;min-width:0;box-sizing:border-box/);
     expect(css).toMatch(/@media\(max-width:760px\)[^{]*\{[^}]*\.zoorq-judge-entry\.is-continuing\{[^}]*flex-direction:column;align-items:stretch/);
     expect(css).toMatch(/\.zoorq-judge-entry\.is-continuing \.zoorq-judge-entry-actions\{[^}]*flex:none;display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);

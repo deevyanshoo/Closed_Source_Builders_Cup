@@ -12,6 +12,12 @@ export function formatJudgeFact(value: string): string {
   const rounded = Number(display.replaceAll(',', ''));
   return `${rounded !== amount ? 'about ' : ''}${display} ${match[2]}`;
 }
+function compactFactBasis(label: string, basis: string): string {
+  if (label === 'Profile stock cover') return 'Recorded stock / daily use';
+  if (label === 'Shortest profile lead') return 'Profile estimate';
+  if (label === 'Reviewed baseline spend') return 'Reviewed quote total';
+  return basis;
+}
 export type JudgeEntryDestination = 'route' | 'news' | 'what-if';
 export type JudgeEntryProps = {
   company: CompanyProfile;
@@ -34,7 +40,11 @@ export function ZoorqJudgeEntry({ company, session, visit, prepared, companyCoun
       <div className="zoorq-judge-entry-status" role="status">{ready ? 'Prepared scenario · ready to explore' : prepared.status === 'loading' ? 'Preparing the scenario…' : 'Prepared scenario unavailable; you can still explore this company.'}</div></>}
     </div>
     {!continuing && ready && prepared.facts.length > 0 && <dl className="zoorq-judge-entry-facts" aria-label="Scenario facts">
-      {prepared.facts.map(fact => <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd>{formatJudgeFact(fact.value)}</dd><small>{fact.basis}</small></div>)}
+      {prepared.facts.map(fact => {
+        const display = formatJudgeFact(fact.value);
+        const parts = /^(.*) (days|[A-Z]{3})$/.exec(display);
+        return <div key={`${fact.label}:${fact.value}`}><dt>{fact.label}</dt><dd aria-label={display}>{parts ? <><span className="zoorq-judge-entry-fact-value">{parts[1]}</span> <span className="zoorq-judge-entry-fact-unit">{parts[2]}</span></> : display}</dd><small title={fact.basis}><span aria-hidden="true">{compactFactBasis(fact.label, fact.basis)}</span><span className="sr-only">Source basis: {fact.basis}</span></small></div>;
+      })}
     </dl>}
     <nav className="zoorq-judge-entry-actions" aria-label="Explore the scenario">
       <button type="button" onClick={() => onNavigate('route')}>Route <span aria-hidden="true">↗</span></button>

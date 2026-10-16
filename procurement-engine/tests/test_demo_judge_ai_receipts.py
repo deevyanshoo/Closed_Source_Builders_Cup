@@ -1,5 +1,7 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from procure.demo.judge_ai_receipts import summarize_gemini_receipts
 
@@ -65,3 +67,60 @@ def test_hindi_fixture_has_public_scope_without_fabricated_translation():
     assert source['scope']['import_country'] == 'India'
     assert source['translation']['status'] == 'unavailable'
     assert source['gemini_receipt'] is None
+
+
+def test_vertex_hindi_provider_requests_output_contract_and_retains_actual_receipt_metadata(monkeypatch):
+    from google import genai
+    import procure.demo.operator as operator
+    from procure.demo.experience_service import VertexHindiProvider, hindi_payload, sanitize_receipt
+
+    seen = {}
+    class Boundary:
+        available = True
+        model = 'gemini-3.5-flash-lite'
+    class Models:
+        def generate_content(self, *, model, contents, config):
+            seen.update(model=model, payload=json.loads(contents), config=config)
+            return SimpleNamespace(
+                candidates=[SimpleNamespace(finish_reason='STOP')],
+                text=json.dumps({'output':'English rendering: a cotton policy notice. '
+                    'Conditional implication: regional sourcing may need review. '
+                    'Limitation: the title alone does not establish supplier prices.',
+                    'model_reviewed_flags':['public_policy_change','review_source']}),
+                model_version='gemini-3.5-flash-lite-actual', response_id='provider-call-1')
+    class Client:
+        def __init__(self, **kwargs):
+            seen['client_args'] = kwargs
+            self.models = Models()
+        def close(self):
+            seen['closed'] = True
+
+    monkeypatch.setattr(operator, 'VertexOperatorProvider', Boundary)
+    monkeypatch.setattr(genai, 'Client', Client)
+    monkeypatch.setenv('GOOGLE_CLOUD_PROJECT', 'synthetic-project')
+    monkeypatch.setenv('GOOGLE_CLOUD_LOCATION', 'global')
+    raw = VertexHindiProvider()(hindi_payload())
+
+    schema = seen['config'].response_json_schema
+    assert seen['config'].response_mime_type == 'application/json'
+    assert seen['config'].temperature == 0 and seen['config'].max_output_tokens == 640
+    assert seen['config'].automatic_function_calling.disable is True
+    assert schema['type'] == 'object'
+    assert set(schema['required']) == {'output', 'model_reviewed_flags'}
+    assert schema['properties']['output']['type'] == 'string'
+    flags = schema['properties']['model_reviewed_flags']
+    assert flags['type'] == 'array' and flags['maxItems'] == 3
+    assert flags['items']['type'] == 'string'
+    assert set(flags['items']['enum']) == {'public_policy_change', 'regional_import_exposure', 'review_source'}
+    assert '"output"' in seen['payload']['instruction']
+    assert '"model_reviewed_flags"' in seen['payload']['instruction']
+    assert seen['model'] == 'gemini-3.5-flash-lite'
+    assert seen['client_args']['http_options'].timeout == 15000
+    assert seen['client_args']['http_options'].api_version == 'v1'
+    assert seen['closed'] is True
+    receipt = sanitize_receipt(raw, datetime(2026, 10, 17, tzinfo=timezone.utc))
+    assert receipt['model_version'] == 'gemini-3.5-flash-lite-actual'
+    assert receipt['provider_call_id'] == 'provider-call-1'
+    assert receipt['output'].startswith('English rendering:')
+    assert receipt['model_reviewed_flags'] == ['public_policy_change', 'review_source']
+    assert sanitize_receipt({**raw, 'output': None}, datetime(2026, 10, 17, tzinfo=timezone.utc)) is None

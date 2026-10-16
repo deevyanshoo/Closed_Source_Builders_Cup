@@ -2,7 +2,7 @@
   "registry_version": "carbon-factors-v1",
   "checked_on": "2026-10-15",
   "label": "estimate, not a certified footprint",
-  "scope": "Cradle-to-gate primary material production for materials with a published category factor, plus the transport legs the buyer enters. The material factors already include transport to the point of sale, so entered legs may overlap them. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+  "scope": "Cradle-to-gate material production for materials with a cited factor, plus the transport legs the buyer enters. The UK DESNZ material factors include transport to the point of sale, so entered legs may overlap them; the ICA copper cathode factor ends at the refinery gate. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
   "sources": {
     "desnz-2026-full-set": {
       "publisher": "Department for Energy Security and Net Zero (UK government)",
@@ -16,6 +16,19 @@
       "published_on": "2026-06-11",
       "factor_year": 2026,
       "checked_on": "2026-10-15"
+    },
+    "ica-copper-environmental-profile-2023": {
+      "publisher": "International Copper Association",
+      "title": "Copper Environmental Profile, Global 2023 (summary of the ICA copper cathode life cycle assessment, Quantis 2022)",
+      "page_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+      "file_url": "https://internationalcopper.org/wp-content/uploads/2023/05/ICA-LCI-GlobalSummary-202305-F.pdf",
+      "file_sha256": "828eee137de1c99280b46b1a3e3cd6e10a60ffbd819340e51466850e70434738",
+      "licence": "Copyright International Copper Association, All rights reserved. One published figure is cited with attribution; the document is not redistributed.",
+      "licence_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+      "attribution": "Source: International Copper Association, Copper Environmental Profile (Global 2023), Table 4.",
+      "published_on": "2023-05-26",
+      "factor_year": 2019,
+      "checked_on": "2026-10-16"
     }
   },
   "transport_modes": {
@@ -25,7 +38,8 @@
       "sheet": "Freighting goods",
       "row": "HGV (non-refrigerated, all diesel) / Average non-refrigerated HGVs / Average laden / kg CO2e",
       "factor": "0.10356",
-      "unit": "kg CO2e per tonne.km"
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
     },
     "rail_freight": {
       "label": "Rail freight train",
@@ -33,7 +47,8 @@
       "sheet": "Freighting goods",
       "row": "Rail / Freight train / kg CO2e",
       "factor": "0.02583",
-      "unit": "kg CO2e per tonne.km"
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
     },
     "sea_container": {
       "label": "Sea, average container ship",
@@ -41,7 +56,8 @@
       "sheet": "Freighting goods",
       "row": "Cargo ship / Container ship / Average / kg CO2e",
       "factor": "0.01612",
-      "unit": "kg CO2e per tonne.km"
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
     },
     "sea_bulk": {
       "label": "Sea, average bulk carrier",
@@ -49,7 +65,8 @@
       "sheet": "Freighting goods",
       "row": "Cargo ship / Bulk carrier / Average / kg CO2e",
       "factor": "0.00353",
-      "unit": "kg CO2e per tonne.km"
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
     },
     "air_freight": {
       "label": "Air freight, international (with radiative forcing)",
@@ -57,10 +74,21 @@
       "sheet": "Freighting goods",
       "row": "Freight flights / International, to/from non-UK / With RF / kg CO2e",
       "factor": "0.89939",
-      "unit": "kg CO2e per tonne.km"
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
     }
   },
   "materials": {
+    "copper": {
+      "category": "Copper cathode (99.99% Cu), global ICA member average",
+      "source": "ica-copper-environmental-profile-2023",
+      "sheet": "Table 4: Results of the LCIA for Copper Concentrate and Copper Cathode According to EF 3.0 Method",
+      "row": "Climate Change / Results per metric tonne of Copper Cathode (99.99% Cu)",
+      "factor": "3965",
+      "unit": "kg CO2e per tonne",
+      "system_boundary": "Cradle-to-gate, from extraction at the mine to copper cathode at the refinery gate, primary and secondary routes; EF 3.0 climate change; ICA member data for reference year 2019 covering 23% of world cathode output; independently reviewed. Excludes rod drawing or other semi-fabrication and transport to the buyer.",
+      "note": "Industry average, not supplier-specific. For copper rod it covers the cathode only, so it understates rod production."
+    },
     "pet-resin": {
       "category": "Plastics: PET (incl. forming)",
       "source": "desnz-2026-full-set",
@@ -68,7 +96,8 @@
       "row": "Plastic / Plastics: PET (incl. forming) / Primary material production",
       "factor": "3861.58251",
       "unit": "kg CO2e per tonne",
-      "note": "Closest published category. It includes forming, which resin has not had yet, so it may overstate resin."
+      "note": "Closest published category. It includes forming, which resin has not had yet, so it may overstate resin.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet)."
     },
     "aggregate": {
       "category": "Construction: Aggregates",
@@ -77,7 +106,8 @@
       "row": "Construction / Aggregates / Primary material production",
       "factor": "7.80307",
       "unit": "kg CO2e per tonne",
-      "note": "Published category for primary aggregates."
+      "note": "Published category for primary aggregates.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet)."
     },
     "vials": {
       "category": "Other: Glass",
@@ -86,7 +116,8 @@
       "row": "Other / Glass / Primary material production",
       "factor": "1402.76667",
       "unit": "kg CO2e per tonne",
-      "note": "Generic glass category. Needs the mass of the vials; a count of units cannot be used."
+      "note": "Generic glass category. Needs the mass of the vials; a count of units cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet)."
     },
     "cartons": {
       "category": "Paper and board: board",
@@ -95,7 +126,8 @@
       "row": "Paper / Paper and board: board / Primary material production",
       "factor": "1198.23866",
       "unit": "kg CO2e per tonne",
-      "note": "Generic board category. Needs the mass of the cartons; a count of units cannot be used."
+      "note": "Generic board category. Needs the mass of the cartons; a count of units cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet)."
     },
     "aluminium-foil": {
       "category": "Metal: aluminium cans and foil (excl. forming)",
@@ -104,7 +136,8 @@
       "row": "Metal / Metal: aluminium cans and foil (excl. forming) / Primary material production",
       "factor": "9113.58251",
       "unit": "kg CO2e per tonne",
-      "note": "Generic aluminium foil category. Needs the mass of the rolls; a roll count cannot be used."
+      "note": "Generic aluminium foil category. Needs the mass of the rolls; a roll count cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet)."
     }
   }
 }

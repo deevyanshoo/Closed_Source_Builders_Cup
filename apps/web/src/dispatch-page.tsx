@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
+import { HOSTED_RECOVERY_NOTE, HostedDemoContext, readCapabilities } from './dispatch-hosted';
+import type { HostedCapabilities } from './dispatch-hosted';
 import {
   createDispatchFixtureAdapter, dispatchReport, DispatchError, dispatchFixtureInfo, explainChange, formatInstant, formatLeadTime, formatQuantities, freshness,
   hazardStateLabel, humanize, replayReason, statusLabel,
@@ -19,6 +21,21 @@ const WORKSPACE_PAGES: [string, string][] = [
   ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
   ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
 ];
+
+function HostedNav() {
+  return <nav className="workspace-nav" aria-label="Workspace pages">
+    <a className="recovery-back" href="/demo">Back to the demo</a>
+    <NavLink className="recovery-back" to="/dispatch" end>Synthetic dispatch workspace</NavLink>
+  </nav>;
+}
+
+/** Local workspace link to recovery comparisons; on the hosted demo, a note because that page is not served. */
+export function RecoveryLink({ to, note }: { to: string; note: string }) {
+  const hosted = useContext(HostedDemoContext);
+  return <p className="dispatch-recovery">
+    {hosted ? <small>{HOSTED_RECOVERY_NOTE}</small> : <><Link className="secondary-button" to={to}>View recovery options</Link><small>{note}</small></>}
+  </p>;
+}
 
 function WorkspaceNav() {
   return <nav className="workspace-nav" aria-label="Workspace pages">
@@ -88,10 +105,7 @@ export function ShipmentDetail({ row, timeline, onShowAffected }: { row: Shipmen
       <div><dt>On hold</dt><dd>{(current?.on_hold ?? row.on_hold) ? 'Yes' : 'No'}</dd></div>
       {timeline.lead_time && <LeadTimeFact lead={timeline.lead_time} />}
     </dl>
-    <p className="dispatch-recovery">
-      <Link className="secondary-button" to="/shipment-recovery">View recovery options</Link>
-      <small>Opens the existing shipment recovery comparisons. It does not preselect this shipment yet.</small>
-    </p>
+    <RecoveryLink to="/shipment-recovery" note="Opens the existing shipment recovery comparisons. It does not preselect this shipment yet." />
     <h3>Milestones</h3>
     {timeline.events.length === 0
       ? <StateNotice kind="empty" message={`No accepted milestones (${timeline.reasons.map(humanize).join(', ') || 'none'}).`} />
@@ -240,10 +254,7 @@ export function ReplayResult({ result }: { result: ReplayResponse }) {
     </section>}
     <h3>Material screen</h3>
     <MaterialScreenView screen={result.material_screen} />
-    <p className="dispatch-recovery">
-      <Link className="secondary-button" to={result.recovery_link}>View recovery options</Link>
-      <small>{result.note}</small>
-    </p>
+    <RecoveryLink to={result.recovery_link} note={result.note} />
   </div>;
 }
 
@@ -336,7 +347,12 @@ export function HazardPanel({ hazards }: { hazards: HazardResponse }) {
   </section>;
 }
 
-export function DispatchPage() {
+export function DispatchPage({ capabilities: given }: { capabilities?: HostedCapabilities | null } = {}) {
+  // Hosted navigation comes from the server's capabilities, never from the URL (review, 16 Oct).
+  const [fetched, setFetched] = useState<HostedCapabilities | null>(null);
+  useEffect(() => { if (given === undefined) readCapabilities().then(setFetched); }, [given]);
+  const capabilities = given === undefined ? fetched : given;
+  const hostedDemo = !!capabilities?.hosted && capabilities.served_pages.includes('/dispatch');
   const adapter = useMemo(() => createDispatchFixtureAdapter(), []);
   const [list, setList] = useState<Load<ListResponse>>({ kind: 'loading' });
   const [selected, setSelected] = useState<string | null>(null);
@@ -379,11 +395,11 @@ export function DispatchPage() {
   const row = rows.find(r => r.shipment_id === selected) ?? null;
   const hours = Math.floor(age.ageSeconds / 3600);
 
-  return <main className="shell dispatch-shell">
+  return <HostedDemoContext.Provider value={hostedDemo}><main className="shell dispatch-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
       <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
-      <WorkspaceNav />
+      {hostedDemo ? <HostedNav /> : <WorkspaceNav />}
     </header>
     <section className="recovery-intro">
       <p className="eyebrow">Dispatch workspace · issue 5</p>
@@ -431,5 +447,5 @@ export function DispatchPage() {
     </div>
     <ReplaySection adapter={adapter} />
     <footer><span>Synthetic shipments, ports and hazards only</span><span>Read only · no supplier messages or plan changes</span></footer>
-  </main>;
+  </main></HostedDemoContext.Provider>;
 }

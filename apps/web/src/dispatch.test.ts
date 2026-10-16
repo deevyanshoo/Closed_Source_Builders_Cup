@@ -21,7 +21,7 @@ describe('local dispatch fixture adapter', () => {
 
   it('returns a timeline with the open ETA and exact delivered quantity', async () => {
     const hold = await adapter.timeline('SHP-SYN-002');
-    expect(hold.current?.open_eta?.eta).toBe('2026-10-12T02:30:00+00:00');
+    expect(hold.current?.open_eta?.eta).toBe('2026-10-20T02:30:00+00:00');
     expect(hold.current?.on_hold).toBe(true);
     const partial = await adapter.timeline('SHP-SYN-003');
     expect(partial.current?.delivered_quantity).toEqual({ tonne: '20.000' });
@@ -99,7 +99,7 @@ describe('port-delay replay (local adapter)', () => {
     const r = await adapter.replay('innsa-hold-new-eta');
     const screen = r.material_screen;
     if (screen?.status !== 'screened') throw new Error('expected a screened material result');
-    expect(screen.arrival_changes[0]).toMatchObject({ line_id: 'LINE-002-A', quantity: '3000', unit: 'kg', changed_at: '2026-10-16T02:30:00+00:00' });
+    expect(screen.arrival_changes[0]).toMatchObject({ line_id: 'LINE-002-A', quantity: '3000', unit: 'kg', changed_at: '2026-10-24T02:30:00+00:00' });
     expect((await adapter.replay('inmaa-hold-no-eta')).material_screen).toEqual({ status: 'not_run', reason: 'hold_without_new_eta', event_id: 'rpl-inmaa-hold' });
   });
 
@@ -131,7 +131,7 @@ describe('port-delay replay (local adapter)', () => {
       'Last milestone: port hold → port released',
     ]);
     const hold = (await adapter.replay('innsa-hold-new-eta')).changes[0];
-    expect(explainChange(hold)).toEqual(['Expected arrival: 2026-10-12 02:30 UTC (stated ETA) → 2026-10-16 02:30 UTC (stated ETA)']);
+    expect(explainChange(hold)).toEqual(['Expected arrival: 2026-10-20 02:30 UTC (stated ETA) → 2026-10-24 02:30 UTC (stated ETA)']);
   });
 
   it('describes reasons in plain words', () => {
@@ -149,10 +149,10 @@ describe('working-day lead time', () => {
     expect(t.lead_time).toMatchObject({ status: 'ok', basis: 'cutoff_to_expected_arrival', country: 'IN', working_days: 4, synthetic: true });
     expect(formatLeadTime(t.lead_time!)).toEqual({
       headline: '4 working days',
-      detail: 'Cutoff 2026-10-08 to expected arrival 2026-10-15 in IN (lane destination: INMAA): 7 calendar days, 2 weekend days, 1 holiday (Synthetic closure day IN-A).',
+      detail: 'Cutoff 2026-10-16 to expected arrival 2026-10-23 in IN (lane destination: INMAA): 7 calendar days, 2 weekend days, 1 holiday (Synthetic closure day IN-A).',
       source: 'Synthetic holiday table: invented dates, not real public holidays.',
     });
-    expect(formatLeadTime((await adapter.timeline('SHP-SYN-001')).lead_time!).detail).toMatch(/^Departure 2026-09-20 to arrival 2026-10-06 in IN/);
+    expect(formatLeadTime((await adapter.timeline('SHP-SYN-001')).lead_time!).detail).toMatch(/^Departure 2026-09-28 to arrival 2026-10-14 in IN/);
   });
 
   it('says plainly when no lead time can be given', async () => {

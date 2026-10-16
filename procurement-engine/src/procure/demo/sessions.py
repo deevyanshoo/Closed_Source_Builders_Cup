@@ -57,6 +57,8 @@ class Session:
     context_version: int = 1
     workspaces: dict = field(default_factory=dict)
     chat_history: dict = field(default_factory=dict)
+    judge_receipts: dict = field(default_factory=dict)
+    judge_attempts: int = 0
     research_attempts: int = 0
     research_records: dict = field(default_factory=dict)
     active: bool = True
@@ -108,7 +110,7 @@ class SessionStore:
                      'voice_calls', 'live_voice_sessions', 'live_voice_starts_by_company',
                      'company_id', 'context_version', 'workspaces', 'live_calls',
                      'live_failed_calls', 'chat_history', 'research_attempts', 'research_records', 'drafts',
-                     'pending_proposal')
+                     'pending_proposal', 'judge_receipts', 'judge_attempts')
 
     def __init__(self, *, clock: Callable | None = None, ttl_seconds: int | None = None,
                  max_sessions: int = 256, persistence_backend=None):
@@ -237,11 +239,34 @@ class SessionStore:
         if session.pending_proposal is not None and not cls._valid_proposal(session.pending_proposal, session):
             raise StorageInvalid('Invalid pending proposal')
         cls._validate_carbon_state(session)
+        cls._validate_judge_state(session)
         state = {'schema_version': 1, 'session_id': session.session_id,
                  'csrf_token': session.csrf_token, 'expires_at': session.expires_at.isoformat(),
                  'requests': 0}
         state.update({name: getattr(session, name) for name in cls._STATE_FIELDS})
         return state
+
+    @staticmethod
+    def _validate_judge_state(session: Session) -> None:
+        from .company import list_companies
+        from .judge_ai_receipts import summarize_gemini_receipts
+        allowed = {'provider','status','model_id','model_version','provider_call_id','input_source_id',
+                   'called_at','source_title','source_url','source_as_of','output','evidence_refs','model_reviewed_flags'}
+        ids = {row['company_id'] for row in list_companies()}
+        if (not isinstance(session.judge_receipts,dict) or not session.judge_receipts.keys() <= ids
+                or type(session.judge_attempts) is not int or not 0 <= session.judge_attempts <= 3):
+            raise StorageInvalid('Invalid judge receipt partition')
+        for records in session.judge_receipts.values():
+            if not isinstance(records,list) or len(records)>3:
+                raise StorageInvalid('Invalid judge receipt bounds')
+            for record in records:
+                if (not isinstance(record,dict) or set(record) != allowed
+                        or len(json.dumps(record,ensure_ascii=False))>7000
+                        or not isinstance(record.get('model_reviewed_flags'),list)
+                        or any(flag not in {'regional_import_exposure','public_policy_change','review_source'}
+                               for flag in record['model_reviewed_flags'])
+                        or summarize_gemini_receipts([record])['interpreted_articles'] != 1):
+                    raise StorageInvalid('Invalid sanitized judge receipt')
 
     @staticmethod
     def _validate_carbon_state(session: Session) -> None:
@@ -347,12 +372,13 @@ class SessionStore:
             if expires_at.tzinfo is None:
                 raise ValueError()
             expires_at = expires_at.astimezone(timezone.utc)
-            values = {name: state.get(name, []) if name == 'drafts' else
+            values = {name: state.get(name, {}) if name == 'judge_receipts' else
+                      state.get(name, 0) if name == 'judge_attempts' else state.get(name, []) if name == 'drafts' else
                       state.get(name) if name == 'carbon_assessment' else
                       state.get(name) if name == 'pending_proposal' else state[name]
                       for name in cls._STATE_FIELDS}
             for name in ('offers', 'idempotency', 'live_voice_starts_by_company', 'workspaces',
-                         'chat_history', 'research_records'):
+                         'chat_history', 'research_records', 'judge_receipts'):
                 if not isinstance(values[name], dict):
                     raise ValueError()
             if not cls._valid_replay_journal(values['idempotency']):
@@ -366,6 +392,10 @@ class SessionStore:
                     not isinstance(items, list) or len(items) > 100 for items in values['chat_history'].values()):
                 raise ValueError()
             if type(values['research_attempts']) is not int or not 0 <= values['research_attempts'] <= 6:
+                raise ValueError()
+            if type(values['judge_attempts']) is not int or not 0 <= values['judge_attempts'] <= 3:
+                raise ValueError()
+            if len(values['judge_receipts']) > 10 or any(not isinstance(r,list) or len(r)>3 for r in values['judge_receipts'].values()):
                 raise ValueError()
             if len(values['research_records']) > 64:
                 raise ValueError()

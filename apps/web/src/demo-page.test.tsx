@@ -83,22 +83,23 @@ describe('ZOORQ workspace routes', () => {
     expect(html).toContain('aria-label="Workspace destinations"');
   });
   it('disables company opening until the canonical session is available', () => {
-    const html = renderToStaticMarkup(<DemoPage initialCompanies={[company, emptyCompany]} />);
+    const html = renderToStaticMarkup(<DemoPage initialCompanies={[company, emptyCompany]} initialView="hub" />);
     expect(html).toMatch(/aria-label="Open Solara Cables workspace"[^>]*disabled=""/);
   });
-  it('offers company selection and appearance at the landing without quote controls', () => {
+  it('offers company selection and appearance at the explicit hub without quote controls', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
-    const html = renderToStaticMarkup(<DemoPage initialState={loaded} />);
+    const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="hub" />);
     expect(html).toContain('aria-label="Workspace destinations"');
     expect(html).toContain('aria-label="Appearance"');
     expect(html).toContain('aria-label="Search companies"');
     expect(html).not.toContain('demo-extract-form');
   });
   const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
-  it('opens at the company hub and keeps the saved company as a continuation', () => {
+  it('opens the saved company overview with a reachable company hub', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialCompanies={[company, emptyCompany]} />);
     expect(html).toContain('Continue Solara Cables');
-    expect(html).toContain('Search companies');
+    expect(html).toContain('All companies');
+    expect(html).toContain('Company overview');
     expect(html).not.toContain('demo-extract-form');
   });
   it('keeps quote forms within Procurement and separates its stages', () => {
@@ -139,7 +140,7 @@ describe('ZOORQ workspace routes', () => {
   });
   it('restores only a destination and stage from the URL', () => {
     expect(readWorkspaceLocation('?view=procurement&stage=compare&company=other')).toEqual({ view: 'procurement', stage: 'compare' });
-    expect(readWorkspaceLocation('?view=invalid&stage=invalid')).toEqual({ view: 'hub', stage: 'add' });
+    expect(readWorkspaceLocation('?view=invalid&stage=invalid')).toEqual({ view: 'overview', stage: 'add' });
     expect(workspaceSearch('?company=other&source=demo', 'news', 'add')).toBe('?source=demo&view=news');
   });
   it('uses measured synthetic stock cover and a relevant company story in Overview', () => {

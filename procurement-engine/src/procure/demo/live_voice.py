@@ -316,6 +316,13 @@ def _research_current(session, store, context_version: int, gate: dict | None) -
                 and store.now() < datetime.fromisoformat(proposal['expires_at']))
 
 
+def judge_research_spoken_response(result: dict, query: str) -> str:
+    local = (str(result.get('assistant_text',''))[:2400] + ' '
+             if any(step.get('tool') == 'judge_read' or
+                    step.get('tool') in {'read_shipments', 'read_carbon'} and step.get('status') == 'completed'
+                    for step in result.get('agent_steps',[])) else '')
+    return local + 'I can search the public web for: ' + query + '. Say confirm research to start.'
+
 def _research_gate(session, store, context_version: int, result: dict) -> dict | None:
     public = result.get('proposal')
     if result.get('status') != 'proposal' or not isinstance(public, dict) or public.get('kind') != 'research':
@@ -1374,7 +1381,7 @@ async def run_live_voice(
                                         canonical.get('context_version') != context_version):
                                     raise _Invalid()
                             result = present_turn(result, supplier_names)
-                            if name == 'prepare_research':
+                            if name in {'prepare_research','operate_workspace'}:
                                 research_gate = _research_gate(session, store, context_version, result)
                                 if research_operation is not None and research_operation['result'] is not None:
                                     research_operation = None
@@ -1397,10 +1404,8 @@ async def run_live_voice(
                             active_plan = (session.recovery['scenario'] if session.recovery is not None
                                            else session.last_plan)
                             _selected_purchase_model_result(name, result, model_result, active_plan)
-                            if name == 'prepare_research' and research_gate is not None:
-                                model_result['required_spoken_response'] = (
-                                    'I can search the public web for: ' + research_gate['query']
-                                    + '. Say confirm research to start.')
+                            if name in {'prepare_research','operate_workspace'} and research_gate is not None:
+                                model_result['required_spoken_response'] = judge_research_spoken_response(result,research_gate['query'])
                             if name == 'confirm_research' and allowed_research and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = (
                                     'Give the sourced answer in two or three short sentences; offer more detail on request.')

@@ -85,7 +85,7 @@ class BodyLimit:
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                news_service=None, operator_provider=None, voice_service=None, live_client_factory=None,
-               research_provider=None, session_backend=None, voice_consent_verifier=None) -> FastAPI:
+               research_provider=None, session_backend=None, voice_consent_verifier=None, judge_provider=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
@@ -143,8 +143,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 response = failure('internal_error', 'Demo could not complete this request.', 500)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Referrer-Policy'] = 'same-origin'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com https://www.eia.gov https://www.ecb.europa.eu; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://www.gstatic.com https://www.eia.gov https://www.ecb.europa.eu; media-src 'self' blob:; connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         request_outcome(diagnostics, request.method, request.url.path,
                         response.status_code, (monotonic() - started) * 1000)
         return response
@@ -294,6 +294,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         snapshot['carbon_assessment'] = current_carbon_assessment(
             value, active_plan, validate_plan_current)
         snapshot['shipments'] = dispatch_view(value)
+        from .experience_service import completed_research
+        snapshot['completed_research'] = completed_research(value)
         if include_risks:
             from .proactive_risks import assess_company
             snapshot['risk_report'] = assess_company(snapshot, value.news, store.now())
@@ -411,6 +413,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                   'buyer_draft', 'selected_material_id', 'simulated_outbox')}
         fields['carbon_assessment'] = snapshot.get('carbon_assessment')
         fields['shipments'] = snapshot.get('shipments')
+        fields['completed_research'] = snapshot.get('completed_research', [])
         return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
                                          default=str).encode()).hexdigest()
 
@@ -872,6 +875,148 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def companies():
         return {'companies': list_companies()}
 
+    @app.get('/api/demo/judge/config')
+    async def judge_config(request: Request):
+        value = session(request)
+        with value.lock:
+            key = os.environ.get('MAPS_BROWSER_KEY', '').strip()
+            return {'maps_browser_key': key or None, 'maps_enabled': bool(key),
+                    'roles': {'gemini': 'Source interpretation', 'vertex_ai': 'Model runtime', 'cloud_run': 'Workflow hosting'}}
+
+    @app.get('/api/demo/judge/routes')
+    async def judge_routes(request: Request, route_id: str, material_id: str, buyer_location_index: int = 0):
+        from .route_display import build_route_display
+        value = session(request)
+        with value.lock:
+            active(value)
+            try:
+                result = build_route_display(get_company(value.company_id), route_id, material_id, buyer_location_index)
+            except ValueError:
+                raise SessionError('route_unavailable', 'Choose an owned profile route, material and buyer location.', 422)
+            return {**result, 'context_version': value.context_version}
+
+    @app.get('/api/demo/judge/evidence')
+    async def judge_evidence(request: Request):
+        from .experience_service import evidence
+        value = session(request)
+        with value.lock:
+            return evidence(value)
+
+    @app.post('/api/demo/judge/start')
+    async def judge_start(request: Request):
+        from .agent_tools import inventory_analytics
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('expected_context_version','idempotency_key'))
+        with value.lock:
+            context(value,data,explicit=True)
+            key,replay = start(value,data,'judge_start')
+            if replay is not None:
+                if value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_context','Workspace changed since startup.',409)
+                return replay
+            try:
+                seeded = False
+                # Only the untouched flagship session can be seeded. Never replace a restored workspace.
+                if (value.company_id == DEFAULT_COMPANY_ID and value.context_version == 1 and not value.workspaces
+                        and not value.offers and value.last_plan is None and value.buyer_draft is None
+                        and not value.drafts and not value.simulated_outbox and not value.watch_items
+                        and value.pending_proposal is None and value.recovery is None and value.rfq is None):
+                    material = get_company(value.company_id)['buyer_defaults']['material']
+                    staged_quotes(value,material)
+                    parameters = reviewed_quote_preview(value, {'material_id':material,
+                        'offer_ids':[o['offer_id'] for o in value.offers.values()]})
+                    apply_reviewed_quotes(value,parameters)
+                    compare_quotes(value,material)
+                    seeded = True
+                rows = inventory_analytics(operator_snapshot(value))['materials']
+                selected = next((r for r in rows if r['material_id']==value.selected_material_id),rows[0])
+                facts = [{'label':'Profile stock cover','value':str(selected['stock_cover_days'])+' days',
+                          'basis':'Fictional profile stock / daily consumption'},
+                         {'label':'Shortest profile lead','value':str(selected['shortest_supplier_lead_days'])+' days',
+                          'basis':'Matching material supplier profile; not a shipment ETA'}]
+                if value.last_plan:
+                    facts.append({'label':'Reviewed baseline spend', 'value':str(value.last_plan['total_cost'])+' '+value.last_plan['reporting_currency'],
+                                  'basis':'Deterministic bundled quote comparison; not realized loss or savings'})
+                example = None
+                if seeded and value.last_plan.get('selected_offer_id'):
+                    from .recovery import compare
+                    paired = compare(value.last_plan,value.plan_request,list(value.offers.values()),
+                        {value.last_plan['selected_offer_id']:7},today=store.now().date())
+                    example = {'assumed_delay_days':7,'baseline_spend':paired['baseline']['total_cost'],
+                               'scenario_spend':paired['scenario']['total_cost'],'additional_recovery_cost':paired['cost_delta'],
+                               'currency':paired['baseline']['reporting_currency'],'outcome':paired['outcome'],
+                               'scenario_plan_id':None,'read_only':True}
+                result = complete(value,key,{'seed_version':'judge-baseline-v1','seeded':seeded,
+                    'session':view(value),'facts':facts,'before_after':example})
+                value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
+                store.save(value)
+                return result
+            except BaseException:
+                failed(value,key)
+                raise
+
+    @app.post('/api/demo/judge/interpret-hindi')
+    async def interpret_hindi(request: Request):
+        from .experience_service import VertexHindiProvider, hindi_payload, sanitize_receipt, evidence
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('expected_context_version','idempotency_key'))
+        acquired = False
+        with value.lock:
+            context(value,data,explicit=True)
+            if value.company_id != 'loomworks':
+                raise SessionError('case_unavailable','This public cotton case belongs to LoomWorks.',422)
+            key,replay = start(value,data,'judge_hindi')
+            if replay is not None:
+                return replay
+            try:
+                if value.idempotency[key].get('judge_call_claimed'):
+                    raise SessionError('judge_claimed','This interpretation was already attempted. Start a new explicit request.',409)
+                verified = evidence(value)
+                if verified['hindi_case'] and verified['hindi_case']['status'] == 'success':
+                    result = complete(value,key,verified)
+                    store.save(value)
+                    return result
+                if value.judge_attempts >= 3:
+                    raise SessionError('judge_limit','This session reached its interpretation limit.',429)
+                if not research_workers.acquire(blocking=False):
+                    raise SessionError('judge_busy','Interpretation capacity is busy.',429)
+                acquired = True
+                if not store.reserve_research_budget(store.now().date().isoformat(), 60):
+                    raise SessionError('judge_limit','Public interpretation budget is exhausted.',429)
+                value.idempotency[key]['judge_call_claimed'] = True
+                value.judge_attempts += 1
+                value.operator_generation += 1
+                generation = value.operator_generation
+                marker = snapshot_marker(operator_snapshot(value))
+                store.save(value)
+            except BaseException:
+                if acquired: research_workers.release()
+                failed(value,key)
+                raise
+        try:
+            raw = await asyncio.wait_for(run_in_threadpool(judge_provider or VertexHindiProvider(), hindi_payload()),timeout=20)
+            with value.lock:
+                context(value,data,explicit=True)
+                if generation != value.operator_generation or marker != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_context','Workspace changed during interpretation.',409)
+                record = sanitize_receipt(raw,store.now())
+                if record is None:
+                    raise SessionError('interpretation_unavailable','No verifiable model version and interpretation returned.',503)
+                value.judge_receipts.setdefault(value.company_id,[]).append(record)
+                result = complete(value,key,evidence(value))
+                store.save(value)
+                return result
+        except BaseException as exc:
+            with value.lock:
+                failed(value,key)
+                store.save(value)
+            if isinstance(exc,(SessionError,asyncio.CancelledError)): raise
+            raise SessionError('interpretation_unavailable','Interpretation unavailable; no verified translation is claimed.',503) from None
+        finally:
+            research_workers.release()
+
     @app.get('/api/demo/dispatch')
     async def get_dispatch(request: Request):
         value = session(request)
@@ -941,21 +1086,25 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         with value.lock:
             context(value, {'expected_context_version': expected_version}, explicit=True)
             brief = build_news_brief(get_company(value.company_id), view, now=store.now())
-            items = brief['headlines'][:2]
+            items = brief['headlines'][:3]
             if items:
-                lines = [f"{row['title']} ({row['publisher'] or row['provider'] or 'Source unverified'}, "
-                         f"published {row['published_at'][:10] if row['published_at'] else 'date unavailable'})"
-                         for row in items]
-                summary = (f"For {brief['company_name']}, watch: " + '; '.join(lines) +
-                    '. These are potential procurement exposures, not confirmed shipment delays. '
-                    'Check current supplier and route evidence before changing your plan.')
+                lines = []
+                for row in items:
+                    refs = []
+                    for name, label in (('matched_materials','material'),('matched_routes','route'),('matched_currencies','currency')):
+                        refs.extend(f'{label} {entry}' for entry in row.get('exposure',{}).get(name,[])[:2])
+                    exposure = f" Profile match: {', '.join(refs)}; actual impact needs verification." if refs else ' Sector context; verify company relevance.'
+                    lines.append(f"- [{row['title']}]({row['url']}) — {row['publisher'] or row['provider'] or 'Source unverified'}, "
+                                 f"{row['published_at'][:10] if row['published_at'] else 'date unavailable'}.{exposure}")
+                summary = (f"For {brief['company_name']}, the connected News view shows:\n" + '\n'.join(lines) +
+                    '\nNext: check the named supplier and current shipment or route evidence, then review the quote or plan before changing it. These are possible exposures, not confirmed delays or costs.')
             elif brief['global_watch']['events']:
                 summary = (f"No company-matched headline is available for {brief['company_name']}. "
                     'Global Watch has public events, but company exposure needs verification against its recorded materials and routes.')
             else:
                 summary = 'Connected news coverage is unavailable for this company right now; no current business impact can be verified.'
             if brief['availability'] != 'available':
-                summary += ' Coverage is partial or stale; check the source dates.'
+                summary += '\nCoverage is partial or stale; check the source dates.'
             return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
                 'context_version': expected_version, 'status': 'completed',
                 'assistant_text': summary,
@@ -964,6 +1113,19 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     'tool': 'read_news', 'summary': 'Read bounded connected news with source dates and conditional exposure.'}],
                 'evidence_ids': [row['item_id'] for row in brief['headlines']],
                 'proposal': None, 'read_only': True, 'workspace': {'news_brief': brief}}
+
+    def combine_local_news(news_result, local_resolution):
+        if local_resolution is None:
+            return news_result
+        from .experience_service import judge_outcome
+        local = judge_outcome(local_resolution)
+        result = {**news_result,
+            'assistant_text': local['assistant_text'] + '\n' + news_result['assistant_text'],
+            'agent_steps': local['agent_steps'] + news_result['agent_steps'],
+            'evidence_ids': list(dict.fromkeys(local['evidence_ids'] + news_result['evidence_ids']))}
+        if local.get('analytics') is not None:
+            result['analytics'] = local['analytics']
+        return result
 
     @app.get('/api/demo/news')
     async def get_news(request: Request):
@@ -1095,19 +1257,32 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         message = data['message']
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
             raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
+        from .experience_service import baseline_snapshot, judge_outcome, resolve_local_turn, has_local_evidence
+        with value.lock:
+            context(value, data, explicit=True)
+        # Load the canonical cached News view for the utterance itself. On a
+        # first turn the resolver can only see news=None and may propose public
+        # research before these company-owned facts have been read.
         briefing = is_workspace_news_question(message)
-        if briefing:
-            await current_news(value, data['expected_context_version'])
+        news_outcome = await voice_news(value,data['expected_context_version']) if briefing else None
         with value.lock:
             context(value, data, explicit=True)
             from .research import prepare_research, ResearchValidationError
+            current_snapshot = operator_snapshot(value)
+            resolved = resolve_local_turn(current_snapshot, message, now=store.now())
+            local_news_resolution = None
+            if news_outcome is not None:
+                local_snapshot = {**current_snapshot, 'news': None, 'completed_research': []}
+                local = resolve_local_turn(local_snapshot, message, now=store.now())
+                if has_local_evidence(local, local_snapshot):
+                    local_news_resolution = local
             try:
-                research_parameters = (None if briefing else
+                research_parameters = (None if briefing or resolved is not None else
                     prepare_research(message, get_company(value.company_id), store.now()))
                 research_invalid = None
             except ResearchValidationError as exc:
                 research_parameters, research_invalid = None, str(exc)
-            prepared = research_parameters is not None or research_invalid is not None
+            prepared = news_outcome is not None or resolved is not None or research_parameters is not None or research_invalid is not None
             key, replay = start(value, data, 'operator_turn')
             if replay is not None:
                 if (value.idempotency[key].get('operator_generation') != value.operator_generation or
@@ -1162,11 +1337,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             value.pending_proposal = None
         try:
             try:
-                outcome = await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
+                if news_outcome is not None:
+                    outcome = {**combine_local_news(news_outcome, local_news_resolution), 'candidate': None}
+                else:
+                    outcome = (judge_outcome(resolved) if resolved is not None else await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
                                                   model=model,
                                                   provider_call='mocked' if operator_injected else 'real',
                                                   context_cache=context_cache,
-                                                  cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest())
+                                                  cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest()))
             except (OperatorUnavailable, OperatorValidationError) as exc:
                 category = 'provider' if isinstance(exc, OperatorUnavailable) else 'validation'
                 fingerprint = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
@@ -1181,6 +1359,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise SessionError('stale_context', 'A newer operator turn superseded this request.', 409)
                 if snapshot_marker(operator_snapshot(value)) != marker:
                     raise SessionError('stale_context', 'Workspace changed during the operator turn.', 409)
+                if outcome.get('judge_resolution', {}).get('kind') == 'read_only_preview':
+                    outcome = execute_judge_preview(value, outcome)
                 proposal = None
                 utility = outcome.get('utility')
                 action_result = None
@@ -1262,6 +1442,45 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         finally:
             operator_workers.release()
 
+    def execute_judge_preview(value, outcome):
+        from .experience_service import baseline_snapshot
+        from .judge_impact import build_judge_impact
+        from .judge_resolver import resolve_judge_turn
+        from .recovery import compare
+        resolved = outcome['judge_resolution']
+        request = resolved['preview_request']
+        snapshot = baseline_snapshot(operator_snapshot(value))
+        if (resolved['company_id'] != value.company_id or resolved['context_version'] != value.context_version
+                or resolved.get('baseline_plan_id') != (snapshot.get('plan') or {}).get('plan_id')
+                or resolved.get('offer_versions') != (snapshot.get('plan') or {}).get('offer_versions', {})):
+            raise SessionError('stale_context', 'Preview context changed.', 409)
+        preview = {'preview_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                   'context_version': value.context_version, 'baseline_plan_id': resolved.get('baseline_plan_id'),
+                   'scenario_plan_id': None, 'read_only': True, 'mode': request.get('mode','reviewed_plan')}
+        if request.get('mode') != 'profile_stock_cover':
+            baseline = snapshot['plan']
+            validate_plan_current(value, baseline)
+            if request.get('material_id') != baseline.get('material'):
+                raise SessionError('stale_plan', 'Preview material changed.', 409)
+            delays = request['delay_days_by_offer']
+            row = resolve_recovery_shipment(snapshot['shipments'], request['shipment_id'],
+                baseline['plan_id'], baseline['offer_versions'].get(baseline['selected_offer_id']))
+            if row is None or set(delays) != {baseline['selected_offer_id']}:
+                raise SessionError('shipment_not_found', 'Owned baseline shipment unavailable.', 409)
+            offers = current_offers(value, baseline, baseline['offer_versions'], today=store.now().date())
+            compared = compare(baseline, value.plan_request, offers, delays, today=store.now().date())
+            compared['scenario']['company_id'] = value.company_id
+            compared['scenario']['plan_id'] = None
+            impact = build_judge_impact(snapshot, compared, [row['order_id']] if row.get('order_id') else [])
+            preview.update(impact=impact, outcome=compared['outcome'])
+            delta = impact['additional_recovery_cost']
+            cost = f"{delta['value']} {delta['currency']}" if delta['status']=='available' else 'unavailable for this scenario'
+            outcome['assistant_text'] += f" Baseline {baseline['total_cost']} {baseline['reporting_currency']}; assumed-delay outcome {compared['outcome']}; additional recovery cost {cost}. This preview leaves the accepted plan and RFQ unchanged."
+        preview['summary'] = outcome['assistant_text']
+        outcome['workspace'] = {'judge_preview': preview}
+        outcome['candidate'] = None
+        return outcome
+
     @app.websocket('/api/demo/voice/live')
     async def live_voice(websocket: WebSocket):
         # Same trusted runtime and operator boundary as typed chat; no browser token.
@@ -1285,8 +1504,6 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         from .live_voice import run_live_voice
 
         async def operate(message, context_version, key):
-            if is_workspace_news_question(message):
-                return await voice_news(value, context_version)
             return await execute_operator_turn(value, {'message': message,
                 'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
 
@@ -1320,17 +1537,29 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if not isinstance(args, dict):
                     raise SessionError('invalid_research', 'Provide a public research question.', 422)
                 shape(args, ('message',))
+                from .experience_service import resolve_local_turn, has_local_evidence
+                # Share the typed path's canonical News read and local facts.
                 if is_workspace_news_question(args['message']):
-                    return await voice_news(value, context_version)
+                    news_result = await voice_news(value, context_version)
+                    with value.lock:
+                        context(value, {'expected_context_version': context_version}, explicit=True)
+                        local_snapshot = {**operator_snapshot(value), 'news': None,
+                                          'completed_research': []}
+                        local = resolve_local_turn(local_snapshot, args['message'], now=store.now())
+                        if not has_local_evidence(local, local_snapshot):
+                            local = None
+                        return combine_local_news(news_result, local)
                 from .research import prepare_research, ResearchValidationError
                 with value.lock:
                     context(value, {'expected_context_version': context_version}, explicit=True)
-                    try:
-                        parameters = prepare_research(args['message'], get_company(value.company_id), store.now())
-                    except ResearchValidationError:
-                        parameters = None
-                    if parameters is None:
-                        raise SessionError('invalid_research', 'Prepare a public research question without private workspace details.', 422)
+                    local = resolve_local_turn(operator_snapshot(value), args['message'], now=store.now())
+                    if local is None:
+                        try:
+                            public = prepare_research(args['message'], get_company(value.company_id), store.now())
+                        except ResearchValidationError:
+                            public = None
+                        if public is None:
+                            raise SessionError('invalid_research','Provide a public question without private workspace details.',422)
                 return await execute_operator_turn(value, {'message': args['message'],
                     'expected_context_version': context_version, 'idempotency_key': key}, channel='voice')
             if name == 'read_research':
@@ -1341,6 +1570,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     context(value, {'expected_context_version': context_version}, explicit=True)
                     records = [item for item in value.research_records.values()
                         if item.get('company_id') == value.company_id
+                        and item.get('context_version') == value.context_version
                         and item.get('state') == 'completed'
                         and item.get('result', {}).get('status') == 'completed']
                     requested = args.get('research_id')
@@ -1731,13 +1961,13 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             with value.lock:
                 active(value)
                 record = value.research_records[proposal_id]
-                record.update(state='completed', result=deepcopy(result))
                 if (value.company_id != company_id or value.context_version != version
                         or snapshot_marker(operator_snapshot(value)) != marker):
-                    record['state'] = 'discarded'
+                    record.update(state='discarded', result=deepcopy(result))
                     failed(value, key)
                     store.save(value)
                     raise SessionError('stale_context', 'Workspace changed while researching. The result was not applied.', 409)
+                record.update(state='completed', result=deepcopy(result))
                 remember(value, {'id': result['research_id'], 'channel': 'text', 'question': None,
                                   'answer': result['answer'], 'research': result})
                 response = {'status': 'applied', 'company_id': company_id,

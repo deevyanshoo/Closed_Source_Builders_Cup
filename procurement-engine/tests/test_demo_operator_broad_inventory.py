@@ -150,10 +150,13 @@ def test_mixed_action_request_stays_on_existing_operator_path():
 
 def test_foreign_company_name_does_not_use_current_workspace_canonical_answer():
     value = snapshot(get_company('solara-cables'))
-    with pytest.raises(OperatorValidationError):
-        broad_turn(value, 'copper', message=(
-            'Explain the inventory position and sourcing options for Copper cathode '
-            'at ForgeLine Components.'))
+    result = broad_turn(value, 'copper', message=(
+        'Explain the inventory position and sourcing options for Copper cathode '
+        'at ForgeLine Components.'))
+    assert result['status'] == 'needs_clarification'
+    assert result['candidate'] is None
+    assert 'active company' in result['assistant_text']
+    assert '2000' not in result['assistant_text']
 
 
 @pytest.mark.parametrize('reference', ['nickel', 'unobtainium'])

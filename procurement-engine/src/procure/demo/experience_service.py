@@ -1,0 +1,172 @@
+"""Thin judge integration: public fixtures, bounded projections, no numerical engine."""
+from copy import deepcopy
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import re
+
+from .judge_ai_receipts import summarize_gemini_receipts, _public_url
+
+CONFIG = Path(__file__).resolve().parents[3] / 'config'
+
+def fixture(name):
+    return json.loads((CONFIG / name).read_text(encoding='utf-8'))
+
+def completed_research(value):
+    rows = []
+    for record in list(value.research_records.values())[-12:]:
+        result = record.get('result') or {}
+        if (record.get('company_id') != value.company_id or
+            record.get('context_version') != value.context_version or
+            record.get('state') != 'completed' or result.get('status') != 'completed'):
+            continue
+        sources = [{'source_id': s['source_id'][:160], 'url': s['url'], 'title': str(s.get('title',''))[:220]}
+                   for s in result.get('sources', [])[:8] if isinstance(s,dict)
+                   and isinstance(s.get('source_id'),str) and _public_url(s.get('url'))]
+        if sources:
+            rows.append({'company_id': value.company_id, 'context_version': value.context_version,
+                         'status': 'completed', 'checked_at': result.get('checked_at'),
+                         'query': str(record.get('query',result.get('query','')))[:500],
+                         'answer': str(result.get('answer',''))[:2000], 'sources': sources,
+                         'evidence_refs': [s['source_id'] for s in sources]})
+    return rows
+
+def baseline_snapshot(snapshot):
+    result = deepcopy(snapshot)
+    result['plan'] = deepcopy(snapshot.get('last_plan') or snapshot.get('baseline_plan')
+                              or (snapshot.get('plan') if not snapshot.get('recovery') else None))
+    baseline = result['plan']
+    if baseline:
+        from .dispatch_view import build_dispatch_view
+        result['shipments'] = build_dispatch_view(result['company'], result['offers'], baseline, None)
+    return result
+
+def resolve_local_turn(snapshot, message, *, now):
+    from .judge_resolver import resolve_judge_turn
+    if not isinstance(snapshot.get('context_version'),int):
+        return None  # Legacy pure-reader snapshots have no session context.
+    resolved = resolve_judge_turn(snapshot, message, now=now)
+    # The resolver decides hypothetical intent; only preview/input outcomes need
+    # an original-baseline view. Factual reads keep the active recovery state.
+    if resolved and resolved['kind'] in {'read_only_preview','needs_input','unavailable'}:
+        resolved = resolve_judge_turn(baseline_snapshot(snapshot), message, now=now)
+    # Explicit operational requests belong to the existing validated action path.
+    if resolved and resolved.get('missing_inputs') == ['company']:
+        return resolved
+    if re.match(r'\s*(?:watch|navigate|open|draft|send|approve|apply|save|load|review)\b', message,re.I):
+        return None
+    # Source provenance and model-evidence explanation remain grounded reasoning;
+    # a bare mention of news is not a request to search the public internet.
+    if resolved and resolved['kind']=='research_proposal' and not re.search(
+            r'\b(?:search|research|look up|latest|fresh|today|recent|newest|up.to.date|now)\b',message,re.I):
+        return None
+    # Pure public-only requests retain the exact validated question. Mixed turns
+    # use the resolver's separated public subquestion so private facts stay local.
+    if resolved and resolved['kind'] == 'research_proposal':
+        from .research import prepare_research, ResearchValidationError
+        try:
+            exact = prepare_research(message, snapshot['company'], now)
+            if exact:
+                resolved['research_parameters'] = exact
+        except ResearchValidationError:
+            pass
+    return resolved
+
+def has_local_evidence(resolved, snapshot):
+    if not resolved or resolved.get('kind') != 'internal_answer':
+        return False
+    private_refs = {row.get('offer_id') for row in snapshot.get('offers',[]) if isinstance(row,dict)}
+    private_refs.update((snapshot.get(name) or {}).get('plan_id') for name in ('plan','last_plan','baseline_plan'))
+    return any(isinstance(ref,str) and (ref.startswith(('profile:','workspace:')) or ref in private_refs)
+               for ref in resolved.get('evidence_refs',[]))
+
+def judge_outcome(resolved):
+    kind = resolved['kind']
+    research = resolved.get('follow_up_research') or resolved.get('research_parameters')
+    candidate = {'kind': 'research', 'parameters': deepcopy(research)} if research else None
+    tool = next((name for name in ('read_shipments','read_carbon') if any(name in ref for ref in resolved.get('evidence_refs',[]))), 'judge_read')
+    result = {'status': 'proposal' if candidate else 'needs_clarification' if kind == 'needs_input' else 'completed',
+            'assistant_text': resolved.get('answer') or resolved.get('outcome') or 'This comparison is unavailable.',
+            'agent_steps': [{'agent': 'workspace', 'role': 'Grounded local evidence', 'status': 'completed',
+                             'model': 'none', 'provider_call': 'none', 'tool': tool,
+                             'summary': 'Read current owned records; no public search executed.'}],
+            'evidence_ids': resolved.get('evidence_refs', [])[:16], 'candidate': candidate,
+            'judge_resolution': resolved, 'utility': None,
+            'proposal_kind': 'research' if candidate else None, 'parameters': deepcopy(research) if research else None}
+    if resolved.get('analytics'):
+        result['analytics'] = deepcopy(resolved['analytics'])
+    return result
+
+def evidence(value):
+    aggregate = summarize_gemini_receipts(value.judge_receipts.get(value.company_id, []))
+    case = None
+    if value.company_id == 'loomworks':
+        source = fixture('judge_hindi_case_v1.json')
+        match = next((r for r in aggregate['receipts'] if r['input_source_id'] == source['source_id']),None)
+        case = {'status': 'success' if match else 'unavailable', 'inputSourceId': source['source_id'],
+                'originalTitle': source['original_title'], 'publisher': source['publisher'],
+                'publishedAt': source['publication_at'], 'sourceUrl': source['source_url']}
+        if match:
+            case.update(translationSummary=match['output'], nextAction=source['exposure_limit'])
+    from .judge_replay import replay_at
+    replay = fixture('judge_suez_2021_v1.json')
+    replay['timeline'] = [replay_at(replay,datetime(2021,3,day,23,59,59,999999,tzinfo=timezone.utc))
+                          for day in range(23,31)]
+    return {'company_id': value.company_id, 'context_version': value.context_version,
+            'aggregate': aggregate, 'hindi_case': case, 'replay': replay}
+
+def hindi_payload():
+    source = fixture('judge_hindi_case_v1.json')
+    return {'source_id': source['source_id'], 'title': source['original_title'],
+            'source_url': source['source_url'], 'publication_at': source['publication_at'],
+            'instruction': 'Interpret only this curated Hindi title in short English. Explain regional cotton sourcing implications and limitations. Do not infer supplier price, stock or Bangladesh duty. Return JSON output and model_reviewed_flags (public_policy_change, regional_import_exposure, review_source). No tools or URL fetch.'}
+
+def sanitize_receipt(raw, now):
+    if not isinstance(raw,dict):
+        return None
+    source = fixture('judge_hindi_case_v1.json')
+    def clean(v,n):
+        return re.sub(r'[\x00-\x1f\x7f]', ' ',v).strip()[:n] if isinstance(v,str) else ''
+    model, version = clean(raw.get('model_id'),120), clean(raw.get('model_version'),120)
+    output = clean(raw.get('output'),1500)
+    if not model.startswith('gemini-') or not version or not output:
+        return None
+    record = {'provider': 'vertex_ai', 'status': 'success', 'model_id': model, 'model_version': version,
+              'provider_call_id': clean(raw.get('provider_call_id'),120) or None,
+              'input_source_id': source['source_id'], 'called_at': now.isoformat(),
+              'source_title': source['original_title'], 'source_url': source['source_url'],
+              'source_as_of': source['publication_at'][:10], 'output': output,
+              'evidence_refs': [source['source_id'],source['corroboration_url']],
+              'model_reviewed_flags': sorted({f for f in raw.get('model_reviewed_flags',[]) if isinstance(f,str)} &
+                                             {'regional_import_exposure','public_policy_change','review_source'})}
+    return record if summarize_gemini_receipts([record])['interpreted_articles'] == 1 else None
+
+class VertexHindiProvider:
+    """Same lazy, offline-aware Vertex boundary as the workspace operator."""
+    def __call__(self,payload):
+        from .operator import VertexOperatorProvider, OperatorUnavailable
+        from google import genai
+        from google.genai import types
+        import os
+        boundary = VertexOperatorProvider()
+        if not boundary.available:
+            raise OperatorUnavailable('Vertex unavailable')
+        client = genai.Client(vertexai=True, project=os.environ['GOOGLE_CLOUD_PROJECT'].strip(),
+                              location=os.environ['GOOGLE_CLOUD_LOCATION'].strip(),
+                              http_options=types.HttpOptions(api_version='v1',timeout=15000))
+        try:
+            response = client.models.generate_content(model=boundary.model, contents=json.dumps(payload,ensure_ascii=False),
+                config=types.GenerateContentConfig(temperature=0,max_output_tokens=640,response_mime_type='application/json',
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)))
+            candidates = response.candidates or []
+            if len(candidates)!=1 or str(candidates[0].finish_reason).split('.')[-1].upper()!='STOP':
+                raise OperatorUnavailable('Incomplete interpretation')
+            raw = response.text
+            if not raw or len(raw)>6000:
+                raise OperatorUnavailable('Invalid interpretation')
+            result = json.loads(raw)
+            result.update(model_id=boundary.model, model_version=getattr(response,'model_version',None),
+                          provider_call_id=getattr(response,'response_id',None))
+            return result
+        finally:
+            client.close()

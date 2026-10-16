@@ -1,0 +1,808 @@
+{
+  "schema": 1,
+  "purpose": "Illustrative profile display only; no shipment, supplier, offer, route measurement, or carbon/planner input.",
+  "coordinate_notice": "Hand-curated approximate city, corridor and port points. Where a point resembles locations_v1, that registry's eight port coordinates remain unverified hand entries. No facility coordinate is known. Polylines are illustrative, not navigable maritime or road routes.",
+  "attribution": "Fictional company route labels: Closed Source demo company profiles. Approximate display coordinates curated for this project; no third-party chart, tile, route geometry, or copyrighted map data is embedded. Google Maps JavaScript supplies optional map tiles under its own terms.",
+  "routes": [
+    {
+      "company_id": "solara-cables",
+      "route_id": "solara-cables-route-1",
+      "material_id": "copper",
+      "origin": "Valparaiso, Chile",
+      "destination": "Pune, India",
+      "via": [
+        "Pacific Ocean",
+        "Mumbai"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Valparaiso port area",
+          "kind": "origin_port",
+          "lat": -33.03,
+          "lng": -71.63,
+          "source": "locations_v1:CLVAP; hand-entered, unverified",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Pacific Ocean corridor",
+          "kind": "corridor",
+          "lat": -30,
+          "lng": -110,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "South Pacific corridor",
+          "kind": "corridor",
+          "lat": -12,
+          "lng": -150,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Western Pacific corridor",
+          "kind": "corridor",
+          "lat": -5,
+          "lng": 175,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Philippine Sea corridor",
+          "kind": "corridor",
+          "lat": 18,
+          "lng": 145,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Luzon Strait corridor",
+          "kind": "corridor",
+          "lat": 22,
+          "lng": 123,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "South China Sea corridor",
+          "kind": "corridor",
+          "lat": 15,
+          "lng": 115,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Singapore Strait corridor",
+          "kind": "corridor",
+          "lat": 1.2,
+          "lng": 103.5,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Malacca Strait corridor",
+          "kind": "corridor",
+          "lat": 6,
+          "lng": 95,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Arabian Sea corridor",
+          "kind": "corridor",
+          "lat": 11,
+          "lng": 75,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Mumbai port area",
+          "kind": "destination_port",
+          "lat": 18.95,
+          "lng": 72.95,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Pune city area",
+          "kind": "city",
+          "lat": 18.52,
+          "lng": 73.86,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        }
+      ]
+    },
+    {
+      "company_id": "solara-cables",
+      "route_id": "solara-cables-route-2",
+      "material_id": "copper",
+      "origin": "Hamburg, Germany",
+      "destination": "Chennai, India",
+      "via": [
+        "Suez Canal"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Hamburg port area",
+          "kind": "origin_port",
+          "lat": 53.54,
+          "lng": 9.98,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "North Sea corridor",
+          "kind": "corridor",
+          "lat": 54.5,
+          "lng": 7.5,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "English Channel corridor",
+          "kind": "corridor",
+          "lat": 50.1,
+          "lng": -1,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Bay of Biscay corridor",
+          "kind": "corridor",
+          "lat": 45,
+          "lng": -6,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Gibraltar Strait corridor",
+          "kind": "corridor",
+          "lat": 36,
+          "lng": -5.5,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Western Mediterranean corridor",
+          "kind": "corridor",
+          "lat": 37,
+          "lng": 8,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Eastern Mediterranean corridor",
+          "kind": "corridor",
+          "lat": 34,
+          "lng": 25,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Port Said Mediterranean approach",
+          "kind": "corridor",
+          "lat": 31.27,
+          "lng": 32.3,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Suez Canal corridor",
+          "kind": "corridor",
+          "lat": 30.48,
+          "lng": 32.34,
+          "source": "profile-declared via; hand-curated illustrative waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Suez Red Sea exit",
+          "kind": "corridor",
+          "lat": 29.97,
+          "lng": 32.55,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Red Sea corridor",
+          "kind": "corridor",
+          "lat": 24,
+          "lng": 36,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Bab el-Mandeb corridor",
+          "kind": "corridor",
+          "lat": 12.6,
+          "lng": 43.4,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Gulf of Aden corridor",
+          "kind": "corridor",
+          "lat": 12,
+          "lng": 50,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Arabian Sea corridor",
+          "kind": "corridor",
+          "lat": 15,
+          "lng": 62,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "South India sea approach",
+          "kind": "corridor",
+          "lat": 6,
+          "lng": 78,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Bay of Bengal approach",
+          "kind": "corridor",
+          "lat": 8,
+          "lng": 82,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Chennai port area",
+          "kind": "destination_port",
+          "lat": 13.1,
+          "lng": 80.3,
+          "source": "locations_v1:INMAA; hand-entered, unverified",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    },
+    {
+      "company_id": "terrapack",
+      "route_id": "terrapack-route-1",
+      "material_id": "pet-resin",
+      "origin": "Singapore",
+      "destination": "Ahmedabad, India",
+      "via": [
+        "Nhava Sheva"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Singapore port area",
+          "kind": "origin_port",
+          "lat": 1.27,
+          "lng": 103.82,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Malacca Strait corridor",
+          "kind": "corridor",
+          "lat": 3,
+          "lng": 100,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Andaman Sea corridor",
+          "kind": "corridor",
+          "lat": 8,
+          "lng": 95,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Indian Ocean corridor",
+          "kind": "corridor",
+          "lat": 10,
+          "lng": 80,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "West India sea approach",
+          "kind": "corridor",
+          "lat": 15,
+          "lng": 72,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Nhava Sheva port area",
+          "kind": "destination_port",
+          "lat": 18.95,
+          "lng": 72.95,
+          "source": "locations_v1:INNSA; hand-entered, unverified",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Ahmedabad city area",
+          "kind": "city",
+          "lat": 23.03,
+          "lng": 72.58,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        }
+      ]
+    },
+    {
+      "company_id": "loomworks",
+      "route_id": "loomworks-route-1",
+      "material_id": "cotton",
+      "origin": "Kolkata, India",
+      "destination": "Dhaka, Bangladesh",
+      "via": [
+        "Benapole"
+      ],
+      "mode": "land",
+      "points": [
+        {
+          "label": "Kolkata city area",
+          "kind": "city",
+          "lat": 22.57,
+          "lng": 88.36,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        },
+        {
+          "label": "Benapole border area",
+          "kind": "corridor",
+          "lat": 23.04,
+          "lng": 88.9,
+          "source": "profile-declared via; hand-curated approximate border area",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Dhaka city area",
+          "kind": "city",
+          "lat": 23.81,
+          "lng": 90.41,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        }
+      ]
+    },
+    {
+      "company_id": "harvest-foods",
+      "route_id": "harvest-foods-route-1",
+      "material_id": "wheat",
+      "origin": "Vancouver, Canada",
+      "destination": "Mombasa, Kenya",
+      "via": [
+        "Indian Ocean"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Vancouver port area",
+          "kind": "origin_port",
+          "lat": 49.29,
+          "lng": -123.1,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "North Pacific corridor",
+          "kind": "corridor",
+          "lat": 42,
+          "lng": -130,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Pacific Ocean corridor",
+          "kind": "corridor",
+          "lat": 25,
+          "lng": -160,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Western Pacific corridor",
+          "kind": "corridor",
+          "lat": 25,
+          "lng": 175,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Philippine Sea corridor",
+          "kind": "corridor",
+          "lat": 24,
+          "lng": 145,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Luzon Strait corridor",
+          "kind": "corridor",
+          "lat": 22,
+          "lng": 123,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "South China Sea corridor",
+          "kind": "corridor",
+          "lat": 15,
+          "lng": 115,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Singapore Strait corridor",
+          "kind": "corridor",
+          "lat": 1.2,
+          "lng": 103.5,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Andaman Sea corridor",
+          "kind": "corridor",
+          "lat": 6,
+          "lng": 95,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Indian Ocean corridor",
+          "kind": "corridor",
+          "lat": -6,
+          "lng": 70,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Mombasa port area",
+          "kind": "destination_port",
+          "lat": -4.04,
+          "lng": 39.67,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    },
+    {
+      "company_id": "meridian-pharma",
+      "route_id": "meridian-pharma-route-1",
+      "material_id": "api",
+      "origin": "Hyderabad, India",
+      "destination": "Basel, Switzerland",
+      "via": [
+        "Frankfurt"
+      ],
+      "mode": "unspecified",
+      "points": [
+        {
+          "label": "Hyderabad city area",
+          "kind": "city",
+          "lat": 17.39,
+          "lng": 78.49,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        },
+        {
+          "label": "Frankfurt city area",
+          "kind": "corridor",
+          "lat": 50.11,
+          "lng": 8.68,
+          "source": "profile-declared via; hand-curated approximate city center",
+          "precision": "approximate city area"
+        },
+        {
+          "label": "Basel city area",
+          "kind": "city",
+          "lat": 47.56,
+          "lng": 7.59,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        }
+      ]
+    },
+    {
+      "company_id": "forgeline-components",
+      "route_id": "forgeline-components-route-1",
+      "material_id": "steel",
+      "origin": "Detroit, USA",
+      "destination": "Monterrey, Mexico",
+      "via": [
+        "Laredo"
+      ],
+      "mode": "land",
+      "points": [
+        {
+          "label": "Detroit city area",
+          "kind": "city",
+          "lat": 42.33,
+          "lng": -83.05,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        },
+        {
+          "label": "Laredo border area",
+          "kind": "corridor",
+          "lat": 27.51,
+          "lng": -99.51,
+          "source": "profile-declared via; hand-curated approximate border area",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Monterrey city area",
+          "kind": "city",
+          "lat": 25.69,
+          "lng": -100.32,
+          "source": "hand-curated approximate city center",
+          "precision": "approximate city area"
+        }
+      ]
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "route_id": "gridspring-batteries-route-1",
+      "material_id": "lithium",
+      "origin": "Antofagasta, Chile",
+      "destination": "Busan, South Korea",
+      "via": [
+        "Pacific Ocean"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Antofagasta port area",
+          "kind": "origin_port",
+          "lat": -23.65,
+          "lng": -70.4,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Pacific Ocean corridor",
+          "kind": "corridor",
+          "lat": -20,
+          "lng": -110,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Central Pacific corridor",
+          "kind": "corridor",
+          "lat": -5,
+          "lng": -160,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Western Pacific corridor",
+          "kind": "corridor",
+          "lat": 18,
+          "lng": 175,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "North Pacific corridor",
+          "kind": "corridor",
+          "lat": 30,
+          "lng": 150,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Korea Strait corridor",
+          "kind": "corridor",
+          "lat": 33,
+          "lng": 128,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Busan port area",
+          "kind": "destination_port",
+          "lat": 35.1,
+          "lng": 129.04,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "route_id": "circuitpeak-systems-route-1",
+      "material_id": "chips",
+      "origin": "Kaohsiung, Taiwan",
+      "destination": "Penang, Malaysia",
+      "via": [
+        "South China Sea"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Kaohsiung port area",
+          "kind": "origin_port",
+          "lat": 22.61,
+          "lng": 120.29,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "South China Sea corridor",
+          "kind": "corridor",
+          "lat": 15,
+          "lng": 113,
+          "source": "profile-declared sea; hand-curated illustrative waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Southern South China Sea corridor",
+          "kind": "corridor",
+          "lat": 7,
+          "lng": 108,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Singapore Strait corridor",
+          "kind": "corridor",
+          "lat": 1.2,
+          "lng": 103.5,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Malacca Strait corridor",
+          "kind": "corridor",
+          "lat": 3,
+          "lng": 101,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Penang port area",
+          "kind": "destination_port",
+          "lat": 5.41,
+          "lng": 100.35,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "route_id": "atlas-petrochem-route-1",
+      "material_id": "naphtha",
+      "origin": "Dammam, Saudi Arabia",
+      "destination": "Abu Dhabi, UAE",
+      "via": [
+        "Persian Gulf"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Dammam port area",
+          "kind": "origin_port",
+          "lat": 26.43,
+          "lng": 50.1,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Persian Gulf corridor",
+          "kind": "corridor",
+          "lat": 26,
+          "lng": 53,
+          "source": "profile-declared gulf; hand-curated illustrative waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Abu Dhabi port area",
+          "kind": "destination_port",
+          "lat": 24.5,
+          "lng": 54.37,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "route_id": "stonebridge-materials-route-1",
+      "material_id": "gypsum",
+      "origin": "Alexandria, Egypt",
+      "destination": "Durban, South Africa",
+      "via": [
+        "Suez Canal"
+      ],
+      "mode": "sea",
+      "points": [
+        {
+          "label": "Alexandria port area",
+          "kind": "origin_port",
+          "lat": 31.2,
+          "lng": 29.9,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        },
+        {
+          "label": "Port Said Mediterranean approach",
+          "kind": "corridor",
+          "lat": 31.27,
+          "lng": 32.3,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Suez Canal corridor",
+          "kind": "corridor",
+          "lat": 30.48,
+          "lng": 32.34,
+          "source": "profile-declared via; hand-curated illustrative waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Suez Red Sea exit",
+          "kind": "corridor",
+          "lat": 29.97,
+          "lng": 32.55,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Red Sea corridor",
+          "kind": "corridor",
+          "lat": 19,
+          "lng": 39,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Bab el-Mandeb corridor",
+          "kind": "corridor",
+          "lat": 12.6,
+          "lng": 43.4,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Somali offshore corridor",
+          "kind": "corridor",
+          "lat": -2,
+          "lng": 49,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Mozambique Channel corridor",
+          "kind": "corridor",
+          "lat": -18,
+          "lng": 42,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "South Africa east-coast approach",
+          "kind": "corridor",
+          "lat": -27,
+          "lng": 36,
+          "source": "hand-curated illustrative sea waypoint",
+          "precision": "broad corridor"
+        },
+        {
+          "label": "Durban port area",
+          "kind": "destination_port",
+          "lat": -29.87,
+          "lng": 31.03,
+          "source": "hand-curated approximate city/port area",
+          "precision": "unverified approximate port area"
+        }
+      ]
+    }
+  ]
+}

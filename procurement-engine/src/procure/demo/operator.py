@@ -742,7 +742,15 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
     """Call each specialist once; return only server-checkable suggestions."""
     if not isinstance(message, str) or not message.strip() or len(message) > 1200:
         raise OperatorValidationError('Short message required.')
+    from .experience_service import resolve_local_turn, judge_outcome
+    resolved = resolve_local_turn(snapshot, message, now=datetime.now(timezone.utc))
     workspace_news_question = is_workspace_news_question(message)
+    # An explicitly supplied available model can still interpret a broad dated
+    # news brief. The hosted executor handles canonical local outcomes first and
+    # passes no provider for them; offline/None reads always stay deterministic.
+    model_news = workspace_news_question and provider is not None and bool(getattr(provider,'available',True))
+    if resolved is not None and not model_news:
+        return judge_outcome(resolved)
     research = None
     if not workspace_news_question:
         try:

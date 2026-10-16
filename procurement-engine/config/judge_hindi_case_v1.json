@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "source_id": "pib-2267065",
+  "publisher": "Press Information Bureau, Government of India",
+  "issuer": "Ministry of Finance, Government of India",
+  "language": "hi",
+  "publication_at": "2026-05-30T18:46:00+05:30",
+  "retrieved_at": "2026-10-16T19:19:57Z",
+  "original_title": "केंद्र सरकार ने 1 जून, 2026 से 31 अक्टूबर, 2026 तक कपास के आयात पर सभी सीमा शुल्क से अस्थायी छूट दी",
+  "source_url": "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2267065&lang=2&reg=48",
+  "corroboration_url": "https://static.pib.gov.in/WriteReadData/specificdocs/documents/2026/may/doc2026530879601.pdf",
+  "gazette_notification": "19/2026-Customs",
+  "scope": {
+    "hs_heading": "5201",
+    "goods": "Cotton",
+    "import_country": "India",
+    "exemptions": ["First Schedule customs duty", "Agriculture Infrastructure and Development Cess"],
+    "effective_from": "2026-06-01",
+    "effective_through_inclusive": "2026-10-31"
+  },
+  "translation": {"status": "unavailable", "provenance": null, "english_text": null},
+  "gemini_receipt": null,
+  "exposure_limit": "Regional Indian cotton import policy context only; no supplier stock, supplier price, or Bangladesh import-duty change established."
+}

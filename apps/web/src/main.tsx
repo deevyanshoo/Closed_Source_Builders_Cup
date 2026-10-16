@@ -23,7 +23,8 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/scenarios" element={<VoicePage />} />
         <Route path="/dispatch" element={<Suspense fallback={<p className="notice">Loading dispatch…</p>}><DispatchPage /></Suspense>} />
         <Route path="/demo" element={<Suspense fallback={<p className="notice">Opening demo…</p>}><DemoPage /></Suspense>} />
-        <Route path="*" element={<Navigate to="/planning" replace />} />
+        <Route path="/" element={<Navigate to="/demo" replace />} />
+        <Route path="*" element={<Navigate to="/demo" replace />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>,

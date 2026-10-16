@@ -21,14 +21,14 @@ const stageNames: Record<ProcurementStage, string> = { add: 'Add quotes', review
 
 export function readWorkspaceLocation(search: string): { view: WorkspaceView; stage: ProcurementStage } {
   const params = new URLSearchParams(search), rawView = params.get('view'), rawStage = params.get('stage');
-  return { view: rawView && workspaceViews.includes(rawView as Exclude<WorkspaceView, 'hub'>) ? rawView as WorkspaceView : 'hub', stage: rawStage && procurementStages.includes(rawStage as ProcurementStage) ? rawStage as ProcurementStage : 'add' };
+  return { view: rawView && workspaceViews.includes(rawView as Exclude<WorkspaceView, 'hub'>) ? rawView as WorkspaceView : rawView === 'hub' ? 'hub' : 'overview', stage: rawStage && procurementStages.includes(rawStage as ProcurementStage) ? rawStage as ProcurementStage : 'add' };
 }
 export function readSupplyLocation(search: string): SupplyTab {
   return new URLSearchParams(search).get('supply') === 'shipments' ? 'shipments' : 'inventory';
 }
 export function workspaceSearch(search: string, view: WorkspaceView, stage: ProcurementStage, supply: SupplyTab = 'inventory') {
   const params = new URLSearchParams(search); params.delete('company'); params.delete('supply');
-  if (view === 'hub') { params.delete('view'); params.delete('stage'); }
+  if (view === 'hub') { params.set('view', 'hub'); params.delete('stage'); }
   else { params.set('view', view); if (view === 'procurement') params.set('stage', stage); else params.delete('stage'); if (view === 'inventory' && supply === 'shipments') params.set('supply', 'shipments'); }
   const next = params.toString(); return next ? `?${next}` : '';
 }

@@ -89,6 +89,45 @@ export function carbonCell(comparison: CarbonComparison, offerId: string): strin
 }
 
 export type CarbonMass = { mass_kg: string; basis: string };
+export type CarbonInputs = { legs: Record<string, CarbonLeg[]>; masses: Record<string, CarbonMass> };
+
+/** Only an assessment for the exact active context may provide form values. A draft always wins. */
+export function carbonPanelInputs(result: CarbonComparison | null, scope: CarbonScope, plan: PlanView, dirty: boolean, draft: CarbonInputs | null): CarbonInputs {
+  if (draft) return draft;
+  if (dirty || !carbonResponseMatchesScope(result, scope, plan.plan_id)) return { legs: {}, masses: {} };
+  const allowed = new Set(plan.alternatives.map(a => a.offer_id));
+  return {
+    legs: Object.fromEntries(result.suppliers.filter(row => allowed.has(row.offer_id)).map(row =>
+      [row.offer_id, row.estimate.transport.legs.slice(0, 5).map(({ mode, distance_km }) => ({ mode, distance_km }))])),
+    masses: Object.fromEntries(result.suppliers.filter(row => allowed.has(row.offer_id) && row.estimate.mass_basis).map(row =>
+      [row.offer_id, { mass_kg: row.estimate.mass_basis!.mass_kg, basis: row.estimate.mass_basis!.basis }])),
+  };
+}
+
+export function carbonSubmission(plan: PlanView, inputs: CarbonInputs, massUnit: boolean) {
+  const legsByOffer: Record<string, CarbonLeg[]> = {};
+  const massByOffer: Record<string, CarbonMass> = {};
+  for (const offer of plan.alternatives) {
+    const supplier = supplierDisplayName(offer.supplier);
+    const complete: CarbonLeg[] = [];
+    for (const [index, leg] of (inputs.legs[offer.offer_id] ?? []).entries()) {
+      const mode = leg.mode.trim(), distance_km = leg.distance_km.trim();
+      if (!mode && !distance_km) continue;
+      if (!mode) throw new Error(`${supplier}, leg ${index + 1}: choose a transport mode.`);
+      if (!distance_km) throw new Error(`${supplier}, leg ${index + 1}: enter a distance in km.`);
+      complete.push({ mode, distance_km });
+    }
+    if (complete.length) legsByOffer[offer.offer_id] = complete;
+    if (!massUnit) {
+      const mass_kg = inputs.masses[offer.offer_id]?.mass_kg.trim() ?? '';
+      const basis = inputs.masses[offer.offer_id]?.basis.trim() ?? '';
+      if (mass_kg && !basis) throw new Error(`${supplier}: enter a mass basis for the shipping mass.`);
+      if (basis && !mass_kg) throw new Error(`${supplier}: enter a shipping mass in kg for this basis.`);
+      if (mass_kg) massByOffer[offer.offer_id] = { mass_kg, basis };
+    }
+  }
+  return { legsByOffer, massByOffer };
+}
 
 export async function requestCarbonEstimate(send: typeof fetch, csrf: string, planId: string, legsByOffer: Record<string, CarbonLeg[]>, contextVersion?: number, massByOffer: Record<string, CarbonMass> = {}): Promise<CarbonComparison> {
   let response: Response;
@@ -122,21 +161,21 @@ export function CarbonPanel(props: CarbonPanelProps) {
 
 function CarbonPanelContent({ plan, csrf, scope, contextVersion, result, onResult, onInputsChange, dirty, send = fetch, requestScope }: CarbonPanelProps & { requestScope: string }) {
   const massUnit = ['kg', 'tonne'].includes(plan.quantity_unit ?? 'kg');
-  const [masses, setMasses] = useState<Record<string, CarbonMass>>({});
-  const [legs, setLegs] = useState<Record<string, CarbonLeg>>({});
+  const [draft, setDraft] = useState<CarbonInputs | null>(null);
+  const [savedResult, setSavedResult] = useState<CarbonComparison | null>(carbonResponseMatchesScope(result, scope, plan.plan_id) ? result : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [locallyEdited, setLocallyEdited] = useState(false);
   const [localResult, setLocalResult] = useState<CarbonComparison | null>(null);
   const owner = useMemo(() => new CarbonRequestOwner(requestScope), [requestScope]);
   useEffect(() => { owner.activate(); owner.setScope(requestScope); return () => owner.dispose(); }, [owner, requestScope]);
-  const shown = locallyEdited ? localResult : result;
-  const current = !dirty && shown?.plan_id === plan.plan_id && shown.company_id === scope.companyId &&
-    (!locallyEdited || carbonResponseMatchesScope(shown, scope, plan.plan_id)) ? shown : null;
-  const leg = (offerId: string) => legs[offerId] ?? { mode: 'sea_container', distance_km: '' };
+  useEffect(() => { if (carbonResponseMatchesScope(result, scope, plan.plan_id)) { setSavedResult(result); setLocalResult(null); } }, [result, scope.companyId, scope.contextVersion, plan.plan_id]);
+  const shown = localResult ?? result ?? savedResult;
+  const current = !dirty && !draft && carbonResponseMatchesScope(shown, scope, plan.plan_id) ? shown : null;
+  const inputs = carbonPanelInputs(shown, scope, plan, dirty, draft);
+  const offerLegs = (offerId: string) => inputs.legs[offerId]?.length ? inputs.legs[offerId] : [{ mode: '', distance_km: '' }];
+  function editInputs(next: CarbonInputs) { inputsChanged(); setDraft(next); }
   function inputsChanged() {
     invalidateCarbonInputs(owner, () => {
-      setLocallyEdited(true);
       setLocalResult(null);
       setBusy(false);
       setError('');
@@ -148,12 +187,13 @@ function CarbonPanelContent({ plan, csrf, scope, contextVersion, result, onResul
       setError('The comparison changed. Run it again before estimating emissions.');
       return;
     }
+    let submission: ReturnType<typeof carbonSubmission>;
+    try { submission = carbonSubmission(plan, inputs, massUnit); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Complete the entered emissions inputs.'); return; }
+    const { legsByOffer, massByOffer } = submission;
     setBusy(true); setError('');
-    const entered = Object.fromEntries(plan.alternatives.map(a => [a.offer_id, leg(a.offer_id)]).filter(([, value]) => (value as CarbonLeg).distance_km.trim() !== '')
-      .map(([id, value]) => [id, [{ mode: (value as CarbonLeg).mode, distance_km: (value as CarbonLeg).distance_km.trim() }]]));
-    const massEntered = Object.fromEntries(Object.entries(masses).filter(([, m]) => m.mass_kg.trim() && m.basis.trim()).map(([id, m]) => [id, { mass_kg: m.mass_kg.trim(), basis: m.basis.trim() }]));
     await owner.run(async () => {
-      try { return { value: await requestCarbonEstimate(send, csrf, plan.plan_id, entered, scope.contextVersion, massUnit ? {} : massEntered) }; }
+      try { return { value: await requestCarbonEstimate(send, csrf, plan.plan_id, legsByOffer, scope.contextVersion, massByOffer) }; }
       catch (reason) { return { reason }; }
     }, outcome => {
       setBusy(false);
@@ -166,8 +206,9 @@ function CarbonPanelContent({ plan, csrf, scope, contextVersion, result, onResul
         setError('The comparison changed. Run it again before estimating emissions.');
         return;
       }
-      setLocallyEdited(true);
+      setDraft(null);
       setLocalResult(value);
+      setSavedResult(value);
       onResult(value);
     });
   }
@@ -175,14 +216,22 @@ function CarbonPanelContent({ plan, csrf, scope, contextVersion, result, onResul
     <div className="demo-heading"><div><span className="demo-kicker">Emissions estimate</span><h2>Carbon alongside cost</h2></div><span className="demo-session">Estimate from published average factors</span></div>
     <p className="demo-muted demo-carbon-intro">Compare material production and the freight legs you enter.</p>
     <details className="demo-carbon-scope"><summary>Scope and assumptions</summary><p>{current?.scope ?? 'Cradle-to-gate material production from published factors, plus the transport legs you enter.'} Distances are what you enter; nothing is inferred from the route.</p></details>
-    <div className="demo-carbon-legs">{plan.alternatives.map(a => { const name = supplierDisplayName(a.supplier); const value = leg(a.offer_id); return <div key={a.offer_id} className="demo-carbon-leg"><strong>{name}</strong>
-      <label><span>Transport mode</span><select aria-label={`Transport mode for ${name}`} value={value.mode} onChange={e => { inputsChanged(); setLegs(old => ({ ...old, [a.offer_id]: { ...value, mode: e.target.value } })); }}>{CARBON_MODES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-      <label><span>Distance (km)</span><input aria-label={`Distance in km for ${name}`} inputMode="decimal" placeholder="Unknown until entered" value={value.distance_km} onChange={e => { inputsChanged(); setLegs(old => ({ ...old, [a.offer_id]: { ...value, distance_km: e.target.value } })); }} /></label>
-      {!massUnit && <><label><span>Shipping mass (kg)</span><input aria-label={`Shipping mass in kg for ${name}`} inputMode="decimal" placeholder="Unknown until entered" value={masses[a.offer_id]?.mass_kg ?? ''} onChange={e => { inputsChanged(); setMasses(old => ({ ...old, [a.offer_id]: { basis: old[a.offer_id]?.basis ?? '', mass_kg: e.target.value } })); }} /></label>
-        <label><span>Mass basis</span><input aria-label={`Mass basis for ${name}`} placeholder="For example: packing list" maxLength={200} value={masses[a.offer_id]?.basis ?? ''} onChange={e => { inputsChanged(); setMasses(old => ({ ...old, [a.offer_id]: { mass_kg: old[a.offer_id]?.mass_kg ?? '', basis: e.target.value } })); }} /></label></>}</div>; })}</div>
+    <div className="demo-carbon-legs">{plan.alternatives.map(a => { const name = supplierDisplayName(a.supplier); const rows = offerLegs(a.offer_id);
+      const updateLeg = (index: number, field: keyof CarbonLeg, value: string) => editInputs({ ...inputs, legs: { ...inputs.legs, [a.offer_id]: rows.map((row, at) => at === index ? { ...row, [field]: value } : row) } });
+      return <div key={a.offer_id} className="demo-carbon-leg"><strong>{name}</strong>
+      {rows.map((value, index) => <div className="demo-carbon-leg-row" key={index}>
+        <span className="demo-carbon-leg-title">Leg {index + 1}</span>
+        <label><span>Transport mode</span><select aria-label={`Transport mode for ${name}${rows.length > 1 ? `, leg ${index + 1}` : ''}`} value={value.mode} onChange={e => updateLeg(index, 'mode', e.target.value)}><option value="">Choose mode</option>{CARBON_MODES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label><span>Distance (km)</span><input aria-label={`Distance in km for ${name}${rows.length > 1 ? `, leg ${index + 1}` : ''}`} inputMode="decimal" placeholder="Unknown until entered" value={value.distance_km} onChange={e => updateLeg(index, 'distance_km', e.target.value)} /></label>
+        {rows.length > 1 && <button type="button" className="demo-carbon-leg-action" aria-label={`Remove leg ${index + 1} for ${name}`} onClick={() => editInputs({ ...inputs, legs: { ...inputs.legs, [a.offer_id]: rows.filter((_, at) => at !== index) } })}>Remove leg</button>}
+      </div>)}
+      {rows.length < 5 && <button type="button" className="demo-carbon-leg-action" onClick={() => editInputs({ ...inputs, legs: { ...inputs.legs, [a.offer_id]: [...rows, { mode: '', distance_km: '' }] } })}>Add leg</button>}
+      {!massUnit && <><label><span>Shipping mass (kg)</span><input aria-label={`Shipping mass in kg for ${name}`} inputMode="decimal" placeholder="Unknown until entered" value={inputs.masses[a.offer_id]?.mass_kg ?? ''} onChange={e => editInputs({ ...inputs, masses: { ...inputs.masses, [a.offer_id]: { basis: inputs.masses[a.offer_id]?.basis ?? '', mass_kg: e.target.value } } })} /></label>
+        <label><span>Mass basis</span><input aria-label={`Mass basis for ${name}`} placeholder="For example: packing list" maxLength={200} value={inputs.masses[a.offer_id]?.basis ?? ''} onChange={e => editInputs({ ...inputs, masses: { ...inputs.masses, [a.offer_id]: { mass_kg: inputs.masses[a.offer_id]?.mass_kg ?? '', basis: e.target.value } } })} /></label></>}</div>; })}</div>
     {!massUnit && <p className="demo-muted">Quantities are in {plan.quantity_unit}. A shipping mass you enter is used for freight only and never inferred; material production stays unavailable without a reviewed material mass.</p>}
     {dirty && <p className="demo-carbon-missing" role="status">Buyer inputs changed. Run the comparison again before estimating emissions. The earlier saved assessment describes the previous comparison.</p>}
-    {!dirty && locallyEdited && !current && <p className="demo-carbon-missing" role="status">Entered transport inputs changed. The earlier saved assessment is hidden; estimate again to see these inputs.</p>}
+    {!dirty && draft && <p className="demo-carbon-missing" role="status">These local input edits are unsaved. {carbonResponseMatchesScope(result ?? savedResult, scope, plan.plan_id) && 'The saved assessment describes the previous inputs. '}Estimate again to save these changes.</p>}
+    {!dirty && draft && carbonResponseMatchesScope(result ?? savedResult, scope, plan.plan_id) && <button type="button" className="demo-carbon-leg-action" onClick={() => { const saved = result ?? savedResult; if (!carbonResponseMatchesScope(saved, scope, plan.plan_id)) return; owner.invalidate(); setDraft(null); setLocalResult(null); setError(''); onResult(saved); }}>Restore current saved inputs</button>}
     <button type="button" className="demo-button" disabled={busy || dirty} onClick={estimate}>{busy ? 'Estimating…' : 'Estimate emissions'}</button>
     {error && <p className="demo-error" role="alert">{error}</p>}
     {current && <div className="demo-carbon-results"><p className="demo-carbon-results-label">Supplier estimates <span>kg CO2e · published average factors</span></p>{current.suppliers.map(row => <details key={row.offer_id}><summary><strong>{supplierDisplayName(row.supplier)}</strong> <span>{carbonCell(current, row.offer_id)}</span></summary>

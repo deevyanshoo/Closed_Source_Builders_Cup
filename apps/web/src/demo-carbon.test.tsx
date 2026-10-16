@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { OfferView, PlanView } from './demo-api';
-import { CarbonPanel, carbonCell, requestCarbonEstimate, CarbonRequestOwner, carbonResponseMatchesScope, invalidateCarbonInputs } from './demo-carbon';
+import { CarbonPanel, carbonCell, requestCarbonEstimate, CarbonRequestOwner, carbonResponseMatchesScope, invalidateCarbonInputs, carbonPanelInputs, carbonSubmission } from './demo-carbon';
 import type { CarbonComparison } from './demo-carbon';
 import { PlanResults } from './demo-page';
 
@@ -96,10 +96,77 @@ describe('carbon footprint estimate (#108)', () => {
     expect(renderToStaticMarkup(<CarbonPanel scope={scope} plan={plan} csrf="c" contextVersion={2} result={null} dirty={false} onResult={() => {}} />)).not.toContain('Shipping mass');
   });
 
-  it('shows a parent-validated saved assessment after a company revisit', () => {
+  it('does not hydrate a result from another context after a company revisit', () => {
     const revisited = { ...scope, contextVersion: 9 };
     const html = renderToStaticMarkup(<CarbonPanel scope={revisited} plan={plan} csrf="c" contextVersion={9} result={comparison} dirty={false} onResult={() => {}} />);
-    expect(html).toContain('Material about 30,892.7 kg CO2e');
+    expect(html).not.toContain('Material about 30,892.7 kg CO2e');
+    expect(html).not.toContain('value="1000"');
+  });
+
+  it('hydrates the bot-saved road leg and every explicit leg from the active assessment', () => {
+    const legs = [
+      { ...estimated.transport.legs[0], mode: 'road_hgv', distance_km: '125' },
+      { ...estimated.transport.legs[0], mode: 'rail_freight', distance_km: '0' },
+      { ...estimated.transport.legs[0], mode: 'sea_container', distance_km: '12.50' },
+      { ...estimated.transport.legs[0], mode: 'road_hgv', distance_km: '45' },
+      { ...estimated.transport.legs[0], mode: 'air_freight', distance_km: '6' },
+    ];
+    const saved = { ...comparison, suppliers: [{ ...comparison.suppliers[0], estimate: { ...estimated, transport: { ...estimated.transport, legs } } }] } as CarbonComparison;
+    const html = renderToStaticMarkup(<CarbonPanel scope={scope} plan={plan} csrf="c" contextVersion={2} result={saved} dirty={false} onResult={() => {}} />);
+    expect(html).toMatch(/<option value="road_hgv" selected="">Road, HGV<\/option>/);
+    for (const distance of ['125', '0', '12.50', '45', '6']) expect(html).toContain(`value="${distance}"`);
+    expect(carbonPanelInputs(saved, scope, plan, false, null).legs.q1).toEqual(legs.map(({ mode, distance_km }) => ({ mode, distance_km })));
+  });
+
+  it('keeps unsaved local edits when a later assessment arrives and submits all five legs, zero, and explicit mass', () => {
+    const counted = { ...plan, quantity_unit: 'unit' } as PlanView;
+    const saved = { ...comparison, suppliers: [{ ...comparison.suppliers[0], estimate: { ...estimated, mass_basis: { mass_kg: '2500.00', basis: 'packing list', source: 'entered', used_for: 'freight only' } } }] } as CarbonComparison;
+    const original = carbonPanelInputs(saved, scope, counted, false, null);
+    expect(original.masses.q1).toEqual({ mass_kg: '2500.00', basis: 'packing list' });
+    const draft = { legs: { q1: [{ mode: 'road_hgv', distance_km: '0' }, { mode: 'rail_freight', distance_km: '1.25' }, { mode: 'sea_bulk', distance_km: '2' }, { mode: 'road_hgv', distance_km: '3' }, { mode: 'air_freight', distance_km: '4' }] }, masses: { q1: { mass_kg: '0', basis: 'weighbridge' } } };
+    const later = { ...saved, suppliers: [{ ...saved.suppliers[0], estimate: { ...estimated, transport: { ...estimated.transport, legs: [{ ...estimated.transport.legs[0], mode: 'sea_container', distance_km: '999' }] } } }] } as CarbonComparison;
+    expect(carbonPanelInputs(later, scope, counted, false, draft)).toBe(draft);
+    expect(carbonPanelInputs(later, scope, counted, false, null).legs.q1).toEqual([{ mode: 'sea_container', distance_km: '999' }]);
+    const sent = carbonSubmission(counted, draft, false);
+    expect(sent.legsByOffer.q1).toEqual(draft.legs.q1);
+    expect(sent.massByOffer.q1).toEqual({ mass_kg: '0', basis: 'weighbridge' });
+    expect(carbonPanelInputs(later, { ...scope, companyId: 'other' }, counted, false, null).legs.q1).toBeUndefined();
+    expect(carbonPanelInputs(later, { ...scope, contextVersion: 3 }, counted, false, null).legs.q1).toBeUndefined();
+    expect(carbonPanelInputs(later, scope, { ...counted, plan_id: 'other' }, false, null).legs.q1).toBeUndefined();
+  });
+
+  it('serializes all saved legs and their exact decimal text through the request', async () => {
+    const explicit = ['0', '1.250', '2', '3', '4'].map((distance_km, index) => ({ mode: index ? 'rail_freight' : 'road_hgv', distance_km }));
+    const send = vi.fn(async () => new Response(JSON.stringify(comparison), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const { legsByOffer } = carbonSubmission(plan, { legs: { q1: explicit }, masses: {} }, true);
+    await requestCarbonEstimate(send as unknown as typeof fetch, 'c', 'p1', legsByOffer, 2);
+    const [, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string).legs_by_offer.q1).toEqual(explicit);
+  });
+
+  it('rejects a second leg with a mode but no distance instead of dropping it', () => {
+    const inputs = { legs: { q1: [{ mode: 'road_hgv', distance_km: '125' }, { mode: 'rail_freight', distance_km: '' }] }, masses: {} };
+    expect(() => carbonSubmission(plan, inputs, true)).toThrow(/Swift.*leg 2.*distance/i);
+  });
+
+  it('rejects a second leg with a distance but no mode instead of dropping it', () => {
+    const inputs = { legs: { q1: [{ mode: 'road_hgv', distance_km: '125' }, { mode: '', distance_km: '0' }] }, masses: {} };
+    expect(() => carbonSubmission(plan, inputs, true)).toThrow(/Swift.*leg 2.*mode/i);
+  });
+
+  it('ignores wholly blank placeholders while retaining complete legs and zero distance', () => {
+    const inputs = { legs: { q1: [{ mode: 'road_hgv', distance_km: '125' }, { mode: '', distance_km: '' }, { mode: 'rail_freight', distance_km: '0' }] }, masses: {} };
+    expect(carbonSubmission(plan, inputs, true).legsByOffer).toEqual({ q1: [{ mode: 'road_hgv', distance_km: '125' }, { mode: 'rail_freight', distance_km: '0' }] });
+  });
+
+  it('rejects a nonmass shipping mass without a basis instead of dropping it', () => {
+    const counted = { ...plan, quantity_unit: 'unit' } as PlanView;
+    expect(() => carbonSubmission(counted, { legs: {}, masses: { q2: { mass_kg: '0', basis: '' } } }, false)).toThrow(/Late.*mass basis/i);
+  });
+
+  it('rejects a nonmass basis without a shipping mass instead of dropping it', () => {
+    const counted = { ...plan, quantity_unit: 'unit' } as PlanView;
+    expect(() => carbonSubmission(counted, { legs: {}, masses: { q1: { mass_kg: '', basis: 'packing list' } } }, false)).toThrow(/Swift.*shipping mass/i);
   });
 
   it('requires a fresh estimate response to match the active company, context and plan', () => {

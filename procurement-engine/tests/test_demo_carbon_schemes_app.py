@@ -47,7 +47,8 @@ def test_company_switch_drops_the_old_result_from_export(client):
     version = switched.json()['context_version']
     empty = value.post('/api/demo/carbon/schemes', headers=headers,
                        json={'inputs_by_scheme': {}, 'expected_context_version': version})
-    assert empty.json()['matches'] == [] and 'not evidence that no scheme exists' in empty.json()['no_match_reason']
+    assert empty.json()['company_id'] == 'forgeline-components'
+    assert [row['scheme_id'] for row in empty.json()['matches']] == ['mx-ets-pilot']
 
 
 def test_bad_inputs_and_missing_csrf_are_rejected(client):

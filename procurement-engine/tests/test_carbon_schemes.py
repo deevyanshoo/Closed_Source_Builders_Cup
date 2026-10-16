@@ -31,16 +31,20 @@ def test_each_company_gets_the_schemes_for_its_countries(registry):
     expected = {
         'solara-cables': {'in-ccts-offset', 'in-msme-zed', 'in-sidbi-green-finance'},
         'terrapack': {'in-ccts-offset', 'in-msme-zed', 'in-sidbi-green-finance'},
-        'meridian-pharma': {'ie-eu-ets'},
+        'meridian-pharma': {'ie-eu-ets', 'ch-co2-levy-reduction-obligation', 'ch-ets'},
         'harvest-foods': {'ke-green-finance-taxonomy'},
         'stonebridge-materials': {'za-carbon-tax'},
+        'loomworks': {'bd-green-transformation-fund', 'bd-environment-friendly-refinance'},
+        'forgeline-components': {'mx-ets-pilot'},
+        'gridspring-batteries': {'kr-k-ets', 'vn-green-taxonomy'},
+        'circuitpeak-systems': {'my-bnm-lctf'},
+        'atlas-petrochem': {'om-cbo-green-practices'},
     }
     for summary in list_companies():
         result = find_schemes(registry, get_company(summary['company_id']), {})
         assert set(by_id(result)) == expected.get(summary['company_id'], set()), summary['company_id']
         if not result['matches']:
             assert 'not evidence that no scheme exists' in result['no_match_reason']
-            assert result['not_verified_countries'], summary['company_id']
 
 
 def test_unsupported_numbers_are_disabled_in_the_backend(registry):
@@ -116,3 +120,29 @@ def test_no_output_says_saving_eligible_or_tradeable(registry):
         text = repr(find_schemes(registry, get_company(summary['company_id']), {})).lower()
         assert 'saving' not in text.replace('not a saving', '').replace('not a buyer saving', '')
         assert 'is eligible' not in text and 'tradeable credit' not in text and 'cheaper loan' not in text
+
+
+OFFICIAL_DOMAINS = {'Switzerland': 'bafu.admin.ch', 'South Korea': 'mcee.go.kr', 'Mexico': 'gob.mx',
+                    'Malaysia': 'bnm.gov.my', 'Bangladesh': 'bb.org.bd', 'Vietnam': 'vanban.chinhphu.vn',
+                    'Oman': 'cbo.gov.om'}
+
+
+def test_retried_countries_are_discovery_only_from_official_domains(registry):
+    retried = [s for s in registry['schemes'] if s['country'] in OFFICIAL_DOMAINS]
+    assert {s['country'] for s in retried} == set(OFFICIAL_DOMAINS)
+    for scheme in retried:
+        host = scheme['official_url'].split('/')[2]
+        assert host == OFFICIAL_DOMAINS[scheme['country']] or host.endswith('.' + OFFICIAL_DOMAINS[scheme['country']]), scheme['scheme_id']
+        assert scheme['checked_on'] == '2026-10-16'
+        assert scheme['benefit'] == {'status': 'unavailable', 'reason': scheme['benefit']['reason']}, scheme['scheme_id']
+    assert set(registry['not_verified']) == {'UAE'}
+    atlas = find_schemes(registry, get_company('atlas-petrochem'), {})
+    assert atlas['not_verified_countries'] == {'UAE': registry['not_verified']['UAE']}
+
+
+def test_a_country_with_no_registry_entry_says_absence_is_not_evidence(registry):
+    company = deepcopy(get_company('forgeline-components'))
+    company['locations'] = [dict(location, country='Peru') for location in company['locations']]
+    company['suppliers'] = []
+    result = find_schemes(registry, company, {})
+    assert result['matches'] == [] and 'not evidence that no scheme exists' in result['no_match_reason']

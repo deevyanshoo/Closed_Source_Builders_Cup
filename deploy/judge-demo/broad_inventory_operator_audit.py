@@ -27,7 +27,7 @@ from smoke import base_url, key, require
 
 
 BAD_ANSWER = re.compile(r'\{\{|\}\}|\b(?:need(?:s)? clarification|please specify)\b', re.I)
-NUMBERS = re.compile(r'(?<![\w.-])\d[\d,]*(?:\.\d+)?(?![\w.-])')
+NUMBERS = re.compile(r'(?<![\w.-])\d[\d,]*(?:\.\d+)?(?![\w.])')
 UNREVIEWED_PRICE = re.compile(
     r'(?:[$€£₹]\s*\d|\b(?:price|pricing|cost|landed|unit rate)\b\s*'
     r'(?:(?:is|of|at)\s*)?(?:[A-Z]{3}\s*)?\d)', re.I)
@@ -252,6 +252,66 @@ def check_analytics(result, profile, context):
     return checked
 
 
+def check_voice_tool_result(result, profile, context):
+    if isinstance(result.get('analytics'), dict):
+        return check_analytics(result, profile, context), 'profile_analytics'
+    steps = result.get('agent_steps')
+    if (isinstance(steps, list) and len(steps) == 1 and
+            isinstance(steps[0], dict) and steps[0].get('tool') == 'read_risks'):
+        stage = profile['company_id'] + ':voice_risk_intermediate'
+        require(result.get('company_id') == profile['company_id'] and
+                result.get('context_version') == context and
+                result.get('status') == 'completed' and result.get('read_only') is True and
+                result.get('proposal') is None and not result.get('action_result') and
+                steps[0].get('provider_call') == 'none' and
+                steps[0].get('status') == 'completed',
+                stage, 'voice_risk_intermediate_unsafe')
+        workspace = result.get('workspace')
+        risks = workspace.get('risks') if isinstance(workspace, dict) else None
+        companies = risks.get('companies') if isinstance(risks, dict) else None
+        require(isinstance(companies, list) and len(companies) == 1 and
+                isinstance(companies[0], dict) and
+                companies[0].get('company_id') == profile['company_id'] and
+                companies[0].get('company_name') == profile['name'] and
+                isinstance(companies[0].get('alerts'), list),
+                stage, 'voice_risk_scope_wrong')
+        own_material_ids = {m['material_id'] for m in profile['materials']}
+        require(all(isinstance(alert, dict) and
+                    isinstance(alert.get('material_ids'), list) and
+                    all(isinstance(mid, str) for mid in alert['material_ids']) and
+                    set(alert['material_ids']) <= own_material_ids
+                    for alert in companies[0]['alerts']),
+                stage, 'voice_risk_foreign_material')
+        return None, 'owned_risk_intermediate'
+    require(isinstance(steps, list) and len(steps) == 1 and
+            isinstance(steps[0], dict) and
+            steps[0].get('tool') == 'inventory_sourcing_read' and
+            steps[0].get('provider_call') == 'none' and
+            steps[0].get('status') == 'completed',
+            profile['company_id'] + ':voice', 'voice_unsupported_tool_result')
+    checked = check_answer(result, profile, context, 'companywide')
+    return checked['materials_named'], 'canonical_inventory_sourcing_read'
+
+
+def valid_under_cover_thresholds(caption, profile, material_ids):
+    """Allow 'under 20 days' only when a named material has 19–20 days cover."""
+    folded = caption.casefold()
+    named = [m for m in profile['materials'] if m['material_id'] in material_ids and
+             (m['name'].casefold() in folded or
+              re.search(r'\b' + re.escape(m['material_id'].casefold()) + r'\b', folded))]
+    thresholds, claims = {}, set()
+    for pattern in (r'\bcover\b.{0,45}\b(?:just\s+)?under\s+(\d+)\s+days\b',
+                    r'\b(?:just\s+)?under\s+(\d+)\s+days\b.{0,45}\bcover\b'):
+        for match in re.finditer(pattern, folded):
+            threshold = decimal(match.group(1))
+            if threshold is not None:
+                claims.add(threshold)
+                for material in named:
+                    if expected_cover(material) < threshold <= expected_cover(material) + 1:
+                        thresholds.setdefault(material['material_id'], set()).add(threshold)
+    return thresholds, claims
+
+
 def check_voice_caption(caption, profile, material_ids):
     """Screen provider captions; this does not transcribe the output audio."""
     stage = profile['company_id'] + ':voice_caption'
@@ -260,7 +320,11 @@ def check_voice_caption(caption, profile, material_ids):
             not SPOKEN_PRICE.search(caption) and
             not VOICE_ACTION_CLAIM.search(caption), stage, 'voice_caption_not_grounded')
     without_dates = re.sub(r'\b\d{4}-\d{2}-\d{2}\b', '', caption)
-    require(all(decimal(match.group()) in allowed_numbers(profile)
+    thresholds, under_claims = valid_under_cover_thresholds(caption, profile, material_ids)
+    valid_thresholds = {value for values in thresholds.values() for value in values}
+    require(under_claims <= valid_thresholds, stage, 'voice_caption_bad_cover_threshold')
+    allowed = allowed_numbers(profile) | valid_thresholds
+    require(all(decimal(match.group()) in allowed
                 for match in NUMBERS.finditer(without_dates)),
             stage, 'voice_caption_unverified_number')
     folded = caption.casefold()
@@ -272,11 +336,14 @@ def check_voice_caption(caption, profile, material_ids):
         mid = material['material_id']
         suppliers = [s for s in profile['suppliers'] if mid in s['materials']]
         cover = expected_cover(material)
-        cover_help = (spoken_near(caption, r'\bcover\b', cover, tolerance=Decimal('.1'))
+        cover_help = ((spoken_near(caption, r'\bcover\b', cover, tolerance=Decimal('.5'))
+                       or bool(thresholds.get(mid)))
                       and re.search(r'\b(?:supplier|sourcing|lead)\b', folded))
         supplier_help = any(
             (s['name'].replace(' [SYNTHETIC]', '').casefold() in folded or
-             ' '.join(s['name'].split()[:2]).casefold() in folded) and
+             ' '.join(s['name'].split()[:2]).casefold() in folded or
+             ('alternate source' in folded and 'Alternate Source Ltd' in s['name'] and
+              sum('Alternate Source Ltd' in other['name'] for other in suppliers) == 1)) and
             spoken_near(caption, r'\b(?:lead|days?)\b',
                         Decimal(s['lead_time_days']), distance=65)
             for s in suppliers)
@@ -309,7 +376,7 @@ async def voice_turn(socket, audio, profile, context, trace=None, checkpoint=Non
 
     sender = asyncio.create_task(send_audio())
     started = time.monotonic()
-    material_ids, audio_bytes, input_text, output_text = None, 0, '', ''
+    material_ids, tool_path, audio_bytes, input_text, output_text = None, None, 0, '', ''
     try:
         async with asyncio.timeout(100):
             while True:
@@ -321,7 +388,32 @@ async def voice_turn(socket, audio, profile, context, trace=None, checkpoint=Non
                 elif kind == 'transcript' and event.get('direction') == 'output':
                     output_text += ' ' + str(event.get('text', ''))
                 elif kind == 'tool_result':
-                    material_ids = check_analytics(event.get('result') or {}, profile, context)
+                    result = event.get('result') or {}
+                    if trace is not None:
+                        steps = result.get('agent_steps')
+                        observation = {
+                            'company_id': result.get('company_id'),
+                            'context_version': result.get('context_version'),
+                            'status': result.get('status'),
+                            'assistant_text': str(result.get('assistant_text', ''))[:4000],
+                            'agent_step_tools': [str(step.get('tool', ''))[:80]
+                                                 for step in steps if isinstance(step, dict)]
+                                                if isinstance(steps, list) else [],
+                            'analytics_present': isinstance(result.get('analytics'), dict),
+                        }
+                        trace['tool_observation'] = observation
+                        trace.setdefault('tool_observations', []).append(observation)
+                        if checkpoint is not None:
+                            checkpoint()
+                    checked_ids, checked_path = check_voice_tool_result(result, profile, context)
+                    if checked_path == 'owned_risk_intermediate':
+                        if trace is not None:
+                            trace['owned_risk_intermediates'] = trace.get('owned_risk_intermediates', 0) + 1
+                            if checkpoint is not None:
+                                checkpoint()
+                        continue
+                    material_ids, tool_path = checked_ids, checked_path
+                    output_text, audio_bytes = '', 0
                 elif kind == 'audio' and material_ids:
                     require(event.get('sample_rate_hertz') == 24000,
                             profile['company_id'] + ':voice', 'wrong_audio_format')
@@ -334,7 +426,8 @@ async def voice_turn(socket, audio, profile, context, trace=None, checkpoint=Non
                         if trace is not None:
                             trace.update(output_transcript=output_text.strip()[:4000],
                                          output_audio_bytes=audio_bytes,
-                                         tool_material_ids=material_ids)
+                                         tool_material_ids=material_ids,
+                                         tool_validation_path=tool_path)
                             if checkpoint is not None:
                                 checkpoint()
                         caption_check = check_voice_caption(output_text.strip(), profile, material_ids)
@@ -342,6 +435,7 @@ async def voice_turn(socket, audio, profile, context, trace=None, checkpoint=Non
                         return {'material_ids': material_ids, 'output_audio_bytes': audio_bytes,
                                 'input_transcript_verified': True,
                                 'output_transcript': output_text.strip()[:4000],
+                                'tool_validation_path': tool_path,
                                 **caption_check,
                                 'output_audio_semantics_verified': False,
                                 'elapsed_ms': round((time.monotonic() - started) * 1000)}

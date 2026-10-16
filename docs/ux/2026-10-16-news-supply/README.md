@@ -37,6 +37,8 @@ Screenshots show actual hosted interfaces. Industry context photographs are cred
 
 Known operator limitation: the exact final-revision direct inventory text question completed correctly, but one broader inventory-and-sourcing explanation was rejected by the existing numerical verifier. No action ran. `operator-text-smoke.json` records both results; model-response reliability remains follow-up work. The resolved-placeholder regression passed, and existing chat history is not rewritten.
 
+Resolved in the subsequent r65 release on 16 October: clearly read-only broad inventory and sourcing explanations now use authoritative workspace facts directly. All 20 hosted text cases and controlled voice for all 10 companies passed. See [operator repair and acceptance evidence](../2026-10-16-operator-reliability/README.md); this r64 receipt is retained as historical evidence.
+
 ## Infrastructure and release boundaries
 
 Only existing Cloud Run service and hourly collector images were updated. Runtime identity, environment, scaling and limits were preserved. The service remains one CPU, 1GiB, max one instance, concurrency 8, timeout 240s; collector remains one CPU, 512MiB, one task, 120s, no retries. The existing hourly UTC scheduler stays enabled. No billing upgrade, IAM grant or new paid service was introduced; existing trial credits remain the authorized cost boundary.

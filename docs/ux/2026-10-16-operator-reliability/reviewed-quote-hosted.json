@@ -1,0 +1,12 @@
+{
+  "revision": "closed-source-quote-demo-00065-vst",
+  "checked_at": "2026-10-16T10:02:32.954268+00:00",
+  "company_id": "solara-cables",
+  "before": "In the Solara Cables workspace profile dated 2026-10-14, Copper cathode stock is 2000 kg; stated daily use is 333.33 kg per day, and about 6.00 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover is below the shortest listed lead, a potential replenishment timing gap. Supplier profile options: Europa Copper SA: listed 10 days, EUR; Swift Copper Trading Ltd: listed 14 days, USD; Atacama Red Metals SpA: listed 45 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+  "after": "In the Solara Cables workspace profile dated 2026-10-14, Copper cathode stock is 2000 kg; stated daily use is 333.33 kg per day, and about 6.00 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover is below the shortest listed lead, a potential replenishment timing gap. Supplier profile options: Europa Copper SA: listed 10 days, EUR; Swift Copper Trading Ltd: listed 14 days, USD; Atacama Red Metals SpA: listed 45 days, USD. A saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+  "quote_reviewed": true,
+  "rules_extraction": true,
+  "operator_no_model_calls": true,
+  "no_plan_draft_or_outbox_created": true,
+  "ok": true
+}

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'procurement-engine
 import broad_inventory_operator_audit as audit
 from procure.demo.company import get_company
 from procure.demo.agent_tools import inventory_analytics
+from procure.demo.operator import _broad_inventory_answer
 from smoke import AcceptanceError
 
 
@@ -162,3 +163,133 @@ def test_failed_text_checker_preserves_observed_answer(monkeypatch):
 def test_voice_caption_rejects_spoken_price_and_future_action(caption):
     with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
         audit.check_voice_caption(caption, profile(), ['copper'])
+
+
+def test_r65_valid_caption_phrasing_and_invalid_under_threshold():
+    terra = get_company('terrapack')
+    caption = ('PET resin requires attention first, as it has the lowest stock '
+               'cover at just under 20 days. ColorMill offers the shortest lead '
+               'time of 6 days for packaging inks.')
+    checked = audit.check_voice_caption(caption, terra,
+                                        [m['material_id'] for m in terra['materials']])
+    assert checked['material_id'] == 'pet-resin'
+    with pytest.raises(AcceptanceError, match='voice_caption_bad_cover_threshold'):
+        audit.check_voice_caption(caption.replace('under 20 days', 'under 10 days'),
+                                  terra, [m['material_id'] for m in terra['materials']])
+
+    forge = get_company('forgeline-components')
+    caption = ('Cold-rolled steel requires attention first, as it has the lowest '
+               'stock cover at approximately 25 days. The suppliers with the shortest '
+               'lead times are the Alternate Source options for each material, all '
+               'offering a 10-day lead time.')
+    checked = audit.check_voice_caption(caption, forge,
+                                        [m['material_id'] for m in forge['materials']])
+    assert checked['material_id'] == 'steel'
+
+
+def test_canonical_voice_read_is_grounded_without_analytics():
+    company = get_company('harvest-foods')
+    answer = _broad_inventory_answer({'company': company,
+                                      'company_id': company['company_id']},
+                                     'company-wide', 'Give an inventory and sourcing overview')
+    canonical = {'company_id': company['company_id'], 'context_version': 7,
+                 'status': 'completed', 'read_only': True, 'proposal': None,
+                 'assistant_text': answer,
+                 'agent_steps': [{'tool': 'inventory_sourcing_read',
+                                  'provider_call': 'none', 'status': 'completed'}]}
+    ids, path = audit.check_voice_tool_result(canonical, company, 7)
+    assert path == 'canonical_inventory_sourcing_read'
+    assert len(ids) >= 2
+    with pytest.raises(AcceptanceError, match='voice_unsupported_tool_result'):
+        audit.check_voice_tool_result({**canonical, 'agent_steps': [
+            {'tool': 'prepare_rfq', 'provider_call': 'none', 'status': 'completed'}]},
+            company, 7)
+    with pytest.raises(AcceptanceError, match='not_useful_read_only_answer'):
+        audit.check_voice_tool_result({**canonical, 'action_result': {'tool': 'fill_form'}},
+                                      company, 7)
+
+
+def test_invalid_voice_tool_observation_is_checkpointed_without_secrets():
+    company = get_company('harvest-foods')
+    event = {'type': 'tool_result', 'result': {
+        'company_id': company['company_id'], 'context_version': 7,
+        'status': 'completed', 'assistant_text': 'Current company facts are ready.',
+        'agent_steps': [{'tool': 'prepare_rfq', 'provider_call': 'none'}],
+        'csrf_token': 'secret-token'}}
+    class Socket:
+        async def send(self, _payload):
+            pass
+
+        async def recv(self):
+            return json.dumps(event)
+
+    trace, checkpoints = {}, []
+    with pytest.raises(AcceptanceError, match='voice_unsupported_tool_result'):
+        asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200, company, 7,
+                                     trace, lambda: checkpoints.append(json.loads(json.dumps(trace)))))
+    assert checkpoints[-1]['tool_observation']['agent_step_tools'] == ['prepare_rfq']
+    assert 'secret-token' not in json.dumps(checkpoints)
+
+
+def test_owned_risk_read_is_intermediate_before_grounded_inventory_answer():
+    company = get_company('stonebridge-materials')
+    material = company['materials'][0]
+    suppliers = [s for s in company['suppliers'] if material['material_id'] in s['materials']]
+    fastest = min(suppliers, key=lambda s: s['lead_time_days'])
+    caption = (f"{material['name']} has about {round(audit.expected_cover(material))} days "
+               f"of stock cover. {fastest['name'].replace(' [SYNTHETIC]', '')} "
+               f"has a {fastest['lead_time_days']}-day supplier lead time.")
+    company_risk = {'company_id': company['company_id'], 'company_name': company['name'],
+                    'alerts': [{'material_ids': [material['material_id']]}]}
+    risk = {'company_id': company['company_id'], 'context_version': 7,
+            'status': 'completed', 'read_only': True, 'proposal': None,
+            'assistant_text': 'Scanned 1 company for risk signals.',
+            'agent_steps': [{'tool': 'read_risks', 'provider_call': 'none',
+                             'status': 'completed'}],
+            'workspace': {'risks': {'companies': [company_risk]}}}
+    analytics = {'company_id': company['company_id'], 'context_version': 7,
+                 'status': 'completed', 'read_only': True, 'proposal': None,
+                 'analytics': inventory_analytics({'company': company})}
+    audio = {'type': 'audio', 'sample_rate_hertz': 24000,
+             'data': base64.b64encode(b'\0' * 10000).decode('ascii')}
+    events = [
+        {'type': 'transcript', 'direction': 'input',
+         'text': 'Explain inventory and supplier sourcing options for this company'},
+        {'type': 'tool_result', 'result': risk},
+        {'type': 'transcript', 'direction': 'output', 'text': 'Scanned one company.'},
+        {'type': 'turn_complete'},
+        {'type': 'tool_result', 'result': analytics},
+        {'type': 'transcript', 'direction': 'output', 'text': caption},
+        audio, {'type': 'turn_complete'},
+    ]
+
+    class Socket:
+        async def send(self, _payload):
+            pass
+
+        async def recv(self):
+            return json.dumps(events.pop(0))
+
+    trace = {}
+    output = asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200, company, 7,
+                                          trace, lambda: None))
+    assert output['tool_validation_path'] == 'profile_analytics'
+    assert output['output_transcript'] == caption
+    assert trace['owned_risk_intermediates'] == 1
+    assert [obs['agent_step_tools'] for obs in trace['tool_observations']] == [
+        ['read_risks'], []]
+
+    for invalid in (
+        {**risk, 'workspace': {'risks': {'companies': [
+            risk['workspace']['risks']['companies'][0], {'company_id': 'other'}]}}},
+        {**risk, 'workspace': {'risks': {'companies': [{
+            **risk['workspace']['risks']['companies'][0],
+            'alerts': [{'material_ids': ['foreign-material']}]}]}}},
+    ):
+        with pytest.raises(AcceptanceError):
+            audit.check_voice_tool_result(invalid, company, 7)
+
+    events = [{'type': 'tool_result', 'result': risk},
+              {'type': 'turn_complete'}, {'type': 'error', 'code': 'end_without_inventory'}]
+    with pytest.raises(AcceptanceError, match='voice_error'):
+        asyncio.run(audit.voice_turn(Socket(), b'\0' * 3200, company, 7))

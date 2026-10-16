@@ -31,12 +31,16 @@ def test_each_company_gets_the_schemes_for_its_countries(registry):
     expected = {
         'solara-cables': {'in-ccts-offset', 'in-msme-zed', 'in-sidbi-green-finance'},
         'terrapack': {'in-ccts-offset', 'in-msme-zed', 'in-sidbi-green-finance'},
+        'meridian-pharma': {'ie-eu-ets'},
+        'harvest-foods': {'ke-green-finance-taxonomy'},
+        'stonebridge-materials': {'za-carbon-tax'},
     }
     for summary in list_companies():
         result = find_schemes(registry, get_company(summary['company_id']), {})
         assert set(by_id(result)) == expected.get(summary['company_id'], set()), summary['company_id']
         if not result['matches']:
             assert 'not evidence that no scheme exists' in result['no_match_reason']
+            assert result['not_verified_countries'], summary['company_id']
 
 
 def test_unsupported_numbers_are_disabled_in_the_backend(registry):

@@ -239,6 +239,79 @@
           }
         ]
       }
+    },
+    {
+      "scheme_id": "ie-eu-ets",
+      "country": "Ireland",
+      "official_name": "EU Emissions Trading System (EU ETS) in Ireland",
+      "publisher": "Environmental Protection Agency (Ireland)",
+      "official_url": "https://www.epa.ie/our-services/licensing/climate-change/eu-emissions-trading-system-/",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a cap-and-trade scheme where installations surrender emission allowances and can trade them.",
+      "who": "Operators of covered installations such as power stations and larger industrial plants (for example cement, lime and chemicals), as listed by the EPA.",
+      "match": {
+        "company_country": "Ireland"
+      },
+      "numbers_used": [
+        "The EPA page says the EU ETS limits emissions from more than 11,000 installations."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Allowance needs depend on whether a site is a covered installation and its verified emissions; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "za-carbon-tax",
+      "country": "South Africa",
+      "official_name": "Carbon Tax (Carbon Tax Act), administered by SARS",
+      "publisher": "South African Revenue Service (SARS)",
+      "official_url": "https://www.sars.gov.za/customs-and-excise/excise/environmental-levy-products/carbon-tax/",
+      "checked_on": "2026-10-16",
+      "offers": "compliance_exposure",
+      "offers_text": "Possible compliance exposure: a carbon tax with annual accounts and payments filed with SARS.",
+      "who": "Entities liable under the Carbon Tax Act, as set out by SARS; check the Act and SARS guidance for thresholds.",
+      "match": {
+        "company_country": "South Africa"
+      },
+      "numbers_used": [
+        "SARS lists annual carbon tax accounts and payments filed on eFiling (EXD 180)."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "Liability depends on facility activities, thresholds and allowances in the Act; no amount is calculated."
+      }
+    },
+    {
+      "scheme_id": "ke-green-finance-taxonomy",
+      "country": "Kenya",
+      "official_name": "Kenya Green Finance Taxonomy (April 2025)",
+      "publisher": "Central Bank of Kenya",
+      "official_url": "https://www.centralbank.go.ke/kenya-green-finance-taxonomy-climate-risk-disclosure-framework/",
+      "checked_on": "2026-10-16",
+      "offers": "green_financing",
+      "offers_text": "Green project financing may be available: the taxonomy is the Central Bank of Kenya's classification banks use for green finance. It is guidance, not a loan or subsidy.",
+      "who": "Projects and activities that banks classify as green under the taxonomy; check with a lender.",
+      "match": {
+        "company_country": "Kenya"
+      },
+      "numbers_used": [
+        "Published as the Kenya Green Finance Taxonomy, April 2025."
+      ],
+      "benefit": {
+        "status": "unavailable",
+        "reason": "The taxonomy classifies activities; it states no rate, amount or subsidy."
+      }
     }
-  ]
+  ],
+  "not_verified": {
+    "Bangladesh": "Bangladesh Bank green refinance page did not render readable content on 16 Oct 2026.",
+    "Switzerland": "FOEN CO2-levy exemption page redirected to the climate home page on 16 Oct 2026.",
+    "Mexico": "SEMARNAT emissions trading page gave no readable programme text on 16 Oct 2026.",
+    "South Korea": "No readable K-ETS page found on the Greenhouse Gas Inventory and Research Center site on 16 Oct 2026.",
+    "Vietnam": "No official English page checked in this pass.",
+    "Malaysia": "Bank Negara Malaysia facility page redirected to the home page on 16 Oct 2026.",
+    "Oman": "No official page checked in this pass.",
+    "UAE": "No official page checked in this pass."
+  }
 }

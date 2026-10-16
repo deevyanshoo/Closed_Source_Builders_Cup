@@ -881,7 +881,7 @@ def check_typed_operator_reads(client, stage, company_name, material_name, csrf,
                     and linked['quantity'] in answer
                     and linked['quantity_unit'] in answer
                     and linked['expected_arrival'] in answer
-                    and 'planning' in lowered and 'not live' in lowered,
+                    and 'planning' in lowered and 'planned arrival' in lowered,
                     stage, 'operator_read_ungrounded_text')
         after = client.json(stage, '/api/demo/session')
         require(_operator_action_state(after) == baseline,

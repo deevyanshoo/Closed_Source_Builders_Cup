@@ -318,7 +318,7 @@ def test_typed_operator_reads_use_normal_endpoint_and_preserve_action_state():
             answer = ('Solara Cables copper: 8000 kg has 128.96 kg CO2e freight from a published factor.'
                       if tool == 'read_carbon' else
                       'Solara Cables: 8000 kg of Copper cathode is an inbound planning scenario. '
-                      'Planned arrival is 2026-10-27; not live carrier tracking.')
+                      'Planned arrival is 2026-10-27.')
             return {'company_id': 'solara-cables', 'context_version': 7,
                     'status': 'completed', 'read_only': True, 'proposal': None,
                     'assistant_text': answer, 'workspace': {

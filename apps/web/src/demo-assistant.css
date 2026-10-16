@@ -52,8 +52,9 @@
 .demo-assistant-panel .demo-research-outcome > .demo-operator-evidence { display:flex; flex-wrap:wrap; gap:7px; }
 .demo-assistant-panel .demo-research-outcome > .demo-operator-evidence > li { max-width:100%; padding:6px 10px; font-size:12px; }
 .demo-assistant-panel .demo-research-suggestions iframe { width:100%; min-height:88px; border:1px solid #dce3ec; background:white; }
-.demo-assistant-panel .demo-operator-analytics .demo-table-wrap { overflow:auto; }
+.demo-assistant-panel .demo-operator-analytics .demo-table-wrap { min-width:0; max-width:100%; overflow:auto; }
 .demo-assistant-panel .demo-operator-analytics table { min-width:420px; }
+.demo-assistant-panel .demo-operator-analytics .demo-profile-table { min-width:720px; }
 .demo-assistant-panel .demo-operator-analytics :is(th,td) { color:#142033; border-color:#dce3ec; }
 .demo-assistant-panel .demo-markdown-answer { overflow-wrap:anywhere; }
 .demo-assistant-panel .demo-markdown-answer :is(h2,h3,h4) { color:#142033; margin:16px 0 8px; font-size:16px; line-height:1.4; letter-spacing:-.02em; }

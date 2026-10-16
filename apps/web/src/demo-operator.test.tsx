@@ -672,15 +672,54 @@ describe('operator response boundary', () => {
     expect(outcomeHtml).toContain('Applied to server session · Email simulation');
     expect(outcomeHtml).toContain('simulated sent record is available in the outbox');
   });
-  it('renders server inventory analytics as a table with stated units', () => {
-    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{ ...initialOperatorState, scope, turn: { ...turn, status: 'completed', proposal: null, analytics: { source: 'fictional_company_profile', as_of: '2026-10-14', materials: [{ name: 'Copper', unit: 'kg', stock: '2000', stock_cover_days: '20' }], materials_by_cover: [{ name: 'Copper', unit: 'kg', stock_cover_days: '20' }] } } }} onSession={() => {}} onUnknown={() => {}} />);
+  it('shows one bounded all-material profile table with units, rounded cover and review state', () => {
+    const materialList = Array.from({length: 8}, (_, index) => ({material_id: `stone-${index}`, name: `Material ${index + 1}`, quantity_unit: 'kg'}));
+    const rows = materialList.map((material, index) => ({material_id: material.material_id, name: material.name, unit: 'kg', stock: '2000.0000', consumption_per_day: '333.3300', stock_cover_days: '6.0000600006000060000600006', shortest_supplier_lead_days: 10 + index, stock_cover_at_or_below_lead: true, suppliers: [{supplier_id: 's1', name: 'Supplier [SYNTHETIC]'}], synthetic: true}));
+    const current = {...scope, companyId:'stonebridge-materials'};
+    const result = {...turn, company_id:current.companyId, status:'completed' as const, proposal:null, evidence_ids:materialList.map(m => `profile:${current.companyId}:${m.material_id}`), analytics:{source:'fictional_company_profile', company_id:current.companyId, as_of:'2026-10-14', materials:rows, materials_by_cover:[...rows].reverse()}};
+    const html = renderToStaticMarkup(<OperatorPanel scope={current} csrf="csrf" dirty={false} materials={materialList} initialState={{...initialOperatorState, scope:current, turn:result}} onSession={() => {}} onUnknown={() => {}} />);
     expect(html).toContain('Computed analytics');
-    expect(html.match(/<table>/g)).toHaveLength(2);
-    expect(html).toContain('Materials by cover');
-    expect(html).toContain('Fictional company profile · 2026-10-14');
-    expect(html).toContain('Copper');
-    expect(html).toContain('kg');
-    expect(html).toContain('20');
+    expect(html.match(/<table\b/g)).toHaveLength(1);
+    expect(html.match(/<tr(?: |>|\/)/g)).toHaveLength(9);
+    expect(html).toContain('Profile · 2026-10-14');
+    expect(html).toContain('Material 1');
+    expect(html).toContain('Material 8');
+    expect(html).toContain('2,000 kg');
+    expect(html).toContain('333.33 kg');
+    expect(html).toContain('6 days');
+    expect(html).toContain('10 days');
+    expect(html).toContain('Review cover vs listed lead');
+    expect(html).not.toContain('6.0000600006000060000600006');
+    expect(html).not.toContain('materials_by_cover');
+    expect(html).not.toContain('supplier_id');
+    expect(html).not.toContain('[SYNTHETIC]');
+    expect(html).not.toContain('profile:stonebridge-materials:');
+    expect(html).not.toContain('stone-0');
+    const foreign = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} materials={materialList} initialState={{...initialOperatorState, scope, turn:{...result, company_id:scope.companyId}}} onSession={() => {}} onUnknown={() => {}} />);
+    expect(foreign).not.toContain('Material 1');
+  });
+
+  it('does not display nonfinite profile numbers or change other analytics tables', () => {
+    const profile = {...turn, status:'completed' as const, proposal:null, analytics:{source:'fictional_company_profile', company_id:scope.companyId, materials:[{material_id:'copper', unit:'kg', stock:'NaN', consumption_per_day:'Infinity', stock_cover_days:'1e999', shortest_supplier_lead_days:Infinity, stock_cover_at_or_below_lead:null}]}};
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} materials={[{material_id:'copper',name:'Copper',quantity_unit:'kg'}]} initialState={{...initialOperatorState, scope, turn:profile}} onSession={() => {}} onUnknown={() => {}} />);
+    expect(html).toContain('Coverage unknown');
+    expect(html).toContain('Unavailable kg');
+    expect(html).not.toContain('NaN');
+    expect(html).not.toContain('Infinity');
+    expect(html).not.toContain('1e999');
+    const generic = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} initialState={{...initialOperatorState, scope, turn:{...profile, analytics:{source:'other', checks:[{label:'Checked', value:'yes'}]}}}} onSession={() => {}} onUnknown={() => {}} />);
+    expect(generic).toContain('Checks');
+    expect(generic).toContain('Checked');
+    expect(generic.match(/<table>/g)).toHaveLength(1);
+  });
+
+  it('resolves profile evidence only for exact current-company known materials', () => {
+    const materials = [{material_id:'copper', name:'Copper cathode'}];
+    expect(resolveOperatorEvidence('profile:solara-cables:copper', scope, null, [], null, materials)).toMatchObject({kind:'profile', title:'Copper cathode profile', href:null});
+    expect(resolveOperatorEvidence('profile:loomworks:copper', scope, null, [], null, materials).kind).toBe('unavailable');
+    expect(resolveOperatorEvidence('profile:solara-cables:unknown', scope, null, [], null, materials).kind).toBe('unavailable');
+    expect(resolveOperatorEvidence('profile:solara-cables:copper:extra', scope, null, [], null, materials).kind).toBe('unavailable');
+    expect(resolveOperatorEvidence('profile:solara-cables:copper', scope, null, [], null).kind).toBe('unavailable');
   });
 
   it('enforces actual audio limits, real sample rate, and WebM Opus support', () => {

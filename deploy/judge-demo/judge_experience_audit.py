@@ -437,6 +437,7 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
     tool_time = None
     audio_bytes = 0
     completion_deadline = None
+    pre_answer_completions = 0
     research_phases = []
 
     def trace():
@@ -448,6 +449,7 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                               'captions': captions, 'output_audio_bytes': audio_bytes,
                               'recognized_intent': saw_input, 'qualifying_tool': validated_tool,
                               'grounded_output_caption': spoke_answer,
+                              'pre_answer_completions': pre_answer_completions,
                               'tool_before_input_caption': tool_before_input_caption,
                               'research_phases': research_phases,
                               'tool_latency_ms': tool_time, 'first_audio_ms': first_audio}
@@ -461,11 +463,19 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                 else:
                     remaining = completion_deadline - time.monotonic()
                     if remaining <= 0:
-                        break
+                        saw_input, spoke_answer = trace()
+                        if saw_input and spoke_answer and validated_tool and audio_bytes >= 10000:
+                            break
+                        completion_deadline = None
+                        continue  # An incomplete caption needs a later answer completion.
                     try:
                         raw = await asyncio.wait_for(socket.recv(), remaining)
                     except TimeoutError:
-                        break
+                        saw_input, spoke_answer = trace()
+                        if saw_input and spoke_answer and validated_tool and audio_bytes >= 10000:
+                            break
+                        completion_deadline = None
+                        continue
                 event = json.loads(raw)
                 event_type = event.get('type')
                 counts[event_type] += 1
@@ -541,15 +551,21 @@ async def voice_turn(socket, data, kind, cid, context, baseline_plan_id, row, re
                 elif event_type == 'audio' and validated_tool:
                     check(event.get('sample_rate_hertz') == 24000, 'voice:audio', 'output_sample_rate')
                     audio_bytes += len(base64.b64decode(event.get('data', ''), validate=True))
+                    completion_deadline = None  # More answer audio requires a later completion.
                     if first_audio is None:
                         first_audio = round((time.monotonic() - started) * 1000)
                 trace()
                 if event_type in ('tool_result', 'transcript', 'turn_complete'):
                     receipt.flush()
-                if event_type == 'turn_complete' and completion_deadline is None:
+                if event_type == 'turn_complete':
                     if first_input_event is None and not validated_tool:
                         output_events.clear()
                         continue  # An ungrounded greeting cannot finish the question.
+                    if not validated_tool or audio_bytes < 10000:
+                        pre_answer_completions += 1
+                        trace()
+                        receipt.flush()
+                        continue  # A tool-transition completion precedes the spoken answer.
                     await sender
                     completion_deadline = time.monotonic() + CAPTION_GRACE_SECONDS
             saw_input, spoke_answer = trace()

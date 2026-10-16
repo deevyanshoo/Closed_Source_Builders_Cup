@@ -532,6 +532,8 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                      + re.escape(name) + r'\b', normalized, re.I)
         or re.search(r'\baccording\s+to\s+' + PUBLISHER_PREFIX
                      + re.escape(name) + r'\b', normalized, re.I)
+        or re.search(r'\bpublished\s+by\s+' + PUBLISHER_PREFIX
+                     + re.escape(name) + r'\b', normalized, re.I)
         for name in publisher_names)
     coordinated = re.search(
         r'\bno\s+declared\s+shipment\s+route\s+or\s+live\s+tracking\s+'

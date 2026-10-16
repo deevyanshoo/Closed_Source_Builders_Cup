@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
 from procure.demo.app import create_app
-from procure.demo.live_voice import _selected_purchase_model_result
+from procure.demo.live_voice import _config, _selected_purchase_model_result
 from test_demo_live_voice_rfq import plan_for_copper
 from test_demo_dispatch_view import reviewed_copper, selected_copper
 from test_demo_taher_native import NamedProvider, voice_tool
@@ -190,6 +190,22 @@ def test_carbon_projection_keeps_selected_estimate_and_compact_quote_alternative
     assert 'cost' in projected['carbon_scope'].lower()
     assert result['workspace']['carbon'] == carbon
 
+    proxy_result = deepcopy(result)
+    proxy_result['assistant_text'] = 'Selected production and freight estimates.'
+    proxy_material = proxy_result['workspace']['carbon']['suppliers'][0]['estimate']['material']
+    proxy_material['product_match'] = 'proxy'
+    proxy_material['reason'] = 'A formed product factor is used for resin.'
+    proxy_material['factor']['note'] = 'Includes forming.'
+    proxy_model = deepcopy(proxy_result)
+    _selected_purchase_model_result('read_carbon', proxy_result, proxy_model, plan)
+    assert 'proxy' not in proxy_model['selected_purchase_brief'].lower()
+    selected_material = proxy_model['workspace']['carbon']['suppliers'][0]['estimate']['material']
+    assert selected_material['product_match'] == 'proxy'
+    assert selected_material['factor']['publisher'] == 'Material Source'
+    assert selected_material['factor']['note'] == 'Includes forming.'
+    assert 'when asked about sources or method' in proxy_model['workspace']['carbon']['carbon_scope']
+    assert 'only when asked about sources, method, or reliability' in _config().system_instruction
+
     no_selection = dict(result)
     no_selection_model = dict(no_selection)
     _selected_purchase_model_result('read_carbon', no_selection, no_selection_model,
@@ -269,7 +285,8 @@ def test_native_reads_keep_full_browser_evidence_but_focus_model_on_selected_pur
         assert len(carbon_model['workspace']['carbon']['alternative_quote_estimates']) == len(full_carbon['suppliers']) - 1
         assert selected['estimate']['combined_reason'] in str(carbon_model)
         publisher = selected['estimate']['material']['factor']['publisher']
-        assert publisher in str(carbon_model) and publisher in carbon_model['selected_purchase_brief']
+        assert publisher in str(carbon_model)
+        assert publisher not in carbon_model['selected_purchase_brief']
         assert session['csrf_token'] not in str(carbon_model)
 
         shipments, shipment_model = voice_tool(client, provider, 'read_shipments', {}, 'shipments-projection')

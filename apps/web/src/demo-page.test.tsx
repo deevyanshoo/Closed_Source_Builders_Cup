@@ -46,6 +46,18 @@ const materialFixtures: DemoFixture[] = [{ id: 'quote-a', name: 'Copper quote', 
 const naphthaOffer: OfferView = { ...offer(1, 'saved'), offer_id: 'q2', fixture_id: 'naphtha-a', document: { ...offer(1).document, filename: 'naphtha.csv' } };
 
 describe('ZOORQ workspace routes', () => {
+  it('shows one accessible disclosure at the top of each company workspace, but not the company hub', () => {
+    const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
+    for (const view of ['overview', 'inventory', 'news', 'drafts', 'procurement'] as const) {
+      const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView={view} />);
+      expect(html.match(/aria-label="Demo workspace disclosure"/g)).toHaveLength(1);
+      expect(html).toMatch(/id="zoorq-workspace-content"[^>]*>.*?Demo workspace disclosure.*?Company records, supplier quotes and buyer inputs are illustrative/);
+      expect(html).toContain('News draws on public sources');
+      expect(html).toContain('emissions use published averages and may use product proxy factors');
+    }
+    const hub = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="hub" />);
+    expect(hub).not.toContain('Demo workspace disclosure');
+  });
   it('restores focus to hub content when the prior operator trigger is disabled', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="hub" />);
@@ -397,7 +409,7 @@ describe('demo response state', () => {
     expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toContain('current reviewed comparison');
     expect(html).toContain('Your procurement, in focus.');
     expect(html).toContain('Solara Cables workspace</h1>');
-    expect(html).toContain('Company profiles, quotes and buyer inputs are synthetic');
+    expect(html).toContain('Company records, supplier quotes and buyer inputs are illustrative');
     expect(html).not.toContain('context v1');
     expect(html).toContain('demo-operator-dock');
     expect(html).toContain('Type to ZOORQ');
@@ -593,17 +605,17 @@ describe('demo response state', () => {
     expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="review" />)).toContain('Cached real Gemini extraction');
   });
 
-  it('offers optional fictional buyer inputs with the dated synthetic currency assumption', () => {
+  it('offers optional sample buyer inputs with dated currency assumptions', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-14T08:00:00Z'));
     try {
     expect(sampleBuyerInputs()).toEqual({ material: 'copper', quantity: '10000', current_stock: '2000', quantity_unit: 'kg', need_by: '2026-11-05', decision_date: '2026-10-14', reporting_currency: 'USD', budget: '100000', additional_cost_per_unit: '0.25' });
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 })} initialView="procurement" initialStage="compare" />);
     expect(html).toContain('Use sample buyer inputs');
-    expect(html).toContain('Dated synthetic FX rates, when needed, are recorded in the comparison and JSON export.');
+    expect(html).toContain('Dated FX rates, when needed, are recorded in the comparison and JSON export.');
     expect(html).not.toContain('EUR 1 = USD 1.25');
     expect(html).toContain('2026-10-14');
-    expect(html).toContain('fictional');
+    expect(html).toContain('Optional sample scenario');
     } finally { vi.useRealTimers(); }
   });
 
@@ -629,8 +641,8 @@ describe('demo response state', () => {
 
   it('renders honest demo limits and disabled planning before an accepted quote', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [], plan: null, plan_request: null, rfq: null }, epoch: 0 })} initialView="procurement" initialStage="compare" />);
-    expect(html).toContain('Company profiles, quotes and buyer inputs are synthetic');
-    expect(html).toContain('news is observed public data');
+    expect(html).toContain('Company records, supplier quotes and buyer inputs are illustrative');
+    expect(html).toContain('News draws on public sources');
     expect(html).toContain('temporary session');
     expect(html).toContain('Run comparison');
     expect(html).toMatch(/disabled=""[^>]*>Run comparison|disabled=""[^>]*>[^<]*Run comparison/);

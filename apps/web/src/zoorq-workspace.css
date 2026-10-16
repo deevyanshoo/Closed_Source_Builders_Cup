@@ -1,4 +1,5 @@
 .zoorq-page{--zoorq-white:#fff;--zoorq-canvas:#f7f9fc;--zoorq-ink:#142033;--zoorq-blue:#2159d6;--zoorq-muted:#526174;--zoorq-line:#dce3ec;background:var(--zoorq-canvas);color:var(--zoorq-ink);font-family:Geist,Arial,sans-serif}
+.zoorq-workspace-disclosure{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin:12px clamp(18px,2.4vw,32px) 0;padding:9px 12px;border:1px solid var(--zoorq-line);border-left:3px solid var(--zoorq-blue);border-radius:5px;background:var(--zoorq-white);color:var(--zoorq-muted);font-size:12px;line-height:1.45}.zoorq-workspace-disclosure strong{flex:none;color:var(--zoorq-ink);font-weight:700}
 .zoorq-page:has(.zoorq-nav) main{padding-left:248px;max-width:none;min-width:0}
 .zoorq-page .zoorq-eyebrow{font-size:11px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--zoorq-blue)}
 .zoorq-page .zoorq-primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;padding:10px 16px;border:1px solid var(--zoorq-action);border-radius:7px;background:var(--zoorq-action);color:#fff;font:650 13px/1.2 Geist,Arial,sans-serif;text-decoration:none;white-space:nowrap}

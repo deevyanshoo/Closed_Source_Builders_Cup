@@ -18,6 +18,10 @@ _CURRENT_SCOPE = re.compile(
     r'\b(?:this|my|our|the\s+current|current|selected|saved|reviewed)\s+'
     r'(?:company|workspace|purchase|plan|comparison|assessment|order|'
     r'carbon|emissions?|footprint|(?:planned\s+)?shipments?|inbound|consignments?)\b', re.I)
+_METHOD_QUESTION = re.compile(
+    r'\b(?:sources?|publishers?|factors?|proxies?|proxy|method(?:ology)?|assumptions?|'
+    r'provenance|reliab(?:ility|le)|accurac(?:y|ate)|certif(?:ied|ication)|'
+    r'calculat(?:ion|ed)|how\s+(?:was|were|is|are))\b', re.I)
 
 
 def integration_request(snapshot: dict, message: str) -> str | None:
@@ -39,6 +43,11 @@ def integration_request(snapshot: dict, message: str) -> str | None:
     if shipment and re.search(r'\b(?:prepare|review|compare|recover|recovery)\b', text) and re.search(r'\bdelay(?:ed)?\b', text):
         return 'prepare_shipment_recovery'
     if re.search(r'\b(?:carbon|emission|emissions|footprint|co2e)\b', text):
+        return 'read_carbon'
+    if (not shipment and _METHOD_QUESTION.search(text)
+            and re.search(r'\b(?:factors?|proxies?|proxy)\b', text)
+            and re.search(r'\b(?:this|my|our|the\s+current|current|selected|saved|reviewed)\s+'
+                          r'(?:purchase|plan|assessment|comparison)\b', text)):
         return 'read_carbon'
     return 'read_shipments' if shipment else None
 
@@ -89,6 +98,7 @@ def _spoken_unit(quantity, unit):
 def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     company = snapshot['company']['name']
     named, own = _material_scope(snapshot, message)
+    explain_method = bool(_METHOD_QUESTION.search(message))
     if named - own:
         return {'assistant_text': f'That material is outside the {company} workspace. Choose a material listed for this company.',
                 'workspace': {}}
@@ -116,15 +126,15 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                 material = next((m['name'] for m in snapshot['company']['materials'] if m['material_id'] == result['material_id']), result['material_id'])
                 parts = [f"For {company}, the reviewed plan covers {estimate['quantity']} "
                          f"{_spoken_unit(estimate['quantity'], estimate['unit'])} "
-                         f"of {material} from {supplier_display_name(row['supplier'])} "
-                         '(not a confirmed order):']
+                         f"of {material} from {supplier_display_name(row['supplier'])}:"]
                 production, freight = estimate['material'], estimate['transport']
                 factor = production.get('factor') or {}
                 if production.get('kg_co2e') is not None:
                     publisher = factor.get('publisher')
                     parts.append(f"Production average: {_spoken_kg(production['kg_co2e'])} kg CO2e"
-                                 + (f' from {publisher}.' if publisher else '; source unavailable in this assessment.'))
-                    if production.get('product_match') == 'proxy':
+                                 + ((f' from {publisher}.' if publisher else '; source unavailable in this assessment.')
+                                    if explain_method else '.'))
+                    if explain_method and production.get('product_match') == 'proxy':
                         category = factor.get('category')
                         note = factor.get('note')
                         parts.append('The production factor is a proxy, not an exact product match'
@@ -138,27 +148,30 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                     publishers = _publishers((leg.get('factor') for leg in freight.get('legs', [])
                                               if isinstance(leg, dict)))
                     parts.append(f"Entered freight: {_spoken_kg(freight['kg_co2e'])} kg CO2e"
-                                 + (f" from {'; '.join(publishers)}." if publishers else
-                                    '; source unavailable in this assessment.'))
+                                 + ((f" from {'; '.join(publishers)}." if publishers else
+                                     '; source unavailable in this assessment.') if explain_method else '.'))
                 else:
                     reasons = [leg.get('reason') for leg in freight.get('legs', [])
                                if isinstance(leg, dict) and leg.get('reason')]
                     parts.append('For this saved assessment, entered freight is not fully estimated'
                                  + (': ' + ' '.join(reasons) if reasons else
                                     '; enter a freight mode, distance and any required shipping mass.'))
-                for leg in freight.get('legs', []):
-                    mode = leg['mode'].replace('_', ' ')
-                    distance = leg.get('distance_km')
-                    if distance is None:
-                        parts.append(f'Freight leg {mode}: distance not entered; no route length is inferred.')
-                    else:
-                        parts.append(f'Entered freight leg: {mode}, {distance} km (distance entered by you).')
+                if explain_method:
+                    for leg in freight.get('legs', []):
+                        mode = leg['mode'].replace('_', ' ')
+                        distance = leg.get('distance_km')
+                        if distance is None:
+                            parts.append(f'Freight leg {mode}: distance not entered; no route length is inferred.')
+                        else:
+                            parts.append(f'Entered freight leg: {mode}, {distance} km (distance entered by you).')
                 if estimate.get('combined_status') == 'combined' and estimate.get('total_kg_co2e') is not None:
                     parts.append(f"Supported whole-scenario total: {_spoken_kg(estimate['total_kg_co2e'])} kg CO2e.")
                 else:
-                    parts.append('No whole-scenario total is supported; components remain separate. '
-                                 + (estimate.get('combined_reason') or ''))
-                parts.append('This is an estimate from published averages and entered assumptions, not a certified or supplier-specific footprint.')
+                    parts.append('No whole-scenario total is supported; components remain separate.'
+                                 + ((' ' + estimate['combined_reason']) if explain_method
+                                    and estimate.get('combined_reason') else ''))
+                if explain_method:
+                    parts.append('This estimate uses published averages and entered assumptions; it is not a certified or supplier-specific footprint.')
                 answer = ' '.join(parts)
         return {'assistant_text': answer, 'workspace': {'carbon': result}}
     view = deepcopy(snapshot.get('shipments') or {})
@@ -186,22 +199,23 @@ def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
                       f"The retained baseline planning context was {row['quantity']} "
                       f"{_spoken_unit(row['quantity'], row['quantity_unit'])} "
                       f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the baseline supplier')}. "
-                      'This is not a current selected purchase or a confirmed order. '
+                      'This is not a current selected purchase. '
                       f'Demand reference: {reference}. ')
         else:
             answer = (f"{company}: the current inbound planning scenario is {row['quantity']} "
                       f"{_spoken_unit(row['quantity'], row['quantity_unit'])} "
                       f"of {row['material_name']} from {supplier_display_name(row.get('supplier') or 'the selected supplier')}. "
-                      f"This is not a confirmed order. Demand reference: {reference}. "
+                      f"Demand reference: {reference}. "
                       f"Planned arrival is {row['expected_arrival']}, against a need-by date of {row['need_by']}. ")
         answer = comparison + answer
-        answer += 'Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. '
+        if explain_method:
+            answer += 'Arrival is based on the reviewed quote lead and planning assumptions, not live carrier tracking. '
         answer += ('Choose explicit delay days to prepare a recovery for review; no plan changes until confirmation.'
                    if row.get('recovery_available') else 'Review the saved recovery comparison before preparing another action.')
     else:
         answer = (f'{company} has {len(rows)} expected-order records in this view. '
                   'No current reviewed supplier plan is linked for recovery. Compare reviewed quotes first. '
-                  'These are planning records, not confirmed orders or live carrier tracking.')
+                  'These are expected-order planning records.')
     return {'assistant_text': answer, 'workspace': {'shipments': view}}
 
 

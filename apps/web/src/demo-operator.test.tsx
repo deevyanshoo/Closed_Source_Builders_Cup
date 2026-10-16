@@ -720,7 +720,7 @@ describe('operator response boundary', () => {
     expect(html).toContain('Stock cover: 12.5 days');
     expect(html).toContain('shortest listed supplier lead: 15 days');
     expect(html).toContain('Saved 2026-10-14 09:30 UTC');
-    expect(html).toContain('Synthetic watch item');
+    expect(html).not.toContain('Synthetic watch item');
     expect(html).toContain('Attention details unavailable');
     expect(html).toContain('Watch details unavailable');
     expect(html).not.toContain('stock_cover_days');

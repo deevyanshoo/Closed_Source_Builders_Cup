@@ -25,7 +25,8 @@ def snapshot(*, selected='q2', entered_distance='1000'):
 
 
 def test_selected_supplier_summary_names_only_the_entered_freight_leg():
-    answer = integration_read(snapshot(), 'read_carbon')['assistant_text']
+    answer = integration_read(snapshot(), 'read_carbon',
+                              'Explain the entered freight assumptions for this purchase')['assistant_text']
     assert 'Europa Copper SA' in answer and 'Swift Copper Trading Ltd' not in answer
     assert '31848.96 kg CO2e' in answer
     assert 'sea container, 1000 km' in answer
@@ -45,7 +46,8 @@ def test_no_selected_supplier_does_not_use_first_quote_as_purchase():
 
 def test_unentered_freight_distance_is_not_described_as_a_route_length():
     value = snapshot(entered_distance=None)
-    answer = integration_read(value, 'read_carbon')['assistant_text']
+    answer = integration_read(value, 'read_carbon',
+                              'Explain the freight assumptions for this purchase')['assistant_text']
     assert 'distance not entered' in answer
     assert '1000 km' not in answer
     assert 'standard distance' not in answer.lower()

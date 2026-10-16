@@ -36,12 +36,16 @@ def test_selected_copper_brief_marks_plan_and_attributes_each_component_next_to_
     answer = result['assistant_text']
 
     assert 'reviewed plan' in answer.lower()
-    assert 'not a confirmed order' in answer.lower()
+    assert 'not a confirmed order' not in answer.lower()
+    assert 'not a certified' not in answer.lower()
     assert "Cables's" not in answer
     assert 'Europa Copper SA' in answer and '[SYNTHETIC]' not in answer
     assert 'Swift Copper Trading Ltd' not in answer
-    assert re.search(r'31720(?:\.00)? kg CO2e.{0,80}International Copper Association', answer)
-    assert re.search(r'128\.96 kg CO2e.{0,95}Department for Energy Security and Net Zero', answer)
+    assert '31720 kg CO2e' in answer and '128.96 kg CO2e' in answer
+    assert 'International Copper Association' not in answer
+    sourced = integration_read(value, 'read_carbon', 'Explain the sources and factor assumptions for this current purchase')['assistant_text']
+    assert re.search(r'31720(?:\.00)? kg CO2e.{0,80}International Copper Association', sourced)
+    assert re.search(r'128\.96 kg CO2e.{0,95}Department for Energy Security and Net Zero', sourced)
     assert '2026-10-28' not in answer
     assert result['workspace']['carbon'] == saved
 
@@ -52,24 +56,30 @@ def test_selected_copper_brief_marks_plan_and_attributes_each_component_next_to_
     assert 'source' in model['workspace']['carbon']['carbon_scope'].lower()
     instruction = _config().system_instruction.lower()
     assert 'read_carbon.selected_purchase_brief' in instruction
-    assert 'not a confirmed order' in instruction
+    assert 'only when asked' in instruction
     assert 'read_shipments.current_purchase_brief' in instruction
 
 
 def test_proxy_and_overlap_reasons_are_spoken_for_this_saved_assessment():
     pet = _snapshot_for('terrapack', 'pet-resin', 'kg', '8000')
     answer = integration_read(pet, 'read_carbon')['assistant_text']
-    assert 'proxy' in answer.lower() and 'forming' in answer.lower()
-    assert 'not an exact' in answer.lower()
-    assert 'transport to the point of sale' in answer.lower()
-    assert 'double count' in answer.lower()
+    assert 'proxy' not in answer.lower() and 'not a certified' not in answer.lower()
+    detailed = integration_read(pet, 'read_carbon', 'Explain the factor matching and assumptions for this current purchase')['assistant_text']
+    assert 'proxy' in detailed.lower() and 'forming' in detailed.lower()
+    assert 'not an exact' in detailed.lower()
+    assert 'transport to the point of sale' not in answer.lower()
+    assert 'double count' not in answer.lower()
+    assert 'transport to the point of sale' in detailed.lower()
+    assert 'double count' in detailed.lower()
     assert 'No whole-scenario total' in answer
     assert '30892.66 kg CO2e' in answer
     assert pet['carbon_assessment']['result']['suppliers'][0]['estimate']['material']['kg_co2e'] == '30892.66008'
 
     steel = _snapshot_for('forgeline-components', 'steel', 'tonne', '700')
     steel_answer = integration_read(steel, 'read_carbon')['assistant_text']
-    assert 'steel cans' in steel_answer.lower() and 'proxy' in steel_answer.lower()
+    assert 'proxy' not in steel_answer.lower()
+    steel_detailed = integration_read(steel, 'read_carbon', 'Explain the factor method for this current purchase')['assistant_text']
+    assert 'steel cans' in steel_detailed.lower() and 'proxy' in steel_detailed.lower()
 
 
 def test_missing_factor_and_mass_are_scoped_to_saved_assessment():
@@ -96,7 +106,7 @@ def test_shipment_brief_keeps_selected_plan_recovery_baseline_and_no_plan_distin
     selected = {'company_id': company['company_id'], 'company': company,
                 'shipments': build_dispatch_view(company, [offer], plan, None)}
     answer = integration_read(selected, 'read_shipments')['assistant_text']
-    assert 'planning scenario' in answer.lower() and 'not a confirmed order' in answer.lower()
+    assert 'planning scenario' in answer.lower() and 'not a confirmed order' not in answer.lower()
     assert '2026-10-28' in answer
 
     company, offers, recovery = reviewed_copper({'eu-copper': 20, 'express-copper': 10})
@@ -110,4 +120,4 @@ def test_shipment_brief_keeps_selected_plan_recovery_baseline_and_no_plan_distin
                'shipments': build_dispatch_view(company, offers, None, None)}
     answer = integration_read(no_plan, 'read_shipments')['assistant_text']
     assert 'No current reviewed supplier plan' in answer
-    assert 'not confirmed orders' in answer.lower()
+    assert 'not confirmed orders' not in answer.lower()

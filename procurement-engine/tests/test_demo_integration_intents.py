@@ -11,6 +11,7 @@ from procure.demo.operator import run_turn
 from procure.demo.research import prepare_research
 from test_demo_operator import Provider, snapshot
 from test_demo_dispatch_view import reviewed_copper
+from test_demo_integration_grounding import snapshot as carbon_snapshot
 
 
 @pytest.mark.parametrize('message', [
@@ -105,3 +106,19 @@ def test_native_operator_uses_read_only_shipment_tool_without_provider_after_rec
     assert provider.calls == []
     assert 'Europa Copper SA' in result['assistant_text']
     assert 'Swift Copper Trading Ltd' in result['assistant_text']
+
+
+def test_native_current_purchase_factor_sources_use_deterministic_read_without_provider():
+    state = carbon_snapshot()
+    question = 'Explain the sources and factor assumptions for this current purchase'
+    provider = Provider()
+    result = run_turn(state, question, provider, model='test-model', provider_call='mocked')
+    assert result['status'] == 'completed'
+    assert result['agent_steps'][0]['tool'] == 'read_carbon'
+    assert result['candidate'] is None and provider.calls == []
+    assert 'International Copper Association' in result['assistant_text']
+    assert 'Department for Energy Security and Net Zero' in result['assistant_text']
+    assert integration_request(state, question + ' and current news') is None
+    assert integration_request(state, question + ' and change the plan') is None
+    other = next(company for company in list_companies() if company['company_id'] != state['company_id'])
+    assert integration_request(state, question + f" for {other['name']}") is None

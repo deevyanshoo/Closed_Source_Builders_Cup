@@ -728,11 +728,15 @@ def test_voice_publisher_qualifiers_and_according_to_are_validated():
             '128.96 kg CO2e {source}. Planned arrival is October 27, 2026.')
     for source in ("sourced from the UK's Department for Energy Security and Net Zero",
                    'sourced from the UK’s Department for Energy Security and Net Zero',
-                   'according to the Department for Energy Security and Net Zero'):
+                   'according to the Department for Energy Security and Net Zero',
+                   'published by the Department for Energy Security and Net Zero'):
         assert audit.check_voice_caption(base.format(source=source), 'Solara Cables',
                                          PLAN, carbon, view)['caption_grounded'] is True
     with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
         audit.check_voice_caption(base.format(source='according to Unknown Publisher'),
+                                  'Solara Cables', PLAN, carbon, view)
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(base.format(source='published by Unknown Publisher'),
                                   'Solara Cables', PLAN, carbon, view)
 
 

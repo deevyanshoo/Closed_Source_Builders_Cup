@@ -376,7 +376,21 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
                    if row.get('plan_id') == plan['plan_id']
                    and row.get('offer_id') == plan['selected_offer_id']), None)
     material_name = linked.get('material_name', '') if isinstance(linked, dict) else ''
-    lowered = caption.lower()
+    normalized = ' '.join(caption.split())
+    lowered = normalized.lower()
+    publishers = set()
+    for supplier in carbon.get('suppliers', []):
+        estimate = supplier.get('estimate', {})
+        factors = [estimate.get('material', {}).get('factor')]
+        factors.extend(leg.get('factor') for leg in
+                       estimate.get('transport', {}).get('legs', []))
+        publishers.update(factor['publisher'] for factor in factors
+                          if isinstance(factor, dict)
+                          and isinstance(factor.get('publisher'), str))
+    attributed_figures = any(
+        re.search(r'\bfigures?\s+from\b.{0,100}\b' + re.escape(publisher) + r'\b',
+                  normalized, re.I)
+        for publisher in publishers)
     for claim in VOICE_LIVE_CLAIM.finditer(caption):
         prefix = caption[max(0, claim.start() - 16):claim.start()]
         require(re.search(r'\b(?:no|not|never|without)\s+(?:a\s+|any\s+)?$',
@@ -386,13 +400,15 @@ def check_voice_caption(caption, company_name, plan, carbon, dispatch):
             and (plan['material'].lower() in lowered
                  or (material_name and material_name.lower() in lowered))
             and re.search(r'\b(?:carbon|co2e|greenhouse gas emissions?)\b', caption, re.I)
-            and re.search(r'\b(?:ship(?:ment|ping)|dispatch|inbound delivery)\b', caption, re.I)
+            and re.search(r'\b(?:ship(?:ment|ping)|dispatch|inbound delivery|'
+                          r'planned\s+arrival)\b', normalized, re.I)
             and re.search(r'\b(?:synthetic|fictional|planning scenario|hypothetical plan|'
                           r'planned\s+(?:inbound\s+)?(?:arrival|shipment|delivery)|'
                           r'expected\s+(?:shipment|arrival|delivery))\b', caption, re.I)
-            and re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b', caption, re.I)
+            and (re.search(r'\b(?:sources?|factors?|assumptions?|entered)\b',
+                           normalized, re.I) or attributed_figures)
             and re.search(r'\b(?:kg\s*CO2e|kilograms?\s+(?:of\s+)?'
-                          r'(?:CO2e|carbon dioxide equivalent))\b',
+                          r'(?:CO2e|CO2\s+equivalent|carbon dioxide equivalent))\b',
                           caption, re.I)
             and len(claims) >= 1,
             stage, 'voice_caption_not_grounded')

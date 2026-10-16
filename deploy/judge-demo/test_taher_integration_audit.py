@@ -454,6 +454,55 @@ def test_voice_result_and_caption_reject_foreign_scope_action_and_fabrication():
         audit.check_voice_result(wrong, PLAN, 7, carbon, view)
 
 
+def test_r67_solara_caption_grounded_without_lexical_source_or_shipment_tokens():
+    _, carbon = comparison()
+    plan = {**PLAN, 'selected_offer_id': 'q2'}
+    view = dispatch()
+    view['shipments'][0]['offer_id'] = 'q2'
+    view['shipments'][0]['expected_arrival'] = '2026-10-24'
+    caption = ('For Solara Cables and  their copper cathode  purchase, the estimated  '
+               'emissions  are 31,848.96  kg  CO2e,  including  production  averages  '
+               'and  freight from Europa  Copper SA.  This relies on figures  from '
+               "the International  Copper Association  and the UK's DESNZ,  though it  "
+               'remains an estimate  rather than supplier-specific  data. The planned  '
+               'arrival  is set for October  24, 2026.')
+    assert audit.check_voice_caption(caption, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+    with pytest.raises(AcceptanceError, match='voice_unverified_number'):
+        audit.check_voice_caption(caption.replace('31,848.96', '31,849.96'),
+                                  'Solara Cables', plan, carbon, view)
+    with pytest.raises(AcceptanceError, match='voice_unverified_number'):
+        audit.check_voice_caption(caption.replace('October  24', 'October  28'),
+                                  'Solara Cables', plan, carbon, view)
+    without_source = caption.replace('This relies on figures  from '
+                                     "the International  Copper Association  and the UK's DESNZ,  ", '')
+    with pytest.raises(AcceptanceError, match='voice_caption_not_grounded'):
+        audit.check_voice_caption(without_source, 'Solara Cables', plan, carbon, view)
+    unavailable = deepcopy(carbon)
+    for supplier in unavailable['suppliers']:
+        supplier['estimate']['total_kg_co2e'] = None
+    unsupported_total = caption.replace('31,848.96', '128.96').replace(
+        'estimated  emissions', 'combined total  emissions')
+    with pytest.raises(AcceptanceError, match='voice_unknown_total_claim'):
+        audit.check_voice_caption(unsupported_total, 'Solara Cables', plan,
+                                  unavailable, view)
+
+
+def test_r67_generic_prompt_caption_accepts_spoken_co2_equivalent_unit():
+    _, carbon = comparison()
+    plan = {**PLAN, 'selected_offer_id': 'q2'}
+    view = dispatch()
+    view['shipments'][0]['offer_id'] = 'q2'
+    view['shipments'][0]['expected_arrival'] = '2026-10-24'
+    caption = ('For Solara Cables  and their copper  cathode purchase, the planned  '
+               'arrival  with Europa Copper  SA is October  24, 2026.  The estimated  '
+               'carbon  emissions for this shipment  total 31,848.96  kilograms  of CO2  '
+               'equivalent,  based  on International  Copper Association  and UK DESNZ  '
+               'factors,  excluding supplier-specific  data.  No action  has been taken.')
+    assert audit.check_voice_caption(caption, 'Solara Cables', plan, carbon,
+                                     view)['caption_grounded'] is True
+
+
 def test_voice_turn_requires_both_actual_read_results_and_audio():
     _, carbon = comparison()
     view = dispatch()

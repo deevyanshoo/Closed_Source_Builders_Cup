@@ -1,6 +1,7 @@
 """Committed price outlook results: reproducible, consistent with the scorecard run, honestly labelled."""
 import csv
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -14,15 +15,53 @@ RESULTS = ROOT / 'config' / 'prediction_results_v1.json'
 RUN = ROOT / 'evaluation' / 'prediction_backtest_v1'
 
 
+REL_TOL = 1e-3  # statsmodels on Linux differs from macOS in the 4th to 5th significant digit
+
+
+def assert_same_outlook(actual, expected, path='$'):
+    """Statuses, models, labels, months and other text must match exactly; floats within REL_TOL."""
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict) and actual.keys() == expected.keys(), path
+        for key in expected:
+            assert_same_outlook(actual[key], expected[key], f'{path}.{key}')
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected), path
+        for i, (a, e) in enumerate(zip(actual, expected)):
+            assert_same_outlook(a, e, f'{path}[{i}]')
+    elif isinstance(expected, float) or (isinstance(actual, float) and not isinstance(expected, (bool, str)) and expected is not None):
+        assert not isinstance(actual, bool) and isinstance(actual, (int, float)), path
+        assert math.isclose(actual, expected, rel_tol=REL_TOL), (path, actual, expected)
+    else:
+        assert actual == expected and type(actual) is type(expected), (path, actual, expected)
+
+
 @pytest.fixture(scope='module')
 def results():
     return json.loads(RESULTS.read_text(encoding='utf-8'))
 
 
-def test_rerunning_the_script_reproduces_the_committed_entry_exactly(results):
+def test_reproduction_check_allows_float_noise_but_not_a_changed_status(results):
+    entry = results['series']['fx:INR']
+    noisy = json.loads(json.dumps(entry))
+    noisy['horizons'][0]['backtest']['mape'] *= 1 + 4e-4
+    noisy['latest_value'] *= 1 - 4e-4
+    assert_same_outlook(noisy, entry)
+    for path, value in ((('horizons', 0, 'status'), 'PREDICTION'), (('horizons', 0, 'label'), 'x'),
+                        (('horizons', 1, 'target_month'), '1999-01'), (('selection', 'selected_model'), 'gbm'),
+                        (('horizons', 0, 'backtest', 'mape'), entry['horizons'][0]['backtest']['mape'] * 1.002)):
+        changed = json.loads(json.dumps(entry))
+        target = changed
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        with pytest.raises(AssertionError):
+            assert_same_outlook(changed, entry)
+
+
+def test_rerunning_the_script_reproduces_the_committed_entry(results):
     out = subprocess.run([sys.executable, str(ROOT / 'scripts' / 'build_price_predictions.py'), '--series', 'fx:INR'],
                          capture_output=True, text=True, check=True, cwd=ROOT)
-    assert json.loads(out.stdout) == results['series']['fx:INR']
+    assert_same_outlook(json.loads(out.stdout), results['series']['fx:INR'])
 
 
 def test_statuses_follow_the_committed_scorecard_run(results):

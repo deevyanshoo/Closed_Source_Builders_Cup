@@ -3,7 +3,7 @@ import type { PlanView } from './demo-api';
 import { supplierDisplayName } from './demo-display';
 import './demo-carbon.css';
 
-type FactorView = { publisher: string; source_url: string; licence: string; factor_year: number; checked_on: string; factor: string; unit: string; category?: string; label?: string; note?: string };
+type FactorView = { publisher: string; source_url: string; licence: string; factor_year: number; checked_on: string; factor: string; unit: string; category?: string; label?: string; note?: string; system_boundary?: string };
 type Part = { status: string; kg_co2e: string | null; reason?: string; formula?: string; factor?: FactorView | null };
 export type CarbonLeg = { mode: string; distance_km: string };
 export type CarbonEstimate = { label: string; scope: string; registry_version: string; material_id: string; quantity: string; unit: string;
@@ -57,7 +57,7 @@ function FactorLine({ part }: { part: Part }) {
   if (!part.factor) return <p className="demo-carbon-missing">{part.reason ?? 'Factor unavailable.'}</p>;
   const f = part.factor;
   return <p>{part.formula ? <><code>{part.formula}</code>{part.kg_co2e != null && <> = {part.kg_co2e} kg CO2e</>}. </> : <span className="demo-carbon-missing">{part.reason} </span>}
-    Factor {f.category ?? f.label}: {f.factor} {f.unit}, {f.factor_year} · <a href={f.source_url} target="_blank" rel="noreferrer">{f.publisher}</a> · {f.licence} · checked {f.checked_on}{f.note ? ` · ${f.note}` : ''}</p>;
+    Factor {f.category ?? f.label}: {f.factor} {f.unit}, {f.factor_year} · <a href={f.source_url} target="_blank" rel="noreferrer">{f.publisher}</a> · {f.licence} · checked {f.checked_on}{f.note ? ` · ${f.note}` : ''}{f.system_boundary ? ` · Boundary: ${f.system_boundary}` : ''}</p>;
 }
 
 export function CarbonPanel({ plan, csrf, contextVersion, result, onResult, send = fetch }: { plan: PlanView; csrf: string; contextVersion?: number; result: CarbonComparison | null; onResult: (value: CarbonComparison) => void; send?: typeof fetch }) {

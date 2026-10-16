@@ -8,7 +8,7 @@ import { PlanResults } from './demo-page';
 const factorSource = { publisher: 'Department for Energy Security and Net Zero (UK government)', source_url: 'https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026', licence: 'Open Government Licence v3.0', factor_year: 2026, checked_on: '2026-10-15' };
 const estimated = {
   label: 'estimate, not a certified footprint', scope: 'Cradle-to-gate primary material production plus entered legs.', registry_version: 'carbon-factors-v1', material_id: 'pet-resin', quantity: '8000', unit: 'kg',
-  material: { status: 'estimated', kg_co2e: '30892.66008', mass_tonnes: '8', formula: '8 t x 3861.58251 kg CO2e/t', factor: { ...factorSource, category: 'Plastics: PET (incl. forming)', factor: '3861.58251', unit: 'kg CO2e per tonne', note: 'Closest published category.' } },
+  material: { status: 'estimated', kg_co2e: '30892.66008', mass_tonnes: '8', formula: '8 t x 3861.58251 kg CO2e/t', factor: { ...factorSource, category: 'Plastics: PET (incl. forming)', factor: '3861.58251', unit: 'kg CO2e per tonne', note: 'Closest published category.', system_boundary: 'Cradle-to-gate primary material production.' } },
   transport: { status: 'estimated', kg_co2e: '128.96', legs: [{ mode: 'sea_container', distance_km: '1000', status: 'estimated', tonne_km: '8000', kg_co2e: '128.96', formula: '8 t x 1000 km x 0.01612 kg CO2e/tonne.km', factor: { ...factorSource, label: 'Sea, average container ship', factor: '0.01612', unit: 'kg CO2e per tonne.km' } }] },
   total_kg_co2e: '31021.62008', complete: true, factor_versions: { 'carbon-factors-v1': { 'desnz-2026-full-set': { published_on: '2026-06-11', checked_on: '2026-10-15', factor_year: 2026, file_sha256: 'abc' } } },
 };
@@ -47,6 +47,7 @@ describe('carbon footprint estimate (#108)', () => {
     expect(html).toContain('Plastics: PET (incl. forming)');
     expect(html).toContain('href="https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026"');
     expect(html).toContain('Open Government Licence v3.0');
+    expect(html).toContain('Boundary: Cradle-to-gate primary material production.');
     expect(html).toContain('No published factor is registered for copper.');
     expect(html).toContain('Distances are what you enter; nothing is inferred from the route.');
     expect(html).not.toMatch(/\bis certified\b|\bverified footprint\b|\bcarbon neutral\b/i);

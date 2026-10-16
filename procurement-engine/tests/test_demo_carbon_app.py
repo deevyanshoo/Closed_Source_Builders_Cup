@@ -26,11 +26,11 @@ def test_estimate_uses_the_active_plan_and_is_exported(demo):
     assert result['plan_id'] == plan['plan_id']
     assert result['material_id'] == 'copper'
     first = result['suppliers'][0]['estimate']
-    # Copper has no registered production factor: shown as unavailable, never guessed.
-    assert first['material']['status'] == 'factor_unavailable'
-    # 8000 kg = 8 t; 8 t x 12000 km x 0.01612 = 1547.52 kg CO2e
+    # 8000 kg = 8 t; production 8 t x 3965 = 31720 (ICA copper cathode, cradle-to-gate)
+    assert first['material']['kg_co2e'] == '31720'
+    # transport 8 t x 12000 km x 0.01612 = 1547.52 kg CO2e
     assert first['transport']['kg_co2e'] == '1547.52'
-    assert first['total_kg_co2e'] is None
+    assert first['total_kg_co2e'] == '33267.52'
     exported = client.get('/api/demo/export').json()
     assert exported['carbon'] == result
     assert exported['carbon']['registry_version'] == 'carbon-factors-v1'

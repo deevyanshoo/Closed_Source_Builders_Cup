@@ -16,9 +16,10 @@ def test_registry_cites_source_url_licence_year_and_unit_for_every_factor(regist
     for group in ('transport_modes', 'materials'):
         for key, factor in registry[group].items():
             source = registry['sources'][factor['source']]
-            assert source['page_url'].startswith('https://www.gov.uk/'), key
-            assert source['licence'] == 'Open Government Licence v3.0'
-            assert source['factor_year'] == 2026
+            assert source['page_url'].startswith('https://'), key
+            assert source['publisher'] and source['licence'] and source['checked_on'], key
+            assert type(source['factor_year']) is int, key
+            assert factor['system_boundary'], key
             assert factor['unit'].startswith('kg CO2e per ')
             assert Decimal(factor['factor']) > 0
 
@@ -63,10 +64,10 @@ def test_tonne_quantities_are_used_as_mass_directly(registry):
 
 
 def test_unknown_material_and_mode_are_factor_unavailable_never_guessed(registry):
-    result = estimate(registry=registry, material_id='copper', quantity='1000', unit='kg',
+    result = estimate(registry=registry, material_id='polymer', quantity='1000', unit='kg',
                       legs=[{'mode': 'pipeline', 'distance_km': '10'}])
     assert result['material'] == {'status': 'factor_unavailable', 'kg_co2e': None, 'factor': None,
-                                  'mass_tonnes': '1', 'reason': 'No published factor is registered for copper.'}
+                                  'mass_tonnes': '1', 'reason': 'No published factor is registered for polymer.'}
     leg = result['transport']['legs'][0]
     assert leg['status'] == 'factor_unavailable' and leg['kg_co2e'] is None
     assert result['total_kg_co2e'] is None
@@ -112,3 +113,22 @@ def test_compare_plan_adds_one_estimate_per_supplier_with_versions(registry):
     assert result['suppliers'][1]['estimate']['transport']['status'] == 'not_entered'
     with pytest.raises(CarbonInputError):
         compare_plan(registry, plan, {'q9': []})
+
+
+def test_copper_cathode_uses_the_cited_ica_cradle_to_gate_factor(registry):
+    result = estimate(registry=registry, material_id='copper', quantity='8000', unit='kg', legs=[])
+    material = result['material']
+    # 8 t x 3965 kg CO2e/t = 31720 kg CO2e (ICA Copper Environmental Profile 2023, Table 4)
+    assert material['status'] == 'estimated' and material['kg_co2e'] == '31720'
+    factor = material['factor']
+    assert factor['source_id'] == 'ica-copper-environmental-profile-2023'
+    assert factor['publisher'] == 'International Copper Association'
+    assert factor['factor_year'] == 2019
+    assert factor['unit'] == 'kg CO2e per tonne'
+    assert 'cradle-to-gate' in factor['system_boundary'].lower()
+    assert 'refinery gate' in factor['system_boundary']
+    source = registry['sources']['ica-copper-environmental-profile-2023']
+    assert source['file_url'].endswith('ICA-LCI-GlobalSummary-202305-F.pdf')
+    assert source['file_sha256'] == '828eee137de1c99280b46b1a3e3cd6e10a60ffbd819340e51466850e70434738'
+    assert 'All rights reserved' in source['licence']
+    assert result['factor_versions']['carbon-factors-v1']['ica-copper-environmental-profile-2023']['factor_year'] == 2019

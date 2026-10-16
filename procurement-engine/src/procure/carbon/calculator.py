@@ -35,6 +35,7 @@ def load_registry(path: Path | None = None) -> dict:
             source = registry['sources'].get(factor.get('source'))
             if (source is None or not source.get('page_url') or not source.get('licence')
                     or type(source.get('factor_year')) is not int or factor.get('unit') != unit
+                    or not factor.get('system_boundary')
                     or not _DECIMAL.match(str(factor.get('factor', ''))) or Decimal(factor['factor']) <= 0):
                 raise ValueError(f'Carbon factor {group}.{key} lacks a cited source, unit or valid value.')
     return registry

@@ -888,6 +888,9 @@ async def run_live_voice(
     reserved = False
     provider_ready = False
     suppress_failed_speech = False
+    # An outstanding/retired local review cannot leak unlabelled output after
+    # renewal. Only its owning pending review or a fresh bound tool can reopen it.
+    clarification_output_blocked = False
     counted_window = None
     counted_company = None
     context_version = None
@@ -1050,6 +1053,7 @@ async def run_live_voice(
 
             async def from_provider():
                 nonlocal output_bytes, produced_output_bytes, tool_calls, suppress_failed_speech, research_gate, accepted_activity_end, research_operation
+                nonlocal clarification_output_blocked
                 nonlocal fresh_input_ready, fresh_activity_start, fresh_activity_end, fresh_transcript_ready, fresh_explicit_incomplete
                 nonlocal recovery_spoken, recovery_asr_incomplete, recovery_vad_started, recovery_vad_ended, recovery_result, recovery_generation
                 from google.genai import types
@@ -1081,6 +1085,7 @@ async def run_live_voice(
                 recovery_held_calls = []
                 recovery_speech_pending = False
                 clarification_speech_pending = False
+                clarification_review_generation = None
                 recovery_speech_deadline = None
                 recovery_required_speech = ''
                 recovery_output_text = ''
@@ -1446,6 +1451,7 @@ async def run_live_voice(
                 while True:
                     async for event in received():
                         _current(session, store, context_version)
+                        clarification_response_event = False
                         browser_interrupt = event == ('browser_interrupt',)
                         if getattr(event, 'go_away', None) is not None:
                             raise _Renew()
@@ -1648,6 +1654,7 @@ async def run_live_voice(
                                     name=held.name, id=held.id, response=denied))
                         if clarification_speech_pending and (interrupted_frame or activity is not None and
                                 (not activity_valid or kind.endswith('ACTIVITY_START'))):
+                            clarification_output_blocked = True
                             await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
                                 'message': 'The spoken clarification was interrupted. Please ask again.',
                                 'review': clarification_diagnostic('interrupted')})
@@ -1810,6 +1817,8 @@ async def run_live_voice(
                             await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
                                 'message': 'The recovery result is on screen, but the prior spoken turn did not finish. Review it on screen before approving.'})
                         if (recovery_speech_deadline is not None and monotonic() >= recovery_speech_deadline):
+                            if clarification_speech_pending:
+                                clarification_output_blocked = True
                             recovery_speech_deadline = None
                             recovery_speech_pending = False
                             recovery_review_aborted = True
@@ -2351,16 +2360,29 @@ async def run_live_voice(
                                     step.get('provider_call') == 'none' and step.get('model') == 'none'
                                     and step.get('agent') == 'workspace' for step in result['agent_steps']))
                             if grounded_clarification:
-                                suppress_failed_speech = False
-                                clarification_speech_pending = True
-                                recovery_speech_pending = True
-                                recovery_speech_deadline = monotonic() + RECOVERY_SPEECH_WAIT_SECONDS
-                                recovery_required_speech = result['assistant_text']
-                                recovery_output_text = ''
-                                recovery_output_audio.clear()
+                                if clarification_review_generation != recovery_generation:
+                                    clarification_review_generation = recovery_generation
+                                    clarification_output_blocked = True
+                                    clarification_speech_pending = True
+                                    recovery_speech_pending = True
+                                    recovery_speech_deadline = monotonic() + RECOVERY_SPEECH_WAIT_SECONDS
+                                    recovery_required_speech = result['assistant_text']
+                                    recovery_output_text = ''
+                                    recovery_output_audio.clear()
+                                # Repeated calls cannot restart the deadline or
+                                # replace partial output from this generation.
+                                suppress_failed_speech = not clarification_speech_pending
                                 # The real function response requests this review;
                                 # no synthetic user turn or duplicate TTS is needed.
                                 recovery_review_dispatched = True
+                            elif (not clarification_speech_pending and settled_rfq_input
+                                    and clarification_review_generation != recovery_generation):
+                                clarification_output_blocked = False
+                            if clarification_speech_pending:
+                                # This incoming event predates the real function
+                                # response; its output cannot answer that response.
+                                clarification_response_event = True
+                                suppress_failed_speech = False
                             if suppress_failed_speech:
                                 await send_frame({'type': 'interrupted'})
                                 await send_frame({'type': 'transcript', 'direction': 'output',
@@ -2468,6 +2490,8 @@ async def run_live_voice(
                             not recovery_settled and (_explicit_recovery_request(recovery_spoken) or bool(recovery_held_calls))
                             or recovery_review_aborted
                             or recovery_speech_pending and not recovery_review_dispatched and not recovery_held_calls))
+                        hold_clarification_output = (clarification_output_blocked and
+                            not clarification_speech_pending or clarification_response_event)
                         if interrupted_frame:
                             provider_output_active = False
                             suppress_failed_speech = False
@@ -2484,7 +2508,7 @@ async def run_live_voice(
                             transcription = getattr(content, field, None)
                             value = getattr(transcription, 'text', None)
                             if isinstance(value, str) and value and not interrupted_frame and (speaker == 'input' or not suppress_failed_speech):
-                                if speaker == 'output' and hold_recovery_output:
+                                if speaker == 'output' and (hold_recovery_output or hold_clarification_output):
                                     continue
                                 if speaker == 'output' and recovery_speech_pending:
                                     recovery_output_text = _append_transcription(recovery_output_text, value)[-3000:]
@@ -2509,7 +2533,7 @@ async def run_live_voice(
                             produced_output_bytes += len(audio)
                             if not produced_budget.allow(len(audio)):
                                 raise _Invalid()
-                            if suppress_failed_speech or interrupted_frame or hold_recovery_output:
+                            if suppress_failed_speech or interrupted_frame or hold_recovery_output or hold_clarification_output:
                                 continue
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['prompt_audio'] = True
@@ -2539,6 +2563,16 @@ async def run_live_voice(
                                 continue
                             if hold_recovery_output:
                                 continue
+                            if (clarification_speech_pending and not recovery_output_audio
+                                    and not recovery_output_text):
+                                # Tool dispatch and completion can share a packet.
+                                # Empty output is not a completed speech review.
+                                # Keep the original deadline; repeated empties do
+                                # not create a retry, new turn or consent gate.
+                                clarification_diagnostic('empty_completion_deferred')
+                                continue
+                            if hold_clarification_output:
+                                continue
                             if recovery_speech_pending:
                                 compact = lambda text: re.sub(r'\W+', '', text.casefold())
                                 reviewed = (bool(recovery_output_audio and
@@ -2554,6 +2588,8 @@ async def run_live_voice(
                                         'missing_audio' if not recovery_output_audio else
                                         'missing_caption' if not recovery_output_text else 'caption_mismatch')
                                 if not reviewed:
+                                    if clarification_speech_pending:
+                                        clarification_output_blocked = True
                                     recovery_output_audio.clear()
                                     recovery_output_text = ''
                                     research_gate = None
@@ -2564,6 +2600,8 @@ async def run_live_voice(
                                             'The recovery result is on screen, but its spoken review was incomplete. Review it on screen before approving.')})
                                     clarification_speech_pending = False
                                     continue
+                                if clarification_speech_pending:
+                                    clarification_output_blocked = False
                                 for index in range(0, len(recovery_output_text), MAX_TRANSCRIPT_CHARS):
                                     await send_frame({'type': 'transcript', 'direction': 'output',
                                         'text': recovery_output_text[index:index + MAX_TRANSCRIPT_CHARS]})

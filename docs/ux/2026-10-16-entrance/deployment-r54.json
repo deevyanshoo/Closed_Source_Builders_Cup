@@ -1,0 +1,26 @@
+{
+  "revision": "closed-source-quote-demo-00054-6vh",
+  "runtime_source": "59ca0b64a47d97c5c06b094a1a2a2cf52616528b",
+  "build": "c2cd5a2e-62d4-480c-8674-cf3265a65b3c",
+  "image": "sha256:af66bd428c79c6b8da6c2fa4db67684802f19d0b8e2a65fc99f072a2b1d97d2f",
+  "configuration_unchanged": true,
+  "traffic_percent": 100,
+  "checks": [
+    {
+      "host": "https://closed-source-quote-demo-ryoeyuqvta-el.a.run.app",
+      "health": {
+        "ready": true,
+        "revision": "closed-source-quote-demo-00054-6vh",
+        "persistence": "firestore"
+      }
+    },
+    {
+      "host": "https://closed-source-quote-demo-963802031195.asia-south1.run.app",
+      "health": {
+        "ready": true,
+        "revision": "closed-source-quote-demo-00054-6vh",
+        "persistence": "firestore"
+      }
+    }
+  ]
+}

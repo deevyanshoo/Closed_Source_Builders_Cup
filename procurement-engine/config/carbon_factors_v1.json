@@ -1,0 +1,706 @@
+{
+  "registry_version": "carbon-factors-v1",
+  "checked_on": "2026-10-15",
+  "label": "estimate from published average factors",
+  "scope": "Material production and entered freight are separate components. A combined figure is shown only when the material factor is an exact product match and ends at the production gate, so entered freight cannot overlap it. UK DESNZ material factors include transport to the point of sale and are UK reporting averages, so they are never combined with entered freight. Excludes use, end of life, packaging, warehousing and supplier-specific data.",
+  "sources": {
+    "desnz-2026-full-set": {
+      "publisher": "Department for Energy Security and Net Zero (UK government)",
+      "title": "Greenhouse gas reporting: conversion factors 2026, full set (version 1)",
+      "page_url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026",
+      "file_url": "https://assets.publishing.service.gov.uk/media/6a29392bade52dc0882218a8/ghg-conversion-factors-2026-full-set.xlsx",
+      "file_sha256": "b5c4f2f86cdc74707337b2fb013b44ded189a1b528f5e29ea99856ba65ae0205",
+      "licence": "Open Government Licence v3.0",
+      "licence_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Crown copyright.",
+      "published_on": "2026-06-11",
+      "factor_year": 2026,
+      "checked_on": "2026-10-15"
+    },
+    "ica-copper-environmental-profile-2023": {
+      "publisher": "International Copper Association",
+      "title": "Copper Environmental Profile, Global 2023 (summary of the ICA copper cathode life cycle assessment, Quantis 2022)",
+      "page_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+      "file_url": "https://internationalcopper.org/wp-content/uploads/2023/05/ICA-LCI-GlobalSummary-202305-F.pdf",
+      "file_sha256": "828eee137de1c99280b46b1a3e3cd6e10a60ffbd819340e51466850e70434738",
+      "licence": "Copyright International Copper Association, All rights reserved. One published figure is cited with attribution; the document is not redistributed.",
+      "licence_url": "https://internationalcopper.org/sustainable-copper/about-copper/copper-environmental-profile/",
+      "attribution": "Source: International Copper Association, Copper Environmental Profile (Global 2023), Table 4.",
+      "published_on": "2023-05-26",
+      "factor_year": 2019,
+      "checked_on": "2026-10-16"
+    }
+  },
+  "transport_modes": {
+    "road_hgv": {
+      "label": "Road, average HGV (diesel, average laden)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "HGV (non-refrigerated, all diesel) / Average non-refrigerated HGVs / Average laden / kg CO2e",
+      "factor": "0.10356",
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
+    },
+    "rail_freight": {
+      "label": "Rail freight train",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Rail / Freight train / kg CO2e",
+      "factor": "0.02583",
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
+    },
+    "sea_container": {
+      "label": "Sea, average container ship",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Cargo ship / Container ship / Average / kg CO2e",
+      "factor": "0.01612",
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
+    },
+    "sea_bulk": {
+      "label": "Sea, average bulk carrier",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Cargo ship / Bulk carrier / Average / kg CO2e",
+      "factor": "0.00353",
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
+    },
+    "air_freight": {
+      "label": "Air freight, international (with radiative forcing)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Freighting goods",
+      "row": "Freight flights / International, to/from non-UK / With RF / kg CO2e",
+      "factor": "0.89939",
+      "unit": "kg CO2e per tonne.km",
+      "system_boundary": "Direct emissions per tonne.km for this mode and average load, as published in the DESNZ Freighting goods sheet; well-to-tank fuel supply is published separately and not included."
+    }
+  },
+  "materials": {
+    "copper": {
+      "category": "Copper cathode (99.99% Cu), global ICA member average",
+      "source": "ica-copper-environmental-profile-2023",
+      "sheet": "Table 4: Results of the LCIA for Copper Concentrate and Copper Cathode According to EF 3.0 Method",
+      "row": "Climate Change / Results per metric tonne of Copper Cathode (99.99% Cu)",
+      "factor": "3965",
+      "unit": "kg CO2e per tonne",
+      "system_boundary": "Cradle-to-gate, from extraction at the mine to copper cathode at the refinery gate, primary and secondary routes; EF 3.0 climate change; ICA member data for reference year 2019 covering 23% of world cathode output; independently reviewed. Excludes rod drawing or other semi-fabrication and transport to the buyer.",
+      "note": "Industry average, not supplier-specific. For copper rod it covers the cathode only, so it understates rod production.",
+      "geography": "Global (ICA member sites, reference year 2019)",
+      "product_match": "exact",
+      "life_cycle_stages": [
+        "mining",
+        "concentration",
+        "smelting",
+        "converting",
+        "refining to cathode"
+      ],
+      "includes_transport_to_point_of_sale": false
+    },
+    "pet-resin": {
+      "category": "Plastics: PET (incl. forming)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Plastic / Plastics: PET (incl. forming) / Primary material production",
+      "factor": "3861.58251",
+      "unit": "kg CO2e per tonne",
+      "note": "Formed-product proxy: the DESNZ PET category includes forming, which resin has not undergone, so it overstates unformed resin. Not an exact resin factor.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "proxy"
+    },
+    "aggregate": {
+      "category": "Construction: Aggregates",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Construction / Aggregates / Primary material production",
+      "factor": "7.80307",
+      "unit": "kg CO2e per tonne",
+      "note": "Published category for primary aggregates.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "exact"
+    },
+    "vials": {
+      "category": "Other: Glass",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Other / Glass / Primary material production",
+      "factor": "1402.76667",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic glass category. Needs the mass of the vials; a count of units cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "proxy"
+    },
+    "cartons": {
+      "category": "Paper and board: board",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Paper / Paper and board: board / Primary material production",
+      "factor": "1198.23866",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic board category. Needs the mass of the cartons; a count of units cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "proxy"
+    },
+    "aluminium-foil": {
+      "category": "Metal: aluminium cans and foil (excl. forming)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Metal / Metal: aluminium cans and foil (excl. forming) / Primary material production",
+      "factor": "9113.58251",
+      "unit": "kg CO2e per tonne",
+      "note": "Generic aluminium cans and foil category, excluding forming. Needs the mass of the rolls; a roll count cannot be used.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "proxy"
+    },
+    "aluminium": {
+      "category": "Metal: aluminium cans and foil (excl. forming)",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Metal / Metal: aluminium cans and foil (excl. forming) / Primary material production",
+      "factor": "9113.58251",
+      "unit": "kg CO2e per tonne",
+      "note": "Proxy: DESNZ aluminium cans and foil (primary, excluding forming) for aluminium conductor. Conductor drawing is not included.",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true,
+      "product_match": "proxy"
+    },
+    "steel": {
+      "category": "Metal: steel cans",
+      "source": "desnz-2026-full-set",
+      "sheet": "Material use",
+      "row": "Metal / Metal: steel cans / Primary material production",
+      "factor": "2861.58251",
+      "unit": "kg CO2e per tonne",
+      "system_boundary": "Cradle-to-gate primary material production: extraction, primary processing, manufacturing and transport to the point of sale (DESNZ Material use sheet).",
+      "note": "Proxy: DESNZ steel cans category for steel products. Cold rolling and rebar rolling differ from can making.",
+      "geography": "United Kingdom (DESNZ UK company-reporting averages; other geographies at the user's risk)",
+      "product_match": "proxy",
+      "life_cycle_stages": [
+        "extraction",
+        "primary processing",
+        "manufacturing",
+        "transport to point of sale"
+      ],
+      "includes_transport_to_point_of_sale": true
+    }
+  },
+  "catalogue": [
+    {
+      "company_id": "solara-cables",
+      "material_id": "copper",
+      "name": "Copper cathode",
+      "unit": "kg",
+      "state": "exact",
+      "factor_key": "copper",
+      "reason": null
+    },
+    {
+      "company_id": "solara-cables",
+      "material_id": "polymer",
+      "name": "Cable insulation polymer",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Insulation polymer type (PVC, PE or XLPE) is not stated, so no single factor applies."
+    },
+    {
+      "company_id": "solara-cables",
+      "material_id": "aluminium",
+      "name": "Aluminium conductor",
+      "unit": "kg",
+      "state": "proxy",
+      "factor_key": "aluminium",
+      "reason": "Proxy: DESNZ aluminium cans and foil (primary, excluding forming) for aluminium conductor. Conductor drawing is not included."
+    },
+    {
+      "company_id": "terrapack",
+      "material_id": "pet-resin",
+      "name": "PET resin",
+      "unit": "kg",
+      "state": "proxy",
+      "factor_key": "pet-resin",
+      "reason": "Formed-product proxy: the DESNZ PET category includes forming, which resin has not undergone, so it overstates unformed resin. Not an exact resin factor."
+    },
+    {
+      "company_id": "terrapack",
+      "material_id": "inks",
+      "name": "Packaging inks",
+      "unit": "litre",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for printing inks in DESNZ or the other priority sources; quantity is in litres."
+    },
+    {
+      "company_id": "terrapack",
+      "material_id": "aluminium-film",
+      "name": "Aluminium film",
+      "unit": "roll",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Laminated aluminium film composition is not stated; quantity is in rolls."
+    },
+    {
+      "company_id": "loomworks",
+      "material_id": "cotton",
+      "name": "Cotton fibre",
+      "unit": "bale",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No DESNZ material factor for raw cotton fibre (the clothing category covers finished garments); quantity is in bales."
+    },
+    {
+      "company_id": "loomworks",
+      "material_id": "dyes",
+      "name": "Reactive dyes",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for reactive dyes in the priority sources."
+    },
+    {
+      "company_id": "loomworks",
+      "material_id": "yarn",
+      "name": "Spun yarn",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No DESNZ factor for spun yarn; the clothing category covers finished garments."
+    },
+    {
+      "company_id": "harvest-foods",
+      "material_id": "wheat",
+      "name": "Wheat grain",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "DESNZ food and drink is a mixed average, not wheat grain; not applied."
+    },
+    {
+      "company_id": "harvest-foods",
+      "material_id": "oil",
+      "name": "Sunflower oil",
+      "unit": "litre",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for sunflower oil; quantity is in litres."
+    },
+    {
+      "company_id": "harvest-foods",
+      "material_id": "cartons",
+      "name": "Food cartons",
+      "unit": "unit",
+      "state": "unit_mismatch",
+      "factor_key": "cartons",
+      "reason": "Factor is per tonne but quantities are in unit; a reviewed material mass is needed and is never inferred."
+    },
+    {
+      "company_id": "harvest-foods",
+      "material_id": "sugar",
+      "name": "Refined sugar",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "DESNZ food and drink is a mixed average, not refined sugar; not applied."
+    },
+    {
+      "company_id": "meridian-pharma",
+      "material_id": "api",
+      "name": "Active ingredient",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Active pharmaceutical ingredients vary too widely for any published average factor."
+    },
+    {
+      "company_id": "meridian-pharma",
+      "material_id": "vials",
+      "name": "Sterile vials",
+      "unit": "unit",
+      "state": "unit_mismatch",
+      "factor_key": "vials",
+      "reason": "Factor is per tonne but quantities are in unit; a reviewed material mass is needed and is never inferred."
+    },
+    {
+      "company_id": "meridian-pharma",
+      "material_id": "ethanol",
+      "name": "Medical ethanol",
+      "unit": "litre",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for medical ethanol; quantity is in litres."
+    },
+    {
+      "company_id": "forgeline-components",
+      "material_id": "steel",
+      "name": "Cold-rolled steel",
+      "unit": "tonne",
+      "state": "proxy",
+      "factor_key": "steel",
+      "reason": "Proxy: DESNZ steel cans category for steel products. Cold rolling and rebar rolling differ from can making."
+    },
+    {
+      "company_id": "forgeline-components",
+      "material_id": "copper",
+      "name": "Copper rod",
+      "unit": "kg",
+      "state": "proxy",
+      "factor_key": "copper",
+      "reason": "Industry average, not supplier-specific. For copper rod it covers the cathode only, so it understates rod production."
+    },
+    {
+      "company_id": "forgeline-components",
+      "material_id": "bearings",
+      "name": "Precision bearings",
+      "unit": "unit",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Precision bearings are assembled products; no cited product factor."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "lithium",
+      "name": "Lithium carbonate",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for lithium carbonate in the priority sources checked."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "nickel",
+      "name": "Nickel sulfate",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for nickel sulfate in the priority sources checked."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "separators",
+      "name": "Cell separators",
+      "unit": "roll",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for battery cell separators; quantity is in rolls."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "graphite",
+      "name": "Battery graphite",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for battery-grade graphite in the priority sources checked."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "cobalt",
+      "name": "Cobalt sulfate",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for cobalt sulfate in the priority sources checked."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "manganese",
+      "name": "Manganese sulfate",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for manganese sulfate in the priority sources checked."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "electrolyte",
+      "name": "Battery electrolyte",
+      "unit": "litre",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for battery electrolyte; quantity is in litres."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "aluminium-foil",
+      "name": "Cathode aluminium foil",
+      "unit": "roll",
+      "state": "unit_mismatch",
+      "factor_key": "aluminium-foil",
+      "reason": "Factor is per tonne but quantities are in roll; a reviewed material mass is needed and is never inferred."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "copper-foil",
+      "name": "Anode copper foil",
+      "unit": "roll",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "The ICA factor covers copper cathode only, not foil; quantity is in rolls."
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "material_id": "cell-cans",
+      "name": "Cell cans",
+      "unit": "unit",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Battery cell cans are formed components; no cited product factor."
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "material_id": "chips",
+      "name": "Power semiconductors",
+      "unit": "unit",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Power semiconductors: no cited per-unit factor in the priority sources."
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "material_id": "boards",
+      "name": "Printed circuit boards",
+      "unit": "unit",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Printed circuit boards: no cited per-unit factor in the priority sources."
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "material_id": "solder",
+      "name": "Lead-free solder paste",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for lead-free solder paste in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "naphtha",
+      "name": "Naphtha feedstock",
+      "unit": "barrel",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for naphtha feedstock; quantity is in barrels."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "methanol",
+      "name": "Methanol",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for methanol in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "catalyst",
+      "name": "Process catalyst",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Process catalyst composition is not stated."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "ethane",
+      "name": "Ethane feedstock",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for ethane feedstock in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "propane",
+      "name": "Propane feedstock",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for propane feedstock as a material in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "benzene",
+      "name": "Benzene",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for benzene in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "toluene",
+      "name": "Toluene",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for toluene in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "ethylene",
+      "name": "Ethylene",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for ethylene in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "caustic-soda",
+      "name": "Caustic soda",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for caustic soda in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "sulfur",
+      "name": "Elemental sulfur",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited cradle-to-gate factor for elemental sulfur in the priority sources checked."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "hydrogen",
+      "name": "Compressed hydrogen",
+      "unit": "cylinder",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Hydrogen production route is not stated; quantity is in cylinders."
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "material_id": "polymer-additive",
+      "name": "Polymer stabilizer",
+      "unit": "kg",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Polymer stabilizer composition is not stated."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "clinker",
+      "name": "Cement clinker",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for cement clinker in DESNZ material use (concrete and bricks are different products)."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "gypsum",
+      "name": "Gypsum",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "DESNZ plasterboard is a finished product, not gypsum; not applied."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "rebar",
+      "name": "Reinforcing bar",
+      "unit": "tonne",
+      "state": "proxy",
+      "factor_key": "steel",
+      "reason": "Proxy: DESNZ steel cans category for steel products. Cold rolling and rebar rolling differ from can making."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "aggregate",
+      "name": "Crushed aggregate",
+      "unit": "tonne",
+      "state": "exact",
+      "factor_key": "aggregate",
+      "reason": null
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "limestone",
+      "name": "Limestone",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for limestone as a material in the priority sources checked."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "fly-ash",
+      "name": "Fly ash",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "Fly ash is a by-product; no cited allocation factor."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "silica-sand",
+      "name": "Silica sand",
+      "unit": "tonne",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for silica sand in the priority sources checked."
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "material_id": "admixture",
+      "name": "Concrete admixture",
+      "unit": "litre",
+      "state": "unavailable",
+      "factor_key": null,
+      "reason": "No cited factor for concrete admixture; quantity is in litres."
+    }
+  ]
+}

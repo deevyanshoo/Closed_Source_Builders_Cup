@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "extractions": [
+    {
+      "fixture": "late-copper",
+      "document_sha256": "1256c543568466fe44d1f3791c2861e65bd21f833883f98c5a85eae2784398df",
+      "real_provider": true,
+      "model": "gemini-3.5-flash-lite",
+      "cache": false,
+      "document_evidence": true
+    },
+    {
+      "fixture": "express-copper",
+      "document_sha256": "eb05f6b26257600f4ca1c23a8ba6d542fd21a97775084291257a45f9baad98ba",
+      "real_provider": true,
+      "model": "gemini-3.5-flash-lite",
+      "cache": false,
+      "document_evidence": true
+    },
+    {
+      "fixture": "eu-copper",
+      "document_sha256": "8dc9d68ae21f47b03585325f2d2297a0e2710d3ef3a6bdce212faa5bdaf727a5",
+      "real_provider": true,
+      "model": "gemini-3.5-flash-lite",
+      "cache": false,
+      "document_evidence": true
+    }
+  ],
+  "revision": "closed-source-quote-demo-00050-z2x"
+}

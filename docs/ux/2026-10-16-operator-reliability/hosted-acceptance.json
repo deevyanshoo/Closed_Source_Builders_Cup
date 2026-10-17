@@ -1,0 +1,137 @@
+{
+  "verified_at": "2026-10-16T10:19:48.844113+00:00",
+  "expected_revision": "closed-source-quote-demo-00065-vst",
+  "all_companies_passed": true,
+  "unique_companies": 10,
+  "unique_typed_cases": 20,
+  "controlled_voice_companies": 10,
+  "automatic_retries": 0,
+  "selection_rule": "Initial twenty typed cases all completed. Final voice acceptance uses the latest successful per-company row after documented audit-only corrections and targeted rechecks; the original failed checker receipts remain preserved.",
+  "limitations": [
+    "Controlled Google-generated speech; physical microphone hardware and human audibility not tested.",
+    "Output captions and returned audio verified; waveform not independently transcribed.",
+    "No external email or RFQ sent."
+  ],
+  "companies": [
+    {
+      "company_id": "solara-cables",
+      "typed_primary": "In the Solara Cables workspace profile dated 2026-10-14, Copper cathode stock is 2000 kg; stated daily use is 333.33 kg per day, and about 6.00 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover is below the shortest listed lead, a potential replenishment timing gap. Supplier profile options: Europa Copper SA: listed 10 days, EUR; Swift Copper Trading Ltd: listed 14 days, USD; Atacama Red Metals SpA: listed 45 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for Solara Cables (workspace profile dated 2026-10-14):\n\n- Copper cathode: stock 2000 kg, about 6.00 days cover vs 10 days shortest listed lead (potential timing gap); profile source Europa Copper SA (10 days listed).\n- Aluminium conductor: stock 4300 kg, about 29.66 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Solara Cables Aluminium conductor Alternate Source Ltd (10 days listed).\n- Cable insulation polymer: stock 5800 kg, about 46.40 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Solara Cables Cable insulation polymer Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "The company needs to  address Copper cathode  first, as its  stock cover of six  days falls below  the shortest supplier  lead time of ten  days. Several  suppliers, including  Europa Copper SA  for copper  and Alternate Source  Ltd for polymer  and aluminium,  offer the shortest  lead time of ten days.",
+      "voice_audio_bytes": 808322,
+      "voice_elapsed_ms": 29257,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-initial.json"
+    },
+    {
+      "company_id": "loomworks",
+      "typed_primary": "In the LoomWorks Textiles workspace profile dated 2026-10-14, Cotton fibre stock is 920 bale; stated daily use is 32 bale per day, and about 28.75 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: LoomWorks Textiles Cotton fibre Alternate Source Ltd: listed 10 days, USD; Delta Cotton: listed 11 days, USD; LoomWorks Textiles Cotton fibre Selected Source Ltd: listed 12 days, BDT. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for LoomWorks Textiles (workspace profile dated 2026-10-14):\n\n- Cotton fibre: stock 920 bale, about 28.75 days cover vs 10 days shortest listed lead (no simple timing gap); profile source LoomWorks Textiles Cotton fibre Alternate Source Ltd (10 days listed).\n- Spun yarn: stock 7100 kg, about 30.87 days cover vs 10 days shortest listed lead (no simple timing gap); profile source LoomWorks Textiles Spun yarn Alternate Source Ltd (10 days listed).\n- Reactive dyes: stock 4400 kg, about 40.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source LoomWorks Textiles Reactive dyes Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "LoomWorks Textiles  currently holds  920 bales  of cotton fibre,  4,400  kilograms of reactive  dyes, and 7,100  kilograms  of spun yarn. Cotton  fibre  requires  priority attention,  as it has the shortest  stock cover at 28.75  days.  Several  listed alternate  sources across materials  offer the shortest  lead time of 10  days.",
+      "voice_audio_bytes": 1005602,
+      "voice_elapsed_ms": 33198,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-initial.json"
+    },
+    {
+      "company_id": "meridian-pharma",
+      "typed_primary": "In the Meridian Pharma workspace profile dated 2026-10-14, Active ingredient stock is 1250 kg; stated daily use is 34 kg per day, and about 36.76 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Meridian Pharma Active ingredient Alternate Source Ltd: listed 10 days, USD; Meridian Pharma Active ingredient Selected Source Ltd: listed 12 days, CHF; BioMolecule: listed 31 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for Meridian Pharma (workspace profile dated 2026-10-14):\n\n- Sterile vials: stock 120000 unit, about 31.58 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Meridian Pharma Sterile vials Alternate Source Ltd (10 days listed).\n- Active ingredient: stock 1250 kg, about 36.76 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Meridian Pharma Active ingredient Alternate Source Ltd (10 days listed).\n- Medical ethanol: stock 9000 litre, about 40.91 days cover vs 8 days shortest listed lead (no simple timing gap); profile source PureSolvent (8 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "Meridian Pharma  handles active  ingredients, sterile  vials, and medical  ethanol. Sterile  vials require  our attention first,  as they have the lowest  stock cover  of about 32 days.  PureSolvent  offers  the shortest lead time,  supplying medical ethanol  in just 8  days.",
+      "voice_audio_bytes": 757442,
+      "voice_elapsed_ms": 28048,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-initial.json"
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "typed_primary": "In the GridSpring Batteries workspace profile dated 2026-10-14, Lithium carbonate stock is 88 tonne; stated daily use is 4 tonne per day, and about 22.00 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: GridSpring Batteries Lithium carbonate Alternate Source Ltd: listed 10 days, USD; GridSpring Batteries Lithium carbonate Selected Source Ltd: listed 12 days, KRW; GridSpring Batteries Lithium carbonate Late Source Ltd: listed 40 days, KRW. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for GridSpring Batteries (workspace profile dated 2026-10-14):\n\n- Lithium carbonate: stock 88 tonne, about 22.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source GridSpring Batteries Lithium carbonate Alternate Source Ltd (10 days listed).\n- Nickel sulfate: stock 175 tonne, about 25.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source GridSpring Batteries Nickel sulfate Alternate Source Ltd (10 days listed).\n- Battery graphite: stock 130 tonne, about 26.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source GridSpring Batteries Battery graphite Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "Lithium carbonate needs  attention first,  as it currently has the lowest  stock cover at 22  days.  Across the listed  suppliers, the alternate  source options  offer the shortest lead time  at 10 days.",
+      "voice_audio_bytes": 499202,
+      "voice_elapsed_ms": 22712,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-initial.json"
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "typed_primary": "In the CircuitPeak Systems workspace profile dated 2026-10-14, Power semiconductors stock is 74000 unit; stated daily use is 2100 unit per day, and about 35.24 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: CircuitPeak Systems Power semiconductors Alternate Source Ltd: listed 10 days, USD; CircuitPeak Systems Power semiconductors Selected Source Ltd: listed 12 days, MYR; SiliconGate: listed 35 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for CircuitPeak Systems (workspace profile dated 2026-10-14):\n\n- Printed circuit boards: stock 42000 unit, about 35.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source CircuitPeak Systems Printed circuit boards Alternate Source Ltd (10 days listed).\n- Power semiconductors: stock 74000 unit, about 35.24 days cover vs 10 days shortest listed lead (no simple timing gap); profile source CircuitPeak Systems Power semiconductors Alternate Source Ltd (10 days listed).\n- Lead-free solder paste: stock 860 kg, about 35.83 days cover vs 10 days shortest listed lead (no simple timing gap); profile source CircuitPeak Systems Lead-free solder paste Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "We hold 74,000  units of power  semiconductors,  42,000  units of printed  circuit boards, and 860  kilograms  of lead-free  solder paste.  Printed circuit  boards have the lowest  stock cover, at  35 days,  requiring attention  first. Multiple  suppliers offer  the shortest lead  time of 10 days.",
+      "voice_audio_bytes": 906240,
+      "voice_elapsed_ms": 31258,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-initial.json"
+    },
+    {
+      "company_id": "terrapack",
+      "typed_primary": "In the TerraPack Films workspace profile dated 2026-10-14, PET resin stock is 18500 kg; stated daily use is 950 kg per day, and about 19.47 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: TerraPack Films PET resin Alternate Source Ltd: listed 10 days, USD; TerraPack Films PET resin Selected Source Ltd: listed 12 days, INR; ResinArc: listed 21 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for TerraPack Films (workspace profile dated 2026-10-14):\n\n- PET resin: stock 18500 kg, about 19.47 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films PET resin Alternate Source Ltd (10 days listed).\n- Aluminium film: stock 145 roll, about 24.17 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films Aluminium film Alternate Source Ltd (10 days listed).\n- Packaging inks: stock 2100 litre, about 43.75 days cover vs 6 days shortest listed lead (no simple timing gap); profile source ColorMill (6 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "TerraPack Films holds  about 19.5  days of stock cover  for PET resin,  making it the most constrained  material by coverage.  For sourcing,  ColorMill offers  the shortest lead time  across all materials at just  six days.",
+      "voice_audio_bytes": 558722,
+      "voice_elapsed_ms": 24067,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-affected-recheck.json"
+    },
+    {
+      "company_id": "harvest-foods",
+      "typed_primary": "In the Harvest Foods workspace profile dated 2026-10-14, Wheat grain stock is 1800 tonne; stated daily use is 74 tonne per day, and about 24.32 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Harvest Foods Wheat grain Alternate Source Ltd: listed 10 days, USD; Harvest Foods Wheat grain Selected Source Ltd: listed 12 days, KES; Prairie Grain: listed 38 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for Harvest Foods (workspace profile dated 2026-10-14):\n\n- Wheat grain: stock 1800 tonne, about 24.32 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Wheat grain Alternate Source Ltd (10 days listed).\n- Refined sugar: stock 420 tonne, about 28.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Refined sugar Alternate Source Ltd (10 days listed).\n- Food cartons: stock 98000 unit, about 36.30 days cover vs 5 days shortest listed lead (no simple timing gap); profile source PackEast (5 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "Wheat grain requires  the most immediate  attention, as it has the lowest  stock cover of roughly  24 days.  PackEast,  supplying food cartons,  has the shortest  lead time at just  five days.",
+      "voice_audio_bytes": 487680,
+      "voice_elapsed_ms": 22387,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-affected-recheck.json"
+    },
+    {
+      "company_id": "forgeline-components",
+      "typed_primary": "In the ForgeLine Components workspace profile dated 2026-10-14, Cold-rolled steel stock is 610 tonne; stated daily use is 24 tonne per day, and about 25.42 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: ForgeLine Components Cold-rolled steel Alternate Source Ltd: listed 10 days, USD; ForgeLine Components Cold-rolled steel Selected Source Ltd: listed 12 days, MXN; LakeSteel: listed 13 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for ForgeLine Components (workspace profile dated 2026-10-14):\n\n- Cold-rolled steel: stock 610 tonne, about 25.42 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Cold-rolled steel Alternate Source Ltd (10 days listed).\n- Copper rod: stock 7800 kg, about 30.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Copper rod Alternate Source Ltd (10 days listed).\n- Precision bearings: stock 14000 unit, about 32.56 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Precision bearings Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "Cold-rolled steel requires  the most  immediate attention,  as it currently has the lowest  stock cover  at approximately 25  days. Alternate  Source Ltd  offers the shortest  lead time across  the catalogue at just  10 days.",
+      "voice_audio_bytes": 595682,
+      "voice_elapsed_ms": 24615,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-affected-recheck.json"
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "typed_primary": "In the Atlas Petrochem workspace profile dated 2026-10-14, Naphtha feedstock stock is 190000 barrel; stated daily use is 7100 barrel per day, and about 26.76 days of stock cover at stated daily use. Shortest listed supplier lead is 9 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Gulf Feedstock: listed 9 days, USD; Atlas Petrochem Naphtha feedstock Alternate Source Ltd: listed 10 days, USD; Atlas Petrochem Naphtha feedstock Selected Source Ltd: listed 12 days, AED. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for Atlas Petrochem (workspace profile dated 2026-10-14):\n\n- Naphtha feedstock: stock 190000 barrel, about 26.76 days cover vs 9 days shortest listed lead (no simple timing gap); profile source Gulf Feedstock (9 days listed).\n- Propane feedstock: stock 9200 tonne, about 27.06 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Propane feedstock Alternate Source Ltd (10 days listed).\n- Elemental sulfur: stock 6950 tonne, about 28.37 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Elemental sulfur Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "Naphtha feedstock  requires attention  first, as it has the lowest  stock cover  at approximately 26.8  days.  Oman  Chemicals offers the shortest  lead time across  the portfolio, delivering  Methanol in just  7 days.",
+      "voice_audio_bytes": 600962,
+      "voice_elapsed_ms": 24495,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-affected-recheck.json"
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "typed_primary": "In the StoneBridge Materials workspace profile dated 2026-10-14, Cement clinker stock is 12500 tonne; stated daily use is 480 tonne per day, and about 26.04 days of stock cover at stated daily use. Shortest listed supplier lead is 6 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: KilnSouth: listed 6 days, ZAR; StoneBridge Materials Cement clinker Alternate Source Ltd: listed 10 days, USD; StoneBridge Materials Cement clinker Selected Source Ltd: listed 12 days, ZAR. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+      "typed_companywide": "Company-wide inventory and sourcing overview for StoneBridge Materials (workspace profile dated 2026-10-14):\n\n- Cement clinker: stock 12500 tonne, about 26.04 days cover vs 6 days shortest listed lead (no simple timing gap); profile source KilnSouth (6 days listed).\n- Crushed aggregate: stock 17800 tonne, about 28.71 days cover vs 10 days shortest listed lead (no simple timing gap); profile source StoneBridge Materials Crushed aggregate Alternate Source Ltd (10 days listed).\n- Reinforcing bar: stock 2200 tonne, about 29.33 days cover vs 10 days shortest listed lead (no simple timing gap); profile source SteelCape (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+      "voice_caption": "At StoneBridge Materials,  Cement clinker  requires attention  first, as it has  the lowest stock cover  at approximately twenty-six  days. The supplier  with the shortest  lead time is  KilnSouth, providing  Cement clinker in just  six days.",
+      "voice_audio_bytes": 562562,
+      "voice_elapsed_ms": 23859,
+      "voice_input_verified": true,
+      "voice_caption_grounded": true,
+      "read_only_state_verified": true,
+      "receipt": "hosted-stonebridge-final.json"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "verified_at": "2026-10-16T10:19:48.845115+00:00",
+  "application_source_revision": "6e2fb2a",
+  "documentation_and_audit_followup": "Audit-only corrections and acceptance evidence committed separately; no runtime source changes after this application revision.",
+  "build_id": "f4aa0b1a-c378-40ac-b152-9c2dcfb90d38",
+  "build_status": "SUCCESS",
+  "image_digest": "sha256:6fd2b16f49abf51629b721f925e1ef01be39c5a1fa08dcc5a4fe078d7adeb0e7",
+  "source_package": {
+    "files": 336,
+    "bytes": 5783486,
+    "bundle_sha256": "009dc53f55100b2f5275fb5b3dcbef610a040f63ee5ebc2657fc8f34a0628b41"
+  },
+  "ready_revision": "closed-source-quote-demo-00065-vst",
+  "traffic_percent": 100,
+  "hosted_url": "https://closed-source-quote-demo-963802031195.asia-south1.run.app/demo",
+  "health_aliases": [
+    {
+      "base": "https://closed-source-quote-demo-963802031195.asia-south1.run.app",
+      "revision": "closed-source-quote-demo-00065-vst",
+      "health_status": 200,
+      "ready_status": 200,
+      "ready": true
+    },
+    {
+      "base": "https://closed-source-quote-demo-ryoeyuqvta-el.a.run.app",
+      "revision": "closed-source-quote-demo-00065-vst",
+      "health_status": 200,
+      "ready_status": 200,
+      "ready": true
+    }
+  ],
+  "tests": {
+    "demo_backend_plus_initial_audit": 829,
+    "initial_audit_subset": 8,
+    "demo_backend": 821,
+    "final_audit_checker": 12,
+    "web_typecheck": "passed",
+    "web_production_build": "passed",
+    "full_repository_analytics_forecast": "not run"
+  },
+  "hosted_acceptance": {
+    "unique_typed_cases": 20,
+    "controlled_voice_companies": 10,
+    "reviewed_quote_transition": "passed",
+    "protected_state_unchanged": true,
+    "physical_microphone": "not tested",
+    "output_waveform_independent_transcription": "not performed"
+  },
+  "configuration_verification": "configuration-verification.json",
+  "independent_review": "independent-review.md",
+  "cost_boundary": "Existing trial-credit project only. No new paid service, billing upgrade, IAM change or scaling change.",
+  "rollback_revision": "closed-source-quote-demo-00064-kmp",
+  "rollback_image_digest": "sha256:0b6e2fead22a3c1ecf98a0998da8aa982b5865e4b44230fc61a7599e1edb7a29"
+}

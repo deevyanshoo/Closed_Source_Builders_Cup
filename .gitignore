@@ -6,3 +6,10 @@ dist/
 playwright-report/
 test-results/
 .DS_Store
+.demo-deps/
+.superpowers/
+.venv/
+__pycache__/
+.pytest_cache/
+procurement-engine/data/
+/output/

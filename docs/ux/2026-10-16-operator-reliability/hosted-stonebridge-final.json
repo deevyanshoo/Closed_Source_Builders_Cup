@@ -1,0 +1,94 @@
+{
+  "started_at": "2026-10-16T10:15:15.313532+00:00",
+  "expected_revision": "closed-source-quote-demo-00065-vst",
+  "controlled_speech": true,
+  "automatic_retries": 0,
+  "ok": true,
+  "companies": [
+    {
+      "company_id": "stonebridge-materials",
+      "ok": true,
+      "stage": "completed",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the StoneBridge Materials workspace profile dated 2026-10-14, Cement clinker stock is 12500 tonne; stated daily use is 480 tonne per day, and about 26.04 days of stock cover at stated daily use. Shortest listed supplier lead is 6 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: KilnSouth: listed 6 days, ZAR; StoneBridge Materials Cement clinker Alternate Source Ltd: listed 10 days, USD; StoneBridge Materials Cement clinker Selected Source Ltd: listed 12 days, ZAR. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the StoneBridge Materials workspace profile dated 2026-10-14, Cement clinker stock is 12500 tonne; stated daily use is 480 tonne per day, and about 26.04 days of stock cover at stated daily use. Shortest listed supplier lead is 6 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: KilnSouth: listed 6 days, ZAR; StoneBridge Materials Cement clinker Alternate Source Ltd: listed 10 days, USD; StoneBridge Materials Cement clinker Selected Source Ltd: listed 12 days, ZAR. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "clinker"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for StoneBridge Materials (workspace profile dated 2026-10-14):\n\n- Cement clinker: stock 12500 tonne, about 26.04 days cover vs 6 days shortest listed lead (no simple timing gap); profile source KilnSouth (6 days listed).\n- Crushed aggregate: stock 17800 tonne, about 28.71 days cover vs 10 days shortest listed lead (no simple timing gap); profile source StoneBridge Materials Crushed aggregate Alternate Source Ltd (10 days listed).\n- Reinforcing bar: stock 2200 tonne, about 29.33 days cover vs 10 days shortest listed lead (no simple timing gap); profile source SteelCape (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for StoneBridge Materials (workspace profile dated 2026-10-14):\n\n- Cement clinker: stock 12500 tonne, about 26.04 days cover vs 6 days shortest listed lead (no simple timing gap); profile source KilnSouth (6 days listed).\n- Crushed aggregate: stock 17800 tonne, about 28.71 days cover vs 10 days shortest listed lead (no simple timing gap); profile source StoneBridge Materials Crushed aggregate Alternate Source Ltd (10 days listed).\n- Reinforcing bar: stock 2200 tonne, about 29.33 days cover vs 10 days shortest listed lead (no simple timing gap); profile source SteelCape (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "clinker",
+            "rebar",
+            "aggregate"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "stonebridge-materials",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Current workspace facts are ready.",
+          "agent_step_tools": [
+            "read_workspace"
+          ],
+          "analytics_present": true
+        },
+        "tool_observations": [
+          {
+            "company_id": "stonebridge-materials",
+            "context_version": 2,
+            "status": "completed",
+            "assistant_text": "Current workspace facts are ready.",
+            "agent_step_tools": [
+              "read_workspace"
+            ],
+            "analytics_present": true
+          }
+        ],
+        "output_transcript": "At StoneBridge Materials,  Cement clinker  requires attention  first, as it has  the lowest stock cover  at approximately twenty-six  days. The supplier  with the shortest  lead time is  KilnSouth, providing  Cement clinker in just  six days.",
+        "output_audio_bytes": 562562,
+        "tool_material_ids": [
+          "clinker",
+          "gypsum",
+          "rebar",
+          "aggregate",
+          "limestone",
+          "fly-ash",
+          "silica-sand",
+          "admixture"
+        ],
+        "tool_validation_path": "profile_analytics",
+        "material_ids": [
+          "clinker",
+          "gypsum",
+          "rebar",
+          "aggregate",
+          "limestone",
+          "fly-ash",
+          "silica-sand",
+          "admixture"
+        ],
+        "input_transcript_verified": true,
+        "material_id": "clinker",
+        "numbers_checked": 0,
+        "output_caption_grounding_verified": true,
+        "output_audio_semantics_verified": false,
+        "elapsed_ms": 23859
+      },
+      "read_only_state_verified": true
+    }
+  ],
+  "stage": "completed",
+  "completed_at": "2026-10-16T10:15:41.474132+00:00"
+}

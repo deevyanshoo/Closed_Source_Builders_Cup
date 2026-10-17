@@ -1,0 +1,29 @@
+{
+  "revision": "closed-source-quote-demo-00061-49v",
+  "source": "0485463",
+  "method": "Isolated synthetic unsent RFQ fixture; existing Operator target scrollIntoView(block:start) with instant measurement to avoid smooth-scroll timing. At top of document target clamps to58 and heading remains below header. No voice/backend contract change from r60.",
+  "measures": [
+    {
+      "size": "desktop",
+      "headerBottom": 58,
+      "headingTop": 103.5,
+      "height": 900,
+      "overflow": false,
+      "scrollMargin": "82px",
+      "scrollY": 0,
+      "targetTop": 58,
+      "width": 1440
+    },
+    {
+      "size": "mobile",
+      "headerBottom": 58,
+      "headingTop": 101.5,
+      "height": 844,
+      "overflow": false,
+      "scrollMargin": "82px",
+      "scrollY": 0,
+      "targetTop": 58,
+      "width": 390
+    }
+  ]
+}

@@ -8,6 +8,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 from test_service_auth import signed, AUD, CALLER
 from procure import service_app
+from procure.offers import quote_transport
 
 @pytest.fixture
 def backend():
@@ -252,8 +253,8 @@ def test_quote_query_ceiling_precedes_parser_and_parameter_count(monkeypatch):
     def forbidden(*args, **kwargs):
         raise AssertionError('oversize query reached parser')
     monkeypatch.setattr(urllib.parse, 'parse_qs', forbidden)
-    assert service_app._offer_query(b'as_of=' + b'1' * 5000, {'as_of'}) is False
-    assert service_app._offer_query(b'as_of=1&as_of=2&as_of=3', {'as_of'}) is False
+    assert quote_transport._offer_query(b'as_of=' + b'1' * 5000, {'as_of'}) is False
+    assert quote_transport._offer_query(b'as_of=1&as_of=2&as_of=3', {'as_of'}) is False
 
 
 def test_quote_headers_rejected_before_verifier_or_backend():
@@ -296,15 +297,15 @@ def test_quote_body_shape_rejects_overdepth_iteratively():
     near = {'field': 'x', 'expected_version': 1, 'value': 0}
     for _ in range(31):
         near['value'] = [near['value']]
-    assert service_app._offer_body_shape('/offers/o/corrections', near) is True
+    assert quote_transport._offer_body_shape('/offers/o/corrections', near) is True
     too_deep = {'field': 'x', 'expected_version': 1, 'value': 0}
     for _ in range(32):
         too_deep['value'] = [too_deep['value']]
-    assert service_app._offer_body_shape('/offers/o/corrections', too_deep) is False
+    assert quote_transport._offer_body_shape('/offers/o/corrections', too_deep) is False
     raw = '{"field":"x","expected_version":1,"value":' + '[' * 650 + '0' + ']' * 650 + '}'
-    assert service_app._offer_body_shape('/offers/o/corrections', json.loads(raw)) is False
+    assert quote_transport._offer_body_shape('/offers/o/corrections', json.loads(raw)) is False
     too_many = {'field': 'x', 'expected_version': 1, 'value': [None] * 100_001}
-    assert service_app._offer_body_shape('/offers/o/corrections', too_many) is False
+    assert quote_transport._offer_body_shape('/offers/o/corrections', too_many) is False
 
 
 def test_signed_overdepth_correction_returns_controlled_422_without_backend():

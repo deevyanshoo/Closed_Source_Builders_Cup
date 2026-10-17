@@ -295,6 +295,18 @@ def _native_pin(path):
             'identity': _native_identity(path), 'ancestors': _native_ancestors(path)}
 
 
+def _tamper_runtime_alias(runtime, tmp_path):
+    """Corrupt a real alias, or claim one when the venv executable is copied."""
+    chain = runtime['alias_chain']
+    if chain:
+        chain[0]['target'] = 'synthetic-wrong-target'
+        return
+    fake = tmp_path / 'unissued-python-alias'
+    fake.symlink_to(runtime['executable_alias'])
+    chain.append({'path': str(fake), 'target': os.readlink(fake),
+                  'identity': _native_identity(fake), 'ancestors': _native_ancestors(fake)})
+
+
 def native_owned_fixture(tmp_path, monkeypatch, *, mutate=None, register=True):
     """Only this owning test utility configures isolated synthetic host state."""
     import hashlib, sys, weakref
@@ -382,7 +394,7 @@ def test_native_host_control_refusal_precedes_source_body(tmp_path,monkeypatch,c
         if change=='output':c['outputs']['path']=str(Path(c['source']['file']['path']).parent/'run')
         if change=='package':c['runtime']['packages'][0]['metadata']['sha256']='0'*64
         if change=='origin':c['runtime']['packages'][0]['module_origin']='/missing/synthetic-module.py'
-        if change=='alias':c['runtime']['alias_chain'][0]['target']='synthetic-wrong-target'
+        if change=='alias':_tamper_runtime_alias(c['runtime'],tmp_path)
         if change=='head':c['integrated_head']='0'*40
         if change=='unknown':c['unexpected_permission']=True
     authority,c,raw,source,pp,mp,output=native_owned_fixture(tmp_path.resolve(),monkeypatch,mutate=mutate,register=False)
@@ -560,7 +572,7 @@ def test_agnostic_bad_control_refuses_before_any_original_body(tmp_path,monkeypa
         elif change=='code':c['code'][-1]['file']['sha256']='0'*64
         elif change=='metadata':c['runtime']['packages'][0]['metadata']['sha256']='0'*64
         elif change=='origin':c['runtime']['packages'][0]['module_origin']='/absent/generated.py'
-        elif change=='alias':c['runtime']['alias_chain'][0]['target']='wrong'
+        elif change=='alias':_tamper_runtime_alias(c['runtime'],tmp_path)
         elif change=='selection':c['selected_ids'].append('WB:foreign')
         elif change=='source_size':c['sources']['bis']['file']['bytes']=32*1024*1024+1
         elif change=='head':c['integrated_head']='0'*40

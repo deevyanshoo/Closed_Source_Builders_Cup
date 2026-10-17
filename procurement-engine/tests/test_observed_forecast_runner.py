@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import math
@@ -34,6 +35,28 @@ def months():
 def protocol():
     frozen = json.loads((Path(__file__).parents[1] / "evaluation/forecast/protocol.json").read_text())
     return {**frozen, "snapshot_sha256": "a" * 64, "protocol_sha256": "b" * 64}
+
+
+@pytest.mark.parametrize("entrypoint", ["_legacy_run_offline_evaluation", "_run_offline_evaluation_inner"])
+def test_legacy_runner_refuses_approved_looking_control_before_any_access(tmp_path, monkeypatch, entrypoint):
+    """Old entrypoints cannot bypass the accepted-run, source and output anchors."""
+    control = tmp_path / "approved-looking-protocol.json"
+    control.write_text(json.dumps({**protocol(), "status": "APPROVED_OBSERVED_EXECUTION",
+                                   "observed_execution_authorized": True, "source_sha256": "c" * 64}))
+    manifest = tmp_path / "approved-looking-manifest.json"
+    manifest.write_text(json.dumps({"eligibility_status": "APPROVED_OBSERVED", "rights_status": "APPROVED",
+                                    "is_synthetic": False, "sha256": "c" * 64}))
+    source, output = tmp_path / "source.xlsx", tmp_path / "output"
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("legacy path accessed control, source, fit, or output")
+
+    for name in ("strict_json", "load_verified_native_series", "fit_in_owned_child",
+                 "publish_runner", "_publish_incomplete_run"):
+        monkeypatch.setattr(observed_runner, name, forbidden)
+    with pytest.raises(ValueError, match="legacy runner unavailable"):
+        getattr(observed_runner, entrypoint)(control, manifest, source, output, "2026-10-08")
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("case,model,expected", [
@@ -345,9 +368,17 @@ def test_admitted_public_host_freezes_then_scores_whole_cohorts(tmp_path, monkey
         return _admitted_fake_fit()
     monkeypatch.setattr(observed_runner, "fit_in_owned_child", fit)
     monkeypatch.setattr(observed_runner, "attach_frozen_actuals", attach)
-    result = _admitted_call(fixture)
+    real_import = builtins.__import__
+    def forbid_parent_model_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "procure.forecast.models" or (name == "procure.forecast" and "models" in fromlist):
+            raise AssertionError("admitted parent imported forecast.models")
+        return real_import(name, globals, locals, fromlist, level)
+    with monkeypatch.context() as local_patch:
+        local_patch.setattr(builtins, "__import__", forbid_parent_model_import)
+        result = _admitted_call(fixture)
+        verified = verify_runner_run(out, expected_run=fixture[3])
     assert result["status"] == "fixture_complete" and result["observed_execution_authorized"] is False
-    assert verify_runner_run(out, expected_run=fixture[3])
+    assert verified
     ledger = json.loads((out / "candidate_ledger.json").read_bytes())["entries"]
     assert len(ledger) == 96 and sum(r["status"] == "scored" for r in ledger) == 36
     unavailable = [r for r in ledger if r["status"] != "scored"]
@@ -356,7 +387,6 @@ def test_admitted_public_host_freezes_then_scores_whole_cohorts(tmp_path, monkey
     assert len(json.loads((out / "scored_rows.json").read_bytes())["predictions"]) == 864
     assert len(json.loads((out / "selection_freeze.json").read_bytes())["calibration"]) == 18
     assert len(json.loads((out / "selection_freeze.json").read_bytes())["selection"]) == 6
-    assert "procure.forecast.models" not in sys.modules
     assert len([e for e in events if e[0] == "fit"]) == 288
     first_attachment = next(i for i,e in enumerate(events) if e == ("attach", "validation"))
     assert len([e for e in events[:first_attachment] if e[0] == "fit"]) == 144

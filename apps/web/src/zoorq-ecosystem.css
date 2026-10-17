@@ -1,0 +1,10 @@
+.zoorq-ecosystem{position:relative;width:100%;height:390px;overflow:hidden;isolation:isolate}
+.zoorq-ecosystem::before{content:"";position:absolute;left:50%;bottom:8%;width:min(31%,310px);height:10%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse,rgba(28,39,58,.16),transparent 68%);filter:blur(15px)}
+:root[data-zoorq-theme="dark"] .zoorq-ecosystem::before{background:radial-gradient(ellipse,rgba(0,0,0,.28),transparent 68%)}
+.zoorq-ecosystem-fallback,.zoorq-ecosystem-canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
+.zoorq-ecosystem-fallback{transition:opacity .3s ease}
+.zoorq-ecosystem-ready .zoorq-ecosystem-fallback{opacity:0}
+.zoorq-ecosystem-canvas{opacity:0;pointer-events:none;transition:opacity .35s ease}
+.zoorq-ecosystem-ready .zoorq-ecosystem-canvas{opacity:1}
+@media(max-width:760px){.zoorq-ecosystem{height:185px}}
+@media(prefers-reduced-motion:reduce){.zoorq-ecosystem-fallback,.zoorq-ecosystem-canvas{transition:none}}

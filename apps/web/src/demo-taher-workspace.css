@@ -1,0 +1,44 @@
+.zoorq-page .demo-taher-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 1.25rem 30px 1rem;
+  border-bottom: 1px solid var(--zoorq-line);
+}
+
+.zoorq-page .demo-taher-tabs button {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--zoorq-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+  min-height: 46px;
+  padding: .65rem .15rem;
+  cursor: pointer;
+}
+
+.zoorq-page .demo-taher-tabs button:hover {
+  color: var(--zoorq-ink);
+  background: var(--zoorq-soft);
+}
+
+.zoorq-page .demo-taher-tabs button:focus-visible {
+  outline: 3px solid var(--zoorq-blue);
+  outline-offset: 2px;
+}
+
+.zoorq-page .demo-taher-tabs button.active {
+  color: var(--zoorq-ink);
+  border-bottom-color: var(--zoorq-blue);
+}
+
+@media (max-width: 620px) {
+  .zoorq-page .demo-taher-tabs { margin-inline: 15px; }
+}
+
+@media (max-width: 390px) {
+  .zoorq-page .demo-taher-tabs button { flex: 1 1 auto; }
+}

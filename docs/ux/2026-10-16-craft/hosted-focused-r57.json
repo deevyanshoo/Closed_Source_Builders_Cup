@@ -1,0 +1,179 @@
+{
+  "revision": "closed-source-quote-demo-00057-9wg",
+  "sourceRevision": "7247a841eee93efd30d3432e88f94a702698ba1b",
+  "typedAnswer": "YOU\n\nInspect the company inventory and explain its stock cover.\n\nOPERATOR · VOICE\n\nThe company inventory shows most materials have a stock cover between 26 and 34 days, which is relatively tight. Naphtha has the lowest cover at approximately 26.8 days, while the process catalyst has the longest cover at roughly 77.1 days.\n\nYOU\n\nGive me a brief inventory summary and identify the material with the lowest stock cover.\n\nOPERATOR\n\nAtlas Petrochem currently holds 190000 barrel of naphtha feedstock with a stock cover of 26.8 days, while methanol stands at 3900 tonne with 28.9 days. The material with the lowest stock cover is naphtha feedstock at 26.8 days.\n\nEvidence and specialist activity · 0 references · 4 steps",
+  "controls": [
+    {
+      "theme": "dark",
+      "size": "desktop",
+      "buttons": [
+        {
+          "height": 44.00001525878906,
+          "text": "Inventory & supply"
+        },
+        {
+          "height": 44,
+          "text": "View all signals"
+        }
+      ],
+      "overflow": false,
+      "signal": "Supply positionInventory & supply Naphtha feedstock cover at a glance26.8 daysof stock cover190000 barrel recorded stock · high criticality · synthetic company profile.Matching supplier profile lead9 daysEstimated uncovered gapNo gap indicatedProfile lead is a synthetic supplier estimate; review accepted offers and buyer inputs before deciding.Compare with reviewed quotes for a sourcing decision.Review sourcing Meet your procurement operatorAsk, analyse or prepare your next action. Start a live conversationVoice is available in this workspace.Latest relevant signalView all signals LG Chem restarts Yeosu naphtha cracker after seven-month halt - Quantum Commodity IntelligenceQuantum Commodity Intelligence · Published 14/10/2026, 21:09:09Coverage may be incomplete or dated. Review source and collection times in News.Continue your workProcurement Review supplier quotesDrafts & activity Review before use"
+    },
+    {
+      "theme": "light",
+      "size": "mobile",
+      "buttons": [
+        {
+          "height": 44,
+          "text": "Inventory & supply"
+        },
+        {
+          "height": 44,
+          "text": "View all signals"
+        }
+      ],
+      "overflow": false
+    }
+  ],
+  "routes": [
+    {
+      "company": "Atlas Petrochem",
+      "theme": "dark",
+      "size": "desktop",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    },
+    {
+      "company": "Atlas Petrochem",
+      "theme": "light",
+      "size": "mobile",
+      "checks": [
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Overview",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "News",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Procurement",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Inventory & supply",
+          "shortButtons": [],
+          "talk": true
+        },
+        {
+          "active": true,
+          "appearance": true,
+          "company": true,
+          "nav": true,
+          "overflow": false,
+          "route": "Drafts & activity",
+          "shortButtons": [],
+          "talk": true
+        }
+      ]
+    }
+  ],
+  "system320": {
+    "overflow": false,
+    "paddingRight": "27px",
+    "value": "system",
+    "width": 80
+  },
+  "landingDesktop": {
+    "canvasDisplayWidth": 1296,
+    "canvasWidth": 1295,
+    "companyCount": 10,
+    "overflow": false,
+    "sceneReady": true,
+    "scrollY": 0
+  },
+  "landingMobile": {
+    "overflow": false,
+    "sceneReady": true,
+    "searchBottom": 718.546875
+  },
+  "reducedMotion": {
+    "matches": true,
+    "overflow": false,
+    "sceneOpacity": "1",
+    "sceneReady": true
+  }
+}

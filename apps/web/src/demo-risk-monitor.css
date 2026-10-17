@@ -1,0 +1,20 @@
+.demo-risk-monitor .demo-risk-companies { grid-template-columns: minmax(0, 1fr); }
+.zoorq-portfolio-panel { margin: 2rem auto; max-width: 1200px; padding: 0 2rem; }
+.zoorq-portfolio-panel > button, .zoorq-risk-disclosure > button { min-height: 44px; display: inline-flex; align-items: center; gap: .6rem; }
+.demo-risk-monitor .demo-risk-summary { align-items: baseline; flex-wrap: wrap; padding-block: .8rem; }
+.demo-risk-monitor .demo-risk-summary strong { font-variant-numeric: tabular-nums; }
+.demo-risk-monitor .demo-risk-diagnostics { margin-top: 1rem; color: var(--zoorq-muted, #687385); font-size: .8rem; }
+.demo-risk-monitor .demo-risk-diagnostics summary { cursor: pointer; min-height: 32px; }
+.demo-risk-monitor .demo-risk-alert h4 { font-size: .95rem; line-height: 1.45; }
+.demo-risk-monitor .demo-risk-alerts { gap: .75rem; }
+.demo-risk-monitor .demo-risk-filters { flex-wrap: wrap; gap: .75rem; }
+@media (max-width: 600px) {
+  .zoorq-portfolio-panel { padding-inline: 1rem; }
+  .demo-risk-monitor .demo-heading { align-items: flex-start; gap: .6rem; }
+  .demo-risk-monitor .demo-heading h2 { font-size: 1.4rem; }
+  .demo-risk-monitor .demo-risk-summary span { flex-basis: 100%; }
+}
+
+.zoorq-page .zoorq-session-tools { margin: 1rem 2rem 2rem; border-top: 1px solid var(--zoorq-line); padding-top: .8rem; color: var(--zoorq-muted); font-size: .8rem; }
+.zoorq-page .zoorq-session-tools > summary { cursor: pointer; min-height: 36px; }
+.zoorq-page .zoorq-session-tools .demo-end { margin: 0; padding-inline: 0; }

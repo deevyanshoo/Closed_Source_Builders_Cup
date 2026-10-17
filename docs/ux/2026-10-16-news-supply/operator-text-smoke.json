@@ -1,0 +1,9 @@
+{
+  "revision": "closed-source-quote-demo-00064-kmp",
+  "direct_inventory_question": "Which material has the lowest stock cover at Solara Cables?",
+  "direct_inventory_result": "Completed; Copper cathode, 2000 kg,6.0 days of cover;four specialist steps.",
+  "broader_explanation_question": "Explain the inventory position and sourcing options for Copper cathode at Solara Cables.",
+  "broader_explanation_result": "Rejected by existing deterministic numerical verification;no action taken.",
+  "diagnostic_fingerprint": "adc559f6328e",
+  "known_limitation": "Broader model prose can still fail trusted-number validation;the verifier remains strict."
+}

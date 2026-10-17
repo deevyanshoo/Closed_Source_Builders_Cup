@@ -437,6 +437,29 @@ class ConsumerTests(unittest.TestCase):
             self.assert_refusal(snapshot,'CONSUMER_CODE_CHANGED')
         self.assertEqual(source_calls,[])
 
+    def test_runner_code_read_mismatch_refuses_before_source_open(self):
+        # The observed runner is a later pin; a bad read there must still stop
+        # before any original or public panel is loaded.
+        _,_,_,snapshot=self.fixture(labels=['2026-07','2026-08'])
+        real_open=consumer.os.open; real_read=consumer.os.read; public=consumer.load_verified_panel_series
+        runner_fds=set(); source_calls=[]
+        def opened(path,*args,**kwargs):
+            fd=real_open(path,*args,**kwargs)
+            if path=='observed_runner.py': runner_fds.add(fd)
+            return fd
+        def changed(fd,size):
+            raw=real_read(fd,size)
+            return b'X'+raw[1:] if fd in runner_fds and raw else raw
+        def record(*args,**kwargs):
+            source_calls.append(True)
+            return public(*args,**kwargs)
+        with patch.object(consumer.os,'open',side_effect=opened),\
+             patch.object(consumer.os,'read',side_effect=changed),\
+             patch.object(consumer,'load_verified_panel_series',side_effect=record):
+            self.assert_refusal(snapshot,'CONSUMER_CODE_CHANGED')
+        self.assertTrue(runner_fds)
+        self.assertEqual(source_calls,[])
+
     def test_hardlink_metadata_mismatch_refuses(self):
         # Hardlink equality is checked using anchored descriptors, not byte hashes.
         _,_,_,snapshot=self.fixture(labels=['2026-07','2026-08'])

@@ -1,0 +1,141 @@
+{
+  "baseline_commit": "06ccd7118dba8ad6f25ad55f9f8bf5e9bd8caaa3",
+  "hosted_revision": "closed-source-quote-demo-00061-49v",
+  "hosted_runtime_commit": "0485463",
+  "scope": "Pinned standalone PR snapshots; no combined integration, browser or provider acceptance claimed. No product/cloud changes.",
+  "totals": {
+    "targeted_web": 40,
+    "targeted_python": 42,
+    "production_builds": 5
+  },
+  "per_pr": [
+    {
+      "pr": 113,
+      "web": {
+        "exit": 0,
+        "log": "pr113-web.log",
+        "passed": 5
+      },
+      "build": {
+        "exit": 0,
+        "log": "pr113-build.log",
+        "passed": true
+      },
+      "python": {
+        "exit": 0,
+        "log": "pr113-python.log",
+        "passed": 2
+      }
+    },
+    {
+      "pr": 114,
+      "web": {
+        "exit": 0,
+        "log": "pr114-web.log",
+        "passed": 5
+      },
+      "build": {
+        "exit": 0,
+        "log": "pr114-build.log",
+        "passed": true
+      },
+      "python": {
+        "exit": 0,
+        "log": "pr114-python.log",
+        "passed": 19
+      }
+    },
+    {
+      "pr": 115,
+      "web": {
+        "exit": 0,
+        "log": "pr115-web.log",
+        "passed": 4
+      },
+      "build": {
+        "exit": 0,
+        "log": "pr115-build.log",
+        "passed": true
+      },
+      "python": {
+        "exit": 0,
+        "log": "pr115-python.log",
+        "passed": 11
+      }
+    },
+    {
+      "pr": 116,
+      "web": {
+        "exit": 0,
+        "log": "pr116-web.log",
+        "passed": 3
+      },
+      "build": {
+        "exit": 0,
+        "log": "pr116-build.log",
+        "passed": true
+      },
+      "python": {
+        "exit": 0,
+        "log": "pr116-python.log",
+        "passed": 9
+      }
+    },
+    {
+      "pr": 117,
+      "web": {
+        "exit": 0,
+        "log": "pr117-web.log",
+        "passed": 23
+      },
+      "build": {
+        "exit": 0,
+        "log": "pr117-build.log",
+        "passed": true
+      },
+      "python": {
+        "exit": 0,
+        "log": "pr117-python.log",
+        "passed": 1
+      }
+    }
+  ],
+  "source_checks": {
+    "desnz": {
+      "bytes": 2109334,
+      "sha256": "b5c4f2f86cdc74707337b2fb013b44ded189a1b528f5e29ea99856ba65ae0205",
+      "numeric_factor_cells_matched": 10,
+      "url": "https://assets.publishing.service.gov.uk/media/6a29392bade52dc0882218a8/ghg-conversion-factors-2026-full-set.xlsx"
+    },
+    "world_bank": {
+      "bytes": 586099,
+      "sha256": "ea1c350827878ea3bbe30e3cda16a13fd3bd5b409b8458940dc94a36b5a33154",
+      "series": 6,
+      "monthly_cells_matched": 18,
+      "url": "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/related/CMO-Historical-Data-Monthly.xlsx"
+    },
+    "zed": {
+      "women_subsidy_amendment_directly_read": "https://loginzed.msme.gov.in/Uploads/Incentives/146File1.pdf",
+      "annual_report_and_fee_booklet": "Official search-index text available; direct source downloads returned404. Archive a current accessible fee schedule before enabling monetary claims."
+    }
+  },
+  "merge_probes": {
+    "113": [
+      "apps/web/src/demo-page.tsx",
+      "apps/web/src/demo.css"
+    ],
+    "114": [
+      "apps/web/src/demo-page.tsx"
+    ],
+    "115": [
+      "apps/web/src/demo-page.tsx"
+    ],
+    "116": [
+      "apps/web/src/demo-page.tsx"
+    ],
+    "117": [
+      "apps/web/src/demo-page.tsx",
+      "apps/web/src/demo.css"
+    ]
+  }
+}

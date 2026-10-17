@@ -38,3 +38,12 @@ def seeded_db():
 def pytest_sessionfinish(session, exitstatus):
     db.close()
     shutil.rmtree(_TMP, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def isolated_live_voice_process_budget(request, monkeypatch):
+    """Fake-provider examples each start with an independent process quota window."""
+    if request.node.path.name.startswith('test_demo_'):
+        from procure.demo import live_voice
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+        monkeypatch.setattr(live_voice, '_PROCESS_WINDOW_STARTED', live_voice.monotonic())

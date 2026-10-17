@@ -75,18 +75,18 @@ describe('dispatch report', () => {
     const report = dispatchReport({ row, timeline: await a.timeline('SHP-SYN-002'), evidence: await a.routeEvidence('SHP-SYN-002'),
       hazards: await a.hazards('SHP-SYN-002') }, AT);
     const json = JSON.parse(report.json);
-    expect([json.synthetic, json.shipment.status, json.cutoff]).toEqual([true, 'on_hold', '2026-10-08T12:00:00+00:00']);
+    expect([json.synthetic, json.shipment.status, json.cutoff]).toEqual([true, 'on_hold', '2026-10-16T12:00:00+00:00']);
     expect(json.timeline.map((e: { event_id: string }) => e.event_id)).toEqual(['evt-002-hold']);
     expect(json.route_evidence.confirmed.map((e: { evidence_id: string }) => e.evidence_id)).toEqual(['rev-port-002']);
     expect(json.hazards.map((h: { state: string }) => h.state)).toContain('exposure_found');
     expect(json.lead_time.working_days).toBe(2);
     expect(json.route_evidence.confirmed[0].source.reference).toBe('SYN-PA-117');
     expect(json.route_evidence.confirmed[0].content_sha256).toBe('b2e0000000000000000000000000000000000000000000000000000000000002');
-    expect(json.route_evidence.confirmed[0].observed_period.start).toBe('2026-10-05T00:00:00+00:00');
+    expect(json.route_evidence.confirmed[0].observed_period.start).toBe('2026-10-13T00:00:00+00:00');
     expect(json.hazards.find((h: { provider_id: string }) => h.provider_id === 'open-meteo').payload_sha256)
-      .toBe('99acbf09e031b7c9693e62af720d43d7d9c97dda748d66921f3da6e9977d71c3');
+      .toBe('7c0e9dfb4001e6c7efc538152e364677adb9027bd7dd0529bc4a0250947e5248');
     expect(json.hazards.find((h: { provider_id: string }) => h.provider_id === 'open-meteo').evidence_ids)
-      .toContain('haz-open-meteo-INNSA-99acbf09e031');
+      .toContain('haz-open-meteo-INNSA-7c0e9dfb4001');
     expect(report.basename).toBe('synthetic-dispatch-SHP-SYN-002');
     const lines = report.csv.trimEnd().split('\r\n');
     expect(lines.slice(1).every(line => line.endsWith(',true'))).toBe(true);
@@ -97,7 +97,7 @@ describe('dispatch report', () => {
     expect(report.csv).toContain('gdacs_alert_within_radius: Green FL alert; distance 32 km; event 9100002; threshold Orange or Red within 300 km; met false');
     expect(report.csv).not.toContain('Green km');
     expect(report.csv).not.toContain('300 km km');
-    expect(report.csv).toContain('haz-open-meteo-INNSA-99acbf09e031');
+    expect(report.csv).toContain('haz-open-meteo-INNSA-7c0e9dfb4001');
   });
 
   it('exports without hazards when they have not loaded', async () => {

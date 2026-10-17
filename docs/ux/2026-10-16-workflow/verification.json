@@ -1,0 +1,42 @@
+{
+  "web": {
+    "passed": 448,
+    "existing_skips": 6,
+    "files": 33,
+    "session_race": "passed",
+    "typecheck": "passed",
+    "production_build": "passed"
+  },
+  "backend_demo": {
+    "passed": 772,
+    "gate": "pytest tests/test_demo*.py",
+    "offline": true
+  },
+  "focused_voice_backend": {
+    "passed": 28
+  },
+  "broad_backend": {
+    "state": "interrupted_at_41_percent",
+    "missing_test_dependencies": [
+      "statsmodels",
+      "scikit-learn",
+      "fpdf"
+    ],
+    "existing_integrity_mismatch": "consumer_boundary.py pins an earlier observed_runner.py hash/size; both source files are unchanged by this release",
+    "not_a_full_suite_pass": true
+  },
+  "voice": {
+    "input": "Controlled Google TTS speech through real hosted browser and Gemini Live",
+    "physical_microphone_tested": false,
+    "rfq_provider_turn_complete": true,
+    "news_provider_turn_complete": true,
+    "news_output_audio_bytes": 1226882,
+    "rfq_output_audio_bytes": 793442,
+    "end_live_tracks": 0,
+    "mute_probe": "Click executed; immediate state read was not awaited, so no runtime mute-state assertion is claimed."
+  },
+  "downloads": {
+    "matching_current_rfq_endpoint_status": 200,
+    "browser_download_event": "Not observed by automation; not claimed as verified OS file save."
+  }
+}

@@ -1,0 +1,9 @@
+.zoorq-brand-lockup{display:inline-flex;align-items:center;gap:9px;line-height:1;color:var(--zoorq-ink)}
+.zoorq-brand-lockup .zoorq-mark{width:34px;height:34px;flex:none}
+.zoorq-brand-type{display:inline-flex;align-items:center}
+.zoorq-brand-type svg{display:block;width:126px;height:auto;overflow:visible}
+.zoorq-brand-lockup-compact .zoorq-mark{width:27px;height:27px}
+.zoorq-brand-lockup-compact .zoorq-brand-type svg{width:100px}
+.zoorq-mark-loop{stroke:currentColor}
+.zoorq-mark-route{stroke:var(--zoorq-blue,#2159d6)}
+.zoorq-mark-block{stroke:#d18b46}

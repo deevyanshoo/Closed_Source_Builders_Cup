@@ -1,0 +1,318 @@
+{
+  "started_at": "2026-10-16T10:08:11.316883+00:00",
+  "expected_revision": "closed-source-quote-demo-00065-vst",
+  "controlled_speech": true,
+  "automatic_retries": 0,
+  "ok": false,
+  "companies": [
+    {
+      "company_id": "terrapack",
+      "ok": true,
+      "stage": "completed",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the TerraPack Films workspace profile dated 2026-10-14, PET resin stock is 18500 kg; stated daily use is 950 kg per day, and about 19.47 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: TerraPack Films PET resin Alternate Source Ltd: listed 10 days, USD; TerraPack Films PET resin Selected Source Ltd: listed 12 days, INR; ResinArc: listed 21 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the TerraPack Films workspace profile dated 2026-10-14, PET resin stock is 18500 kg; stated daily use is 950 kg per day, and about 19.47 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: TerraPack Films PET resin Alternate Source Ltd: listed 10 days, USD; TerraPack Films PET resin Selected Source Ltd: listed 12 days, INR; ResinArc: listed 21 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "pet-resin"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for TerraPack Films (workspace profile dated 2026-10-14):\n\n- PET resin: stock 18500 kg, about 19.47 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films PET resin Alternate Source Ltd (10 days listed).\n- Aluminium film: stock 145 roll, about 24.17 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films Aluminium film Alternate Source Ltd (10 days listed).\n- Packaging inks: stock 2100 litre, about 43.75 days cover vs 6 days shortest listed lead (no simple timing gap); profile source ColorMill (6 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for TerraPack Films (workspace profile dated 2026-10-14):\n\n- PET resin: stock 18500 kg, about 19.47 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films PET resin Alternate Source Ltd (10 days listed).\n- Aluminium film: stock 145 roll, about 24.17 days cover vs 10 days shortest listed lead (no simple timing gap); profile source TerraPack Films Aluminium film Alternate Source Ltd (10 days listed).\n- Packaging inks: stock 2100 litre, about 43.75 days cover vs 6 days shortest listed lead (no simple timing gap); profile source ColorMill (6 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "pet-resin",
+            "inks",
+            "aluminium-film"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "terrapack",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Current workspace facts are ready.",
+          "agent_step_tools": [
+            "read_workspace"
+          ],
+          "analytics_present": true
+        },
+        "output_transcript": "TerraPack Films holds  about 19.5  days of stock cover  for PET resin,  making it the most constrained  material by coverage.  For sourcing,  ColorMill offers  the shortest lead time  across all materials at just  six days.",
+        "output_audio_bytes": 558722,
+        "tool_material_ids": [
+          "pet-resin",
+          "inks",
+          "aluminium-film"
+        ],
+        "tool_validation_path": "profile_analytics",
+        "material_ids": [
+          "pet-resin",
+          "inks",
+          "aluminium-film"
+        ],
+        "input_transcript_verified": true,
+        "material_id": "pet-resin",
+        "numbers_checked": 1,
+        "output_caption_grounding_verified": true,
+        "output_audio_semantics_verified": false,
+        "elapsed_ms": 24067
+      },
+      "read_only_state_verified": true
+    },
+    {
+      "company_id": "harvest-foods",
+      "ok": true,
+      "stage": "completed",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the Harvest Foods workspace profile dated 2026-10-14, Wheat grain stock is 1800 tonne; stated daily use is 74 tonne per day, and about 24.32 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Harvest Foods Wheat grain Alternate Source Ltd: listed 10 days, USD; Harvest Foods Wheat grain Selected Source Ltd: listed 12 days, KES; Prairie Grain: listed 38 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the Harvest Foods workspace profile dated 2026-10-14, Wheat grain stock is 1800 tonne; stated daily use is 74 tonne per day, and about 24.32 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Harvest Foods Wheat grain Alternate Source Ltd: listed 10 days, USD; Harvest Foods Wheat grain Selected Source Ltd: listed 12 days, KES; Prairie Grain: listed 38 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "wheat"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for Harvest Foods (workspace profile dated 2026-10-14):\n\n- Wheat grain: stock 1800 tonne, about 24.32 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Wheat grain Alternate Source Ltd (10 days listed).\n- Refined sugar: stock 420 tonne, about 28.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Refined sugar Alternate Source Ltd (10 days listed).\n- Food cartons: stock 98000 unit, about 36.30 days cover vs 5 days shortest listed lead (no simple timing gap); profile source PackEast (5 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for Harvest Foods (workspace profile dated 2026-10-14):\n\n- Wheat grain: stock 1800 tonne, about 24.32 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Wheat grain Alternate Source Ltd (10 days listed).\n- Refined sugar: stock 420 tonne, about 28.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Harvest Foods Refined sugar Alternate Source Ltd (10 days listed).\n- Food cartons: stock 98000 unit, about 36.30 days cover vs 5 days shortest listed lead (no simple timing gap); profile source PackEast (5 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "wheat",
+            "cartons",
+            "sugar"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "harvest-foods",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Current workspace facts are ready.",
+          "agent_step_tools": [
+            "read_workspace"
+          ],
+          "analytics_present": true
+        },
+        "output_transcript": "Wheat grain requires  the most immediate  attention, as it has the lowest  stock cover of roughly  24 days.  PackEast,  supplying food cartons,  has the shortest  lead time at just  five days.",
+        "output_audio_bytes": 487680,
+        "tool_material_ids": [
+          "wheat",
+          "oil",
+          "cartons",
+          "sugar"
+        ],
+        "tool_validation_path": "profile_analytics",
+        "material_ids": [
+          "wheat",
+          "oil",
+          "cartons",
+          "sugar"
+        ],
+        "input_transcript_verified": true,
+        "material_id": "wheat",
+        "numbers_checked": 1,
+        "output_caption_grounding_verified": true,
+        "output_audio_semantics_verified": false,
+        "elapsed_ms": 22387
+      },
+      "read_only_state_verified": true
+    },
+    {
+      "company_id": "forgeline-components",
+      "ok": true,
+      "stage": "completed",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the ForgeLine Components workspace profile dated 2026-10-14, Cold-rolled steel stock is 610 tonne; stated daily use is 24 tonne per day, and about 25.42 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: ForgeLine Components Cold-rolled steel Alternate Source Ltd: listed 10 days, USD; ForgeLine Components Cold-rolled steel Selected Source Ltd: listed 12 days, MXN; LakeSteel: listed 13 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the ForgeLine Components workspace profile dated 2026-10-14, Cold-rolled steel stock is 610 tonne; stated daily use is 24 tonne per day, and about 25.42 days of stock cover at stated daily use. Shortest listed supplier lead is 10 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: ForgeLine Components Cold-rolled steel Alternate Source Ltd: listed 10 days, USD; ForgeLine Components Cold-rolled steel Selected Source Ltd: listed 12 days, MXN; LakeSteel: listed 13 days, USD. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "steel"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for ForgeLine Components (workspace profile dated 2026-10-14):\n\n- Cold-rolled steel: stock 610 tonne, about 25.42 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Cold-rolled steel Alternate Source Ltd (10 days listed).\n- Copper rod: stock 7800 kg, about 30.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Copper rod Alternate Source Ltd (10 days listed).\n- Precision bearings: stock 14000 unit, about 32.56 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Precision bearings Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for ForgeLine Components (workspace profile dated 2026-10-14):\n\n- Cold-rolled steel: stock 610 tonne, about 25.42 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Cold-rolled steel Alternate Source Ltd (10 days listed).\n- Copper rod: stock 7800 kg, about 30.00 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Copper rod Alternate Source Ltd (10 days listed).\n- Precision bearings: stock 14000 unit, about 32.56 days cover vs 10 days shortest listed lead (no simple timing gap); profile source ForgeLine Components Precision bearings Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "steel",
+            "copper",
+            "bearings"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "forgeline-components",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Current workspace facts are ready.",
+          "agent_step_tools": [
+            "read_workspace"
+          ],
+          "analytics_present": true
+        },
+        "output_transcript": "Cold-rolled steel requires  the most  immediate attention,  as it currently has the lowest  stock cover  at approximately 25  days. Alternate  Source Ltd  offers the shortest  lead time across  the catalogue at just  10 days.",
+        "output_audio_bytes": 595682,
+        "tool_material_ids": [
+          "steel",
+          "copper",
+          "bearings"
+        ],
+        "tool_validation_path": "profile_analytics",
+        "material_ids": [
+          "steel",
+          "copper",
+          "bearings"
+        ],
+        "input_transcript_verified": true,
+        "material_id": "steel",
+        "numbers_checked": 2,
+        "output_caption_grounding_verified": true,
+        "output_audio_semantics_verified": false,
+        "elapsed_ms": 24615
+      },
+      "read_only_state_verified": true
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "ok": true,
+      "stage": "completed",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the Atlas Petrochem workspace profile dated 2026-10-14, Naphtha feedstock stock is 190000 barrel; stated daily use is 7100 barrel per day, and about 26.76 days of stock cover at stated daily use. Shortest listed supplier lead is 9 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Gulf Feedstock: listed 9 days, USD; Atlas Petrochem Naphtha feedstock Alternate Source Ltd: listed 10 days, USD; Atlas Petrochem Naphtha feedstock Selected Source Ltd: listed 12 days, AED. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the Atlas Petrochem workspace profile dated 2026-10-14, Naphtha feedstock stock is 190000 barrel; stated daily use is 7100 barrel per day, and about 26.76 days of stock cover at stated daily use. Shortest listed supplier lead is 9 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: Gulf Feedstock: listed 9 days, USD; Atlas Petrochem Naphtha feedstock Alternate Source Ltd: listed 10 days, USD; Atlas Petrochem Naphtha feedstock Selected Source Ltd: listed 12 days, AED. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "naphtha"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for Atlas Petrochem (workspace profile dated 2026-10-14):\n\n- Naphtha feedstock: stock 190000 barrel, about 26.76 days cover vs 9 days shortest listed lead (no simple timing gap); profile source Gulf Feedstock (9 days listed).\n- Propane feedstock: stock 9200 tonne, about 27.06 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Propane feedstock Alternate Source Ltd (10 days listed).\n- Elemental sulfur: stock 6950 tonne, about 28.37 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Elemental sulfur Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for Atlas Petrochem (workspace profile dated 2026-10-14):\n\n- Naphtha feedstock: stock 190000 barrel, about 26.76 days cover vs 9 days shortest listed lead (no simple timing gap); profile source Gulf Feedstock (9 days listed).\n- Propane feedstock: stock 9200 tonne, about 27.06 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Propane feedstock Alternate Source Ltd (10 days listed).\n- Elemental sulfur: stock 6950 tonne, about 28.37 days cover vs 10 days shortest listed lead (no simple timing gap); profile source Atlas Petrochem Elemental sulfur Alternate Source Ltd (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "naphtha",
+            "propane",
+            "sulfur"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "atlas-petrochem",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Current workspace facts are ready.",
+          "agent_step_tools": [
+            "read_workspace"
+          ],
+          "analytics_present": true
+        },
+        "output_transcript": "Naphtha feedstock  requires attention  first, as it has the lowest  stock cover  at approximately 26.8  days.  Oman  Chemicals offers the shortest  lead time across  the portfolio, delivering  Methanol in just  7 days.",
+        "output_audio_bytes": 600962,
+        "tool_material_ids": [
+          "naphtha",
+          "methanol",
+          "catalyst",
+          "ethane",
+          "propane",
+          "benzene",
+          "toluene",
+          "ethylene",
+          "caustic-soda",
+          "sulfur",
+          "hydrogen",
+          "polymer-additive"
+        ],
+        "tool_validation_path": "profile_analytics",
+        "material_ids": [
+          "naphtha",
+          "methanol",
+          "catalyst",
+          "ethane",
+          "propane",
+          "benzene",
+          "toluene",
+          "ethylene",
+          "caustic-soda",
+          "sulfur",
+          "hydrogen",
+          "polymer-additive"
+        ],
+        "input_transcript_verified": true,
+        "material_id": "naphtha",
+        "numbers_checked": 2,
+        "output_caption_grounding_verified": true,
+        "output_audio_semantics_verified": false,
+        "elapsed_ms": 24495
+      },
+      "read_only_state_verified": true
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "ok": false,
+      "stage": "voice_pending",
+      "typed": {
+        "primary": {
+          "status": "completed",
+          "assistant_text": "In the StoneBridge Materials workspace profile dated 2026-10-14, Cement clinker stock is 12500 tonne; stated daily use is 480 tonne per day, and about 26.04 days of stock cover at stated daily use. Shortest listed supplier lead is 6 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: KilnSouth: listed 6 days, ZAR; StoneBridge Materials Cement clinker Alternate Source Ltd: listed 10 days, USD; StoneBridge Materials Cement clinker Selected Source Ltd: listed 12 days, ZAR. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "read_only": true,
+          "answer": "In the StoneBridge Materials workspace profile dated 2026-10-14, Cement clinker stock is 12500 tonne; stated daily use is 480 tonne per day, and about 26.04 days of stock cover at stated daily use. Shortest listed supplier lead is 6 days. Cover exceeds the shortest listed lead in this simple profile comparison. Supplier profile options: KilnSouth: listed 6 days, ZAR; StoneBridge Materials Cement clinker Alternate Source Ltd: listed 10 days, USD; StoneBridge Materials Cement clinker Selected Source Ltd: listed 12 days, ZAR. No saved reviewed quote document for this material is in the workspace; profile suppliers are not live price or capacity offers. Compare quote validity, capacity, quantity, currency and delivery against demand before choosing a source.",
+          "numbers_checked": 7,
+          "materials_named": [
+            "clinker"
+          ]
+        },
+        "companywide": {
+          "status": "completed",
+          "assistant_text": "Company-wide inventory and sourcing overview for StoneBridge Materials (workspace profile dated 2026-10-14):\n\n- Cement clinker: stock 12500 tonne, about 26.04 days cover vs 6 days shortest listed lead (no simple timing gap); profile source KilnSouth (6 days listed).\n- Crushed aggregate: stock 17800 tonne, about 28.71 days cover vs 10 days shortest listed lead (no simple timing gap); profile source StoneBridge Materials Crushed aggregate Alternate Source Ltd (10 days listed).\n- Reinforcing bar: stock 2200 tonne, about 29.33 days cover vs 10 days shortest listed lead (no simple timing gap); profile source SteelCape (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "read_only": true,
+          "answer": "Company-wide inventory and sourcing overview for StoneBridge Materials (workspace profile dated 2026-10-14):\n\n- Cement clinker: stock 12500 tonne, about 26.04 days cover vs 6 days shortest listed lead (no simple timing gap); profile source KilnSouth (6 days listed).\n- Crushed aggregate: stock 17800 tonne, about 28.71 days cover vs 10 days shortest listed lead (no simple timing gap); profile source StoneBridge Materials Crushed aggregate Alternate Source Ltd (10 days listed).\n- Reinforcing bar: stock 2200 tonne, about 29.33 days cover vs 10 days shortest listed lead (no simple timing gap); profile source SteelCape (10 days listed).\n\nNo saved reviewed quote documents for these materials are in the workspace. Supplier profiles are not live quotes or confirmed availability. Compare quote validity, capacity, units and arrival against demand before choosing a source. Ask for the inventory and sourcing position of a named material to see more detail.",
+          "numbers_checked": 12,
+          "materials_named": [
+            "clinker",
+            "rebar",
+            "aggregate"
+          ]
+        }
+      },
+      "voice": {
+        "tool_observation": {
+          "company_id": "stonebridge-materials",
+          "context_version": 2,
+          "status": "completed",
+          "assistant_text": "Scanned 1 companies; 15 risk and watch signals. Review the evidence and conditional impacts before taking action.",
+          "agent_step_tools": [
+            "read_risks"
+          ],
+          "analytics_present": false
+        }
+      },
+      "error_type": "AcceptanceError",
+      "error": "voice_unsupported_tool_result"
+    }
+  ],
+  "stage": "completed",
+  "completed_at": "2026-10-16T10:10:13.771783+00:00"
+}

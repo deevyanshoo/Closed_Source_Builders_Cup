@@ -1,0 +1,39 @@
+{
+  "verified_at": "2026-10-16T10:00:15.201660+00:00",
+  "read_only": true,
+  "source_revision": "6e2fb2a",
+  "build_id": "f4aa0b1a-c378-40ac-b152-9c2dcfb90d38",
+  "service": {
+    "baseline_revision": "closed-source-quote-demo-00064-kmp",
+    "ready_revision": "closed-source-quote-demo-00065-vst",
+    "latest_created_revision": "closed-source-quote-demo-00065-vst",
+    "ready": true,
+    "traffic_percent": 100,
+    "image_digest": "sha256:6fd2b16f49abf51629b721f925e1ef01be39c5a1fa08dcc5a4fe078d7adeb0e7",
+    "image_digest_matches": true,
+    "runtime_identity_environment_scaling_unchanged_except_image": true,
+    "live_spec_matches_release_receipt": true,
+    "cpu": "1",
+    "memory": "1Gi",
+    "max_instances": "1"
+  },
+  "news_job": {
+    "entire_spec_unchanged": true,
+    "image_digest": "sha256:0b6e2fead22a3c1ecf98a0998da8aa982b5865e4b44230fc61a7599e1edb7a29",
+    "image_digest_matches_prior_release": true,
+    "cpu": "1",
+    "memory": "512Mi",
+    "timeout_seconds": 120,
+    "tasks": 1,
+    "parallelism": 1,
+    "max_retries": 0
+  },
+  "news_scheduler": {
+    "schedule": "0 * * * *",
+    "time_zone": "UTC",
+    "state": "ENABLED",
+    "schedule_target_identity_retry_unchanged": true
+  },
+  "sanitization_note": "Environment values, identity addresses and tokens omitted. Generated client nonce and operation metadata excluded from service runtime comparison.",
+  "all_requested_checks_passed": true
+}

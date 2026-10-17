@@ -29,7 +29,7 @@ news:
   half_life_days: 7
   index_scale: 3.0                    # index = tanh(weighted sum / index_scale)
   cache_hours: 6
-  gemini_model: gemini-2.5-flash
+  gemini_model: gemini-3.5-flash-lite
 
 simulation:
   n_paths: 2000

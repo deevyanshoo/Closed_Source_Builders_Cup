@@ -1,0 +1,53 @@
+{
+  "revision": "closed-source-quote-demo-00054-6vh",
+  "controlled_speech": true,
+  "physical_microphone": false,
+  "states": [
+    "connecting",
+    "listening",
+    "speaking",
+    "thinking"
+  ],
+  "peak_listening": 0.92,
+  "peak_speaking": 1,
+  "metrics": {
+    "events": [
+      {
+        "duration": 3.5074375,
+        "label": "inventory",
+        "time": 1792101284781,
+        "type": "controlled_input"
+      },
+      {
+        "status": "completed",
+        "time": 1792101289639,
+        "type": "tool_result"
+      },
+      {
+        "time": 1792101289665,
+        "type": "turn_complete"
+      },
+      {
+        "time": 1792101308936,
+        "type": "turn_complete"
+      }
+    ],
+    "interrupts": 0,
+    "outputAudioBytes": 880803,
+    "socketsClosed": 1,
+    "socketsCreated": 1,
+    "streamsCreated": 1,
+    "toolResults": 1,
+    "tracksStopped": 1,
+    "turnCompletes": 2
+  },
+  "after_end": {
+    "focus": "zoorq-talk-live",
+    "dialogs": 0
+  },
+  "canvas_mobile": {
+    "display": 180,
+    "bitmap": 180
+  },
+  "theme_changed_without_new_socket": true
+}

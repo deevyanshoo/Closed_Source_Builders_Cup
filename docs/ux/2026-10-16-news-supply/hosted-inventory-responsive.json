@@ -1,0 +1,125 @@
+{
+  "revision": "closed-source-quote-demo-00064-kmp",
+  "observations": [
+    {
+      "company": "Solara Cables workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "Solara Cables workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "TerraPack Films workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "TerraPack Films workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "LoomWorks Textiles workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "LoomWorks Textiles workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "Harvest Foods workspace",
+      "materialCount": 4,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "Harvest Foods workspace",
+      "materialCount": 4,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "Meridian Pharma workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "Meridian Pharma workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "ForgeLine Components workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "ForgeLine Components workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "GridSpring Batteries workspace",
+      "materialCount": 10,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "GridSpring Batteries workspace",
+      "materialCount": 10,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "CircuitPeak Systems workspace",
+      "materialCount": 3,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "CircuitPeak Systems workspace",
+      "materialCount": 3,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "Atlas Petrochem workspace",
+      "materialCount": 12,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "Atlas Petrochem workspace",
+      "materialCount": 12,
+      "pageWidth": 390,
+      "width": 390
+    },
+    {
+      "company": "StoneBridge Materials workspace",
+      "materialCount": 8,
+      "pageWidth": 1440,
+      "width": 1440
+    },
+    {
+      "company": "StoneBridge Materials workspace",
+      "materialCount": 8,
+      "pageWidth": 390,
+      "width": 390
+    }
+  ]
+}

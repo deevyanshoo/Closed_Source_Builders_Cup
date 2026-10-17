@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "replay_id": "suez-2021-maersk-v1",
+  "source_url": "https://www.maersk.com/news/articles/2021/03/24/vessel-blockage-in-the-suez-canal",
+  "source_type": "living_carrier_advisory",
+  "publisher": "A.P. Moller - Maersk",
+  "retrieved_at": "2026-10-16T19:19:57Z",
+  "attribution": "Short paraphrases of dated Maersk customer advisory sections. The living page contains later updates.",
+  "advisories": [
+    {"evidence_id": "maersk-2021-03-24-update-1", "published_at": "2021-03-24", "date_precision": "day", "event_at": "2021-03-23", "source_section": "March 24, 2021 - Update 1", "source_url": "https://www.maersk.com/news/articles/2021/03/24/vessel-blockage-in-the-suez-canal", "fact": "Maersk reported the canal blocked in both directions after the vessel grounded on March 23; no affected company shipment is established."},
+    {"evidence_id": "maersk-2021-03-26-update-4", "published_at": "2021-03-26", "date_precision": "day", "event_at": "2021-03-26", "source_section": "March 26, 2021 - Update 4", "source_url": "https://www.maersk.com/news/articles/2021/03/24/vessel-blockage-in-the-suez-canal", "fact": "The canal remained blocked; Maersk said it was too early to indicate a vessel delay."},
+    {"evidence_id": "maersk-2021-03-29-update-10", "published_at": "2021-03-29", "date_precision": "day", "event_at": "2021-03-29", "source_section": "March 29, 2021 - Update 10", "source_url": "https://www.maersk.com/news/articles/2021/03/24/vessel-blockage-in-the-suez-canal", "fact": "Maersk reported the Ever Given fully refloated; passage for the waiting queue was not yet confirmed."},
+    {"evidence_id": "maersk-2021-03-30-update-13", "published_at": "2021-03-30", "date_precision": "day", "event_at": "2021-03-30", "source_section": "March 30, 2021 - Update 13", "source_url": "https://www.maersk.com/news/articles/2021/03/24/vessel-blockage-in-the-suez-canal", "fact": "Maersk reported transit resumed through the channel while network disruption remained possible."}
+  ]
+}

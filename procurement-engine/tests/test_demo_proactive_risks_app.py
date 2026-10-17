@@ -112,7 +112,9 @@ def test_named_voice_risk_read_has_all_companies_and_no_session_credentials_or_m
         async def send_realtime_input(self, **kwargs):
             if kwargs.get('audio'):
                 await self.events.put(NS(tool_call=NS(function_calls=[NS(
-                    name='read_risks', args={'scope': 'all'}, id='risk-read')]), server_content=None))
+                    name='read_risks', args={'scope': 'all',
+                        'message': 'What risk alerts affect all ten companies?'},
+                    id='risk-read')]), server_content=None))
     provider = RiskProvider()
     @asynccontextmanager
     async def factory():

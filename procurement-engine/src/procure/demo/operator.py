@@ -573,7 +573,7 @@ def _broad_inventory_scope(snapshot, message):
                              message, re.I)
             or re.search(r'\d|\{\{|\}\}|\b(?:send|draft|prepare|approve|apply|save|update|change|'
                          r'edit|load|compare|place|buy|purchase|simulate|execute|search|'
-                         r'browse|research|online|web|news|headline|forecast|market)\b',
+                         r'browse|research|online|web|risks?|alerts?|headlines?|news|forecast|market)\b',
                          action_text, re.I)):
         return None
     company = snapshot['company']

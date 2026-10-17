@@ -1748,10 +1748,45 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if name == 'read_risks':
                 if not isinstance(args, dict):
                     raise SessionError('invalid_utility', 'Risk scope must be an object.', 422)
-                shape(args, (), ('scope',))
+                shape(args, (), ('scope', 'message'))
                 scope = args.get('scope', 'current')
                 if scope not in ('current', 'all'):
                     raise SessionError('invalid_utility', 'Choose current or all company risks.', 422)
+                message = args.get('message')
+                if message is not None:
+                    if not isinstance(message, str) or not 0 < len(message.strip()) <= 1200:
+                        raise SessionError('invalid_message', 'State the risk or inventory question.', 422)
+                    # A broad factual read is safe to resolve locally even when
+                    # Live picked the alert tool. The resolver owns company and
+                    # material scope; a rejected scope must not become a scan.
+                    broad_words = (re.search(r'\b(?:inventory|stock|cover)\b', message, re.I)
+                        and re.search(r'\b(?:sourcing|source|suppliers?)\b', message, re.I)
+                        and re.search(r'\b(?:all materials|across all|overview|position|summary|analy[sz]e)\b', message, re.I)
+                        and not re.search(r'\b(?:risks?|alerts?|headlines?|news)\b', message, re.I))
+                    if broad_words:
+                        from .operator import _broad_inventory_scope, _broad_inventory_answer
+                        from .agent_tools import inventory_analytics
+                        with value.lock:
+                            context(value, {'expected_context_version': context_version}, explicit=True)
+                            snapshot = operator_snapshot(value, include_risks=False)
+                        resolver_message = re.sub(r'^\s*analy[sz]e\b', 'Summarize', message, flags=re.I)
+                        material_scope = _broad_inventory_scope(snapshot, resolver_message)
+                        answer = (_broad_inventory_answer(snapshot, material_scope, message)
+                                  if material_scope is not None else None)
+                        if answer is None:
+                            return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                                'context_version': context_version, 'status': 'needs_clarification',
+                                'assistant_text': 'Choose an owned material or ask for this company’s inventory and sourcing overview. No action was taken.',
+                                'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+                        return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                            'context_version': context_version, 'status': 'completed',
+                            'assistant_text': answer,
+                            'agent_steps': [{'agent': 'verifier', 'role': 'Read owned inventory and supplier facts.',
+                                'status': 'completed', 'model': 'deterministic', 'provider_call': 'none',
+                                'tool': 'inventory_sourcing_read',
+                                'summary': 'Compared owned stock cover and listed supplier leads.'}],
+                            'evidence_ids': [], 'proposal': None, 'read_only': True,
+                            'analytics': inventory_analytics(snapshot)}
                 report = await scan_risks(value, context_version)
                 projection = risk_projection(report, scope=scope)
                 count = sum(sum(row['counts'].values()) for row in projection['companies'])

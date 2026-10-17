@@ -4,10 +4,96 @@ import { acceptsOperatorTurn, matchesUtilitySession, applyOperatorResult, initia
 import { acceptsLiveTurn } from './demo-live-voice';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { OperatorPanel } from './demo-operator';
-import { currentSessionProposal } from './demo-operator-contract';
+import { currentSavedRfq, currentSessionProposal } from './demo-operator-contract';
 const scope={sessionId:'s',companyId:'solara',contextVersion:2,epoch:1};
 const plan={plan_id:'plan',offer_versions:{q:3}} as unknown as PlanView;
-const offers=[{offer_id:'q',version:3}] as OfferView[];
+const offers=[{offer_id:'q',version:3,fields:{}}] as OfferView[];
+function canonicalRfqSession(): DemoSession {
+  const draft={draft_id:'rfq / one',company_id:scope.companyId,kind:'rfq' as const,status:'draft_unsent' as const,
+    material_id:'copper',recipient_label:'Supplier desk',subject:'Copper request',body:'Full RFQ body\nDelivery terms.',
+    created_at:'2026-10-17T10:00:00Z',plan_id:'plan',offer_versions:{q:3}};
+  return {session_id:scope.sessionId,csrf_token:'csrf',expires_at:'2099-01-01',synthetic:true,persistence:'ephemeral',
+    provider:{model:'test',available:false},company:{company_id:scope.companyId} as DemoSession['company'],context_version:scope.contextVersion,
+    plan,offers,drafts:[draft],rfq:{draft_id:draft.draft_id,plan_id:'plan',offer_versions:{q:3},synthetic:true,status:'draft_unsent',
+      supplier:'Supplier desk',material:'copper',need_by:'2026-11-01',reporting_currency:'USD',total_cost:'100',created_at:draft.created_at,text:draft.body},
+    pending_operator_proposal:{proposal_id:draft.draft_id,kind:'rfq',summary:'Prepare RFQ',parameters:{draft_preview:{recipient_label:draft.recipient_label,subject:draft.subject,body:draft.body}},plan_id:'plan',offer_versions:{q:3},context_version:scope.contextVersion,expires_at:'2000-01-01'} };
+}
+it('recognizes a canonical saved RFQ independently of proposal expiry and rejects every mismatched binding',()=>{
+  const session=canonicalRfqSession();
+  expect(currentSavedRfq(session,scope)?.draft.draft_id).toBe('rfq / one');
+  const draft=session.drafts![0], rfq=session.rfq!;
+  const invalid: DemoSession[]=[
+    {...session,rfq:{...rfq,draft_id:'other'}},
+    {...session,rfq:{...rfq,text:'Different body'}},
+    {...session,rfq:{...rfq,status:'sent' as never}},
+    {...session,rfq:{...rfq,plan_id:'other'}},
+    {...session,rfq:{...rfq,offer_versions:{q:4}}},
+    {...session,drafts:[{...draft,body:'Different body'}]},
+    {...session,drafts:[{...draft,plan_id:'other'}]},
+    {...session,drafts:[{...draft,offer_versions:{q:4}}]},
+    {...session,drafts:[draft,{...draft}]},
+    {...session,offers:[{...offers[0],version:4}]},
+    {...session,plan:{...plan,plan_id:'other'}},
+    {...session,company:{company_id:'other'} as DemoSession['company']},
+    {...session,context_version:3},
+  ];
+  for(const bad of invalid) expect(currentSavedRfq(bad,scope)).toBeNull();
+});
+it('renders a saved RFQ on restore without a historical turn or a second approval',()=>{
+  const session=canonicalRfqSession();
+  const html=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} session={session} plan={plan} offers={offers} onSession={()=>{}} onUnknown={()=>{}} />);
+  expect(html).toContain('aria-label="RFQ saved"');
+  expect(html).toContain('Supplier desk');
+  expect(html).toContain('Copper request');
+  expect(html).toContain('Full RFQ body');
+  expect(html).toContain('/api/demo/rfq/rfq%20%2F%20one/download');
+  expect(html).not.toContain('Current proposal requiring review');
+  expect(html).not.toContain('Apply reviewed proposal');
+  expect(html).not.toContain('I reviewed the exact arguments');
+  expect(html).not.toContain('Saved answer');
+  const dirty=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty session={session} plan={plan} offers={offers} onSession={()=>{}} onUnknown={()=>{}} />);
+  expect(dirty).not.toContain('aria-label="RFQ saved"');
+  expect(dirty).not.toContain('/api/demo/rfq/');
+});
+it('shows the completed RFQ result from the current turn without applying the proposal again',()=>{
+  const session=canonicalRfqSession();
+  const turn: OperatorTurn={turn_id:'prepared',company_id:scope.companyId,context_version:scope.contextVersion,
+    status:'completed',read_only:false,assistant_text:'Your unsent RFQ is ready.',agent_steps:[],evidence_ids:[],
+    proposal:{...session.pending_operator_proposal!,expires_at:'2099-01-01'},session:{...session,pending_operator_proposal:{...session.pending_operator_proposal!,expires_at:'2099-01-01'}},
+    action_result:{tool:'prepare_rfq',summary:'RFQ saved'}};
+  const html=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+    initialState={{...initialOperatorState,scope,turn,reviewed:true}} plan={plan} offers={offers} onSession={()=>{}} onUnknown={()=>{}} />);
+  expect(html).toContain('aria-label="RFQ saved"');
+  expect(html).toContain('Full RFQ preview');
+  expect(html).toContain('Download RFQ');
+  expect(html).not.toContain('Current proposal requiring review');
+  expect(html).not.toContain('Apply reviewed proposal');
+  expect(html).not.toContain('checked=""');
+});
+it('never exposes a current download for mismatched canonical data and preserves other approvals',()=>{
+  const session=canonicalRfqSession(), draft=session.drafts![0], rfq=session.rfq!;
+  for(const bad of [
+    {...session,rfq:{...rfq,draft_id:'wrong'}},
+    {...session,rfq:{...rfq,text:'Wrong body'}},
+    {...session,rfq:{...rfq,plan_id:'wrong'}},
+    {...session,rfq:{...rfq,offer_versions:{q:4}}},
+    {...session,drafts:[{...draft,company_id:'foreign'}]},
+  ]) {
+    const html=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} session={bad} plan={plan} offers={offers} onSession={()=>{}} onUnknown={()=>{}} />);
+    expect(html).not.toContain('aria-label="RFQ saved"');
+    expect(html).not.toContain('/api/demo/rfq/');
+  }
+  const pending={...session,pending_operator_proposal:{...session.pending_operator_proposal!,expires_at:'2099-01-01'}};
+  const legacy=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} session={{...pending,rfq:null}} plan={plan} offers={offers} onSession={()=>{}} onUnknown={()=>{}} />);
+  expect(legacy).toContain('Current proposal requiring review');
+  expect(legacy).toContain('Apply reviewed proposal');
+  const email=saved('simulate_email');
+  const emailHtml=renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+    initialState={{...initialOperatorState,scope,turn:email,reviewed:true}} onSession={()=>{}} onUnknown={()=>{}} />);
+  expect(emailHtml).toContain('Current proposal requiring review');
+  expect(emailHtml).toContain('Record simulated sent message');
+  expect(emailHtml).not.toContain('aria-label="RFQ saved"');
+});
 it('restores a recovery proposal against the exact first or existing baseline only',()=>{
   const proposal={proposal_id:'recover',kind:'recovery' as const,summary:'Compare supplier delay',parameters:{delay_days:2},plan_id:'plan',offer_versions:{q:3},context_version:2,expires_at:'2099-01-01T00:00:00Z'};
   const session={session_id:'s',csrf_token:'csrf',expires_at:'2099-01-01T00:00:00Z',synthetic:true,persistence:'ephemeral',provider:{model:'test',available:false},company:{company_id:'solara'},context_version:2,plan,offers,pending_operator_proposal:proposal} as unknown as DemoSession;

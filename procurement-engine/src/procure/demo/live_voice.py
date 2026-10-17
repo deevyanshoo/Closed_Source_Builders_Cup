@@ -28,7 +28,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from .sessions import SessionError
 from .agent_tools import BUYER_FIELDS
-from .presentation import present_turn
+from .presentation import present_turn, supplier_display_name
+from .company import get_company
 from .voice_cues import load_cue_pcm
 
 
@@ -89,6 +90,27 @@ def completed_research_speech(result: dict, *, reused: bool = False) -> dict:
         if isinstance(action, dict) and action.get('tool') == 'confirm_research':
             speech['action_result'] = {'tool': 'confirm_research'}
     return speech
+
+
+def carbon_spoken_result(result: dict) -> dict:
+    """Keep the server's complete calculation/question as Live's sole answer source."""
+    applied = (result.get('status') == 'completed' and result.get('read_only') is False
+               and isinstance(result.get('action_result'), dict))
+    speech = {'status': result['status'], 'read_only': result['read_only'],
+              'tool_succeeded': result['status'] == 'completed',
+              'action_applied': applied,
+              'required_spoken_response': result['assistant_text']}
+    if applied:
+        speech['action_result'] = {'tool': 'estimate_carbon'}
+    return speech
+
+
+def _broad_inventory_read(message: str) -> bool:
+    """Keep a factual all-material read on the bounded native read path."""
+    return bool(re.search(r'\b(?:inventory|stock|cover)\b', message, re.I)
+        and re.search(r'\b(?:sourcing|source|suppliers?)\b', message, re.I)
+        and re.search(r'\b(?:all materials|across all|overview|position|summary|analy[sz]e)\b', message, re.I)
+        and not re.search(r'\b(?:risks?|alerts?|headlines?|news)\b', message, re.I))
 
 
 VOICE_CUE_FILE = Path(__file__).resolve().parents[3] / 'demo_fixtures/voice-cues/research-checking.wav'
@@ -248,7 +270,8 @@ INSTRUCTION = (
     "and cross-check workspace.buyer_draft.material when a buyer_draft exists. "
     "If the selection is missing or conflicts with the buyer_draft, ask for clarification. "
     "Never use the first catalogue material or a previous company's selection for this reference. "
-    "Use read_risks for proactive inventory, supplier and news signals across the current or all ten companies. "
+    "For broad factual inventory and sourcing analysis across all materials, call operate_workspace with the user's exact words; do not use risk alerts as stock or cover analytics. "
+    "Use read_risks for proactive risk alerts and conditional impacts for the current or all ten companies. Pass the user's exact words. "
     "Explain provenance, conditional impact and recovery options; headline exposure never confirms a shipment delay. "
     "never invent stock, prices, dates, news, or outcomes. Use fill_buyer_form to update "
     "explicit buyer inputs, load_sample_quotes to load drafts, review_sample_quotes to "
@@ -265,6 +288,7 @@ INSTRUCTION = (
     "For news, headlines, world events or what could affect this business, "
     "use read_news FIRST: it reads the connected News Workspace and Global Watch without an external search. "
     "For a request to calculate or estimate emissions, or a follow-up giving freight mode and distance, call estimate_carbon with the user's exact words. Wait for its tool result before claiming a calculation. "
+    "After estimate_carbon, say its server required_spoken_response briefly and completely: state material and entered freight components and any supported total, then always ask its exact missing-input question when present. Do not end at incomplete. "
     "For a question combining emissions and planned arrivals, call both read_carbon and read_shipments before answering. "
     "Use read_carbon.selected_purchase_brief as the selected source-grounded carbon reference. "
     "For ordinary selected-purchase summaries, say reviewed plan without repeating generic disclaimers. "
@@ -422,20 +446,56 @@ def _workspace_action_gate(session, store, context_version: int, result: dict) -
             baseline = session.last_plan or {}
             preview = proposal['parameters']['preview']
             def supplier(offer_id):
+                if offer_id is None:
+                    return 'no selected supplier'
                 offer = session.offers.get(offer_id) or {}
                 raw = (offer.get('fields', {}).get('supplier_name') or {}).get('value') or offer_id
-                return re.sub(r'\s*\(synthetic\)$', '', str(raw), flags=re.I)
+                return re.sub(r'\s*\(synthetic\)$', '',
+                              supplier_display_name(str(raw)), flags=re.I)
             baseline_supplier = supplier(baseline.get('selected_offer_id'))
             resulting_supplier = supplier(preview['selected_offer_id'])
             delay = ', '.join(f'{supplier(offer_id)} {days} days' for offer_id, days in
                               proposal['parameters']['delay_days_by_offer'].items())
-            subject = proposal['parameters'].get('shipment_id') or baseline.get('material') or baseline.get('material_id') or 'the current material'
+            company = get_company(session.company_id)
+            material_id = baseline.get('material') or baseline.get('material_id')
+            material = next((row for row in company['materials']
+                             if row['material_id'] == material_id), None)
+            material_name = material['name'] if material else 'current material'
+            purchase = baseline.get('required_purchase', baseline.get('required_purchase_kg'))
+            unit = baseline.get('quantity_unit') or (material or {}).get('quantity_unit')
+            spoken_unit = {'kg': 'kilograms', 'tonne': 'tonnes', 'litre': 'litres'}.get(unit, unit)
+            if purchase is not None and unit:
+                if purchase == '0':
+                    subject = f"no purchase planned for {material_name} for {company['name']}"
+                else:
+                    if purchase == '1':
+                        spoken_unit = {'kg': 'kilogram', 'tonne': 'tonne', 'litre': 'litre'}.get(unit, unit)
+                    subject = (f"planned purchase {purchase} {spoken_unit} of {material_name} "
+                               f"for {company['name']}")
+            else:
+                subject = f"{material_name} for {company['name']}"
+            outcome = preview['outcome']
+            outcome_text = ('The supplier and cost remain unchanged.' if outcome == 'unchanged' else
+                            'The selected supplier changes.' if outcome == 'changed' and
+                            baseline.get('selected_offer_id') != preview.get('selected_offer_id') else
+                            'The scenario outcome changes.' if outcome == 'changed' else
+                            'Current stock covers the stated need; no purchase is selected.'
+                            if outcome == 'stock_covers_need' else
+                            'The scenario has no feasible selected supplier.')
+            def cost(amount, currency, *, no_purchase=False):
+                if amount is None:
+                    if no_purchase:
+                        return 'not applicable; no purchase required'
+                    return f'unavailable ({currency})' if currency else 'unavailable'
+                return f'{amount} {currency}' if currency else str(amount)
+            no_purchase = outcome == 'stock_covers_need'
             review = (f"Apply recovery for {subject}: "
                       f"delay {delay}; baseline supplier {baseline_supplier}, "
-                      f"baseline cost {baseline.get('total_cost')} {baseline.get('reporting_currency')}; "
-                      f"resulting supplier {resulting_supplier}, resulting cost {preview['total_cost']} "
-                      f"{preview['reporting_currency']}, cost change {preview['cost_delta']} "
-                      f"{preview['reporting_currency']}.")
+                      f"baseline cost {cost(baseline.get('total_cost'), baseline.get('reporting_currency'))}; "
+                      f"resulting supplier {resulting_supplier}, resulting cost "
+                      f"{cost(preview.get('total_cost'), preview.get('reporting_currency'), no_purchase=no_purchase)}, "
+                      f"cost change {cost(preview.get('cost_delta'), preview.get('reporting_currency'), no_purchase=no_purchase)}. "
+                      f"Preview outcome {outcome}: {outcome_text}")
         gate = {'proposal_id': proposal['proposal_id'], 'proposal_kind': proposal['kind'],
                 'gate_kind': 'workspace_action', 'query': review,
                 'marker': proposal['_marker'], 'expires_at': proposal['expires_at'],
@@ -575,8 +635,9 @@ def _config(company=None):
         ('read_shipments', 'Read current company planning shipments and demand scenarios; identify plan-linked inbound rows.', {}, []),
         ('read_workspace', 'Read current company, buyer form, current selected material, news, quotes and plan facts. Omit material_id to resolve the current selection.', {'material_id': text}, []),
         ('analyze_inventory', 'Calculate stock cover and supplier lead-time exposure from profile facts.', {'material_id': text}, []),
-        ('read_risks', 'Read proactively detected risks, impact and recovery options for the current or all ten fictional companies.',
-         {'scope': {'type': 'string', 'enum': ['current', 'all']}}, []),
+        ('read_risks', 'Read risk alerts for current or all ten companies. Pass the exact user words; a broad factual inventory/sourcing read is resolved with owned stock and cover analytics, never risk headlines.',
+         {'scope': {'type': 'string', 'enum': ['current', 'all']},
+          'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
         ('fill_buyer_form', 'Fill the visible buyer form using explicitly requested values or scenario defaults.',
          {'material_id': text, 'values': values}, ['material_id', 'values']),
         ('load_sample_quotes', 'Load owned synthetic quote drafts for a material; drafts require review.', {'material_id': text}, ['material_id']),
@@ -1327,6 +1388,12 @@ async def run_live_voice(
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
                                 raise _Invalid()
+                            risk_args_valid = (name != 'read_risks' or
+                                (set(args) <= {'scope', 'message'} and
+                                 isinstance(args.get('message'), str) and
+                                 0 < len(args['message'].strip()) <= 1200 and
+                                 isinstance(args.get('scope', 'current'), str) and
+                                 args.get('scope', 'current') in {'current', 'all'}))
                             if name == 'prepare_research' and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
@@ -1495,8 +1562,19 @@ async def run_live_voice(
                                         'status': 'needs_clarification',
                                         'assistant_text': 'I could not verify a fresh spoken approval for the current reviewed action. No change was applied.',
                                         'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+                                elif name == 'read_risks' and not risk_args_valid:
+                                    result = {'turn_id': secrets.token_urlsafe(18),
+                                        'company_id': session.company_id, 'context_version': context_version,
+                                        'status': 'needs_clarification',
+                                        'assistant_text': 'Please ask the exact risk or inventory question for this company or all ten companies.',
+                                        'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                                        'read_only': True}
                                 elif name == 'operate_workspace':
-                                    result = await operate_workspace(args['message'], context_version, key)
+                                    if workspace_tools is not None and _broad_inventory_read(args['message']):
+                                        result = await workspace_tools('read_risks',
+                                            {'message': args['message']}, context_version, key)
+                                    else:
+                                        result = await operate_workspace(args['message'], context_version, key)
                                 elif workspace_tools is not None:
                                     result = await workspace_tools(name, args, context_version, key)
                                 else:
@@ -1564,6 +1642,10 @@ async def run_live_voice(
                             if name == 'preview_supplier_delay':
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'estimate_carbon':
+                                model_result = carbon_spoken_result(result)
+                            if name == 'read_risks' and result.get('analytics') is not None:
+                                model_result['required_spoken_response'] = result['assistant_text']
+                            if name == 'operate_workspace' and result.get('analytics') is not None:
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'prepare_rfq' and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = result['assistant_text']

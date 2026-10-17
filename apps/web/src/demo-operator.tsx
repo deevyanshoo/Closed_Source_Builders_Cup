@@ -8,7 +8,7 @@ import { ActivityIndicator } from './demo-activity';
 import { displaySupplierMentions, supplierDisplayName } from './demo-display';
 import { ResearchOutcome, validatedResearchResult } from './demo-research';
 import { MarkdownAnswer } from './demo-markdown';
-import { currentProposalDraft, currentSessionProposal, isCurrentSavedDraft } from './demo-operator-contract';
+import { currentProposalDraft, currentSavedRfq, currentSessionProposal, isCurrentSavedDraft } from './demo-operator-contract';
 import './demo-assistant.css';
 
 export type OperatorScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
@@ -634,8 +634,10 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     if (matchesUtilitySession(turn, captured) && turn.session) { onSession(turn.session, turn.action_result); if (turn.action_result?.view) onNavigate?.(turn.action_result.view); }
   }
 
-  const proposal = activeOperatorProposal(state);
-  const reviewTurn = reviewableOperatorTurn(state);
+  const savedRfq = !dirty && !blocked ? currentSavedRfq(state.currentSession ?? session ?? state.turn?.session, scope) : null;
+  const activeProposal = activeOperatorProposal(state);
+  const proposal = savedRfq && activeProposal?.kind === 'rfq' && activeProposal.proposal_id === savedRfq.draft.draft_id ? null : activeProposal;
+  const reviewTurn = proposal ? reviewableOperatorTurn(state) : null;
   const previewSession = state.currentSession ?? session ?? reviewTurn?.session;
   useEffect(() => {
     if (!proposal) return;
@@ -671,6 +673,15 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
       {!!voiceExchange.turn?.evidence_ids.length && <div className="demo-voice-activity-evidence"><strong>Workspace evidence</strong><ul>{voiceExchange.turn.evidence_ids.map(id => { const evidence = resolveOperatorEvidence(id, scope, news, offers, plan, materials); return <li key={id}>{evidence.href ? <a href={evidence.href} target="_blank" rel="noopener noreferrer">{evidence.title} ↗</a> : <span>{evidence.title}</span>}{evidence.publisher && <small>{evidence.publisher}</small>}{evidence.detail && <small>{evidence.detail}</small>}</li>; })}</ul></div>}
     </div>}
   </article> : null;
+  const savedRfqCard = savedRfq ? (
+    <div className="demo-operator-proposal demo-current-proposal" role="region" aria-label="RFQ saved">
+      <div className="demo-proposal-essential"><span className="demo-kicker">RFQ saved</span><h3>Unsent RFQ draft</h3>
+        <div className="demo-draft-summary"><p><strong>To:</strong> {displaySupplierMentions(savedRfq.draft.recipient_label, supplierNames)}</p><p><strong>Subject:</strong> {savedRfq.draft.subject}</p></div>
+      </div>
+      <details className="demo-draft-preview"><summary>Full RFQ preview</summary><pre>{displaySupplierMentions(savedRfq.draft.body, supplierNames)}</pre></details>
+      <div className="demo-proposal-actions"><a className="demo-link" href={`/api/demo/rfq/${encodeURIComponent(savedRfq.draft.draft_id)}/download`}>Download RFQ</a><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></div>
+    </div>
+  ) : null;
   const proposalCard = proposal ? (
     <div ref={proposalRef} className="demo-operator-proposal demo-current-proposal" role="region" aria-label="Current proposal requiring review" tabIndex={-1}>
       <div className="demo-proposal-essential">
@@ -704,7 +715,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
   ) : null;
   return <section className="demo-company-panel demo-operator-panel demo-assistant-panel" data-has-proposal={!!proposal && !voiceOpen} aria-label="Operator workspace">
     <div className="demo-heading demo-assistant-heading"><div><span className="demo-kicker">Company conversation</span><h2>ZOORQ operator</h2><p><strong>{companyLabel}</strong><span className="demo-assistant-intro"> · Ask about this company. Review actions before they run.</span></p></div><div className="demo-assistant-header-actions"><span className="demo-session">{state.overview?.available === false ? 'Local tools available' : 'Ready to help'}</span>{onClose && <button type="button" className="demo-assistant-close" aria-label="Close operator chat" onClick={onClose}>Close</button>}</div></div>
-    <VoiceConversationSurface open={voiceOpen} onClose={switchToText} onEscape={exitVoice} surfaceRef={voiceSurfaceRef} companyLabel={companyLabel} activity={voiceOpen ? voiceActivity : null} history={voiceOpen && voiceHistory.length ? <ol>{voiceHistory.map(exchange => <li key={exchange.id}>{exchange.question && <p><strong>You:</strong> {exchange.question}</p>}{exchange.turn ? <div><strong>ZOORQ operator:</strong> <OperatorAnswer turn={exchange.turn} scope={scope} supplierNames={supplierNames} /></div> : exchange.answer ? <p><strong>ZOORQ operator:</strong> {exchange.answer}</p> : exchange.error ? <p><strong>Unavailable:</strong> {exchange.error}</p> : exchange.research ? <ResearchOutcome result={exchange.research} /> : null}</li>)}</ol> : null} proposal={voiceOpen ? proposalCard : null} research={voiceOpen && !proposal ? latestVoiceResearch(state, scope) : null}
+    <VoiceConversationSurface open={voiceOpen} onClose={switchToText} onEscape={exitVoice} surfaceRef={voiceSurfaceRef} companyLabel={companyLabel} activity={voiceOpen ? voiceActivity : null} history={voiceOpen && voiceHistory.length ? <ol>{voiceHistory.map(exchange => <li key={exchange.id}>{exchange.question && <p><strong>You:</strong> {exchange.question}</p>}{exchange.turn ? <div><strong>ZOORQ operator:</strong> <OperatorAnswer turn={exchange.turn} scope={scope} supplierNames={supplierNames} /></div> : exchange.answer ? <p><strong>ZOORQ operator:</strong> {exchange.answer}</p> : exchange.error ? <p><strong>Unavailable:</strong> {exchange.error}</p> : exchange.research ? <ResearchOutcome result={exchange.research} /> : null}</li>)}</ol> : null} proposal={voiceOpen && (savedRfqCard || proposalCard) ? <>{savedRfqCard}{proposalCard}</> : null} research={voiceOpen && !proposal ? latestVoiceResearch(state, scope) : null}
       voice={<LiveVoice key={voiceRevision} ref={voiceRef} scope={scope} csrf={csrf} disabled={blocked || busy === 'applying' || state.overview?.available === false} beforeStart={beforeTurn} onTurn={acceptLiveTurn} onSession={onSession} onUnknown={onUnknown} onExit={exitVoice} />} />
     {riskSummary && <p className="demo-operator-risk"><strong>Current company risks:</strong> {riskSummary.high} high · {riskSummary.medium} medium · {riskSummary.low} low <small>Checked {formatRiskCheckedAt(riskSummary.checkedAt)}</small></p>}
     <div ref={historyRef} className="demo-assistant-review-flow" onScroll={event => { followHistoryRef.current = shouldFollowOperatorHistory(event.currentTarget); }}>
@@ -714,6 +725,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
     {busy === 'asking' && <ActivityIndicator state="working" label="Specialists are reviewing the current workspace…" size={20} theme="dark" />}
     {busy === 'applying' && <ActivityIndicator state="working" label="Applying the reviewed proposal…" size={20} theme="dark" />}
     {busy === 'researching' && <ActivityIndicator state="working" label="Searching the public web with the reviewed query…" size={20} theme="dark" />}
+    {!voiceOpen && savedRfqCard}
     {!voiceOpen && proposalCard}
     {state.overview && <details className="demo-assistant-attention"><summary><span>Company attention</span><strong>{state.overview.attention.length} {state.overview.attention.length === 1 ? 'signal' : 'signals'} · {state.overview.watch_items.length} {state.overview.watch_items.length === 1 ? 'watch' : 'watches'}</strong></summary><div className="demo-operator-overview"><div><h3>Company attention</h3>{state.overview.attention.length ? <ul>{state.overview.attention.map((item, index) => { const line = formatOperatorAttention(item, materials); return <li key={index}><strong>{line.title}</strong>{line.detail && <span>{line.detail}</span>}</li>; })}</ul> : <p>No attention items returned.</p>}</div><div><h3>Watch items</h3>{state.overview.watch_items.length ? <ul>{state.overview.watch_items.map((item, index) => { const line = formatOperatorWatch(item, materials, scope.companyId); return <li key={index}><strong>{line.title}</strong>{line.detail && <span>{line.detail}</span>}</li>; })}</ul> : <p>No watch items saved.</p>}</div></div><p className="demo-muted">Available specialists: {state.overview.agents.map(agent => `${agent.name} (${agent.role})`).join('; ') || 'none reported'}.</p>{state.overview.limitations.length > 0 && <p className="demo-alert">Limits: {state.overview.limitations.join('; ')}</p>}</details>}
     <div className="demo-assistant-history" role="log" aria-label="Assistant conversation" aria-live="polite" aria-relevant="additions text">

@@ -122,6 +122,12 @@ def _foreign_company(snapshot, message):
 def _broad_inventory_read(snapshot, message):
     if not (_STOCK.search(message) and _SOURCING.search(message)):
         return None
+    if re.search(r'\b(?:risks?|alerts?|headlines?)\b', message, re.I):
+        return None
+    # Preserve the explicit stock-analysis + separate public-news workflow.
+    if (re.search(r'\bnews\b', message, re.I) and not re.search(
+            r'\ball materials\s+(?:and|plus)\s+[^.!?\n]*\bnews\b', message, re.I)):
+        return None
     # A request for recommended actions is analysis; these verbs request an effect.
     if _OPERATIONAL_ACTION.search(message):
         return None
@@ -344,7 +350,8 @@ def resolve_judge_turn(snapshot: dict, message: str, *, now: datetime,
                                f'{min(count, 3)} priorities. ' + answer)
             refs.extend(f"profile:{snapshot['company_id']}:{row['material_id']}"
                         for row in analytics['materials'])
-    elif _STOCK.search(message) and re.search(r'\b(our|my|current|this|workspace)\b', message, re.I):
+    elif (_STOCK.search(message) and re.search(r'\b(our|my|current|this|workspace)\b', message, re.I)
+          and not re.search(r'\b(?:risks?|alerts?|headlines?)\b', message, re.I)):
         rows = inventory_analytics(snapshot)['materials']
         rows = [row for row in rows if row['material_id'] == material] if material else rows[:3]
         local_parts.append('; '.join(f"{row['name']} stock: {row['stock']} {row['unit']} (profile as of {company.get('as_of')})" for row in rows))

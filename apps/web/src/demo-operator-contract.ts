@@ -1,4 +1,4 @@
-import type { DemoSession, OperatorProposal, OperatorTurn, PreparedDraft } from './demo-api';
+import type { DemoSession, OperatorProposal, OperatorTurn, PreparedDraft, RfqView } from './demo-api';
 
 type Scope = { sessionId: string; companyId: string; contextVersion: number };
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -9,6 +9,29 @@ const sameVersions = (a: Record<string, number>, b: Record<string, number>) => {
   const ids=Object.keys(a);
   return ids.length===Object.keys(b).length && ids.every(id=>Number.isSafeInteger(a[id]) && a[id]===b[id]);
 };
+/** A saved RFQ is a canonical session artifact, independent of proposal review and expiry. */
+export function currentSavedRfq(session: DemoSession | null | undefined, scope: Scope): { rfq: RfqView; draft: PreparedDraft } | null {
+  if (!session || session.session_id !== scope.sessionId || session.company?.company_id !== scope.companyId ||
+      session.context_version !== scope.contextVersion || !record(session.rfq) || !Array.isArray(session.drafts)) return null;
+  const rfq = session.rfq!;
+  if (typeof rfq.draft_id !== 'string' || !rfq.draft_id || rfq.status !== 'draft_unsent' ||
+      typeof rfq.text !== 'string' || !rfq.text.trim() || typeof rfq.plan_id !== 'string' || !rfq.plan_id ||
+      !record(rfq.offer_versions)) return null;
+  const owned = session.drafts.filter(item => item?.draft_id === rfq.draft_id);
+  if (owned.length !== 1) return null;
+  const draft = owned[0];
+  if (draft.kind !== 'rfq' || draft.status !== 'draft_unsent' || draft.company_id !== scope.companyId ||
+      !draftFields.every(field => typeof draft[field] === 'string' && !!draft[field].trim()) ||
+      draft.body !== rfq.text || draft.plan_id !== rfq.plan_id || !record(draft.offer_versions) ||
+      !sameVersions(draft.offer_versions!, rfq.offer_versions)) return null;
+  const plan = session.recovery?.scenario ?? session.plan;
+  const ids = Object.keys(rfq.offer_versions);
+  if (plan?.plan_id !== rfq.plan_id || !record(plan.offer_versions) || ids.length === 0 ||
+      ids.length !== Object.keys(plan.offer_versions).length || !sameVersions(rfq.offer_versions, plan.offer_versions) ||
+      !Array.isArray(session.offers) || !ids.every(id => session.offers.some(offer =>
+        offer?.offer_id === id && offer.version === rfq.offer_versions[id]))) return null;
+  return { rfq, draft };
+}
 export function currentProposalDraft(proposal: OperatorProposal, session: DemoSession, scope: Scope): PreparedDraft | null {
   if (session.session_id !== scope.sessionId || session.company?.company_id !== scope.companyId || session.context_version !== scope.contextVersion ||
       !Array.isArray(session.drafts) || !proposal.proposal_id || !['rfq', 'simulate_email'].includes(proposal.kind)) return null;
@@ -45,7 +68,7 @@ export function currentSessionProposal(session: DemoSession, scope: Scope, now=D
   }
   return ['watch','research','review_quotes'].includes(proposal.kind) ? proposal : null;
 }
-/** The saved artifact is complete; the distinct proposed workflow change still needs review. */
+/** Validates an unexpired proposal for review; saved artifact display uses currentSavedRfq. */
 export function isCurrentSavedDraft(turn: Partial<OperatorTurn>, scope: Scope, now = Date.now()): boolean {
   const p=turn.proposal, session=turn.session;
   if (turn.status !== 'completed' || turn.read_only !== false || !p ||

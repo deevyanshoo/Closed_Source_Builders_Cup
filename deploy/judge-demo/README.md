@@ -1,6 +1,6 @@
 # ZOORQ hosted judge demo: deployment and operator guide
 
-**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). The older `closed-source-quote-demo` revision r74 remains a healthy fallback. Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. The native delay preview passed hosted acceptance. The consent/research/audio/history flow completed, while its strict final date-speaking quality check remains red; see the [release report](../../docs/releases/2026-10-17-zoorq-judge-experience.md).
+**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. Current verification and remaining voice acceptance are recorded in the [latest QA report](../../docs/ZOORQ_QA_REPAIR_20261017.md). The [earlier judge release report](../../docs/releases/2026-10-17-zoorq-judge-experience.md) retains its historical results and failures. The older `closed-source-quote-demo` service is a retained rollback option; check its health before using it.
 
 ## What the demo does
 

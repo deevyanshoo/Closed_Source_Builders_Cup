@@ -33,6 +33,16 @@ class RfqProvider(Provider):
             if not self.tool_first:
                 await self.events.put(event(call=rfq_call()))
 
+    async def send_tool_response(self, *, function_responses):
+        self.tool_response = function_responses
+        response = function_responses.response
+        caption = response.get('required_spoken_response', 'Review this watch proposal.')
+        await self.events.put(NS(tool_call=None, server_content=NS(
+            input_transcription=None, output_transcription=NS(text=caption),
+            interrupted=False, model_turn=NS(parts=[NS(inline_data=NS(
+                data=b'\x01\x00\x02\x00', mime_type='audio/pcm;rate=24000'))]),
+            turn_complete=True)))
+
 
 class ModelApprovalProvider(Provider):
     async def send_realtime_input(self, **kwargs):
@@ -64,7 +74,7 @@ def plan_for_copper(client, headers, *, budget='100000', current_stock='2000'):
     return planned.json()
 
 
-def ask_for_rfq(client, provider):
+def ask_for_rfq(client, provider, *, frames=None):
     session = client.get('/api/demo/session').json()
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
                                   headers={'origin': 'https://demo.test'}) as socket:
@@ -78,8 +88,14 @@ def ask_for_rfq(client, provider):
             assert event['type'] != 'error', event
             event = socket.receive_json()
         result = event['result']
-        while socket.receive_json()['type'] != 'turn_complete':
-            pass
+        while True:
+            event = socket.receive_json()
+            if frames is not None:
+                frames.append(event)
+            if event['type'] == 'error':
+                raise AssertionError(f"voice error after tool_result: {event!r}")
+            if event['type'] == 'turn_complete':
+                break
         socket.send_json({'type': 'stop'})
     return result, provider.tool_response.response
 
@@ -260,3 +276,33 @@ class NativeVoiceRfqTests(unittest.TestCase):
         assert result['status'] == 'needs_clarification'
         assert result['proposal'] is None
         assert self.client.get('/api/demo/session').json()['drafts'] == []
+
+    def test_grounded_clarification_has_matching_spoken_caption_and_pcm(self):
+        started = self.client.post('/api/demo/judge/start', headers=self.headers, json={
+            'expected_context_version': 1, 'idempotency_key': 'clarification-start'})
+        assert started.status_code == 200, started.text
+        self.provider.spoken = 'Draft a bridge RFQ for cotton earlier delivery.'
+        self.provider.tool_first = True
+        frames = []
+        result, model_result = ask_for_rfq(self.client, self.provider, frames=frames)
+        required = model_result['required_spoken_response']
+        assert result['status'] == 'needs_clarification'
+        assert result['read_only'] is True and result.get('action_result') is None
+        assert required == result['assistant_text']
+        assert any(frame['type'] == 'transcript' and frame.get('direction') == 'output'
+                   and frame.get('text') == required for frame in frames), frames
+        assert any(frame['type'] == 'audio' for frame in frames), frames
+
+    def test_helper_rejects_voice_error_after_tool_result(self):
+        class ContradictoryRfqProvider(RfqProvider):
+            async def send_tool_response(self, *, function_responses):
+                await Provider.send_tool_response(self, function_responses=function_responses)
+
+        self.provider = ContradictoryRfqProvider()
+        started = self.client.post('/api/demo/judge/start', headers=self.headers, json={
+            'expected_context_version': 1, 'idempotency_key': 'error-start'})
+        assert started.status_code == 200, started.text
+        self.provider.spoken = 'Draft a bridge RFQ for cotton earlier delivery.'
+        self.provider.tool_first = True
+        with self.assertRaisesRegex(AssertionError, 'voice_review_incomplete'):
+            ask_for_rfq(self.client, self.provider)

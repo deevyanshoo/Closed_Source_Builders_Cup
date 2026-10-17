@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace as NS
 
 from fastapi.testclient import TestClient
+import pytest
 
 from procure.demo.app import create_app
 from test_demo_live_voice import Provider
@@ -87,6 +88,51 @@ def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_pro
             'explicit-recovery')
         assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
         assert value.recovery is None
+
+
+def test_native_operate_workspace_exact_spoken_recovery_prepares_without_applying():
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        session = client.get('/api/demo/session').json()
+        plan = plan_for_copper(client, {'Origin': 'https://demo.test',
+                                        'X-CSRF-Token': session['csrf_token']})
+        value = app.state.sessions.get(session['session_id'])
+        before = deepcopy((value.last_plan, value.recovery, value.rfq, value.drafts))
+        result, _ = voice_tool(client, provider, 'operate_workspace', {
+            'message': 'Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.'
+        }, 'spoken-seven-day-recovery')
+        assert result['status'] == 'proposal', result
+        assert result['proposal']['kind'] == 'recovery'
+        assert result['proposal']['parameters']['delay_days_by_offer'] == {plan['selected_offer_id']: 7}
+        assert before == (value.last_plan, value.recovery, value.rfq, value.drafts)
+
+
+@pytest.mark.parametrize('duration', ['7 to 10 day', 'seven or fourteen day', '0 day'])
+def test_native_operate_workspace_ambiguous_duration_does_not_prepare(duration):
+    provider = NamedProvider()
+    @asynccontextmanager
+    async def factory():
+        yield provider
+    app = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
+                     live_client_factory=factory)
+    with TestClient(app, base_url='https://demo.test') as client:
+        session = client.get('/api/demo/session').json()
+        plan_for_copper(client, {'Origin': 'https://demo.test',
+                                 'X-CSRF-Token': session['csrf_token']})
+        value = app.state.sessions.get(session['session_id'])
+        before = deepcopy((value.last_plan, value.recovery, value.rfq, value.drafts))
+        result, model = voice_tool(client, provider, 'operate_workspace', {
+            'message': f'Prepare a recovery scenario for a {duration} delay of our current copper cathode supplier.'
+        }, f'ambiguous-recovery-{duration}')
+        assert result['status'] == 'needs_clarification', result
+        assert result['proposal'] is None
+        assert model['required_spoken_response'] == result['assistant_text']
+        assert before == (value.last_plan, value.recovery, value.rfq, value.drafts)
 
 
 def test_native_carbon_calculation_uses_same_saved_result_as_text():

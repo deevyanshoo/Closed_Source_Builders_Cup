@@ -143,8 +143,18 @@ def test_spoken_consent_claims_once_and_returns_authoritative_research_result():
             assert first.id == 'consent' and first.response['read_only'] is False
             assert replay.id == 'consent' and replay.response['read_only'] is True
             assert later.id == 'new-attempt' and later.response['read_only'] is True
+            from procure.demo.live_voice import research_spoken_result
+            expected_speech = research_spoken_result(applied)
+            for response in (first, replay, later):
+                assert response.response['required_spoken_response'] == expected_speech
+                assert 'workspace' not in response.response and 'assistant_text' not in response.response
+            assert first.response['action_applied'] is True
+            assert first.response['action_result'] == {'tool': 'confirm_research'}
+            record = next(item for item in app.state.sessions.get(session['session_id']).research_records.values()
+                          if item.get('state') == 'completed')
+            assert record['result']['answer'] == applied['workspace']['research']['answer']
+            assert record['result']['sources'] == applied['workspace']['research']['sources']
             for reused in (replay, later):
-                assert reused.response['workspace'] == applied['workspace']
                 assert reused.response['action_applied'] is False
                 assert reused.response['tool_succeeded'] is True
                 assert 'session' not in reused.response and 'action_result' not in reused.response

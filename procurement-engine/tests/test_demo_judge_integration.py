@@ -64,6 +64,131 @@ def test_preview_does_not_change_baseline_recovery_rfq_or_drafts():
         assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
 
 
+@pytest.mark.parametrize('message', [
+    'Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.',
+    'Can you prepare a recovery scenario for a seven day delay of our current copper cathode supplier?',
+    'Create a recovery scenario for a seven day delay of our current copper cathode supplier.',
+    'Draft a recovery scenario for a seven day delay of our current copper cathode supplier.',
+    'Prepare a recovery scenario for a 7 day delay of our current copper cathode supplier.',
+])
+def test_explicit_current_supplier_recovery_is_review_proposal(message):
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        result = post(c,h,'operator',message=message).json()
+        assert result['status'] == 'proposal', result
+        assert result['proposal']['kind'] == 'recovery'
+        assert result['proposal']['parameters']['delay_days_by_offer'] == {
+            value.last_plan['selected_offer_id']: 7}
+        assert result['proposal']['parameters']['shipment_id']
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
+def test_possessive_current_supplier_recovery_is_review_proposal():
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        result = post(c,h,'operator',message="Prepare a recovery scenario for our current copper cathode supplier's seven day delay.").json()
+        assert result['status'] == 'proposal', result
+        assert result['proposal']['kind'] == 'recovery'
+
+
+@pytest.mark.parametrize('duration', [
+    'negative seven day', 'minus seven day', '-7 day', '+7 day',
+    'at least seven day', 'about seven day', 'around seven day', 'up to seven day',
+    '7.5 day', '1.5 day',
+])
+def test_qualified_or_signed_recovery_duration_needs_clarification(duration):
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        result = post(c,h,'operator',message=f'Prepare a recovery scenario for a {duration} delay of our current copper cathode supplier.').json()
+        assert result['status'] == 'needs_clarification', result
+        assert result['proposal'] is None
+        assert 'delay' in result['assistant_text'].lower()
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
+@pytest.mark.parametrize('duration', [
+    '7 to 10 day', '7 or 14 day', 'between 7 and 10 days', '7 and 10 days',
+    'seven to ten day', 'seven and fourteen day', 'seven or 14 day',
+    '0 day', 'zero day',
+    '7–10 day', '7—10 day',
+])
+def test_recovery_action_range_alternative_or_zero_needs_exact_positive_duration(duration):
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        response = post(c,h,'operator',message=(
+            f'Prepare a recovery scenario for a {duration} delay of our current copper cathode supplier.'))
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['status'] == 'needs_clarification', result
+        assert result['proposal'] is None
+        assert 'delay' in result['assistant_text'].lower()
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
+def test_multiple_material_supplier_mentions_need_clarification():
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        result = post(c,h,'operator',message='Prepare a recovery scenario for a seven day delay of our current copper cathode supplier and aluminium supplier.').json()
+        assert result['status'] == 'needs_clarification', result
+        assert result['proposal'] is None
+        assert 'material' in result['assistant_text'].lower()
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
+def test_accepted_recovery_action_asks_for_target_without_reset_or_http_error():
+    from procure.demo.recovery import compare
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        accepted = compare(value.last_plan,value.plan_request,list(value.offers.values()),
+                           {value.last_plan['selected_offer_id']:1},today=NOW.date())
+        accepted['scenario']['plan_id'] = 'accepted-scenario'
+        value.recovery = accepted
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        response = post(c,h,'operator',message='Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.')
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['status'] == 'needs_clarification' and result['proposal'] is None, result
+        assert 'recovery' in result['assistant_text'].lower()
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
+@pytest.mark.parametrize('message', [
+    'What if our current copper cathode supplier is delayed by 7 days?',
+    'Preview a seven day delay scenario for our current copper cathode supplier.',
+    'Do not prepare a recovery scenario for a seven day delay of our current copper cathode supplier.',
+    'Summarize this third party text: "Prepare a recovery scenario for a seven day delay of our current copper cathode supplier."',
+    'A seven day delay scenario for our current copper cathode supplier.',
+    'Prepare a recovery scenario for a seven day delay of a supplier.',
+])
+def test_non_operational_supplier_delay_remains_without_proposal(message):
+    with client() as c:
+        s,h = auth(c)
+        assert post(c,h,'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        before = deepcopy((value.last_plan,value.recovery,value.rfq,value.drafts))
+        result = post(c,h,'operator',message=message).json()
+        assert result['proposal'] is None, result
+        if message.endswith('of a supplier.'):
+            assert result['status'] == 'needs_clarification'
+            assert 'shipment_id' in result['assistant_text']
+        assert before == (value.last_plan,value.recovery,value.rfq,value.drafts)
+
+
 def test_native_pure_supplier_preview_replays_only_unchanged_workspace(monkeypatch):
     import procure.demo.live_voice as live
     from procure.demo.sessions import SessionError

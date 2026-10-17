@@ -8,6 +8,51 @@ import re
 from .judge_ai_receipts import summarize_gemini_receipts, _public_url
 
 CONFIG = Path(__file__).resolve().parents[3] / 'config'
+_PREPARE_RECOVERY = re.compile(
+    r'^\s*(?:(?:please|kindly)\s+)?(?:(?:can|could|would)\s+you\s+)?'
+    r'(?:prepare|create|draft)\s+(?:a\s+|the\s+)?(?:recovery|replacement)\b', re.I)
+_PREVIEW_ONLY = re.compile(r'\b(?:what[- ]if|suppose|simulate|preview|assume|assuming)\b', re.I)
+_NEGATED_ACTION = re.compile(r"\b(?:do\s+not|don.t|never|without)\s+(?:\w+\s+){0,3}?(?:prepare|create|draft)\b", re.I)
+_DAY_NUMBER = (r'(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|'
+               r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|'
+               r'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)')
+_RANGE_DURATION = re.compile(
+    rf'\b{_DAY_NUMBER}(?:\s+(?:to|and|or)\s+|\s*[-–—]\s*){_DAY_NUMBER}\s*[- ]\s*(?:days?|weeks?)\b', re.I)
+_ZERO_DURATION = re.compile(r'\b(?:0+|zero)\s*[- ]\s*(?:days?|weeks?)\b', re.I)
+
+
+def _explicit_recovery_request(message):
+    return (bool(_PREPARE_RECOVERY.search(message)) and not _PREVIEW_ONLY.search(message)
+            and not _NEGATED_ACTION.search(message))
+
+
+def _recovery_clarification(snapshot, missing, answer):
+    return {'kind': 'needs_input', 'company_id': snapshot['company_id'],
+            'context_version': snapshot['context_version'], 'missing_inputs': [missing],
+            'answer': answer, 'evidence_refs': []}
+
+
+def _ambiguous_recovery_duration(message):
+    # The shared reader may extract a positive integer inside qualified or
+    # decimal wording, or the final value of a range. Action promotion requires
+    # one exact, strictly positive duration.
+    return bool(_RANGE_DURATION.search(message) or _ZERO_DURATION.search(message)
+        or re.search(
+        r'\b(?:negative|minus|at least|about|around|up to|approximately|roughly|'
+        r'more than|less than|under|over|between)\s+(?:\w+\s+){0,2}?'
+        r'(?:\d+(?:[.,]\d+)?|a|one|two|three|four|seven|fourteen)\s*[- ]\s*'
+        r'(?:days?|weeks?)\b', message, re.I)
+        or re.search(r'(?<!\w)[+-]\s*\d+\s*[- ]\s*(?:days?|weeks?)\b', message, re.I)
+        or re.search(r'\b\d+[.,]\d+\s*[- ]\s*(?:days?|weeks?)\b', message, re.I))
+
+
+def _multiple_materials(snapshot, message):
+    # Match the resolver's owned material IDs and names before its selected
+    # material fallback can hide a second explicitly named material.
+    matches = {row['material_id'] for row in snapshot['company'].get('materials', [])
+               if re.search(r'(?<!\w)(?:' + re.escape(row['material_id']) + '|' +
+                            re.escape(row['name']) + r')(?!\w)', message, re.I)}
+    return len(matches) > 1
 
 def fixture(name):
     return json.loads((CONFIG / name).read_text(encoding='utf-8'))
@@ -46,6 +91,29 @@ def resolve_local_turn(snapshot, message, *, now):
     if not isinstance(snapshot.get('context_version'),int):
         return None  # Legacy pure-reader snapshots have no session context.
     resolved = resolve_judge_turn(snapshot, message, now=now)
+    if _explicit_recovery_request(message):
+        if resolved and resolved.get('missing_inputs') == ['company']:
+            return resolved
+        if _ambiguous_recovery_duration(message):
+            return _recovery_clarification(snapshot, 'delay_days',
+                'Specify one exact, positive whole-day delay for the current owned shipment.')
+        if _multiple_materials(snapshot, message):
+            return _recovery_clarification(snapshot, 'material',
+                'Choose one material and its current owned shipment or offer for recovery.')
+        if snapshot.get('recovery') and snapshot.get('plan') != snapshot.get('last_plan'):
+            return _recovery_clarification(snapshot, 'baseline_plan_id',
+                'A recovery is already active. Specify the exact target shipment and baseline before preparing another recovery; the accepted state is unchanged.')
+        # The resolver binds a single current shipment, selected offer, version,
+        # material and exact duration. Reuse that binding for a review proposal.
+        if resolved and resolved['kind'] == 'read_only_preview':
+            request = resolved.get('preview_request') or {}
+            if request.get('shipment_id') and request.get('baseline_plan_id'):
+                return {**resolved, 'kind': 'recovery_proposal',
+                        'recovery_parameters': {
+                            'shipment_id': request['shipment_id'],
+                            'delay_days_by_offer': request['delay_days_by_offer']},
+                        'answer': 'Review the recovery comparison for the selected current shipment. No plan has changed.'}
+        return resolved
     # The resolver decides hypothetical intent; only preview/input outcomes need
     # an original-baseline view. Factual reads keep the active recovery state.
     if resolved and resolved['kind'] in {'read_only_preview','needs_input','unavailable'}:
@@ -83,7 +151,9 @@ def has_local_evidence(resolved, snapshot):
 def judge_outcome(resolved):
     kind = resolved['kind']
     research = resolved.get('follow_up_research') or resolved.get('research_parameters')
-    candidate = {'kind': 'research', 'parameters': deepcopy(research)} if research else None
+    candidate = ({'kind': 'recovery', 'parameters': deepcopy(resolved['recovery_parameters'])}
+                 if kind == 'recovery_proposal' else
+                 {'kind': 'research', 'parameters': deepcopy(research)} if research else None)
     tool = next((name for name in ('read_shipments','read_carbon') if any(name in ref for ref in resolved.get('evidence_refs',[]))), 'judge_read')
     result = {'status': 'proposal' if candidate else 'needs_clarification' if kind == 'needs_input' else 'completed',
             'assistant_text': resolved.get('answer') or resolved.get('outcome') or 'This comparison is unavailable.',
@@ -92,7 +162,8 @@ def judge_outcome(resolved):
                              'summary': 'Read current owned records; no public search executed.'}],
             'evidence_ids': resolved.get('evidence_refs', [])[:16], 'candidate': candidate,
             'judge_resolution': resolved, 'utility': None,
-            'proposal_kind': 'research' if candidate else None, 'parameters': deepcopy(research) if research else None}
+            'proposal_kind': candidate['kind'] if candidate else None,
+            'parameters': deepcopy(candidate['parameters']) if candidate else None}
     if resolved.get('analytics'):
         result['analytics'] = deepcopy(resolved['analytics'])
     return result

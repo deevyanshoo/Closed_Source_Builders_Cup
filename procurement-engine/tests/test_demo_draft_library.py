@@ -83,8 +83,18 @@ def test_rfq_proposal_exposes_unsent_content_before_apply_without_changing_plan(
     assert 'UNSENT REQUEST FOR QUOTATION DRAFT' in preview['body']
     assert preview['plan_id'] == plan['plan_id'] and preview['offer_versions'] == plan['offer_versions']
     state = client.get('/api/demo/session').json()
-    assert state['plan']['plan_id'] == plan['plan_id'] and state['rfq'] is None
+    assert result.json()['status'] == 'completed'
+    assert state['plan']['plan_id'] == plan['plan_id']
+    assert state['plan']['offer_versions'] == plan['offer_versions']
+    assert state['rfq']['draft_id'] == preview['draft_id']
+    assert state['rfq']['plan_id'] == plan['plan_id']
+    assert state['rfq']['offer_versions'] == plan['offer_versions']
+    assert state['rfq']['status'] == 'draft_unsent'
+    assert state['rfq']['text'] == preview['body']
+    download = client.get(f"/api/demo/rfq/{preview['draft_id']}/download")
+    assert download.status_code == 200 and download.text == preview['body']
     assert state['drafts'] == result.json()['workspace']['drafts'] == [preview]
+    assert state['simulated_outbox'] == []
 
 
 def test_direct_rfq_survives_a_new_comparison_and_session_reload(demo):

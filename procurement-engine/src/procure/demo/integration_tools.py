@@ -8,6 +8,7 @@ import re
 from .company import list_companies
 from .news_brief import is_workspace_news_question
 from .presentation import supplier_display_name
+from .route_display import build_route_display
 
 
 _EXTERNAL_TOPIC = re.compile(
@@ -103,21 +104,126 @@ def _spoken_unit(quantity, unit):
     return unit + 's' if plural and unit in {'barrel', 'tonne', 'unit'} else unit
 
 
+def _route_material_scope(message):
+    labels = [(label.casefold(), material['material_id']) for company in list_companies()
+              for material in company['materials'] for label in (material['material_id'], material['name'])]
+    named, spans = set(), []
+    for label, material_id in sorted(set(labels), key=lambda item: -len(item[0])):
+        for match in re.finditer(r'(?<![\w-])' + re.escape(label) + r'(?![\w-])', message.casefold()):
+            if not any(match.start() < end and start < match.end() for start, end in spans):
+                named.add(material_id)
+                spans.append(match.span())
+    return named
+
+
+def _read_routes(snapshot, message):
+    company = snapshot['company']
+    text = message.casefold()
+    named = _route_material_scope(message)
+    own = {material['material_id'] for material in company['materials']}
+    if named - own:
+        return {'assistant_text': f'That material is outside the {company["name"]} workspace. Choose a material listed for this company.',
+                'workspace': {}}
+    if any(other['company_id'] != company['company_id'] and other['name'].casefold() in text
+           for other in list_companies()):
+        return {'assistant_text': f'That company is outside the {company["name"]} workspace. Choose a route from this company.',
+                'workspace': {}}
+    routes = company.get('routes', [])
+    if len(named) > 1:
+        return {'assistant_text': 'Which one material should I use for this itinerary: '
+                                  + ', '.join(sorted(named)) + '?', 'workspace': {}}
+    owned_ids = {route['route_id'] for route in routes}
+    route_ids = [match.group() for match in re.finditer(r'(?<![\w-])[\w-]+-route(?:-\d+)?(?![\w-])', text)]
+    if route_ids and (len(set(route_ids)) != 1 or route_ids[0] not in owned_ids):
+        return {'assistant_text': f'Choose an exact route ID from the {company["name"]} workspace; that route is unknown or outside this workspace.',
+                'workspace': {}}
+    route_id = route_ids[0] if route_ids else None
+    material_request = re.search(r'\b(?:routes?|[\w-]+-route(?:-\d+)?)\s+for\s+([\w-]+)', text)
+    if material_request and not named and material_request.group(1) not in {'this', 'our', 'the', 'company'}:
+        return {'assistant_text': f'That material is unknown in the {company["name"]} workspace. Choose a listed material.',
+                'workspace': {}}
+    if route_id and named:
+        route_materials = set(next(route for route in routes if route['route_id'] == route_id)['materials'])
+        if not named <= route_materials:
+            return {'assistant_text': 'That material is not on the selected profile route. Choose a compatible route and material.',
+                    'workspace': {}}
+
+    locations = company.get('locations', [])
+    mentioned = [index for index, location in enumerate(locations)
+                 if re.search(r'(?<!\w)' + re.escape(location['city'].casefold()) + r'(?!\w)', text)]
+    foreign_city = any(location['city'].casefold() in text
+                       for other in list_companies() if other['company_id'] != company['company_id']
+                       for location in other['locations'] if location['city'].casefold() not in
+                       {own['city'].casefold() for own in locations})
+    destination = re.search(r'\b(?:routes?\s+to\s+|buyer(?:\s+(?:city|location))?\s+|destination\s+|deliver\s+to\s+)'
+                            r'([a-z][a-z .-]*?)(?=\s+for\b|[?.!,]|$)', text)
+    unknown_city = bool(destination and not any(re.search(r'(?<!\w)' + re.escape(loc['city'].casefold()) + r'(?!\w)',
+                                                          destination.group(1)) for loc in locations))
+    if foreign_city or unknown_city or len(set(mentioned)) > 1:
+        choices = ', '.join(location['city'] for location in locations)
+        return {'assistant_text': f'Choose an exact buyer city in the {company["name"]} profile: {choices}.',
+                'workspace': {}}
+    requested_buyer_index = mentioned[0] if mentioned else None
+    buyer_index = requested_buyer_index
+    if buyer_index is None and route_id:
+        matches = [index for index, location in enumerate(locations)
+                   if next(route for route in routes if route['route_id'] == route_id)['destination'] ==
+                   f"{location['city']}, {location['country']}"]
+        if len(matches) != 1:
+            route = next(route for route in routes if route['route_id'] == route_id)
+            choices = ', '.join(location['city'] for location in locations)
+            return {'assistant_text': f"Profile route {route_id}: {route['origin']} to {route['destination']}. "
+                                      f"Source: company profile. Which buyer city should I use: {choices}? "
+                                      'The onward connection is not recorded; no buyer is assumed.',
+                    'workspace': {'routes': [deepcopy(route)]}}
+        buyer_index = matches[0]
+
+    if not route_id and not named and buyer_index is None:
+        via = list(dict.fromkeys(point for route in routes for point in route.get('via', [])
+                                 if isinstance(point, str)))
+        answer = (f"{company['name']} has {len(routes)} declared profile routes. "
+                  + (f"Named via points include {', '.join(via[:4])}. " if via else '')
+                  + 'Transport mode, verified distance and a selected supplier binding are not recorded here. '
+                  'I can narrow the itinerary by material, route or buyer city.')
+        return {'assistant_text': answer, 'workspace': {'routes': deepcopy(routes)}}
+    selected = [route for route in routes if (not route_id or route['route_id'] == route_id)
+                and (not named or named.intersection(route['materials']))
+                and (requested_buyer_index is None or route['destination'] ==
+                     f"{locations[requested_buyer_index]['city']}, {locations[requested_buyer_index]['country']}")]
+    if not selected:
+        return {'assistant_text': 'The selected profile route does not match that material or buyer city. Choose a compatible route or material from this workspace.',
+                'workspace': {}}
+    if len(selected) > 1 or len(named) > 1 or (len(selected[0]['materials']) > 1 and not named):
+        choices = '; '.join(f"{route['route_id']}: {route['origin']} via "
+                            f"{', '.join(route['via']) or 'no named via point'} to {route['destination']} "
+                            f"({', '.join(route['materials'])})" for route in selected)
+        return {'assistant_text': f'{company["name"]} profile route choices: {choices}. Which route and material do you mean? '
+                                  'These routes have no selected supplier binding or recorded freight distance.',
+                'workspace': {'routes': deepcopy(selected)}}
+    route = selected[0]
+    material_id = next(iter(named)) if named else route['materials'][0]
+    if material_id not in route['materials']:
+        return {'assistant_text': 'That material is not on the selected profile route. Choose a compatible route and material.',
+                'workspace': {}}
+    display = build_route_display(company, route['route_id'], material_id, buyer_index or 0)
+    itinerary = display['itinerary']
+    stops = ' → '.join([itinerary['origin'], *itinerary['via'], itinerary['destination']])
+    limitations = ' '.join(display['limitations'][:2])
+    answer = (f"{company['name']} profile route {route['route_id']} for {material_id}: {stops}. "
+              f"Source: company profile; display {itinerary['display']}. {limitations} "
+              'No selected supplier binding, verified freight distance or planner/carbon effect is recorded.')
+    return {'assistant_text': answer, 'workspace': {'routes': deepcopy(selected), 'route_display': display}}
+
+
 def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     company = snapshot['company']['name']
+    if kind == 'read_routes':
+        return _read_routes(snapshot, message)
     named, own = _material_scope(snapshot, message)
     explain_method = bool(_METHOD_QUESTION.search(message))
     if named - own:
         return {'assistant_text': f'That material is outside the {company} workspace. Choose a material listed for this company.',
                 'workspace': {}}
-    if kind == 'read_routes':
-        routes = deepcopy(snapshot['company'].get('routes', []))
-        via = list(dict.fromkeys(point for route in routes for point in route.get('via', [])
-                                 if isinstance(point, str)))
-        answer = (f"{company} has {len(routes)} declared profile routes. "
-                  + (f"Named via points include {', '.join(via[:4])}. " if via else '')
-                  + 'These are profile routes; transport mode, distance and a selected supplier binding are not recorded here.')
-        return {'assistant_text': answer, 'workspace': {'routes': routes}}
     if kind == 'read_carbon':
         record = snapshot.get('carbon_assessment')
         result = deepcopy(record.get('result')) if isinstance(record, dict) else None

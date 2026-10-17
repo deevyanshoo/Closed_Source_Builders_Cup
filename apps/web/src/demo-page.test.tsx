@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, shouldLoadFixtures, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, JudgeDelayDisclosure, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, shouldLoadFixtures, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
@@ -78,6 +78,39 @@ it('keeps RFQ previews clean in procurement and Drafts while preserving canonica
 });
 const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };
 const companySession = { ...session, offers: [offer(1, 'saved')], company, context_version: 1, plan: selectedPlan, plan_request: request, rfq };
+it('reserves a closed delay comparison for every first-visit state and keeps restored visits compact', () => {
+  const comparison = { assumed_delay_days: 7, baseline_spend: '82000', scenario_spend: '86000', additional_recovery_cost: '4000', currency: 'USD', outcome: 'changed', read_only: true as const, scenario_plan_id: null };
+  const loading = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="loading" comparison={null} />);
+  const ready = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="ready" comparison={comparison} />);
+  const unavailable = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="unavailable" comparison={null} />);
+  const readyWithoutComparison = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="ready" comparison={null} />);
+  const restored = renderToStaticMarkup(<JudgeDelayDisclosure visit="restored" status="ready" comparison={comparison} />);
+  expect(loading).toContain('zoorq-judge-example is-reserved is-loading');
+  expect(loading).toContain('aria-hidden="true"');
+  expect(loading).not.toContain('<summary');
+  expect(loading).not.toContain('82000');
+  expect(ready).toContain('<details class="zoorq-judge-example"');
+  expect(ready).toContain('<summary>Compare an explicit 7-day supplier delay</summary>');
+  expect(ready).not.toContain('is-loading');
+  for (const inert of [unavailable, readyWithoutComparison]) {
+    expect(inert).toContain('zoorq-judge-example is-reserved');
+    expect(inert).toContain('aria-hidden="true"');
+    expect(inert).not.toContain('is-loading');
+    expect(inert).not.toContain('zoorq-judge-example-placeholder');
+    expect(inert).not.toContain('<summary');
+    expect(inert).not.toContain('<button');
+    expect(inert).not.toContain('Compare an explicit');
+  }
+  expect(restored).toBe('');
+});
+it('wires initial session loading to the nav slot while leaving restored company navigation real', () => {
+  const loading = renderToStaticMarkup(<DemoPage initialState={initialDemoState} initialView="overview" />);
+  const restored = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 })} initialView="overview" />);
+  expect(loading).toContain('zoorq-nav-company is-placeholder');
+  expect(restored).toContain('Solara Cables');
+  expect(restored).not.toContain('zoorq-nav-company is-placeholder');
+  expect(restored).toContain('is-continuing');
+});
 const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', materials: [{ ...company.materials[0], material_id: 'cotton', name: 'Cotton' }], quote_coverage: { materials: [], fixture_ids: [], note: 'No runnable quote coverage.' }, buyer_defaults: null };
 const naphthaRequest: PlanRequest = { ...request, material: 'naphtha', quantity: '240', current_stock: '40', quantity_unit: 'barrel', budget: '6500', reporting_currency: 'EUR', additional_cost_per_unit: '3' };
 const multiCompany = { ...company, materials: [...company.materials, { ...company.materials[0], material_id: 'naphtha', name: 'Naphtha', quantity_unit: 'barrel', stock: '40' }], quote_coverage: { materials: ['copper', 'naphtha'], fixture_ids: ['quote-a', 'naphtha-a'], note: 'Two runnable materials.', scenarios: [{ material_id: 'copper', fixture_ids: ['quote-a'], buyer_defaults: request }, { material_id: 'naphtha', fixture_ids: ['naphtha-a'], buyer_defaults: naphthaRequest }] }, buyer_defaults: request };

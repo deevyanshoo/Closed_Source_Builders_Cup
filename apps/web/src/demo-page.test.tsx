@@ -19,7 +19,8 @@ const selectedPlan: PlanView = { ...plan, selected_offer_id: 'q1', total_cost: '
 it('shows a clean supplier label in the comparison without changing the selected offer ID or cost', () => {
   const raw = 'Europa Copper SA [SYNTHETIC]';
   const shown = renderToStaticMarkup(<PlanResults plan={{ ...selectedPlan, alternatives: [{ ...selectedPlan.alternatives[0], supplier: raw }] }} offers={[offer(1)]} />);
-  expect(shown).toContain('Europa Copper SA is feasible');
+  expect(shown).toContain('Europa Copper SA selected for this order');
+  expect(shown).toContain('Check supply coverage');
   expect(shown).toContain('86000');
   expect(shown).not.toContain('[SYNTHETIC]');
   expect(selectedPlan.selected_offer_id).toBe('q1');
@@ -500,10 +501,11 @@ describe('demo response state', () => {
   });
   it('offers RFQ review for a feasible current plan and explains unavailable review', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
-    const feasible = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+    const covered = { status: 'covered' } as PlanView['supply_coverage'];
+    const feasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan: { ...selectedPlan, supply_coverage: covered } }} initialView="procurement" initialStage="compare" />);
     expect(feasible).toContain('Review RFQ draft');
-    const infeasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan }} initialView="procurement" initialStage="compare" />);
-    expect(infeasible).toContain('No feasible supplier is selected for an RFQ draft');
+    const infeasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan: { ...plan, supply_coverage: covered } }} initialView="procurement" initialStage="compare" />);
+    expect(infeasible).toContain('No qualifying supplier is selected for an RFQ draft');
     expect(infeasible).not.toContain('Review RFQ draft');
     const dirty = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, dirty: true }} initialView="procurement" initialStage="compare" />);
     expect(dirty).toContain('Run a new comparison before reviewing an RFQ draft');
@@ -688,7 +690,8 @@ describe('demo response state', () => {
   it('shows stock-covered demand as zero purchase rather than an infeasible comparison', () => {
     const result = { ...plan, required_purchase_kg: '0', total_cost: '0', explanation: 'Opening stock covers the stated need; no purchase is required.' };
     const html = renderToStaticMarkup(<PlanResults plan={result} offers={[offer(1)]} />);
-    expect(html).toContain('Stock covers this need');
+    expect(html).toContain('No purchase required for this order');
+    expect(html).toContain('Check supply coverage');
     expect(html).toContain('0 USD');
     expect(html).not.toContain('No feasible quote');
   });

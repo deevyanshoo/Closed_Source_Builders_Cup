@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import re
 
 from .agent_tools import inventory_analytics
@@ -16,6 +16,19 @@ from .research import ResearchValidationError, prepare_research
 _PUBLIC = re.compile(r'\b(suez|hormuz|red sea|panama|news|headlines?|shipping|port|tariffs?|policy|market|insurance|world|global)\b', re.I)
 _LATEST = re.compile(r'\b(latest|fresh|today|now|current|recent|newest|up.to.date)\b', re.I)
 _STOCK = re.compile(r'\b(stock|inventory|stock cover|shortage)\b', re.I)
+_COVERAGE_QUESTION = re.compile(
+    r'\b(?:stock\s*out|run\s*out|last\s+until|before\s+(?:the\s+)?(?:selected\s+)?arrival|'
+    r'continuous\s+supply|supply\s+gap|production\s+supply|uncovered\s+days|bridge\s+quantity)\b', re.I)
+_BRIDGE_REQUEST = re.compile(r'\b(?:draft|prepare|create|request)\b.*\b(?:bridge|earlier\s+delivery)\b.*\b(?:rfq|quotation|quote)\b|'
+                             r'\b(?:draft|prepare|create|request)\b.*\b(?:rfq|quotation|quote)\b.*\b(?:bridge|earlier\s+delivery)\b', re.I)
+_BRIDGE_COMMAND = re.compile(
+    r'^\s*(?:(?:please)\s+|(?:can|could|would)\s+you\s+(?:please\s+)?|'
+    r'i\s+(?:want|need)\s+you\s+to\s+)?(?:draft|prepare|create|request)\b', re.I)
+_DRAFT_NEGATION = re.compile(
+    r"\b(?:do\s+not|don.t|never|without|no\s+need\s+to)\s+"
+    r"(?:(?:ever|also|just|please)\s+)*"
+    r"(?:(?:send|sending)\s+(?:or|and)\s+)?"
+    r"(?:draft(?:ing)?|prepar(?:e|ing)|creat(?:e|ing)|request(?:ing)?|sav(?:e|ing))\b", re.I)
 _SOURCING = re.compile(r'\b(sourcing|source|sources|suppliers?|procurement)\b', re.I)
 _OPERATIONAL_ACTION = re.compile(r'\b(send|draft|prepare|approve|apply|save|update|change|edit|'
                                  r'load|place|buy|purchase|execute|submit|create)\b', re.I)
@@ -62,11 +75,15 @@ def _base(snapshot, kind):
             'offer_versions': dict(plan.get('offer_versions') or {}), 'evidence_refs': []}
 
 
-def _material(snapshot, message):
+def _named_materials(snapshot, message):
     company = snapshot['company']
-    matches = [row['material_id'] for row in company.get('materials', [])
-               if re.search(r'(?<!\w)(?:' + re.escape(row['material_id']) + '|' +
-                            re.escape(row['name']) + r')(?!\w)', message, re.I)]
+    return [row['material_id'] for row in company.get('materials', [])
+            if re.search(r'(?<!\w)(?:' + re.escape(row['material_id']) + '|' +
+                         re.escape(row['name']) + r')(?!\w)', message, re.I)]
+
+
+def _material(snapshot, message):
+    matches = _named_materials(snapshot, message)
     if len(matches) == 1:
         return matches[0]
     if re.search(r'\b(selected|current|this)\s+material\b', message, re.I):
@@ -226,6 +243,111 @@ def _profile_preview(snapshot, material, days):
     return result
 
 
+def _coverage_display(value):
+    """Round a Decimal string for speech only; preserve the assessment value."""
+    amount = Decimal(str(value))
+    rounded = amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if amount > 0 and rounded == 0:
+        return '<0.01'
+    rendered = format(rounded, ',f')
+    concise = rendered.rstrip('0').rstrip('.') if '.' in rendered else rendered
+    return f'about {concise}' if rounded != amount else concise
+
+
+def _coverage_read(snapshot, message):
+    if not _COVERAGE_QUESTION.search(message) or _OPERATIONAL_ACTION.search(message):
+        return None
+    plan = snapshot.get('plan')
+    result = _base(snapshot, 'needs_input')
+    if not isinstance(plan, dict) or plan.get('company_id') != snapshot['company_id']:
+        result['missing_inputs'] = ['current_plan']
+        result['answer'] = 'Compare reviewed quotes for this material first; which current plan should I assess?'
+        return result
+    named_material = _material(snapshot, message)
+    if named_material is not None and named_material != plan.get('material'):
+        result['missing_inputs'] = ['material']
+        result['answer'] = 'Which current plan for that material should I assess?'
+        return result
+    coverage = plan.get('supply_coverage') or {}
+    if coverage.get('status') == 'unknown' or coverage.get('status') not in {'gap', 'covered'}:
+        missing = (coverage.get('missing_inputs') or ['supply_coverage'])[0]
+        result['missing_inputs'] = [missing]
+        result['answer'] = f'Supply coverage is unknown for the active plan. Next: provide or review {missing}.'
+        result['evidence_refs'] = [plan['plan_id'], *coverage.get('evidence_ids', [])]
+        return result
+    result['kind'] = 'internal_answer'
+    unit = coverage['quantity_unit']
+    dates = (f"Reviewed opening stock {_coverage_display(coverage['stock'])} {unit} as of {coverage['inventory_as_of']}; "
+             f"daily consumption {_coverage_display(coverage['consumption_per_day'])} {unit} as of "
+             f"{coverage['consumption_as_of']}. ")
+    arrival = coverage.get('selected_arrival_date') or 'no selected arrival'
+    if coverage['status'] == 'gap':
+        direct = ('A projected supply gap exists. The plan meets the order deadline, but production supply is not continuous. '
+                  if coverage.get('order_deadline_met') else
+                  'A projected supply gap exists. The selected plan does not establish continuous production supply. ')
+        next_step = (f"Next: request an unsent bridge RFQ for {_coverage_display(coverage['bridge_quantity'])} {unit} "
+                     f"needed by {coverage['bridge_needed_by']}, subject to new supplier confirmation."
+                     if plan.get('selected_offer_id') else
+                     'Next: select and review a current supplier quote before requesting earlier delivery.')
+        result['answer'] = (direct + dates +
+            f"Projected opening-stock depletion is around {coverage['stock_depletion_date']}; selected arrival is {arrival}. "
+            f"The projected gap is {_coverage_display(coverage['uncovered_days'])} days / {_coverage_display(coverage['uncovered_quantity'])} {unit}. "
+            + next_step)
+    else:
+        result['answer'] = ('No supply gap is projected; this plan covers continuous supply through '
+            f"{coverage['horizon_end']}. " + dates + f"Selected arrival: {arrival}. "
+            'Next: monitor the dated stock and selected quote arrival before relying on this projection.')
+    result['evidence_refs'] = [plan['plan_id'], *coverage.get('evidence_ids', [])]
+    return result
+
+
+def _explicit_plan_ids(message):
+    """Read labeled/quoted IDs or ID-shaped tokens, never bare plan prose."""
+    ids = set()
+    for match in re.finditer(
+            r'\bplan(?:\s+|(?=[:#=]))'
+            r'(?P<label>(?:(?:id|named)\b\s*[:#=]?\s*|[:#=]\s*))?'
+            r'(?:(?P<quote>[\'"`])(?P<quoted>[\w-]+)(?P=quote)|(?P<bare>[\w-]+))',
+            message, re.I):
+        token = match.group('quoted') or match.group('bare')
+        if (match.group('label') or match.group('quote') or re.search(r'[-_\d]', token)
+                or re.fullmatch(r'[A-Za-z0-9_-]{24}', token)):
+            ids.add(token)
+    return ids
+
+
+def _bridge_intent(snapshot, message):
+    command = any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
+                  for clause in re.split(r'[.,;!?]', message))
+    if not command or _DRAFT_NEGATION.search(message) or _HYPOTHETICAL.search(message):
+        return None
+    result = _base(snapshot, 'needs_input')
+    plan = snapshot.get('plan') or {}
+    coverage = plan.get('supply_coverage') or {}
+    materials = _named_materials(snapshot, message)
+    material = _material(snapshot, message)
+    plan_ids = _explicit_plan_ids(message)
+    plural_materials = re.search(
+        r'\b(?:all|both|multiple|several)\s+(?:(?:current|owned|company)\s+)?materials\b', message, re.I)
+    if plural_materials or len(materials) > 1 or (material is not None and material != plan.get('material')):
+        result['missing_inputs'] = ['material']
+        result['answer'] = 'Which single material in the current reviewed plan should receive the bridge request?'
+    elif (plan_ids and plan_ids != {plan.get('plan_id')}) or (
+            plan.get('company_id') != snapshot['company_id'] or not plan.get('selected_offer_id')):
+        result['missing_inputs'] = ['current_selected_plan']
+        result['answer'] = 'Which current selected plan should receive the bridge request?'
+    elif coverage.get('status') != 'gap' or not coverage.get('bridge_needed_by') or coverage.get('bridge_quantity') in (None, '0'):
+        missing = (coverage.get('missing_inputs') or ['positive_supply_gap'])[0]
+        result['missing_inputs'] = [missing]
+        result['answer'] = f'Which verified {missing} should support an earlier-delivery request?'
+    else:
+        result['kind'] = 'bridge_rfq_request'
+        result['answer'] = ('Prepare an unsent bridge RFQ for the calculated gap. '
+                            'The supplier must confirm new capacity, price and earlier delivery.')
+        result['evidence_refs'] = [plan['plan_id'], *coverage.get('evidence_ids', [])]
+    return result
+
+
 def _preview(snapshot, message):
     if not _DISRUPTION.search(message) or not _HYPOTHETICAL.search(message):
         return None
@@ -326,6 +448,12 @@ def resolve_judge_turn(snapshot: dict, message: str, *, now: datetime,
         result['missing_inputs'] = ['company']
         result['answer'] = 'Choose the active company workspace before using its evidence.'
         return result
+    bridge = _bridge_intent(snapshot, message)
+    if bridge is not None:
+        return bridge
+    coverage = _coverage_read(snapshot, message)
+    if coverage is not None:
+        return coverage
     if _STOCK.search(message) and _SOURCING.search(message) and _OPERATIONAL_ACTION.search(message):
         return None
     preview = _preview(snapshot, message)

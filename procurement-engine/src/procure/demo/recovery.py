@@ -8,6 +8,8 @@ from decimal import Decimal, localcontext
 from procure.offers import normalize as nz
 
 from .planner import build_plan
+from .company import get_company
+from .supply_coverage import assess_supply_coverage
 
 
 def compare(baseline: dict, original_request: dict, offers: list[dict], delays: dict,
@@ -32,7 +34,11 @@ def compare(baseline: dict, original_request: dict, offers: list[dict], delays: 
         outcome = "changed"
     else:
         outcome = "unchanged"
+    company = get_company(baseline.get('company_id'))
+    baseline_coverage = assess_supply_coverage(company, baseline, offers=offers)
+    scenario_coverage = assess_supply_coverage(company, scenario, offers=offers)
     return {"synthetic": True, "baseline": deepcopy(baseline), "scenario": scenario,
             "baseline_request": deepcopy(original_request), "scenario_request": scenario_request,
+            "baseline_supply_coverage": baseline_coverage, "scenario_supply_coverage": scenario_coverage,
             "cost_delta": cost_delta, "selection_changed": changed, "outcome": outcome,
             "replayed": False}

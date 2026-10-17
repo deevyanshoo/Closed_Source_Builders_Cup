@@ -36,6 +36,251 @@ def test_explicit_bootstrap_is_idempotent_and_reads_do_not_seed():
         assert c.get('/api/demo/judge/evidence').json()['aggregate']['interpreted_articles'] == 0
         assert body['facts']
 
+
+def test_typed_bridge_request_uses_current_gap_and_factual_read_stays_pure():
+    with client() as c:
+        s, h = auth(c)
+        started = post(c, h, 'judge/start')
+        assert started.status_code == 200
+        plan = started.json()['session']['plan']
+        before = deepcopy(plan)
+        factual = post(c, h, 'operator', message='Will our stock run out before the selected arrival?',
+                       idempotency_key='coverage-read')
+        assert factual.status_code == 200, factual.text
+        assert factual.json()['read_only'] is True
+        assert '2026-10-24' in factual.json()['assistant_text']
+        assert c.get('/api/demo/session').json()['rfq'] is None
+        drafted = post(c, h, 'operator', message='Draft a bridge RFQ for earlier delivery to cover the gap.',
+                       idempotency_key='bridge-draft')
+        assert drafted.status_code == 200, drafted.text
+        turn = drafted.json()
+        assert turn['read_only'] is False and turn['action_result']['tool'] == 'prepare_rfq'
+        state = c.get('/api/demo/session').json()
+        assert state['plan'] == before
+        assert state['rfq']['bridge'] is True and state['rfq']['status'] == 'draft_unsent'
+        assert state['drafts'][-1]['body'] == state['rfq']['text']
+        assert state['simulated_outbox'] == []
+        assert c.get(f"/api/demo/rfq/{state['rfq']['draft_id']}/download").text == state['rfq']['text']
+
+
+def test_frontend_bridge_cta_prepares_unsent_canonical_draft():
+    with client() as c:
+        _, h = auth(c)
+        started = post(c, h, 'judge/start')
+        assert started.status_code == 200, started.text
+        before = deepcopy(started.json()['session']['plan'])
+        message = (f"Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan {before['plan_id']}. "
+                   'Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.')
+        response = post(c, h, 'operator', message=message, idempotency_key='frontend-bridge-cta')
+        assert response.status_code == 200, response.text
+        turn = response.json()
+        assert turn['read_only'] is False and turn['action_result']['tool'] == 'prepare_rfq'
+        state = c.get('/api/demo/session').json()
+        assert state['plan'] == before
+        assert state['rfq']['bridge'] is True and state['rfq']['status'] == 'draft_unsent'
+        assert state['drafts'][-1]['body'] == state['rfq']['text']
+        assert state['simulated_outbox'] == []
+        assert c.get(f"/api/demo/rfq/{state['rfq']['draft_id']}/download").text == state['rfq']['text']
+
+
+@pytest.mark.parametrize('message', (
+    'What is the projected supply gap and when is the bridge needed?',
+    'Explain how to prepare a bridge RFQ for earlier delivery.',
+    'How do I prepare a bridge RFQ for earlier delivery?',
+    'Can you explain how to prepare a bridge RFQ for earlier delivery?',
+    'Do not draft a bridge RFQ for earlier delivery.',
+    'Do not send or draft a bridge RFQ for earlier delivery.',
+    'Prepare a bridge RFQ for earlier delivery, but do not create the draft.',
+))
+def test_bridge_discussion_and_drafting_negation_leave_operator_read_only(message):
+    with client() as c:
+        _, h = auth(c)
+        started = post(c, h, 'judge/start')
+        assert started.status_code == 200, started.text
+        before = deepcopy(started.json()['session']['plan'])
+        response = post(c, h, 'operator', message=message, idempotency_key='bridge-read-only')
+        assert response.status_code == 200, response.text
+        assert response.json()['read_only'] is True
+        state = c.get('/api/demo/session').json()
+        assert state['plan'] == before
+        assert state['rfq'] is None and state['drafts'] == [] and state['simulated_outbox'] == []
+
+
+def test_bridge_request_rejects_unknown_coverage_without_draft():
+    with client() as c:
+        _, h = auth(c)
+        response = post(c, h, 'operator', message='Draft a bridge RFQ for earlier delivery.',
+                        idempotency_key='unknown-bridge')
+        assert response.status_code == 200
+        assert response.json()['status'] == 'needs_clarification'
+        assert response.json()['read_only'] is True
+        assert c.get('/api/demo/session').json()['drafts'] == []
+
+
+def test_native_operate_bridge_uses_same_durable_draft(monkeypatch):
+    import procure.demo.live_voice as live
+    async def bridge(socket, *, session, operate_workspace, **kwargs):
+        await socket.accept()
+        request = await socket.receive_json()
+        await socket.send_json(await operate_workspace(request['message'], session.context_version,
+                                                     'native-bridge'))
+        await socket.close()
+    monkeypatch.setattr(live, 'run_live_voice', bridge)
+    with client() as c:
+        _, h = auth(c)
+        started = post(c, h, 'judge/start')
+        assert started.status_code == 200
+        before = deepcopy(started.json()['session']['plan'])
+        with c.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                 headers={'Origin': 'https://demo.test'}) as socket:
+            socket.send_json({'message': 'Prepare an earlier delivery RFQ for the supply gap using our current plan. Save the draft without sending it.'})
+            result = socket.receive_json()
+        assert result['read_only'] is False and result['action_result']['tool'] == 'prepare_rfq'
+        state = c.get('/api/demo/session').json()
+        assert state['plan'] == before
+        draft = state['rfq']
+        assert draft['bridge'] is True
+        assert draft['status'] == 'draft_unsent'
+        assert state['drafts'][-1]['body'] == draft['text']
+        assert state['simulated_outbox'] == []
+        assert c.get(f"/api/demo/rfq/{draft['draft_id']}/download").text == draft['text']
+
+
+def _bridge_binding_turn(c, h, monkeypatch, channel, message):
+    if channel == 'typed':
+        response = post(c, h, 'operator', message=message, idempotency_key='binding-turn')
+        assert response.status_code == 200, response.text
+        return response.json()
+    import procure.demo.live_voice as live
+    async def bridge(socket, *, session, operate_workspace, **kwargs):
+        await socket.accept()
+        request = await socket.receive_json()
+        await socket.send_json(await operate_workspace(request['message'], session.context_version,
+                                                     'binding-turn'))
+        await socket.close()
+    monkeypatch.setattr(live, 'run_live_voice', bridge)
+    with c.websocket_connect('wss://demo.test/api/demo/voice/live',
+                             headers={'Origin': 'https://demo.test'}) as socket:
+        socket.send_json({'message': message})
+        return socket.receive_json()
+
+
+@pytest.mark.parametrize('channel', ('typed', 'native'))
+@pytest.mark.parametrize('case', ('wrong_material', 'multiple_materials', 'all_materials', 'stale_cta'))
+def test_bridge_binding_rejection_preserves_state_without_provider_fallback(monkeypatch, channel, case):
+    calls = []
+    def unexpected_provider(self, *args):
+        calls.append(args[0])
+        raise AssertionError('binding rejection must not fall back to a provider')
+    monkeypatch.setattr(Offline, 'available', True)
+    monkeypatch.setattr(Offline, '__call__', unexpected_provider)
+    with client() as c:
+        s, h = auth(c)
+        assert post(c, h, 'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        old_plan_id = value.last_plan['plan_id']
+        if case == 'stale_cta':
+            # A new reviewed plan in the same company/context leaves the old CTA stale.
+            old_plan_id = 'ABCDEFGHIJKLMNOPQRSTUVWX'
+            value.last_plan = {**value.last_plan, 'plan_id': 'ZYXWVUTSRQPONMLKJIHGFEDC'}
+            message = (f'Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan {old_plan_id}. '
+                       'Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.')
+        else:
+            material = {'wrong_material': 'polymer', 'multiple_materials': 'copper and polymer',
+                        'all_materials': 'all materials'}[case]
+            message = f'Draft a bridge RFQ for {material} earlier delivery.'
+        before = c.get('/api/demo/session').json()
+        accepted = deepcopy((value.last_plan, value.plan_request, value.recovery))
+        result = _bridge_binding_turn(c, h, monkeypatch, channel, message)
+        assert result['status'] == 'needs_clarification', result
+        assert result['read_only'] is True and result['proposal'] is None
+        assert not result.get('action_result')
+        after = c.get('/api/demo/session').json()
+        for field in ('company_id', 'context_version', 'plan', 'offers', 'drafts', 'rfq', 'simulated_outbox'):
+            assert after[field] == before[field], field
+        assert (value.last_plan, value.plan_request, value.recovery) == accepted
+        assert calls == []
+
+
+@pytest.mark.parametrize('channel', ('typed', 'native'))
+@pytest.mark.parametrize('message,actionable', (
+    ('Draft a bridge RFQ for earlier delivery using the current plan to cover the gap.', True),
+    ('Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan {plan_id}. Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.', True),
+    ('Do not send the bridge RFQ, prepare an unsent bridge RFQ draft for the current supply gap.', True),
+    ('Explain how to prepare a bridge RFQ for earlier delivery.', False),
+    ('Do not send or draft a bridge RFQ for earlier delivery.', False),
+))
+def test_bridge_binding_keeps_explicit_unsent_actions_and_read_only_discussion(monkeypatch, channel, message, actionable):
+    with client() as c:
+        s, h = auth(c)
+        assert post(c, h, 'judge/start').status_code == 200
+        if 'current reviewed plan {plan_id}' in message:
+            value = c.app.state.sessions.get(s['session_id'])
+            value.last_plan = {**value.last_plan, 'plan_id': 'ZYXWVUTSRQPONMLKJIHGFEDC'}
+        before = c.get('/api/demo/session').json()
+        result = _bridge_binding_turn(c, h, monkeypatch, channel,
+                                      message.format(plan_id=before['plan']['plan_id']))
+        after = c.get('/api/demo/session').json()
+        for field in ('plan', 'offers', 'simulated_outbox'):
+            assert after[field] == before[field], field
+        assert result['read_only'] is not actionable
+        if actionable:
+            assert result['action_result']['tool'] == 'prepare_rfq'
+            assert after['rfq']['bridge'] is True and after['rfq']['status'] == 'draft_unsent'
+            assert after['drafts'][-1]['body'] == after['rfq']['text']
+            assert c.get(f"/api/demo/rfq/{after['rfq']['draft_id']}/download").text == after['rfq']['text']
+        else:
+            assert after['drafts'] == before['drafts'] and after['rfq'] == before['rfq']
+
+
+def test_active_recovery_stockout_read_uses_scenario_arrival_and_gap():
+    from procure.demo.recovery import compare
+    with client() as c:
+        s, h = auth(c)
+        assert post(c, h, 'judge/start').status_code == 200
+        value = c.app.state.sessions.get(s['session_id'])
+        baseline = value.last_plan
+        delayed = compare(baseline, value.plan_request, list(value.offers.values()),
+                          {baseline['selected_offer_id']: 7}, today=NOW.date())
+        delayed['scenario']['plan_id'] = 'active-recovery-scenario'
+        value.recovery = delayed
+        active = c.get('/api/demo/session').json()['plan']['supply_coverage']
+        assert active['plan_id'] == 'active-recovery-scenario'
+        answer = post(c, h, 'operator', message='Will our stock run out before the selected arrival?',
+                      idempotency_key='active-gap-read')
+        assert answer.status_code == 200, answer.text
+        assert active['selected_arrival_date'] in answer.json()['assistant_text']
+        assert '3,666.61 kg' in answer.json()['assistant_text']
+        assert 'active-recovery-scenario' in answer.json()['evidence_ids']
+
+@pytest.mark.parametrize('baseline_status', ['gap', 'covered'])
+def test_active_unknown_coverage_never_borrows_baseline_answer(baseline_status):
+    from procure.demo.experience_service import resolve_local_turn
+    from procure.demo.company import get_company
+    company = get_company('solara-cables')
+    baseline = {'plan_id': 'old-plan', 'company_id': company['company_id'], 'material': 'copper',
+                'supply_coverage': {'status': baseline_status, 'quantity_unit': 'kg',
+                                    'stock': '2000', 'inventory_as_of': '2026-10-14',
+                                    'consumption_per_day': '333.33', 'consumption_as_of': '2026-10-14',
+                                    'selected_arrival_date': '2026-10-24', 'stock_depletion_date': '2026-10-20',
+                                    'uncovered_days': '4', 'uncovered_quantity': '1333.30',
+                                    'bridge_quantity': '1333.30', 'bridge_needed_by': '2026-10-20',
+                                    'horizon_end': '2026-11-05'}}
+    active = {'plan_id': 'active-plan', 'company_id': company['company_id'], 'material': 'copper',
+              'supply_coverage': {'status': 'unknown', 'missing_inputs': ['current accepted quote']}}
+    state = {'company_id': company['company_id'], 'context_version': 7, 'company': company,
+             'offers': [], 'plan': active, 'last_plan': baseline,
+             'recovery': {'scenario': active}, 'selected_material_id': 'copper',
+             'shipments': {'shipments': []}}
+    result = resolve_local_turn(state, 'Will our stock run out before the selected arrival?', now=NOW)
+    assert result['kind'] == 'needs_input'
+    assert result['missing_inputs'] == ['current accepted quote']
+    assert result['context_version'] == 7
+    assert 'active-plan' in result['evidence_refs']
+    assert 'unknown' in result['answer'].lower()
+    assert 'old-plan' not in result['evidence_refs']
+    assert '2026-10-24' not in result['answer']
+
 def test_local_mixed_question_offline_preserves_exact_public_consent():
     with client() as c:
         s,h=auth(c)

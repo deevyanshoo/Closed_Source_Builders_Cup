@@ -135,3 +135,16 @@ def test_quarter_capacity_does_not_imply_available_quantity_before_need_date():
     result = planner.build_plan([offer], request([offer]), today=TODAY)
     assert result["selected_offer_id"] is None
     assert "capacity_period_unsupported" in result["alternatives"][0]["reasons"]
+
+
+def test_comparison_prefers_continuous_supply_over_cheaper_deadline_option():
+    planner, _ = services()
+    offers = accepted_offers()
+    result = planner.build_plan(offers, request(offers, current_stock_kg='5000',
+        delay_days_by_offer={'eu-copper': 6}), today=TODAY)
+    assert result['selected_offer_id'] == 'express-copper'
+    assert result['supply_coverage']['status'] == 'covered'
+    coverage = {a['offer_id']: a for a in result['supply_coverage']['alternatives']}
+    assert coverage['eu-copper']['order_deadline_met'] is True
+    assert coverage['eu-copper']['continuous_supply_covered'] is False
+    assert coverage['express-copper']['continuous_supply_covered'] is True

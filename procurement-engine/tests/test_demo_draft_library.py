@@ -97,7 +97,7 @@ def test_rfq_proposal_exposes_unsent_content_before_apply_without_changing_plan(
     assert state['simulated_outbox'] == []
 
 
-def test_direct_rfq_survives_a_new_comparison_and_session_reload(demo):
+def test_direct_rfq_history_survives_but_new_comparison_retires_current_access(demo):
     client, headers, offers, request, plan = demo
     # Reuse the accepted quote fixture, then persist every subsequent mutation.
     backend = MemorySessionPersistence()
@@ -117,12 +117,15 @@ def test_direct_rfq_survives_a_new_comparison_and_session_reload(demo):
     assert drafts[0]['body'] == rfq['text'] and drafts[0]['kind'] == 'rfq'
     assert client.post('/api/demo/plan', headers=headers, json=request).status_code == 200
     restored = client.get('/api/demo/session').json()
-    assert restored['rfq'] is None and restored['drafts'] == drafts
+    assert restored['rfq'] is None and restored['drafts'] == []
+    assert client.get(f"/api/demo/rfq/{rfq['draft_id']}/download").status_code == 404
+    assert any(row['draft_id'] == rfq['draft_id'] for row in existing.drafts)
     fresh_app = create_app(clock=original_store.clock, session_backend=backend)
     with TestClient(fresh_app, base_url='https://demo.test') as cold:
         cold.cookies.update(client.cookies)
         state = cold.get('/api/demo/session').json()
         assert state['session_id'] == session_id
-        assert state['rfq'] is None and state['drafts'] == drafts
-        assert state['drafts'][0]['status'] == 'draft_unsent'
+        assert state['rfq'] is None and state['drafts'] == []
+        assert cold.get(f"/api/demo/rfq/{rfq['draft_id']}/download").status_code == 404
+        assert any(row['draft_id'] == rfq['draft_id'] for row in fresh_app.state.sessions.get(session_id).drafts)
         assert state['simulated_outbox'] == []

@@ -57,7 +57,7 @@ function validUTC(value: string): boolean {
 export function createExample(example: RecoveryExample, workspace: string): RecoveryComparisonRequest {
   if (!workspace) throw new RecoveryError('An authenticated workspace is required.', 'validation');
   const source = recoveryExamples[example];
-  if (!source) throw new RecoveryError('Choose a provided synthetic example.', 'validation');
+  if (!source) throw new RecoveryError('Choose a provided example.', 'validation');
   const request = structuredClone(source);
   request.snapshot.workspace_id = workspace;
   request.scenario.workspace_id = workspace;

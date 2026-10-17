@@ -1,7 +1,14 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SessionResponse, ShipmentRecoveryContext } from '../../../contracts/generated/types';
-import { isCurrentShipmentRun, refreshShipmentOnForeground, ShipmentOutcomeView, runShipmentComparison, subscribeShipmentForeground } from './shipment-recovery-page';
+import { isCurrentShipmentRun, refreshShipmentOnForeground, ShipmentOutcomeView, ShipmentRecoveryPage, runShipmentComparison, subscribeShipmentForeground } from './shipment-recovery-page';
+import { MemoryRouter } from 'react-router-dom';
+
+it('opens shipment recovery with a plain local-context boundary', () => {
+  const html = renderToStaticMarkup(<MemoryRouter><ShipmentRecoveryPage /></MemoryRouter>);
+  expect(html).toContain('Host-configured shipment contexts');
+  expect(html).not.toContain('LOCAL · SYNTHETIC');
+});
 import type { ShipmentViewOutcome } from './shipment-recovery';
 
 const context: ShipmentRecoveryContext = {

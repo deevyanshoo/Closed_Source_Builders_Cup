@@ -170,8 +170,9 @@ def test_live_research_preparation_delegates_without_search_or_voice_approval():
     asyncio.run(scenario())
 
 
-def test_invalid_csrf_denies_provider_connection():
+def test_invalid_csrf_denies_provider_connection(monkeypatch):
     async def scenario():
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
         store, session = setup()
         socket = Socket(start(session, token='incorrect'))
         opened = False
@@ -187,6 +188,24 @@ def test_invalid_csrf_denies_provider_connection():
                                         client_factory=factory)
         assert (await next_type(socket, 'error'))['code'] == 'voice_invalid'
         assert not opened and socket.closed == 1000
+        assert session.live_voice_sessions == 0
+        assert session.live_voice_starts_by_company == {}
+        assert live_voice._PROCESS_STARTS == 0
+    asyncio.run(scenario())
+
+
+def test_stale_hello_does_not_count_a_start(monkeypatch):
+    async def scenario():
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
+        store, session = setup()
+        socket = Socket(start(session, context=2))
+        await live_voice.run_live_voice(socket, session=session, store=store,
+                                        operate_workspace=lambda *_: None,
+                                        client_factory=connection(Provider()))
+        assert (await next_type(socket, 'error'))['code'] == 'stale_context'
+        assert session.live_voice_sessions == 0
+        assert session.live_voice_starts_by_company == {}
+        assert live_voice._PROCESS_STARTS == 0
     asyncio.run(scenario())
 
 
@@ -297,11 +316,14 @@ def test_context_switch_during_tool_call_discards_stale_result():
     asyncio.run(scenario())
 
 
-def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
+def test_repeated_company_starts_preserve_workspace_and_admit_persisted_count(monkeypatch):
     async def scenario():
         monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
         store, session = setup()
-        for _ in range(live_voice.MAX_COMPANY_STARTS):
+        session.live_voice_sessions = 6
+        session.live_voice_starts_by_company['solara-cables'] = 6
+        session.watch_items.append({'material_id': 'copper'})
+        for _ in range(7):
             socket = Socket(start(session))
             task = asyncio.create_task(live_voice.run_live_voice(
                 socket, session=session, store=store, operate_workspace=lambda *_: None,
@@ -309,13 +331,9 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
             await next_type(socket, 'ready')
             await socket.frames.put('{"type":"stop"}')
             await asyncio.wait_for(task, 2)
-        third = Socket(start(session))
-        await live_voice.run_live_voice(third, session=session, store=store,
-                                        operate_workspace=lambda *_: None,
-                                        client_factory=connection(Provider()))
-        assert (await next_type(third, 'error'))['code'] == 'voice_limit'
-        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS
-        assert session.live_voice_starts_by_company['solara-cables'] == live_voice.MAX_COMPANY_STARTS
+        assert session.live_voice_sessions == 13
+        assert session.live_voice_starts_by_company['solara-cables'] == 13
+        assert session.watch_items == [{'material_id': 'copper'}]
 
         with session.lock:
             session.select_company('terrapack')
@@ -326,26 +344,21 @@ def test_company_and_process_start_limits_after_valid_hello(monkeypatch):
         assert (await next_type(terra, 'ready'))['context_version'] == 2
         await terra.frames.put('{"type":"stop"}')
         await asyncio.wait_for(terra_task, 2)
-        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS + 1
-        assert session.live_voice_starts_by_company == {'solara-cables': live_voice.MAX_COMPANY_STARTS, 'terrapack': 1}
+        assert session.live_voice_sessions == 14
+        assert session.live_voice_starts_by_company == {'solara-cables': 13, 'terrapack': 1}
 
         with session.lock:
             session.select_company('solara-cables')
         returned = Socket(start(session, context=3))
-        await live_voice.run_live_voice(returned, session=session, store=store,
-                                        operate_workspace=lambda *_: None,
-                                        client_factory=connection(Provider()))
-        assert (await next_type(returned, 'error'))['code'] == 'voice_limit'
-        assert session.live_voice_sessions == live_voice.MAX_COMPANY_STARTS + 1
-
-        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', live_voice.MAX_PROCESS_STARTS)
-        new_session = store.create()
-        fourth = Socket(start(new_session))
-        await live_voice.run_live_voice(fourth, session=new_session, store=store,
-                                        operate_workspace=lambda *_: None,
-                                        client_factory=connection(Provider()))
-        assert (await next_type(fourth, 'error'))['code'] == 'voice_limit'
-        assert new_session.live_voice_sessions == 0
+        returned_task = asyncio.create_task(live_voice.run_live_voice(
+            returned, session=session, store=store, operate_workspace=lambda *_: None,
+            client_factory=connection(Provider())))
+        assert (await next_type(returned, 'ready'))['context_version'] == 3
+        await returned.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(returned_task, 2)
+        assert session.live_voice_sessions == 15
+        assert session.live_voice_starts_by_company == {'solara-cables': 14, 'terrapack': 1}
+        assert session.watch_items == [{'material_id': 'copper'}]
     asyncio.run(scenario())
 
 
@@ -359,7 +372,7 @@ def test_provider_startup_failure_does_not_exhaust_retry_budget(monkeypatch):
             raise RuntimeError('private provider detail')
             yield
 
-        for _ in range(live_voice.MAX_COMPANY_STARTS + 1):
+        for _ in range(7):
             socket = Socket(start(session))
             await live_voice.run_live_voice(socket, session=session, store=store,
                                             operate_workspace=lambda *_: None,
@@ -383,13 +396,29 @@ def test_process_start_budget_resets_after_one_hour(monkeypatch):
         tick = [1000.0]
         monkeypatch.setattr(live_voice, 'monotonic', lambda: tick[0])
         monkeypatch.setattr(live_voice, '_PROCESS_WINDOW_STARTED', 1000.0)
-        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', live_voice.MAX_PROCESS_STARTS)
+        monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
         store, session = setup()
+        for _ in range(24):
+            socket = Socket(start(session))
+            task = asyncio.create_task(live_voice.run_live_voice(
+                socket, session=session, store=store, operate_workspace=lambda *_: None,
+                client_factory=connection(Provider())))
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
         blocked = Socket(start(session))
         await live_voice.run_live_voice(blocked, session=session, store=store,
                                         operate_workspace=lambda *_: None,
                                         client_factory=connection(Provider()))
-        assert (await next_type(blocked, 'error'))['code'] == 'voice_limit'
+        error = await next_type(blocked, 'error')
+        assert error['code'] == 'voice_limit'
+        assert 'temporary' in error['message'].lower()
+        assert 'shared' in error['message'].lower()
+        assert 'service' in error['message'].lower()
+        assert 'refresh' not in error['message'].lower()
+        assert 'company' not in error['message'].lower()
+        assert 'demo' not in error['message'].lower()
+        assert session.live_voice_sessions == 24
         tick[0] += 3601
         retry = Socket(start(session))
         task = asyncio.create_task(live_voice.run_live_voice(
@@ -398,6 +427,7 @@ def test_process_start_budget_resets_after_one_hour(monkeypatch):
         await next_type(retry, 'ready')
         await retry.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
+        assert session.live_voice_sessions == 25
     asyncio.run(scenario())
 
 

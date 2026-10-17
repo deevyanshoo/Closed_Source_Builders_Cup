@@ -157,7 +157,7 @@ export function createFixtureAdapter(clock: () => Date = () => new Date()) {
     async upload(file: File): Promise<Offer> {
       const id = await sha256(file);
       const offer = [...offers.values()].find(o => o.document.document_id === id);
-      if (!offer) throw new OffersError('This local adapter only recognises the 18 synthetic fixture quotes. Extracting other files needs the Python /offers service or the gateway, which is not connected yet.', 'unavailable');
+      if (!offer) throw new OffersError('This local adapter accepts only the 18 listed sample quotes. Extracting other files needs the Python /offers service or the gateway, which is not connected yet.', 'unavailable');
       return { ...structuredClone(offer), blocking_reasons: blockingReasons(offer, utcDay(clock)) };
     },
     async correct(id: string, name: string, value: unknown, version: number): Promise<Offer> {

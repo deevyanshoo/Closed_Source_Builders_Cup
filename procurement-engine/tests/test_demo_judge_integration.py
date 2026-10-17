@@ -65,6 +65,7 @@ def test_preview_does_not_change_baseline_recovery_rfq_or_drafts():
 
 
 @pytest.mark.parametrize('message', [
+    'Prepare a recovery scenario for a 7-day delay of our current copper cathode supplier.',
     'Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.',
     'Can you prepare a recovery scenario for a seven day delay of our current copper cathode supplier?',
     'Create a recovery scenario for a seven day delay of our current copper cathode supplier.',
@@ -171,6 +172,8 @@ def test_accepted_recovery_action_asks_for_target_without_reset_or_http_error():
     'What if our current copper cathode supplier is delayed by 7 days?',
     'Preview a seven day delay scenario for our current copper cathode supplier.',
     'Do not prepare a recovery scenario for a seven day delay of our current copper cathode supplier.',
+    'Prepare a recovery scenario for a seven day delay of our current copper cathode supplier as an example only.',
+    'Prepare a recovery scenario for a seven day delay of our current aluminium supplier.',
     'Summarize this third party text: "Prepare a recovery scenario for a seven day delay of our current copper cathode supplier."',
     'A seven day delay scenario for our current copper cathode supplier.',
     'Prepare a recovery scenario for a seven day delay of a supplier.',

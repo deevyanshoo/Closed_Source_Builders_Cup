@@ -51,7 +51,7 @@ export function refreshShipmentOnForeground(clearIdentityBoundState: () => void,
 const show = (v: unknown) => JSON.stringify(v, null, 2);
 function Evidence({ name, rows }: { name: string; rows: unknown[] }) {
   return <details className="shipment-evidence"><summary>{name} · {rows.length}</summary>
-    {rows.length ? <ol>{rows.map((row, index) => <li key={index}><pre>{show(row)}</pre></li>)}</ol> : <p>None in this synthetic context.</p>}
+    {rows.length ? <ol>{rows.map((row, index) => <li key={index}><pre>{show(row)}</pre></li>)}</ol> : <p>None in this context.</p>}
   </details>;
 }
 export function ShipmentOutcomeView({ value }: { value: ShipmentViewOutcome }) {
@@ -59,7 +59,7 @@ export function ShipmentOutcomeView({ value }: { value: ShipmentViewOutcome }) {
   const evidence = outcome.evidence;
   return <section className="shipment-outcome" aria-label="Shipment recovery outcome">
     <div className="shipment-result-head">
-      <p className="eyebrow">LOCAL · SYNTHETIC · HOST CONFIGURED · EPHEMERAL</p>
+      <p className="eyebrow">Host-configured shipment contexts</p>
       <h2>{value.kind === 'evaluated' ? 'Independent shipment comparisons' : value.kind === 'no_eligible_scenario' ? 'No eligible source scenario' : 'Comparison rejected'}</h2>
       <p>Workspace {context.workspace_id} · plan {context.plan_version} · propagation {context.propagation_snapshot_id} · production {context.production_snapshot_id} · as of {context.as_of} · revision {context.revision}</p>
       <p><strong>Source authenticity not verified.</strong> These are independent alternatives, not a simultaneous plan. No operational plan is applied or saved.</p>
@@ -84,7 +84,7 @@ export function ShipmentOutcomeView({ value }: { value: ShipmentViewOutcome }) {
       </div>
     </section>)}
     <details className="shipment-raw"><summary>Complete unchanged adapter outcome JSON</summary><pre>{raw}</pre></details>
-    <p className="shipment-limit">Local synthetic modeling; source authenticity, actual forecast accuracy, production login, persistence and deployment are unverified. No supplier is contacted.</p>
+    <p className="shipment-limit">Local scenario modeling; source authenticity, actual forecast accuracy, production login, persistence and deployment are unverified. No supplier is contacted.</p>
   </section>;
 }
 
@@ -196,27 +196,27 @@ export function ShipmentRecoveryPage() {
   }
   function cancel() { invalidate(); setView({ kind: selectedRef.current ? 'ready' : 'empty' }); }
   return <div className="shell shipment-shell">
-    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SHIPMENT RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/recovery">Receipt comparison</Link><Link className="recovery-back" to="/dispatch">Synthetic dispatch workspace</Link></header>
+    <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / SHIPMENT RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/recovery">Receipt comparison</Link><Link className="recovery-back" to="/dispatch">Dispatch workspace</Link></header>
     <main>
-      <div className="shipment-intro"><p className="eyebrow">LOCAL · SYNTHETIC · HOST CONFIGURED · EPHEMERAL</p><h1>Shipment recovery evidence.</h1><p>Compare complete host-configured shipment contexts through the local read-only gateway. Source authenticity not verified. No plan is applied or saved.</p></div>
+      <div className="shipment-intro"><p className="eyebrow">Host-configured shipment contexts</p><h1>Shipment recovery evidence.</h1><p>Compare complete host-configured shipment contexts through the local read-only gateway. Source authenticity not verified. No plan is applied or saved.</p></div>
       <section className="shipment-session" aria-label="Current local session">
         {view.kind === 'checking' && <p role="status">Checking local session…</p>}
         {session && <p>Local {session.identity_mode === 'private_machine' ? 'private machine' : 'development'} identity · workspace {session.workspace_id} · {session.role}. Interactive production sign-in is unavailable.</p>}
       </section>
       {view.kind === 'loading_contexts' && <p className="shipment-status" role="status">Loading host-configured context metadata…</p>}
-      {view.kind === 'empty' && <div className="notice" role="status">The enabled local catalog has no shipment contexts. Ask the host operator to configure a synthetic context.</div>}
+      {view.kind === 'empty' && <div className="notice" role="status">The enabled local catalog has no shipment contexts. Ask the host operator to configure a test context.</div>}
       {loadedRouteKey === routeKey && handoffUnavailable && <div className="notice" role="status">The quote handoff could not be verified against this session and catalog. No context was selected. Choose a host-configured context explicitly if you want an independent comparison.</div>}
       {(view.kind === 'session_error' || view.kind === 'unavailable' || view.kind === 'error') && <div className="notice notice-error" role="alert"><strong>{view.kind === 'session_error' ? 'Session unavailable' : 'Shipment comparison unavailable'}</strong><p>{view.message}</p><button className="secondary-button" type="button" onClick={() => void load()}>Retry local session and contexts</button></div>}
       {session && loadedRouteKey === routeKey && contexts.length > 0 && <section className="shipment-controls" aria-label="Shipment recovery controls">
-        <label className="field"><span className="field-label">Host-configured synthetic context</span><select value={selected ? String(contexts.indexOf(selected)) : ''} onChange={event => choose(event.target.value)}><option value="">Select a context explicitly</option>{contexts.map((row, i) => <option key={`${row.context_id}:${row.revision}:${row.request_sha256}:${i}`} value={String(i)}>{row.context_id} · {row.plan_version} · {row.propagation_snapshot_id} / {row.production_snapshot_id} · revision {row.revision}</option>)}</select></label>
+        <label className="field"><span className="field-label">Host-configured context</span><select value={selected ? String(contexts.indexOf(selected)) : ''} onChange={event => choose(event.target.value)}><option value="">Select a context explicitly</option>{contexts.map((row, i) => <option key={`${row.context_id}:${row.revision}:${row.request_sha256}:${i}`} value={String(i)}>{row.context_id} · {row.plan_version} · {row.propagation_snapshot_id} / {row.production_snapshot_id} · revision {row.revision}</option>)}</select></label>
         {selected && <p>Context {selected.context_id} · digest {selected.request_sha256}. Digest identifies host-owned bytes, not source authenticity.</p>}
-        {selected && provenance && <p>Quote source checked at {provenance.source_checked_at} for source date {provenance.source_as_of}. Synthetic scenario as of {provenance.context_as_of}. Host configured synthetic binding; source authenticity not verified. This is a read-only association, not a quote-caused shipment or applied plan.</p>}
-        {selected && !provenance && <p>Synthetic scenario as of {selected.as_of}. Source authenticity not verified; no current quote eligibility is claimed.</p>}
+        {selected && provenance && <p>Quote source checked at {provenance.source_checked_at} for source date {provenance.source_as_of}. Scenario as of {provenance.context_as_of}. Host-configured binding; source authenticity not verified. This is a read-only association, not a quote-caused shipment or applied plan.</p>}
+        {selected && !provenance && <p>Scenario as of {selected.as_of}. Source authenticity not verified; no current quote eligibility is claimed.</p>}
         <div className="shipment-actions"><button className="primary-button" type="button" onClick={() => void compare()} disabled={!selected || view.kind === 'comparing'}>Compare selected context</button>{view.kind === 'comparing' && <button className="secondary-button" type="button" onClick={cancel}>Cancel comparison</button>}</div>
         {view.kind === 'comparing' && <p role="status">Comparing independent scenarios…</p>}
       </section>}
       {loadedRouteKey === routeKey && result && <ShipmentOutcomeView value={result} />}
     </main>
-    <footer>Closed Source / local synthetic shipment recovery <span>No plan is applied or supplier contacted.</span></footer>
+    <footer>Closed Source / shipment recovery <span>No plan is applied or supplier contacted.</span></footer>
   </div>;
 }

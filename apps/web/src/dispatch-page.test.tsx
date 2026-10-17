@@ -101,10 +101,10 @@ describe('dispatch workspace components', () => {
 describe('replay a sample delay', () => {
   const render = async (id: string) => renderToStaticMarkup(<MemoryRouter><ReplayResult result={await adapter.replay(id)} /></MemoryRouter>);
 
-  it('lists the samples as synthetic', async () => {
+  it('lists sample events while keeping the replay meaning clear', async () => {
     const html = renderToStaticMarkup(<ReplaySamplePicker samples={(await adapter.replaySamples()).samples} selected="innsa-release" onSelect={() => {}} />);
     expect(html).toContain('Port hold at INNSA with a new ETA');
-    expect(html.match(/>synthetic</g)?.length).toBe(4);
+    expect(html.match(/>Sample</g)?.length).toBe(4);
     expect(html).toContain('aria-pressed="true"');
   });
 
@@ -113,7 +113,7 @@ describe('replay a sample delay', () => {
     expect(html).toContain('Synthetic replay event, not observed data');
     expect(html).toContain('Status: On hold → Delayed');
     expect(html).toContain('removed: on hold');
-    expect(html).toContain('Injected (synthetic)');
+    expect(html).toContain('Simulated replay');
     expect(html).toContain('This event states no new arrival time');
     expect(html).toContain('href="/shipment-recovery"');
   });
@@ -147,11 +147,11 @@ describe('top navigation', () => {
     expect(nav).toContain('aria-label="Workspace pages"');
   });
 
-  it('marks this page as current and keeps the synthetic local-adapter labels', () => {
+  it('marks this page as current and explains the local sample boundary once', () => {
     expect(nav).toMatch(/aria-current="page"[^>]*href="\/dispatch"|href="\/dispatch"[^>]*aria-current="page"/);
     expect(nav.match(/aria-current="page"/g)?.length).toBe(1);
-    expect(html).toContain('Synthetic · local adapter');
-    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
+    expect(html).toContain('Sample shipment data · local adapter · not connected to the gateway');
+    expect(html).not.toContain('Synthetic · local adapter');
   });
 });
 

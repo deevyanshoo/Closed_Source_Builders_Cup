@@ -122,12 +122,13 @@ describe('dispatch report', () => {
 });
 
 describe('download buttons', () => {
-  it('offers JSON and CSV, labelled synthetic', async () => {
+  it('offers readable format labels while preserving source labels in the exported rows', async () => {
     const { renderToStaticMarkup } = await import('react-dom/server');
     const { ReportDownloads } = await import('./report-downloads');
     const html = renderToStaticMarkup(<ReportDownloads label="this offer" build={() => ({ basename: 'x', json: '{}', csv: '' })} />);
-    expect(html).toContain('Download synthetic JSON');
-    expect(html).toContain('Download synthetic CSV');
-    expect(html).toContain('aria-label="Download this offer as synthetic JSON"');
+    expect(html).toContain('Download JSON');
+    expect(html).toContain('Download CSV');
+    expect(html).toContain('aria-label="Download this offer as JSON"');
+    expect(html).toContain('Rows retain their source labels');
   });
 });

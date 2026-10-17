@@ -6,6 +6,13 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 });
 
 describe('hosted demo API', () => {
+  it('presents connection, expiration, and upload limits in workspace language without changing the request boundary', async () => {
+    await expect(createDemoApi(async () => { throw new Error('offline'); }).session()).rejects.toMatchObject({ message: 'The workspace could not be reached. Check your connection and try again.' });
+    await expect(createDemoApi(async () => json({}, 403)).session()).rejects.toMatchObject({ message: 'This workspace session expired. Refresh the page to start again.' });
+    const file = { name: 'large.pdf', size: MAX_UPLOAD_BYTES + 1, arrayBuffer: vi.fn() } as unknown as File;
+    await expect(createDemoApi(vi.fn()).upload('csrf', file, 'gemini')).rejects.toMatchObject({ message: 'Choose a listed sample document smaller than 500 KB.' });
+    expect(file.arrayBuffer).not.toHaveBeenCalled();
+  });
   it('reads the authenticated risk snapshot without a mutation, CSRF, or model request', async () => {
     const send = vi.fn(async () => json({ companies: [], monitoring: 'while_workspace_open' }));
     await createDemoApi(send).risks();

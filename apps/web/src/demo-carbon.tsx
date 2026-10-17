@@ -134,7 +134,7 @@ export async function requestCarbonEstimate(send: typeof fetch, csrf: string, pl
   try {
     response = await send('/api/demo/carbon/estimate', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
       body: JSON.stringify({ plan_id: planId, legs_by_offer: legsByOffer, ...(Object.keys(massByOffer).length ? { mass_by_offer: massByOffer } : {}), ...(contextVersion === undefined ? {} : { expected_context_version: contextVersion }) }) });
-  } catch { throw new Error('The demo service could not be reached. Try again.'); }
+  } catch { throw new Error('The workspace service could not be reached. Try again.'); }
   let body: unknown = null;
   try { body = await response.json(); } catch { /* handled below */ }
   if (!response.ok) {

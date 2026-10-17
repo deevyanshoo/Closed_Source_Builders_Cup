@@ -9,10 +9,10 @@ export function contextRefMatches(value: unknown, expected: ProductionContextRef
 
 export function parseSnapshot(text: string, workspace: string): ProductionSnapshot {
   let value: unknown;
-  try { value = JSON.parse(text); } catch { throw new Error('Enter complete JSON for a synthetic production snapshot.'); }
+  try { value = JSON.parse(text); } catch { throw new Error('Enter complete JSON for a sample production snapshot.'); }
   if (!voiceMatches(value, 'ProductionSnapshot')) throw new Error('The production snapshot is incomplete or has unsupported fields.');
   const snapshot = value as ProductionSnapshot;
-  if (snapshot.workspace_id !== workspace || snapshot.synthetic !== true) throw new Error('The synthetic snapshot must use the current workspace.');
+  if (snapshot.workspace_id !== workspace || snapshot.synthetic !== true) throw new Error('The sample snapshot must use the current workspace.');
   return snapshot;
 }
 

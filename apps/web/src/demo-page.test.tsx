@@ -25,6 +25,32 @@ it('shows a clean supplier label in the comparison without changing the selected
   expect(selectedPlan.selected_offer_id).toBe('q1');
 });
 
+it('renders the known planner explanation and fixture label without changing the plan or document', () => {
+  const original = { ...selectedPlan, explanation: 'Europa Copper SA is the lowest-cost feasible single-offer option under the stated synthetic assumptions.' };
+  const quote = { ...offer(1), fixture_id: 'eu-copper', document: { ...offer(1).document, filename: 'SYN-eu-copper.csv' } };
+  const html = renderToStaticMarkup(<PlanResults plan={original} offers={[quote]} />);
+  expect(html).toContain('under the stated assumptions.');
+  expect(html).toContain('Eu copper');
+  expect(html).not.toContain('stated synthetic assumptions');
+  expect(html).not.toContain('SYN-eu-copper.csv');
+  expect(original.explanation).toContain('stated synthetic assumptions');
+  expect(quote.document.filename).toBe('SYN-eu-copper.csv');
+  const named = renderToStaticMarkup(<PlanResults plan={original} offers={[quote]} fixtures={[{ id: 'eu-copper', name: 'Europa copper · on-time EUR', filename: quote.document.filename, description: '', download_url: '/api/demo/fixtures/eu-copper' }]} />);
+  expect(named).toContain('Europa copper · on-time EUR');
+  const upload = renderToStaticMarkup(<PlanResults plan={original} offers={[{ ...quote, fixture_id: undefined }]} />);
+  expect(upload).toContain('SYN-eu-copper.csv');
+});
+
+it('uses a human quote label in restored comparison controls and delay recap', () => {
+  const quote = { ...offer(1, 'saved'), fixture_id: 'quote-a', document: { ...offer(1).document, filename: 'SYN-eu-copper.csv' } };
+  const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [quote], recovery: { ...recovery, scenario_request: { ...request, delay_days_by_offer: { q1: 20 } } }, rfq: null }, epoch: 0 });
+  const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+  expect(html).toContain('Eu copper');
+  expect(html).toContain('Eu copper +20 days');
+  expect(html).not.toContain('SYN-eu-copper.csv');
+  expect(quote.document.filename).toBe('SYN-eu-copper.csv');
+});
+
 it('shows a clean RFQ recipient while preserving the canonical server draft', () => {
   const raw = 'Europa Copper SA [SYNTHETIC]';
   const canonical = { ...rfq, supplier: raw, text: `Request for quotation to ${raw}. This draft remains unsent.` };
@@ -61,17 +87,19 @@ describe('ZOORQ workspace routes', () => {
       expect(html).toContain('aria-label="ZOORQ home · A product by ClosedSource"');
     }
   });
-  it('shows one accessible disclosure at the top of each company workspace, but not the company hub', () => {
+  it('shows one accessible disclosure at the top of every destination, including the hub', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
     for (const view of ['overview', 'inventory', 'news', 'drafts', 'procurement'] as const) {
       const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView={view} />);
-      expect(html.match(/aria-label="Demo workspace disclosure"/g)).toHaveLength(1);
-      expect(html).toMatch(/id="zoorq-workspace-content"[^>]*>.*?Demo workspace disclosure.*?Company records, supplier quotes and buyer inputs are illustrative/);
-      expect(html).toContain('News draws on public sources');
-      expect(html).toContain('emissions use published averages and may use product proxy factors');
+      expect(html.match(/aria-label="Workspace data disclosure"/g)).toHaveLength(1);
+      expect(html).toMatch(/id="zoorq-workspace-content"[^>]*>.*?Workspace data disclosure.*?Company and supplier records are illustrative; news is public; emissions are estimates/);
+      expect(html).toContain('news is public');
+      expect(html).toContain('emissions are estimates');
     }
     const hub = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="hub" />);
-    expect(hub).not.toContain('Demo workspace disclosure');
+    expect(hub.match(/aria-label="Workspace data disclosure"/g)).toHaveLength(1);
+    expect(hub.indexOf('All companies')).toBeLessThan(hub.indexOf('Explore your company'));
+    expect(hub).toContain('What this preview can show');
   });
   it('restores focus to hub content when the prior operator trigger is disabled', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
@@ -136,6 +164,16 @@ describe('ZOORQ workspace routes', () => {
     const rfqStage = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
     expect(rfqStage).toContain('I reviewed this plan and understand the RFQ is an unsent draft');
     expect(rfqStage).not.toContain('demo-plan-form');
+  });
+  it('offers the existing clean comparison before sending a buyer back to quote intake', () => {
+    const overview = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="overview" />);
+    expect(overview).toContain('Current comparison');
+    expect(overview).toContain('Gemini on Vertex AI');
+    expect(overview).toContain('Multilingual voice &amp; chat');
+    const add = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="add" />);
+    expect(add).toContain('Open current comparison');
+    const dirty = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, dirty: true }} initialView="procurement" initialStage="add" />);
+    expect(dirty).not.toContain('Open current comparison');
   });
   it('shows the exact selected comparison before RFQ review and guides an empty stage', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
@@ -269,7 +307,7 @@ describe('demo response state', () => {
     expect(html).toContain('zoorq-risk-container" hidden=""');
     expect(html.indexOf('Procurement material')).toBeLessThan(html.indexOf('Sample quote'));
     expect(html).toContain('Naphtha · barrel');
-    expect(renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="review" />)).toContain('naphtha.csv');
+    expect(renderToStaticMarkup(<DemoPage initialState={restored} initialView="procurement" initialStage="review" />)).toContain('Naphtha</h2>');
     expect(html).not.toContain('synthetic.pdf');
   });
   it('restores the server buyer draft over an old comparison and shows server-confirmed simulated messages', () => {
@@ -411,10 +449,10 @@ describe('demo response state', () => {
     const missing: FieldResult = { name: 'material', kind: 'text', status: 'missing', value: null, source: 'document', evidence: [], reasons: [] };
     const html = renderToStaticMarkup(<CorrectionEditor field={missing} suggestion="naphtha" busy={false} materialIds={['naphtha']} onApply={() => {}} onCancel={() => {}} />);
     expect(html).toContain('value="naphtha"');
-    expect(html).toContain('Suggested synthetic fixture value');
+    expect(html).toContain('Suggested sample-document value');
     const verified = renderToStaticMarkup(<CorrectionEditor field={{ ...missing, status: 'extracted', value: 'copper' }} suggestion="naphtha" busy={false} onApply={() => {}} onCancel={() => {}} />);
     expect(verified).toContain('value="copper"');
-    expect(verified).not.toContain('Suggested synthetic fixture value');
+    expect(verified).not.toContain('Suggested sample-document value');
   });
   it('exposes the scoped operator tab beside company and news without removing procurement results', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
@@ -425,7 +463,7 @@ describe('demo response state', () => {
     expect(renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />)).toContain('current reviewed comparison');
     expect(html).toContain('Your procurement, in focus.');
     expect(html).toContain('Solara Cables workspace</h1>');
-    expect(html).toContain('Company records, supplier quotes and buyer inputs are illustrative');
+    expect(html).toContain('Company and supplier records are illustrative');
     expect(html).not.toContain('context v1');
     expect(html).toContain('demo-operator-dock');
     expect(html).toContain('Type to ZOORQ');
@@ -657,8 +695,8 @@ describe('demo response state', () => {
 
   it('renders honest demo limits and disabled planning before an accepted quote', () => {
     const html = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, offers: [], plan: null, plan_request: null, rfq: null }, epoch: 0 })} initialView="procurement" initialStage="compare" />);
-    expect(html).toContain('Company records, supplier quotes and buyer inputs are illustrative');
-    expect(html).toContain('News draws on public sources');
+    expect(html).toContain('Company and supplier records are illustrative');
+    expect(html).toContain('news is public');
     expect(html).toContain('temporary session');
     expect(html).toContain('Run comparison');
     expect(html).toMatch(/disabled=""[^>]*>Run comparison|disabled=""[^>]*>[^<]*Run comparison/);
@@ -666,14 +704,13 @@ describe('demo response state', () => {
   it('explains saved same-browser workspace and bounded conversation only for a durable session', () => {
     const durable = { ...companySession, persistence: 'firestore' as const, expires_at: '2026-10-22T12:00:00Z' };
     const savedHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: durable, epoch: 0 })} initialView="overview" />);
-    expect(savedHtml).toContain('same browser');
-    expect(savedHtml).toContain('saved until this seven-day session expires');
-    expect(savedHtml).toContain('Recent conversation history is limited');
+    expect(savedHtml).toContain('Firestore saves this browser session and recent chats for up to seven days');
+    expect(savedHtml).toContain('older exchanges may be removed');
     expect(savedHtml).toContain('Raw voice audio is not stored');
     expect(savedHtml).not.toContain('may disappear when the service restarts');
-    expect(savedHtml).not.toContain('Firestore');
+    expect(savedHtml).toContain('How ZOORQ works');
     const temporaryHtml = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 })} initialView="overview" />);
-    expect(temporaryHtml).toContain('temporary session and may disappear when the service restarts');
-    expect(temporaryHtml).not.toContain('saved until this seven-day session expires');
+    expect(temporaryHtml).toContain('temporary session may disappear when the service restarts');
+    expect(temporaryHtml).not.toContain('Firestore saves this browser session');
   });
 });

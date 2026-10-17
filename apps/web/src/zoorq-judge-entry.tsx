@@ -35,8 +35,8 @@ export function ZoorqJudgeEntry({ company, session, visit, prepared, companyCoun
   return <section className={`zoorq-judge-entry${continuing ? ' is-continuing' : ''}`} aria-label="Procurement resilience story">
     <div className="zoorq-judge-entry-copy">
       <span className="zoorq-judge-entry-kicker">Procurement resilience · {company.name}</span>
-      <h2>{continuing ? `Continue ${company.name}` : 'See the exposure. Review the next move.'}</h2>
-      {!continuing && <><p>Supply signals matter when they reach a material, route and sourcing decision. Trace the evidence, then compare a possible response.</p>
+      <h2>{continuing ? `Continue ${company.name}` : 'Supplier disruption to stock gap.'}</h2>
+      {!continuing && <><p>Trace the signal to your material and route, compare recovery, then prepare a draft for review.</p>
       <div className="zoorq-judge-entry-status" role="status">{ready ? 'Prepared scenario · ready to explore' : prepared.status === 'loading' ? 'Preparing the scenario…' : 'Prepared scenario unavailable; you can still explore this company.'}</div></>}
     </div>
     {!continuing && <div className="zoorq-judge-entry-facts-shell">

@@ -63,6 +63,9 @@ describe('operator response boundary', () => {
     const voice = renderToStaticMarkup(<VoiceConversationSurface open onClose={() => {}} voice={<p>Listening</p>}
       activity={<article>Latest question? Latest answer.</article>}
       history={<ol>{scopedVoiceHistory(current, scope).map(exchange => <li key={exchange.id}>{exchange.question} {exchange.turn?.assistant_text}</li>)}</ol>} />);
+    expect(voice).toContain('Multilingual voice &amp; chat · Gemini on Vertex AI');
+    expect(voice).toContain('Talk naturally in your preferred language. Review proposed actions before they run.');
+    expect(voice).toContain('Action approvals');
     expect(voice).toContain('Recent conversation');
     expect(voice).toMatch(/<details class="demo-voice-history"><summary>Recent conversation<\/summary>/);
     expect(voice).toContain('Earlier question?');
@@ -202,7 +205,11 @@ describe('operator response boundary', () => {
       onClose={() => {}} onSession={() => {}} onUnknown={() => {}} />);
     expect(html).toContain('ZOORQ operator');
     expect(html).toContain('Solara Cables');
-    expect(html).toContain('Ask about this company');
+    expect(html).toContain('Talk naturally in your preferred language. Review proposed actions before they run.');
+    expect(html).toContain('Gemini on Vertex AI');
+    expect(html).toContain('Action approvals');
+    expect(html).toContain('When asked, say the exact approval phrase shown.');
+    expect(html).not.toContain('Ask in English, Hindi or Portuguese');
     expect(html).toContain('aria-label="Close operator chat"');
   });
   it('keeps current review and cancel actions visible above history while details stay collapsed', () => {

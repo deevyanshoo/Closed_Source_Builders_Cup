@@ -1,0 +1,43 @@
+# ZOORQ recovery reliability and product presentation — 17 October 2026
+
+## Release state
+
+The existing [hosted workspace](https://zoorq-963802031195.asia-south1.run.app/demo) serves revision `zoorq-feedback-2285048` at 100% traffic, with healthy Firestore persistence. Runtime source is `2285048f10d105d0513e466f6c6ef07ac948fc18`; subsequent documentation commits do not change that image. Cloud Build `93adf50a-9537-44e4-ac9e-42559f1c88e5` succeeded. The deployed image digest is `sha256:d623f833753d8818354996d1bd511020cdc2c7c8adcfe52594fce592eb810c15`.
+
+Hosted HTML and its entry JavaScript/CSS match the allowlisted release package byte for byte. The service account, environment hash, CPU/memory, maximum instances, concurrency and 3,600-second transport timeout are unchanged. The prior revision `zoorq-continuous-4ad06d2` remains the rollback target. Application coding used parallel Codex CLI agents in Antigravity terminals; independent reviewers checked the recovery, copy and visual changes separately.
+
+## Product changes
+
+The workspace has one prominent data disclosure. Routine page headings and summaries use business wording, while estimates, public-source attribution, historical scenarios, unsent RFQs and simulated delivery remain accurately identified. Structured provenance and source evidence remain available. The disclosure, story, comparison entry and overview share the same content gutters. The first-visit story is shorter, the saved comparison can be reopened directly, and the voice call button sits above the Thinking Orb. Small-screen news tabs and Refresh occupy separate rows when necessary.
+
+The operator and voice interface display **Multilingual voice & chat · Gemini on Vertex AI**. Preferred-language conversation does not require a language picker. Action approval follows the exact phrase shown in the review. The overview and technology details identify the actual roles of Gemini/Vertex AI, Cloud Run, Firestore, Cloud Storage and Maps. Deterministic calculations are distinguished from model-generated interpretation.
+
+A public-company research preview accepts a public company name, displays the exact query and requires explicit consent before Google-grounded research. It reuses existing research budgets and session/context checks. Public research is isolated from the active company's chat and operational records; it does not invent inventory, suppliers, contracts or a connected business system.
+
+The per-company lifetime six-start voice restriction is removed. Previously stored counts remain observability data, without forcing a session reset. Existing shared-service usage controls, connection bounds, authentication, failed-setup refunds and continuous conversation renewal remain.
+
+## Recovery behavior
+
+A fresh, explicit, completed recovery request is routed through the existing validated operator even when the voice model selects a workspace read or gives a generic response. Preparation remains read-only and is bound to the owned material/shipment, exact delay, accepted plan and quote versions. The bridge suppresses unrelated provider readback and requests the actual validated review only after the original provider turn completes. It never invents a function-call identifier. A separate fresh, independently verified approval is required before application.
+
+Real-provider QA exposed late speech metadata: the original input wait elapsed before a valid utterance's caption and END event arrived. The candidate has a separate bounded transport-lateness window while retaining the physical speech-clip and consent limits. Independent review requires abandoned late input to leave the conversation usable through bounded provider renewal, without allowing old captions to authorize a new action.
+
+## Verification
+
+- Exact committed source: backend **3,764 passed, 2 skipped, 263 subtests passed** in 550.76 seconds; frontend **602 passed, 6 skipped**. Session-switch checks, TypeScript and the production build passed.
+- Hosted deterministic workflows passed for all ten companies: accepted quotes, planning, supplier-delay comparison, persisted unsent RFQ and download, carbon assessment and entered freight. All **198 declared route pairs** passed the route checks. Missing product carbon factors remain explicit; an unsupported whole-footprint number is never fabricated.
+- Hosted current-company risk answers passed across all ten companies, including owned evidence, idempotent replay and unchanged protected business state, with no external model calls for those reads.
+- Actual hosted Vertex Gemini Live completed five consecutive controlled-speech turns on one connection: carbon calculation, freight update, saved RFQ, seven-day recovery review and a separate fresh verified spoken approval. The applied recovery matches the local planner oracle and applies once. RFQ download bytes match the canonical saved draft and activity ledger; no supplier delivery occurred.
+- A separate fresh production-configured recovery session returned a complete spoken review, one unique owned proposal and an unchanged plan pending separate approval; 38.688 seconds. Two identical deliveries of the same proposal ID were verified as idempotent delivery, not two proposals.
+- Seven sequential voice starts in the same disposable company session all reached actual provider readiness without resetting the session or changing protected business records. This verifies removal of the lifetime six-start restriction; retained shared service controls still apply.
+- Separate hosted Hindi and Portuguese factual voice reads both returned the owned six-day copper stock cover and ten-day profile lead, using read-only company tools with nonempty speech output, no internet research and unchanged protected records. These checks cover factual multilingual reads; recovery approval remains the exact fresh English phrase shown in its review.
+- The isolated Vertex Live no-tool transport control on the exact committed source passed in 37.294 seconds: one canonical seven-day recovery proposal, complete review, nonempty PCM and no preapproval application. This deliberately minimal no-tool prompt is separate from the hosted production workflow above.
+- Public-company preview completed source-linked Tata Steel research after explicit consent in 3.223 seconds. False consent was rejected, all non-transient result fields replayed identically, active company records and chat stayed isolated, and request-local Google attribution markup was absent from persisted replay as intended.
+- Actual desktop and mobile rendering was reviewed at relevant widths from 360 to 1470 pixels, in light/dark overview, inventory, news, procurement and operator states. Hosted 390-pixel news and operator surfaces had no horizontal page overflow; news tabs and Refresh were distinct, usable controls. A separate reviewer approved the dark inventory desktop first viewport; the coordinator checked mobile and operator pixels. The browser voice interface connected and returned speech; this does not substitute for the isolated factual voice/action oracles.
+- Hosted Lighthouse: mobile **91 performance / 100 accessibility / 100 best practices / 100 SEO**; desktop **99 / 100 / 100 / 100**. These are individual measured runs on the hosted entry page, not every workflow or a guarantee across devices and networks.
+
+Earlier forced no-tool attempts used contradictory production tool instructions and elicited malformed tool calls; those are retained as failed controls. The isolated prompt removed that test conflict. A separate trace established the late caption/END defect above. The controls do not weaken provider argument validation or consent checks. Hosted voice evidence uses controlled speech and actual provider captions/PCM; it is not an independent transcription or speaker-listening evaluation.
+
+Three private QA assumptions were corrected without changing product code or relaxing action checks: 240-character caption capture clipped the approval phrase from a valid 1,200-character recovery frame; Google attribution markup is intentionally request-local rather than replayed; repeated tool-result delivery must be checked by unique proposal ID and identical payload. Original failed receipts remain alongside the corrected passing runs. No failed receipt was overwritten or silently treated as passing.
+
+No testimonial or video was fabricated. No new service, dependency, IAM permission or billing configuration is part of this release. Existing trial-credit authorization and the existing service envelope apply. Private QA receipts remain outside Git under `/private/tmp/zoorq-feedback-recovery-20261017/`; credentials and workspace session tokens are not release artifacts.

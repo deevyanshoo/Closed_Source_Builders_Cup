@@ -718,7 +718,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         if kind == 'load_quotes':
             before = len(value.offers)
             offers = staged_quotes(value, material_id)
-            return {'tool': kind, 'summary': f'{len(offers)} synthetic quotes are ready for review.',
+            return {'tool': kind, 'summary': f'{len(offers)} quotes are ready for review.',
                     'fields_changed': ['offers'] if len(value.offers) != before else []}, True
         if kind == 'compare':
             plan = compare_quotes(value, material_id)
@@ -2069,7 +2069,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     elif name == 'review_sample_quotes':
                         parameters = reviewed_quote_preview(value, args)
                         proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'review_quotes',
-                                    'summary': 'Review exact synthetic quote values before saving.',
+                                    'summary': 'Review exact quote values before saving.',
                                     'parameters': parameters, 'plan_id': None,
                                     'offer_versions': {item['offer_id']: item['expected_version'] for item in parameters['preview']},
                                     'context_version': value.context_version,
@@ -2184,6 +2184,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 failed(value, key)
                 raise SessionError('stale_proposal', 'Research consent expired or the workspace changed.', 409)
             proposal_id = proposal['proposal_id']
+            company_preview = proposal.get('_company_preview') is True
             if proposal_id in value.research_records:
                 failed(value, key)
                 raise SessionError('research_claimed', 'This approved search was already attempted. Read its result or prepare a new request.', 409)
@@ -2215,6 +2216,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             value.research_attempts += 1
             value.research_records[proposal_id] = {'state': 'running', 'query': query,
                 'company_id': company_id, 'context_version': version,
+                'company_preview': company_preview,
                 'idempotency_key': key, 'started_at': store.now().isoformat()}
             value.pending_proposal = None
             try:
@@ -2242,6 +2244,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             if not isinstance(result, dict) or result.get('status') not in ('completed', 'unavailable'):
                 result = {'status': 'unavailable', 'answer': '', 'sources': [],
                           'search_suggestions_html': None, 'checked_at': store.now().isoformat()}
+            if company_preview:
+                from .company_preview import safe_preview_result
+                if result.get('status') == 'completed' and not safe_preview_result(result):
+                    result = {'status': 'unavailable', 'answer': '', 'sources': [],
+                              'search_suggestions_html': None, 'checked_at': store.now().isoformat()}
             result = {**deepcopy(result), 'research_id': secrets.token_urlsafe(18), 'query': query}
             # Google permits the grounded answer in the requesting user's chat
             # history. Attribution markup stays request-local, never in history,
@@ -2262,11 +2269,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     failed(value, key)
                     store.save(value)
                     raise SessionError('stale_context', 'Workspace changed while researching. The result was not applied.', 409)
-                record.update(state='completed', result=deepcopy(result))
-                remember(value, {'id': result['research_id'], 'channel': 'text', 'question': None,
-                                  'answer': result['answer'], 'research': result})
+                record.update(state='preview_completed' if company_preview else 'completed',
+                              result=deepcopy(result))
+                if not company_preview:
+                    remember(value, {'id': result['research_id'], 'channel': 'text', 'question': None,
+                                      'answer': result['answer'], 'research': result})
                 response = {'status': 'applied', 'company_id': company_id,
-                    'context_version': version, 'kind': 'research', 'result': result, 'session': view(value)}
+                    'context_version': version, 'kind': 'research', 'preview': company_preview,
+                    'result': result, 'session': view(value)}
                 complete(value, key, response)
                 store.save(value)
                 initial_response = deepcopy(response)
@@ -2386,6 +2396,61 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             except Exception:
                 failed(value, key)
                 raise
+
+    @app.post('/api/demo/company-preview/prepare')
+    async def company_preview_prepare(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('company_name', 'expected_context_version', 'idempotency_key'))
+        from .company_preview import company_query
+        from .research import prepare_research, ResearchValidationError
+        try:
+            name, parameters = company_query(data['company_name'])
+        except ValueError as exc:
+            raise SessionError('invalid_company_name', str(exc), 422) from None
+        try:
+            approved = prepare_research(parameters['query'], None, store.now())
+        except ResearchValidationError:
+            approved = None
+        if approved != parameters:
+            raise SessionError('invalid_research', 'This public query cannot be researched. Try another company name.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            key, replay = start(value, data, 'company_preview_prepare')
+            if replay is not None:
+                return replay
+            marker = snapshot_marker(operator_snapshot(value))
+            proposal = {'proposal_id': secrets.token_urlsafe(18), 'kind': 'research',
+                'summary': f'Public research preview for {name}. No operational workspace will be created.',
+                'parameters': parameters, 'plan_id': None, 'offer_versions': {},
+                'context_version': value.context_version,
+                'expires_at': (store.now() + timedelta(minutes=5)).isoformat(),
+                '_marker': marker, '_company_id': value.company_id,
+                '_session_id': value.session_id, '_company_preview': True}
+            value.pending_proposal = proposal
+            response = {'proposal': public_proposal(proposal)}
+            complete(value, key, response)
+            return response
+
+    @app.post('/api/demo/company-preview/confirm')
+    async def company_preview_confirm(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('proposal_id', 'reviewed', 'expected_context_version', 'idempotency_key'))
+        if data['reviewed'] is not True or not isinstance(data['proposal_id'], str):
+            raise SessionError('review_required', 'Review the exact public query before searching.', 422)
+        with value.lock:
+            context(value, data, explicit=True)
+            proposal = value.pending_proposal
+            record = value.research_records.get(data['proposal_id'])
+            if not ((proposal and proposal.get('proposal_id') == data['proposal_id']
+                     and proposal.get('_company_preview') is True) or
+                    (record and record.get('company_preview') is True)):
+                raise SessionError('proposal_not_found', 'Company preview consent is no longer current.', 404)
+        result = await confirm_research(value, data)
+        if result.get('preview') is not True:
+            raise SessionError('proposal_not_found', 'Company preview consent is no longer current.', 404)
+        return result
 
     @app.post('/api/demo/operator/confirm')
     async def operator_confirm(request: Request):

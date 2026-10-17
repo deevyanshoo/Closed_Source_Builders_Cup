@@ -54,7 +54,7 @@ function Schedule({ title, value }: { title: string; value: ProductionScheduleSc
 
 export function Comparison({ value, noop }: { value: ReceiptRecoveryComparison; noop: boolean }) {
   return <div data-result="comparison" className="recovery-result">
-    <div className="recovery-result-head"><p className="eyebrow">SYNTHETIC COMPARISON · CALLER SUPPLIED RECOVERY</p><h2>{noop ? 'No changes in this comparison' : 'Three schedules, one set of inputs'}</h2><p>Snapshot {value.snapshot_id} · version {value.plan_version} · as of {utcLabel(value.as_of)}. These IDs check caller consistency; they do not prove this is the current saved plan.</p></div>
+    <div className="recovery-result-head"><p className="eyebrow">Receipt comparison · caller supplied recovery</p><h2>{noop ? 'No changes in this comparison' : 'Three schedules, one set of inputs'}</h2><p>Snapshot {value.snapshot_id} · version {value.plan_version} · as of {utcLabel(value.as_of)}. These IDs check caller consistency; they do not prove this is the current saved plan.</p></div>
     <div className="recovery-three">
       <Schedule title="Original baseline" value={value.original_baseline} />
       <Schedule title="Disrupted baseline" value={value.disrupted_baseline} />
@@ -66,7 +66,7 @@ export function Comparison({ value, noop }: { value: ReceiptRecoveryComparison; 
       <p>Potentially exposed orders: {value.potentially_exposed_order_ids.length ? value.potentially_exposed_order_ids.join(', ') : 'none'}. Changed by disruption: {value.disruption_changed_order_ids.length ? value.disruption_changed_order_ids.join(', ') : 'none'}. Changed by supplied recovery: {value.recovery_changed_order_ids.length ? value.recovery_changed_order_ids.join(', ') : 'none'}.</p>
       <h3>Modeled checks</h3><ul>{value.modeled_checks.map(check => <li key={check}>{humanReason(check)}</li>)}</ul>
       <h3>Not modeled</h3><ul>{value.unmodeled_constraints.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}</ul>
-      <p>This synthetic result does not apply a plan, send a supplier message, or promise a customer date.</p>
+      <p>This comparison does not apply a plan, send a supplier message, or promise a customer date.</p>
     </section>
   </div>;
 }
@@ -161,14 +161,14 @@ export function RecoveryPage() {
   return <div className="shell recovery-shell">
     <header className="masthead"><div className="brand">CLOSED <span>SOURCE</span><sup> / RECOVERY</sup></div><Link className="recovery-back" to="/planning">Planning workspace</Link><Link className="recovery-back" to="/scenarios">Typed scenarios</Link></header>
     <main>
-      <div className="recovery-intro"><p className="eyebrow">SYNTHETIC RECEIPT RECOVERY</p><h1>Compare the change.</h1><p>Move a supplied receipt arrival, then assign each order to a production period. Compare the original, disrupted, and supplied recovery schedules. This view makes no operational change.</p></div>
+      <div className="recovery-intro"><p className="eyebrow">Receipt recovery comparison</p><h1>Compare the change.</h1><p>Move a supplied receipt arrival, then assign each order to a production period. Compare the original, disrupted, and supplied recovery schedules. This view makes no operational change.</p></div>
       <section className="recovery-session" aria-label="Session">
         {checkingSession && <p role="status">Checking session…</p>}
         {!checkingSession && sessionError && <div className="notice notice-error" role="alert"><strong>Session unavailable</strong><p>{sessionError}</p><button type="button" className="text-button" onClick={loadSession}>Retry session</button></div>}
         {session && <p><strong>{session.identity_mode === 'private_machine' ? 'Private machine service caller' : 'Local development identity'}</strong> · workspace {session.workspace_id} · {session.role}. Interactive sign-in is unavailable.</p>}
       </section>
       {session && base && <form className="recovery-form" aria-label="Recovery comparison inputs" onSubmit={compare}>
-        <div className="recovery-form-head"><div><h2>Example and inputs</h2><p>Source: synthetic example. Receipt arrivals and recovery periods below are supplied for this comparison. Snapshot and version are caller consistency checks, not a current saved plan.</p></div><label className="field"><span className="field-label">Synthetic example</span><select value={example} onChange={event => chooseExample(event.target.value as RecoveryExample)}><option value="recovery">Stock delay</option><option value="recovery_precision">Fractional quantities</option></select></label></div>
+        <div className="recovery-form-head"><div><h2>Example and inputs</h2><p>Source: sample scenario. Receipt arrivals and recovery periods below are supplied for this comparison. Snapshot and version are caller consistency checks, not a current saved plan.</p></div><label className="field"><span className="field-label">Sample scenario</span><select value={example} onChange={event => chooseExample(event.target.value as RecoveryExample)}><option value="recovery">Stock delay</option><option value="recovery_precision">Fractional quantities</option></select></label></div>
         <div className="recovery-input-grid">
           <section><h3>Starting material and product demand</h3><p>Snapshot as of {utcLabel(base.snapshot.as_of)}</p><ul>{base.snapshot.inventory.map(item => <li key={item.component_id}>{item.component_id}: {item.starting_stock} {item.unit} at {utcLabel(item.stock_as_of)}</li>)}</ul><ul>{base.snapshot.products.map(product => <li key={product.product_id}>{product.product_id}: {product.bom.map(part => `${part.quantity_per_output_unit} ${part.unit} ${part.component_id} per ${product.output_unit}`).join('; ')}</li>)}</ul></section>
           <section><h3>Receipts · UTC arrival</h3>{base.snapshot.receipts.map(receipt => <label className="field" key={receipt.receipt_id}><span className="field-label">{receipt.receipt_id} · {receipt.quantity} {receipt.unit} {receipt.component_id}</span><span className="field-hint">Original: {utcLabel(receipt.arrival_at)}</span><input name={receipt.receipt_id} type="text" value={arrivals[receipt.receipt_id] ?? receipt.arrival_at} onChange={event => { invalidate(); setArrivals(current => ({ ...current, [receipt.receipt_id]: event.target.value })); }} aria-describedby={`arrival-hint-${receipt.receipt_id}`} /><small id={`arrival-hint-${receipt.receipt_id}`} className="field-hint">UTC format: YYYY-MM-DDTHH:mm:ssZ</small></label>)}</section>
@@ -185,6 +185,6 @@ export function RecoveryPage() {
         {view.kind === 'result' && view.value.kind === 'compared' && <Comparison value={view.value.response.comparison} noop={view.noop} />}
       </div>
     </main>
-    <footer>Closed Source / synthetic recovery comparison <span>No plan is applied or supplier contacted.</span></footer>
+    <footer>Closed Source / recovery comparison <span>No plan is applied or supplier contacted.</span></footer>
   </div>;
 }

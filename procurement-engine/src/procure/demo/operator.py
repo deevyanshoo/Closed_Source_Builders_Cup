@@ -1138,7 +1138,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                                                message, re.IGNORECASE):
                     raise OperatorValidationError('Invalid quote-load request.')
                 utility = {'kind': 'load_quotes', 'parameters': {'material_id': material_id}}
-                answer = f'Load immutable synthetic quotes for {material_id} into review; none is saved.'
+                answer = f'Load immutable quotes for {material_id} into review; none is saved.'
     elif intent == 'review_quotes':
         from .quote_service import company_for_offer
         parameters = coord.get('parameters') or {}
@@ -1255,7 +1255,7 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                                     message, re.IGNORECASE)
         if proc['action'] == 'watch' and material_id is not None and watch_requested:
             candidate = {'kind': 'watch', 'parameters': {'material_id': material_id, 'evidence_ids': cited}}
-            status, answer = 'proposal', f'Review a synthetic watch item for {material_id}; nothing has been saved yet.'
+            status, answer = 'proposal', f'Review a watch item for {material_id}; nothing has been saved yet.'
         else:
             status, answer = 'needs_clarification', 'Choose a tracked material to watch.'
     elif intent == 'recovery':

@@ -84,6 +84,36 @@ describe('proactive risk monitor', () => {
     expect(html).toContain('Send to operator composer');
     expect(html).not.toContain('Apply reviewed proposal');
   });
+  it('cleans known operational risk copy while preserving observed news and canonical alerts', () => {
+    const operational = { ...alert, title: 'Copper order has synthetic lead-time exposure',
+      summary: 'Stated synthetic stock covers 4 days.',
+      impact: 'Potential late arrival under fictional order and supplier assumptions; no actual shipment delay has been observed.',
+      confidence: { ...alert.confidence, reason: 'Dated comparison of fictional order deadline and listed supplier lead; supplier availability is not verified.' },
+      recovery_actions: [{ ...alert.recovery_actions[0], label: 'Review synthetic alternatives', message: 'Load copper sample quotes for review.' }] };
+    const news = { ...operational, alert_id: 'news-1', category: 'news' as const, provenance: 'observed_news' as const, title: 'Synthetic fuels in public news' };
+    const source = { ...report, companies: [{ ...report.companies[0], alerts: [operational, news] }] };
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={source} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    expect(html).toContain('Copper order has lead-time exposure');
+    expect(html).toContain('Stated stock covers 4 days.');
+    expect(html).toContain('no actual shipment delay has been observed');
+    expect(html).toContain('supplier availability is not verified');
+    expect(html).toContain('Review alternatives');
+    expect(html).toContain('Synthetic fuels in public news');
+    expect(operational.title).toContain('synthetic');
+    expect(operational.recovery_actions[0].message).toBe('Load copper sample quotes for review.');
+  });
+  it('keeps the hypothetical and unverified limits on a recorded recovery alert', () => {
+    const recovery = { ...alert, provenance: 'synthetic_plan' as const,
+      title: 'Copper recorded synthetic recovery', summary: 'Copper recorded synthetic recovery',
+      impact: 'The hypothetical delay may change sourcing feasibility or cost; this is a synthetic projection, not an observed shipment event.',
+      confidence: { ...alert.confidence, reason: 'Recomputed with the current saved, version-bound fictional offers and authoritative planner.' } };
+    const source = { ...report, companies: [{ ...report.companies[0], alerts: [recovery] }] };
+    const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={source} onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);
+    expect(html).toContain('Copper recorded recovery');
+    expect(html).toContain('planning projection, not an observed shipment event');
+    expect(html).toContain('version-bound listed offers');
+    expect(recovery.impact).toContain('synthetic projection');
+  });
   it('keeps ten company summaries compact by default and nests complete alert details behind disclosures', () => {
     const ten = { ...report, companies: Array.from({ length: 10 }, (_, index) => ({ ...report.companies[0], company_id: `company-${index}`, company_name: `Company ${index}`, alerts: [{ ...alert, alert_id: `alert-${index}`, company_id: `company-${index}` }] })) };
     const html = renderToStaticMarkup(<RiskMonitor scope={scope} initialReport={ten} mode="portfolio" onReport={() => {}} onOpenCompany={() => {}} onSeedPrompt={() => {}} />);

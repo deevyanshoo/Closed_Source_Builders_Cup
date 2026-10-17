@@ -202,3 +202,15 @@ def test_live_tool_presentation_changes_answer_only_and_preserves_proposal_argum
     assert shown['proposal']['parameters']['recipient_label'] == raw
     assert shown['evidence_ids'] == ['e1'] and shown['analytics']['stock'] == '2000'
     assert original['assistant_text'].endswith('[SYNTHETIC].')
+
+
+def test_present_turn_keeps_clean_authored_action_and_proposal_summaries():
+    original = {'assistant_text': 'Review quotes before saving.',
+                'action_result': {'tool': 'load_quotes', 'summary': '3 quotes are ready for review.', 'synthetic': True},
+                'proposal': {'summary': 'Review exact quote values before saving.',
+                             'parameters': {'fixture_id': 'eu-copper', 'synthetic': True}}}
+    shown = present_turn(original, [])
+    assert shown['action_result']['summary'] == '3 quotes are ready for review.'
+    assert shown['proposal']['summary'] == 'Review exact quote values before saving.'
+    assert shown['proposal']['parameters'] is original['proposal']['parameters']
+    assert shown['action_result']['synthetic'] is True

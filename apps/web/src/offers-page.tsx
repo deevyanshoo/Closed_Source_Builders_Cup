@@ -3,6 +3,7 @@ import type { ChangeEvent, FormEvent } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { createFixtureAdapter, dataAge, fieldEntries, fixtureInfo, formatValue, offerReport, OffersError } from './offers';
 import { ReportDownloads } from './report-downloads';
+import { supplierDisplayName } from './demo-display';
 import type { BlockingReason, Field, Offer } from './offers';
 import { bindOfferExtraction, createQuoteService, loadQuoteSession, QuoteServiceError } from './offers-service';
 import type { QuoteSession, ServiceField, ServiceOffer, ServiceOfferSummary, Sourcing } from './offers-service';
@@ -31,8 +32,8 @@ function Quote({ text, quote }: { text: string; quote: string }) {
 
 // Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
 const WORKSPACE_PAGES: [string, string][] = [
-  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
-  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
+  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Dispatch workspace'],
+  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Recovery comparison'], ['/scenarios', 'Typed scenarios'],
 ];
 
 function WorkspaceNav() {
@@ -288,7 +289,7 @@ function FixtureOffersPage() {
   return <main className="shell offers-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>OFFERS</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
+      <div className="masthead-meta">Local adapter<span className="red-dot" aria-hidden="true">●</span></div>
       <WorkspaceNav />
     </header>
 
@@ -299,29 +300,29 @@ function FixtureOffersPage() {
     </section>
 
     <div className="offers-adapter" role="note">
-      <strong>SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY</strong>
-      <span>{fixtureInfo.notice} Extracted with the rules pipeline at revision {fixtureInfo.revision}, as of {fixtureInfo.asOf}. Eligibility is previewed against the current UTC date when you act. Corrections and saves stay in this browser tab.</span>
+      <strong>Sample quote data · local adapter · not connected to the gateway</strong>
+      <span>Extracted with the rules pipeline at revision {fixtureInfo.revision}, as of {fixtureInfo.asOf}. Eligibility is previewed against the current UTC date when you act. Corrections and saves stay in this browser tab.</span><details><summary>Data source note</summary><p>{fixtureInfo.notice}</p></details>
       {age.old && <span className="offers-old">Old data: these fixtures are {age.days} days old. Re-export them before relying on what you see.</span>}
     </div>
 
     <section className="offers-load">
       <label className="field"><span className="field-label">Upload a quote (PDF, XLSX or CSV)</span><input type="file" accept=".pdf,.xlsx,.csv" onChange={onFile} /></label>
-      <label className="field"><span className="field-label">Or open a synthetic sample</span>
+      <label className="field"><span className="field-label">Or open a sample quote</span>
         <select value={offer?.offer_id ?? ''} onChange={e => openSample(e.target.value)}>
           <option value="">Choose a sample quote</option>
           {samples.map(s => <option key={s.offer_id} value={s.offer_id}>{s.fixture_id} · {s.document.filename} ({s.split})</option>)}
         </select></label>
     </section>
 
-    {view.kind === 'empty' && <div className="empty-state"><div className="empty-mark">∅</div><h3>No quote loaded</h3><p>Upload one of the synthetic fixture files or pick a sample to review its extracted offer.</p></div>}
-    {view.kind === 'loading' && <div className="empty-state" aria-busy="true"><h3>{view.label}</h3><p>Matching the file against the synthetic fixtures.</p></div>}
+    {view.kind === 'empty' && <div className="empty-state"><div className="empty-mark">∅</div><h3>No quote loaded</h3><p>Upload one of the listed sample files or pick a sample to review its extracted offer.</p></div>}
+    {view.kind === 'loading' && <div className="empty-state" aria-busy="true"><h3>{view.label}</h3><p>Matching the file against the listed samples.</p></div>}
     {view.kind === 'error' && <div className="notice notice-error" role="alert"><strong>Could not load this quote</strong><p>{view.message}</p></div>}
 
     {view.kind === 'offer' && offer && <section className="offers-workspace">
       <div className="offers-head">
         <div>
           <p className="eyebrow">{offer.document.filename} · {offer.document.media_type} · {offer.extractor} extractor</p>
-          <h2>{formatValue('text', offer.fields.supplier_name.value)}</h2>
+          <h2>{supplierDisplayName(formatValue('text', offer.fields.supplier_name.value))}</h2>
           <p className="revision-line">Document {offer.document.document_id.slice(0, 23)}… · version {offer.version}</p>
         </div>
         <div className="offers-status" data-status={offer.status}>{statusLabel(offer.status)}</div>
@@ -372,7 +373,7 @@ function FixtureOffersPage() {
 
       <section className="offers-scenario" aria-labelledby="offers-scenario-title">
         <h3 id="offers-scenario-title">Decision date and payment timing</h3>
-        <p className="field-hint">What changes if the decision moves past this quote's validity, and how its payment terms place cash compared with another quote's. Synthetic, computed in this tab, nothing saved.</p>
+        <p className="field-hint">What changes if the decision moves past this quote's validity, and how its payment terms place cash compared with another quote's. This comparison runs in this tab; nothing is saved.</p>
         <ScenarioForm key={offer.offer_id} offer={offer} offers={samples} defaultDate={new Date().toISOString().slice(0, 10)} busy={scenario.kind === 'loading'} onRun={runScenario} />
         <ScenarioView state={scenario} offers={samples} />
       </section>
@@ -385,7 +386,7 @@ function FixtureOffersPage() {
         <p className="limit-note">Saving here is local to the fixture adapter. This preview checks the current UTC date, but cannot replace service normalization, source checks, or audit. Corrected economic values cannot be saved here until authoritative revalidation. Nothing is sent to a supplier.</p>
       </div>
     </section>}
-    <footer><span>Synthetic quotes only</span><span>No supplier messages, orders or purchases</span></footer>
+    <footer><span>Quote review</span><span>No supplier messages, orders or purchases</span></footer>
   </main>;
 }
 
@@ -406,7 +407,7 @@ export function ServiceOfferReview({ offer, sourcing, selected, onSelect, onEdit
     c.item_index >= 0 && c.item_index < offer.items.length) ?? [] : [];
   return <section className="offers-workspace" aria-label="Local quote service offer">
     <div className="offers-head"><div><p className="eyebrow">{offer.document.filename} · {offer.document.media_type} · {offer.extractor ?? 'rules'} extractor</p>
-      <h2>{typeof supplier === 'string' ? supplier : 'Supplier unknown'}</h2><p className="revision-line">Document {offer.document.document_id} · version {offer.version}</p></div>
+      <h2>{typeof supplier === 'string' ? supplierDisplayName(supplier) : 'Supplier unknown'}</h2><p className="revision-line">Document {offer.document.document_id} · version {offer.version}</p></div>
       <div className="offers-status" data-status={offer.status}>{statusLabel(offer.status)}</div></div>
     {offer.blocking_reasons.length > 0 && <Reasons reasons={offer.blocking_reasons} title="Save is blocked until these are resolved" />}
     {offer.review_flags.length > 0 && <div className="offers-flags"><h3>Review flags</h3><ul>{offer.review_flags.map((f, i) => <li key={i}>{statusLabel(f.flag)} {f.locator && <code>{f.locator}</code>} <q>{f.text}</q></li>)}</ul></div>}
@@ -465,7 +466,7 @@ function ServiceOffersPage() {
       const list = await api.list();
       const candidates = await api.sourcing();
       if (mine !== generation.current) return;
-      setOffers(list); setSourcing(candidates); setMessage(list.length ? 'Choose a service offer or upload a labeled synthetic quote.' : 'No service offers in this workspace.');
+      setOffers(list); setSourcing(candidates); setMessage(list.length ? 'Choose a service offer or upload an approved test quote.' : 'No service offers in this workspace.');
     } catch (error) {
       if (mine !== generation.current) return;
       const text = safeMessage(error);
@@ -513,7 +514,7 @@ function ServiceOffersPage() {
       const extraction = await api.extraction(result.extraction_id);
       const bound = await bindOfferExtraction(detail, extraction, isCurrent);
       const list = await api.list(); const currentSourcing = await api.sourcing();
-      setOffer(bound); setSourcing(currentSourcing); setSelected(null); setMessage(result.deduplicated ? 'Existing synthetic upload opened.' : 'Synthetic quote uploaded for review.');
+      setOffer(bound); setSourcing(currentSourcing); setSelected(null); setMessage(result.deduplicated ? 'Existing test quote opened.' : 'Test quote uploaded for review.');
       setOffers(list);
     });
   }
@@ -557,9 +558,9 @@ function ServiceOffersPage() {
       <span>Same-origin session required. This browser has no bearer token or signing key. No source text is shown after an identity or service error.</span></div>
     <div className="offers-load"><div><strong>{session ? `${session.role} · workspace ${session.workspace_id}` : 'Session unavailable'}</strong><p>{message}</p>
       <button className="secondary-button" type="button" onClick={() => void refresh(true)} disabled={busy}>Refresh workspace</button></div>
-      <div><label className="field"><input type="checkbox" checked={syntheticConfirmed} onChange={e => setSyntheticConfirmed(e.target.checked)} /> I confirm this is synthetic test material.</label>
-      <label className="field"><span className="field-label">Upload synthetic PDF, XLSX or CSV</span><input type="file" accept=".pdf,.xlsx,.csv" disabled={!syntheticConfirmed || !session || session.role !== 'editor' || busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} /></label></div></div>
-    <div className="offers-actions"><h3>Workspace offers</h3>{offers.length ? <ul>{offers.map(o => <li key={o.offer_id}><button className="text-button" type="button" onClick={() => void open(o.offer_id)} disabled={busy}>{o.supplier_name ?? 'Supplier unknown'} · {o.filename} · {o.status} · version {o.version}</button></li>)}</ul> : <p>No offers loaded.</p>}</div>
+      <div><label className="field"><input type="checkbox" checked={syntheticConfirmed} onChange={e => setSyntheticConfirmed(e.target.checked)} /> I confirm this is an approved test document.</label>
+      <label className="field"><span className="field-label">Upload test PDF, XLSX or CSV</span><input type="file" accept=".pdf,.xlsx,.csv" disabled={!syntheticConfirmed || !session || session.role !== 'editor' || busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} /></label></div></div>
+    <div className="offers-actions"><h3>Workspace offers</h3>{offers.length ? <ul>{offers.map(o => <li key={o.offer_id}><button className="text-button" type="button" onClick={() => void open(o.offer_id)} disabled={busy}>{o.supplier_name ? supplierDisplayName(o.supplier_name) : 'Supplier unknown'} · {o.filename} · {o.status} · version {o.version}</button></li>)}</ul> : <p>No offers loaded.</p>}</div>
     {offer && <ServiceOfferReview offer={offer} sourcing={sourcing} selected={selected} onSelect={setSelected} onEdit={(name, value) => void mutate('correct', name, value)} onSave={() => void mutate('save')} onBridge={candidate => void bridge(candidate)} canEdit={session?.role === 'editor'} busy={busy} />}
     <footer><span>Service mode · local development</span><span>No supplier messages, orders or purchases</span></footer></main>;
 }
@@ -567,7 +568,7 @@ function ServiceOffersPage() {
 export function OffersPage() {
   const [mode, setMode] = useState<'fixture' | 'service'>('fixture');
   return <><div className="offers-adapter" role="group" aria-label="Quote workspace mode">
-    <button className="secondary-button" type="button" aria-pressed={mode === 'fixture'} onClick={() => setMode('fixture')}>Synthetic fixtures</button>
+    <button className="secondary-button" type="button" aria-pressed={mode === 'fixture'} onClick={() => setMode('fixture')}>Sample quotes</button>
     <button className="secondary-button" type="button" aria-pressed={mode === 'service'} onClick={() => setMode('service')}>Local quote service</button>
   </div>{mode === 'fixture' ? <FixtureOffersPage /> : <ServiceOffersPage />}</>;
 }

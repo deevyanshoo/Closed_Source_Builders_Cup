@@ -35,6 +35,7 @@ export function ZoorqAiReceipts({ state, aggregate, hindiCase, onRequestTranslat
   return <section className="zoorq-ai-receipts" aria-label="AI receipts">
     <div className="zoorq-ai-receipts-head"><div><span className="zoorq-ai-receipts-kicker">Verified AI activity</span><h2>Source interpretation</h2></div>
       <strong>{receipts.length ? `${receipts.length} source${receipts.length === 1 ? '' : 's'} interpreted` : 'No verified model interpretations yet'}</strong></div>
+    <p className="zoorq-ai-receipts-roles">Gemini on Vertex AI translates and summarizes supported public sources when a verified model call is recorded. News collection and ranking are separate from model interpretation.</p>
     {state === 'loading' && <p role="status" className="zoorq-ai-receipts-state">Checking model receipts…</p>}
     {state === 'failed' && <p role="status" className="zoorq-ai-receipts-state">Receipt check failed. No model result is claimed.</p>}
     {state === 'skipped' && <p role="status" className="zoorq-ai-receipts-state">Model interpretation was skipped.</p>}

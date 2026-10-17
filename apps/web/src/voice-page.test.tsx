@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import proposalRaw from '../../../contracts/examples/voice_http_text_proposal_result.json?raw';
-import { VoiceProposalPanel } from './voice-page';
+import { VoicePage, VoiceProposalPanel } from './voice-page';
+import { MemoryRouter } from 'react-router-dom';
 import type { VoiceView } from './voice';
 
 const outcome = JSON.parse(proposalRaw).outcome;
 const base: VoiceView = { kind: 'proposed', example: 'recovery', arrivals: {}, assignments: {}, source: 'saved', contexts: [], hasMore: false, snapshotText: '', proposal: outcome };
 
 describe('text proposal presentation', () => {
+  it('opens the typed scenario route without repeated synthetic banners', () => {
+    const html = renderToStaticMarkup(<MemoryRouter><VoicePage /></MemoryRouter>);
+    expect(html).toContain('Typed receipt scenario');
+    expect(html).not.toContain('LOCAL · SYNTHETIC');
+  });
   it('shows unverified changed receipt UTCs, every assignment and a deliberate confirmation action', () => {
     const html = renderToStaticMarkup(<VoiceProposalPanel view={base} onConfirm={() => {}} />);
     expect(html).toContain('Unverified interpretation');

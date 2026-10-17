@@ -13,3 +13,8 @@
 .zoorq-outlook .zoorq-outlook-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--zoorq-muted,#5d6270);background:var(--zoorq-soft,#f7f9fc)}
 .zoorq-outlook-table td small{display:block;color:var(--zoorq-muted,#5d6270);margin-top:3px}
 .zoorq-outlook-table td[data-status]{text-transform:capitalize;font-weight:600}
+.zoorq-outlook-budget{border:1px solid var(--zoorq-line,#d9dce3);border-radius:10px;padding:14px;margin:0 0 16px;background:var(--zoorq-soft,#f7f9fc)}
+.zoorq-outlook-budget h4{margin:0 0 6px;font-size:15px}
+.zoorq-outlook-budget-today{margin:0 0 10px;font-size:14px}
+.zoorq-outlook-budget-today small{display:block;font-size:12px;color:var(--zoorq-muted,#5d6270)}
+.zoorq-outlook-budget-label{margin:8px 0 0;font-size:12px;font-weight:700}

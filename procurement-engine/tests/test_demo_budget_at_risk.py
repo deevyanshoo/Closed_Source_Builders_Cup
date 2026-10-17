@@ -18,17 +18,23 @@ def plan(material='copper', quantity='8000', unit='kg', currency='USD', plan_id=
             'reporting_currency': currency}
 
 
-def test_current_plan_reads_the_session_request_and_plan_id_without_changing_them():
-    session = SimpleNamespace(last_plan={'plan_id': 'p-9', 'rows': []}, lock=Lock(),
-                              plan_request={'material': 'wheat', 'quantity': '4020', 'quantity_unit': 'tonne',
-                                            'reporting_currency': 'KES'})
-    before = (dict(session.last_plan), dict(session.plan_request))
+def stored_plan(plan_id='p-9', company='harvest-foods', material='wheat', purchase='4020', unit='tonne', currency='KES'):
+    return {'plan_id': plan_id, 'company_id': company, 'material': material, 'quantity': '5000', 'current_stock': '980',
+            'required_purchase': purchase, 'quantity_unit': unit, 'reporting_currency': currency, 'alternatives': []}
+
+
+def test_current_plan_reads_the_required_purchase_from_the_stored_plan_without_changing_it():
+    session = SimpleNamespace(company_id='harvest-foods', last_plan=stored_plan(), lock=Lock())
+    before = dict(session.last_plan)
     assert current_plan(session) == plan('wheat', '4020', 'tonne', 'KES', 'p-9')
-    assert (session.last_plan, session.plan_request) == before
-    legacy = SimpleNamespace(last_plan={'plan_id': 'p-1'}, plan_request={'material': 'copper', 'quantity_kg': '8000',
-                                                                         'reporting_currency': 'USD'})
-    assert current_plan(legacy) == plan(plan_id='p-1')
-    assert current_plan(SimpleNamespace(last_plan=None, plan_request=None)) is None
+    assert session.last_plan == before
+    assert current_plan(SimpleNamespace(company_id='harvest-foods', last_plan=None)) is None
+    assert current_plan(SimpleNamespace(company_id='solara-cables', last_plan=stored_plan())) is None
+
+
+def test_a_plan_whose_stock_covers_the_need_has_no_purchase_to_price():
+    view = get_budget_at_risk('solara-cables', 'copper', plan=plan(quantity='0'), now=TODAY, context_version=1)
+    assert view['status'] == 'no_purchase_required' and 'today' not in view and view['plan_id'] == 'plan-1'
 
 
 def test_shape_for_the_copper_plan():
@@ -77,9 +83,7 @@ def test_unit_series_fx_and_company_paths():
 
 def test_router_follows_the_session_company_plan_and_context_a_to_b_to_a():
     state = SimpleNamespace(company_id='solara-cables', context_version=1, lock=Lock(),
-                            last_plan={'plan_id': 'a-1'},
-                            plan_request={'material': 'copper', 'quantity': '8000', 'quantity_unit': 'kg',
-                                          'reporting_currency': 'USD'})
+                            last_plan=stored_plan('a-1', 'solara-cables', 'copper', '8000', 'kg', 'USD'))
     app = FastAPI()
 
     def session(request: Request):
@@ -89,12 +93,11 @@ def test_router_follows_the_session_company_plan_and_context_a_to_b_to_a():
         def get(**params):
             return client.get('/api/demo/budget-at-risk', params={'material_id': 'copper', **params}).json()
         first = get(plan_id='a-1')
-        state.company_id, state.context_version, state.last_plan, state.plan_request = 'harvest-foods', 2, None, None
+        state.company_id, state.context_version, state.last_plan = 'harvest-foods', 2, None
         second = get(plan_id='a-1')
         state.company_id, state.context_version = 'solara-cables', 3
         third = get()
-        state.last_plan = {'plan_id': 'a-2'}
-        state.plan_request = {'material': 'copper', 'quantity': '10000', 'quantity_unit': 'kg', 'reporting_currency': 'USD'}
+        state.last_plan = stored_plan('a-2', 'solara-cables', 'copper', '10000', 'kg', 'USD')
         stale = get(plan_id='a-1')
         fresh = get(plan_id='a-2')
     assert (first['company_id'], first['context_version'], first['plan_id'], first['status']) == \

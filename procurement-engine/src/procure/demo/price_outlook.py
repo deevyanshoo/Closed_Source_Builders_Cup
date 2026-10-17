@@ -11,6 +11,7 @@ import json
 from contextlib import nullcontext
 from copy import deepcopy
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 
@@ -94,16 +95,24 @@ def get_fx_outlook(company_id: str, *, now: date, context_version: int | None = 
     return {**base, 'status': 'available', 'reporting_currency': company['reporting_currency'], 'currencies': rows}
 
 
+def _is_zero(value) -> bool:
+    try:
+        return Decimal(str(value)) == 0
+    except InvalidOperation:
+        return False
+
+
 def current_plan(session) -> dict | None:
-    """Read-only view of the session's current comparison: plan id, material, quantity, unit and currency."""
-    request, plan = session.plan_request, session.last_plan
-    if not request or not plan or not plan.get('plan_id'):
+    """Read-only view of the session's stored plan: id, material, required purchase, unit and currency.
+
+    The required purchase (need minus opening stock) is the quantity this purchase prices; a plan stored for
+    another company is ignored.
+    """
+    plan = session.last_plan
+    if not plan or not plan.get('plan_id') or plan.get('company_id') != session.company_id:
         return None
-    legacy = 'quantity' not in request and 'quantity_kg' in request
-    return {'plan_id': plan['plan_id'], 'material_id': request.get('material'),
-            'quantity': request['quantity_kg'] if legacy else request.get('quantity'),
-            'unit': 'kg' if legacy else request.get('quantity_unit'),
-            'reporting_currency': request.get('reporting_currency')}
+    return {'plan_id': plan['plan_id'], 'material_id': plan.get('material'), 'quantity': plan.get('required_purchase'),
+            'unit': plan.get('quantity_unit'), 'reporting_currency': plan.get('reporting_currency')}
 
 
 def get_budget_at_risk(company_id: str, material_id: str, *, plan: dict | None, now: date,
@@ -119,6 +128,9 @@ def get_budget_at_risk(company_id: str, material_id: str, *, plan: dict | None, 
     if expected_plan_id is not None and expected_plan_id != plan['plan_id']:
         return {**base, 'status': 'no_current_plan',
                 'reason': 'The comparison changed since this was requested; reload the current comparison.'}
+    if _is_zero(plan['quantity']):
+        return {**base, 'plan_id': plan['plan_id'], 'status': 'no_purchase_required',
+                'reason': 'Opening stock covers the stated need; this plan has no purchase to price.'}
     outlook = get_price_outlook(company_id, material_id, now=now, context_version=context_version, results=results)
     currency = plan['reporting_currency'] or get_company(company_id)['reporting_currency']
     fx = results['series'].get(f'fx:{currency}')

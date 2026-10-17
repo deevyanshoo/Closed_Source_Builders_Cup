@@ -22,3 +22,4 @@
 .zoorq-exports-result{margin-top:12px;padding:12px;border-radius:10px;background:var(--zoorq-soft,#f7f9fc);border:1px solid var(--zoorq-line,#d9dce3)}
 .zoorq-exports-figure{margin:0 0 6px;font-size:15px;font-weight:700}
 .zoorq-exports-arithmetic{margin:6px 0;padding-left:20px;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.zoorq-exports-table td:first-child{min-width:110px;overflow-wrap:normal;word-break:normal}

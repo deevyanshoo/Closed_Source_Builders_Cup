@@ -337,6 +337,26 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         return {'checked_at': report['checked_at'], 'companies': rows,
                 'limitations': report['limitations']}
 
+    def risk_read_outcome(report, *, scope='current', include_news=False):
+        from .risk_read import summarize_risks
+        projection = risk_projection(report, scope=scope)
+        evidence_ids = list(dict.fromkeys(
+            evidence['ref_id'] for company in projection['companies']
+            for alert in company['alerts'] for evidence in alert['evidence']))
+        return {'status': 'completed', 'assistant_text': summarize_risks(projection, include_news=include_news),
+            'agent_steps': [{'agent': 'risk_monitor', 'role': 'Assess evidence-bound company risks.',
+                'status': 'completed', 'model': 'none', 'provider_call': 'none',
+                'tool': 'read_risks', 'summary': 'Read current company-owned risk signals.'}],
+            'evidence_ids': evidence_ids, 'workspace': {'risks': projection}}
+
+    def current_risk_outcome(snapshot):
+        report = {'company_id': snapshot['company_id'],
+            'checked_at': snapshot['risk_report']['checked_at'],
+            'companies': [snapshot['risk_report']],
+            'limitations': ['Company inventory and supplier leads are synthetic.',
+                'Recovery suggestions require review; no supplier message or order is sent.']}
+        return risk_read_outcome(report)
+
     async def scan_risks(value, expected_version=None, scan_scope='all'):
         """Read trusted catalogues without switching company or changing proposals."""
         from .proactive_risks import assess_company
@@ -1310,6 +1330,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         if not isinstance(message, str) or not message.strip() or len(message) > 1200:
             raise SessionError('invalid_message', 'Provide a message of at most 1200 characters.', 422)
         from .experience_service import baseline_snapshot, judge_outcome, resolve_local_turn, has_local_evidence
+        from .risk_read import is_current_risk_question, is_external_risk_research
         from .carbon_operator import is_estimate_request, is_pending_reply, estimate_turn
         with value.lock:
             context(value, data, explicit=True)
@@ -1399,6 +1420,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 research_invalid = None
             except ResearchValidationError as exc:
                 research_parameters, research_invalid = None, str(exc)
+            external_risk_research = is_external_risk_research(message)
+            if (external_risk_research and resolved is None
+                    and research_parameters is None and research_invalid is None):
+                research_invalid = 'Please reformulate this as a public question without private workspace details.'
             prepared = carbon_turn or news_outcome is not None or resolved is not None or research_parameters is not None or research_invalid is not None
             key, replay = start(value, data, 'operator_turn')
             if replay is not None:
@@ -1413,10 +1438,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 raise SessionError('stale_context', 'A newer operator turn superseded this request.', 409)
             snapshot = operator_snapshot(value)
             marker = snapshot_marker(snapshot)
+            current_risk = is_current_risk_question(message, snapshot['company_id'])
             # Canonical reads do not call a model. Keep the normal request,
             # session and concurrency limits, without reserving AI capacity.
             from .integration_tools import integration_request, navigation_request
-            prepared = (prepared or integration_request(snapshot, message) is not None
+            prepared = (prepared or current_risk or integration_request(snapshot, message) is not None
                         or navigation_request(message) is not None
                         or _broad_inventory_scope(snapshot, message) is not None)
             adapter = operator_adapter()
@@ -1458,6 +1484,12 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                'evidence_ids': [], 'candidate': None, 'carbon_turn': True}
                 elif news_outcome is not None:
                     outcome = {**combine_local_news(news_outcome, local_news_resolution), 'candidate': None}
+                elif external_risk_research and research_invalid is not None:
+                    outcome = {'status': 'needs_clarification',
+                        'assistant_text': research_invalid, 'agent_steps': [],
+                        'evidence_ids': [], 'candidate': None}
+                elif current_risk:
+                    outcome = current_risk_outcome(snapshot)
                 else:
                     outcome = (judge_outcome(resolved) if resolved is not None else await run_in_threadpool(run_turn, snapshot, message, adapter if not prepared else None,
                                                   model=model,
@@ -1756,6 +1788,23 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if message is not None:
                     if not isinstance(message, str) or not 0 < len(message.strip()) <= 1200:
                         raise SessionError('invalid_message', 'State the risk or inventory question.', 422)
+                    from .judge_resolver import _foreign_company
+                    with value.lock:
+                        context(value, {'expected_context_version': context_version}, explicit=True)
+                        foreign = _foreign_company(operator_snapshot(value, include_risks=False), message)
+                    if foreign:
+                        return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                            'context_version': context_version, 'status': 'needs_clarification',
+                            'assistant_text': 'Choose the active company workspace before using its evidence.',
+                            'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                            'read_only': True}
+                    from .risk_read import has_non_read_intent
+                    if has_non_read_intent(message):
+                        return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                            'context_version': context_version, 'status': 'needs_clarification',
+                            'assistant_text': 'Use the operator to review this research or action request. No risk scan or action was started.',
+                            'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                            'read_only': True}
                     # A broad factual read is safe to resolve locally even when
                     # Live picked the alert tool. The resolver owns company and
                     # material scope; a rejected scope must not become a scan.
@@ -1787,17 +1836,18 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                 'summary': 'Compared owned stock cover and listed supplier leads.'}],
                             'evidence_ids': [], 'proposal': None, 'read_only': True,
                             'analytics': inventory_analytics(snapshot)}
-                report = await scan_risks(value, context_version)
-                projection = risk_projection(report, scope=scope)
-                count = sum(sum(row['counts'].values()) for row in projection['companies'])
-                return {'turn_id': secrets.token_urlsafe(18), 'company_id': report['company_id'],
-                    'context_version': report['context_version'], 'status': 'completed',
-                    'assistant_text': f"Scanned {len(projection['companies'])} companies; {count} risk and watch signals. Review the evidence and conditional impacts before taking action.",
-                    'agent_steps': [{'agent': 'risk_monitor', 'role': 'Assess evidence-bound company risks.',
-                        'status': 'completed', 'model': 'none', 'provider_call': 'none',
-                        'tool': 'read_risks', 'summary': 'Read current company-owned risk signals.'}],
-                    'evidence_ids': [], 'proposal': None, 'read_only': True,
-                    'workspace': {'risks': projection}}
+                from .risk_read import is_current_risk_question, is_public_risk_question
+                if scope == 'current' and message is not None and is_current_risk_question(message, value.company_id):
+                    with value.lock:
+                        context(value, {'expected_context_version': context_version}, explicit=True)
+                        outcome = current_risk_outcome(operator_snapshot(value))
+                else:
+                    report = await scan_risks(value, context_version, scan_scope=scope)
+                    outcome = risk_read_outcome(report, scope=scope,
+                                                include_news=is_public_risk_question(message))
+                return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                    'context_version': context_version, 'proposal': None, 'read_only': True,
+                    **outcome}
             from .agent_tools import inventory_analytics
             from .quote_service import company_for_offer
             mapping = {'read_workspace', 'analyze_inventory', 'fill_buyer_form',

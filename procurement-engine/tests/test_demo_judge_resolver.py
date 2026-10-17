@@ -95,6 +95,43 @@ def test_bridge_draft_command_remains_actionable_when_only_sending_is_prohibited
 
 
 @pytest.mark.parametrize('message', (
+    'Prepare an earlier delivery. Request a quotation for the supply gap using our current plan. Save the draft without sending it.',
+    'Request a quotation for the supply gap using our current plan. Save the draft without sending it.',
+    'Please request a quotation for the production supply gap using our current plan.',
+    'Draft an RFQ for the supply gap in the current plan.',
+))
+def test_supply_gap_quotation_command_in_one_clause_requests_unsent_bridge(message):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    result = resolve_judge_turn(state, message, now=NOW)
+    assert result['kind'] == 'bridge_rfq_request'
+    assert result['baseline_plan_id'] == 'reviewed-plan'
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
+    'Prepare an earlier delivery. A quotation for the supply gap using our current plan.',
+    'How do I request a quotation for the supply gap?',
+    'The supplier said, "Request a quotation for the supply gap using our current plan."',
+    'What if we request a quotation for the supply gap?',
+    'Do not request a quotation for the supply gap.',
+    'Request a quotation for the supply gap, but do not save the draft.',
+    'Request a quotation for the supply gap only if we approve the cost.',
+    'Request a quotation for the supply gap after approval.',
+    'Request an RFP for the supply gap using our current plan.',
+    'Request a quotation for the supply gap using plan ID stale.',
+    'Request a quotation for polymer supply gap using our current plan.',
+    'Request a quotation for GridSpring Batteries supply gap using our current plan.',
+))
+def test_supply_gap_phrase_does_not_bypass_bridge_draft_guards(message):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    result = resolve_judge_turn(state, message, now=NOW)
+    assert result is None or result['kind'] != 'bridge_rfq_request'
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
     'Do not draft a bridge RFQ for earlier delivery.',
     'Do not prepare an earlier delivery RFQ; do not send it.',
     'Prepare a bridge RFQ for earlier delivery, but do not create the draft.',

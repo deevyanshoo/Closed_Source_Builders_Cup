@@ -64,6 +64,18 @@ it('shows a clean RFQ recipient while preserving the canonical server draft', ()
 });
 const recovery: RecoveryView = { comparison_id: 'c1', synthetic: true, baseline: { ...selectedPlan, plan_id: 'p1', total_cost: '82000' }, scenario: { ...selectedPlan, plan_id: 'p2' }, baseline_request: request, scenario_request: { ...request, delay_days_by_offer: { q1: 20 } }, cost_delta: '4000', selection_changed: true, outcome: 'changed', replayed: false };
 const rfq: RfqView = { draft_id: 'd1', plan_id: 'p2', offer_versions: { q1: 1 }, synthetic: true, status: 'draft_unsent', supplier: 'Swift', material: 'copper', quantity_kg: '1000', need_by: '2026-10-30', reporting_currency: 'USD', total_cost: '86000', created_at: '2026-10-14T10:00:00Z', text: 'Synthetic unsent request for quotation' };
+it('keeps RFQ previews clean in procurement and Drafts while preserving canonical text', () => {
+  const canonical = { ...rfq, text: 'SYNTHETIC TEST DOCUMENT — UNSENT REQUEST FOR QUOTATION DRAFT\nTo: Swift\nTerms remain unsent.' };
+  const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, rfq: canonical }, epoch: 0 });
+  const procurement = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
+  const drafts = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={[]} rfq={canonical} messages={[]} dirty={false} onDownloadRfq={() => {}} />);
+  for (const html of [procurement, drafts]) {
+    expect(html).toContain('UNSENT REQUEST FOR QUOTATION DRAFT');
+    expect(html).toContain('Terms remain unsent.');
+    expect(html).not.toContain('SYNTHETIC TEST DOCUMENT');
+  }
+  expect(canonical.text).toContain('SYNTHETIC TEST DOCUMENT');
+});
 const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };
 const companySession = { ...session, offers: [offer(1, 'saved')], company, context_version: 1, plan: selectedPlan, plan_request: request, rfq };
 const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', materials: [{ ...company.materials[0], material_id: 'cotton', name: 'Cotton' }], quote_coverage: { materials: [], fixture_ids: [], note: 'No runnable quote coverage.' }, buyer_defaults: null };

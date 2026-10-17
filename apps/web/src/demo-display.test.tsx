@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CompanyOverview, OutboxWorkspace } from './demo-company-news';
-import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { displayRfqDraftBody, displaySupplierMentions, supplierDisplayName } from './demo-display';
 import type { CompanyProfile, SimulatedOutboxMessage } from './demo-api';
 
 const raw = 'Europa Copper SA [SYNTHETIC]';
@@ -15,6 +15,18 @@ const company = {
 } satisfies CompanyProfile;
 
 describe('presentation-only supplier labels', () => {
+  it('removes only the leading RFQ classification line and keeps the canonical body intact', () => {
+    for (const title of ['UNSENT REQUEST FOR QUOTATION DRAFT', 'UNSENT BRIDGE REQUEST FOR QUOTATION DRAFT']) {
+      for (const newline of ['\n', '\r\n']) {
+        const canonical = `SYNTHETIC TEST DOCUMENT — ${title}${newline}To: ${raw}${newline}Terms remain unsent.`;
+        expect(displayRfqDraftBody(canonical, [raw])).toBe(`${title}${newline}To: Europa Copper SA${newline}Terms remain unsent.`);
+        expect(canonical).toContain('SYNTHETIC TEST DOCUMENT');
+        expect(displayRfqDraftBody(`Note: ${canonical}`, [raw])).toBe(`Note: SYNTHETIC TEST DOCUMENT — ${title}${newline}To: Europa Copper SA${newline}Terms remain unsent.`);
+      }
+    }
+    expect(displayRfqDraftBody('SYNTHETIC TEST DOCUMENT — unrelated\nBody', [])).toBe('SYNTHETIC TEST DOCUMENT — unrelated\nBody');
+    expect(displayRfqDraftBody('SYNTHETIC TEST DOCUMENT — UNSENT REQUEST FOR QUOTATION DRAFT extra', [])).toBe('SYNTHETIC TEST DOCUMENT — UNSENT REQUEST FOR QUOTATION DRAFT extra');
+  });
   it('strips only a trailing fixture annotation from human-facing names', () => {
     expect(supplierDisplayName(raw)).toBe('Europa Copper SA');
     expect(supplierDisplayName('Europa [SYNTHETIC] extra')).toBe('Europa [SYNTHETIC] extra');

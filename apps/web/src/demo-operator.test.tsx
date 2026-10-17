@@ -95,6 +95,18 @@ describe('operator response boundary', () => {
     expect(opened).not.toBe(proposalPreviewKey({ ...scope, companyId: 'other-company' }, draft.proposal));
     expect(opened).not.toBe(proposalPreviewKey(scope, { ...draft.proposal, proposal_id: 'next-proposal' }));
   });
+  it('shows an RFQ proposal without its repeated classification header', () => {
+    const body = 'SYNTHETIC TEST DOCUMENT — UNSENT BRIDGE REQUEST FOR QUOTATION DRAFT\r\nTo: Supplier desk\r\nTerms remain unsent.';
+    const rfqTurn = { ...turn, proposal: { ...proposal, kind: 'rfq' as const,
+      parameters: { draft_preview: { recipient_label: 'Supplier desk', subject: 'Bridge request', body } } } };
+    const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false}
+      initialState={{ ...initialOperatorState, scope, turn: rfqTurn }} onSession={() => {}} onUnknown={() => {}} />);
+    const preview = html.slice(html.indexOf('Full draft preview'), html.indexOf('View draft in workspace'));
+    expect(preview).toContain('UNSENT BRIDGE REQUEST FOR QUOTATION DRAFT');
+    expect(preview).toContain('Terms remain unsent.');
+    expect(preview).not.toContain('SYNTHETIC TEST DOCUMENT');
+    expect(body).toContain('SYNTHETIC TEST DOCUMENT');
+  });
   it('requires opening the full quote fields for the current proposal before review', () => {
     const review = { ...proposal, kind: 'review_quotes' as const, parameters: { material_id: 'copper', offer_ids: ['q1'], preview: [{ offer_id: 'q1', fixture_id: 'fixture-copper', source_filename: 'reviewed.pdf', expected_version: 2, review_values: { lead_time_days: '10' } }] }, offer_versions: { q1: 2 } };
     const html = renderToStaticMarkup(<OperatorPanel scope={scope} csrf="csrf" dirty={false} offers={[{ ...quote, fixture_id: 'fixture-copper' }]}

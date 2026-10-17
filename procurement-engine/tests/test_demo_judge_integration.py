@@ -85,6 +85,7 @@ def test_frontend_bridge_cta_prepares_unsent_canonical_draft():
 
 @pytest.mark.parametrize('message', (
     'What is the projected supply gap and when is the bridge needed?',
+    'What is the supply gap in our current plan?',
     'Explain how to prepare a bridge RFQ for earlier delivery.',
     'How do I prepare a bridge RFQ for earlier delivery?',
     'Can you explain how to prepare a bridge RFQ for earlier delivery?',
@@ -144,6 +145,49 @@ def test_native_operate_bridge_uses_same_durable_draft(monkeypatch):
         assert state['drafts'][-1]['body'] == draft['text']
         assert state['simulated_outbox'] == []
         assert c.get(f"/api/demo/rfq/{draft['draft_id']}/download").text == draft['text']
+
+
+@pytest.mark.parametrize('channel', ('typed', 'native'))
+def test_observed_punctuated_supply_gap_request_saves_only_unsent_draft(monkeypatch, channel):
+    message = ('Prepare an earlier delivery. Request a quotation for the supply gap using our current plan. '
+               'Save the draft without sending it.')
+    with client() as c:
+        _, h = auth(c)
+        assert post(c, h, 'judge/start').status_code == 200
+        before = c.get('/api/demo/session').json()
+        result = _bridge_binding_turn(c, h, monkeypatch, channel, message)
+        assert result['read_only'] is False
+        assert result['action_result']['tool'] == 'prepare_rfq'
+        after = c.get('/api/demo/session').json()
+        assert after['plan'] == before['plan']
+        assert after['rfq']['bridge'] is True and after['rfq']['status'] == 'draft_unsent'
+        assert after['drafts'][-1]['body'] == after['rfq']['text']
+        assert after['simulated_outbox'] == []
+
+
+@pytest.mark.parametrize('channel', ('typed', 'native'))
+@pytest.mark.parametrize('message', (
+    'Prepare an earlier delivery. A quotation for the supply gap using our current plan.',
+    'The supplier said, "Request a quotation for the supply gap using our current plan."',
+    'What if we request a quotation for the supply gap?',
+    'Do not request a quotation for the supply gap.',
+    'Request a quotation for the supply gap, but do not save the draft.',
+    'Request a quotation for the supply gap only if we approve the cost.',
+    'Request an RFP for the supply gap using our current plan.',
+    'Request a quotation for the supply gap using plan ID stale.',
+    'Request a quotation for GridSpring Batteries supply gap using our current plan.',
+))
+def test_punctuated_supply_gap_discussion_and_unbound_requests_do_not_draft(monkeypatch, channel, message):
+    with client() as c:
+        _, h = auth(c)
+        assert post(c, h, 'judge/start').status_code == 200
+        before = c.get('/api/demo/session').json()
+        result = _bridge_binding_turn(c, h, monkeypatch, channel, message)
+        assert result['read_only'] is True
+        assert not result.get('action_result')
+        after = c.get('/api/demo/session').json()
+        assert after['plan'] == before['plan']
+        assert after['rfq'] is None and after['drafts'] == [] and after['simulated_outbox'] == []
 
 
 def _bridge_binding_turn(c, h, monkeypatch, channel, message):

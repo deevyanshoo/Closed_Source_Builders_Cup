@@ -19,8 +19,8 @@ _STOCK = re.compile(r'\b(stock|inventory|stock cover|shortage)\b', re.I)
 _COVERAGE_QUESTION = re.compile(
     r'\b(?:stock\s*out|run\s*out|last\s+until|before\s+(?:the\s+)?(?:selected\s+)?arrival|'
     r'continuous\s+supply|supply\s+gap|production\s+supply|uncovered\s+days|bridge\s+quantity)\b', re.I)
-_BRIDGE_REQUEST = re.compile(r'\b(?:draft|prepare|create|request)\b.*\b(?:bridge|earlier\s+delivery)\b.*\b(?:rfq|quotation|quote)\b|'
-                             r'\b(?:draft|prepare|create|request)\b.*\b(?:rfq|quotation|quote)\b.*\b(?:bridge|earlier\s+delivery)\b', re.I)
+_BRIDGE_REQUEST = re.compile(r'\b(?:draft|prepare|create|request)\b.*\b(?:bridge|earlier\s+delivery|(?:production\s+)?supply\s+gap)\b.*\b(?:rfq|quotation|quote)\b|'
+                             r'\b(?:draft|prepare|create|request)\b.*\b(?:rfq|quotation|quote)\b.*\b(?:bridge|earlier\s+delivery|(?:production\s+)?supply\s+gap)\b', re.I)
 # A routing boundary only, never authority to turn an RFP into an RFQ. ASR
 # can insert punctuation between "earlier delivery" and the document name.
 _BRIDGE_AMBIGUOUS_REQUEST = re.compile(

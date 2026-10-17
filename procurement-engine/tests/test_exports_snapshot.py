@@ -74,5 +74,5 @@ def test_deploy_package_ships_the_export_config(tmp_path):
                               capture_output=True, text=True)
     assert prepared.returncode == 0, prepared.stderr
     config = destination / 'procurement-engine' / 'config'
-    for name in ('export_products_v1.json', 'export_trade_snapshot_v1.json'):
+    for name in ('export_products_v1.json', 'export_trade_snapshot_v1.json', 'export_fx_v1.json'):
         assert (config / name).read_bytes() == (ROOT / 'config' / name).read_bytes(), name

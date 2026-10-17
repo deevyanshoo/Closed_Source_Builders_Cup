@@ -589,6 +589,10 @@ def _fresh_rfq_route(message: str) -> str | None:
     text = re.sub(r'[-‐‑–—]', ' ', message).strip()
     if _DRAFT_NEGATION.search(text) or _HYPOTHETICAL.search(text) or _DRAFT_DEFERRED.search(text):
         return None
+    # Route ambiguous document wording to the shared local resolver. This
+    # grants no draft authority: it must clarify RFP rather than infer RFQ.
+    if _BRIDGE_AMBIGUOUS_REQUEST.search(text):
+        return 'operate_workspace'
     if any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
            for clause in re.split(r'[.,;!?]', text)):
         return 'operate_workspace'
@@ -2183,7 +2187,8 @@ async def run_live_voice(
                                     result = recovery_result
                                 elif routed_name == 'operate_workspace':
                                     exact_message = (recovery_spoken if recovery_settled and recovery_vad_ended
-                                        and not recovery_asr_incomplete and recovery_spoken else args['message'])
+                                        and not recovery_asr_incomplete and not rfq_input_closed
+                                        and recovery_spoken else args['message'])
                                     if workspace_tools is not None and _broad_inventory_read(exact_message):
                                         result = await workspace_tools('read_risks',
                                             {'message': exact_message}, context_version, key)

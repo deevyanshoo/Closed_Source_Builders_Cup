@@ -28,6 +28,8 @@ class ClarificationProvider(Provider):
         self.chunks, self.reply, self.stale = chunks, reply, stale
         self.turn = 0
         self.model_message = None
+        self.tool_name = 'operate_workspace'
+        self.executed_messages = []
 
     async def send_realtime_input(self, **kwargs):
         if not kwargs.get('audio'):
@@ -39,8 +41,10 @@ class ClarificationProvider(Provider):
                 await self.events.put(event(text=chunk, finished=index == len(self.chunks) - 1))
             await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
         # A new tool ID with no fresh ASR must not borrow the preceding turn.
-        await self.events.put(event(call=NS(name='operate_workspace',
-            args={'message': self.model_message or ''.join(self.chunks)}, id=f'operate-{self.turn}')))
+        args = ({'message': self.model_message or ''.join(self.chunks)}
+                if self.tool_name == 'operate_workspace' else {})
+        await self.events.put(event(call=NS(name=self.tool_name,
+            args=args, id=f'operate-{self.turn}')))
 
     async def send_tool_response(self, *, function_responses):
         self.tool_response = function_responses
@@ -68,6 +72,15 @@ def workspace(monkeypatch):
         yield provider
 
     provider = ClarificationProvider()
+    run_live_voice = live_voice.run_live_voice
+
+    async def observe_execution(*args, operate_workspace, **kwargs):
+        async def operate(message, version, key):
+            provider.executed_messages.append(message)
+            return await operate_workspace(message, version, key)
+        return await run_live_voice(*args, operate_workspace=operate, **kwargs)
+
+    monkeypatch.setattr(live_voice, 'run_live_voice', observe_execution)
     operator = OperatorProvider(intent='recovery', evidence=())
     application = create_app(clock=lambda: datetime(2026, 10, 14, tzinfo=timezone.utc),
         operator_provider=operator, live_client_factory=factory)
@@ -123,14 +136,17 @@ def assert_audio(frames):
                 and frame.get('direction') == 'output']) == 1
 
 
-def test_exact_hosted_rfp_asr_clarifies_locally_without_mutation(workspace):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_exact_hosted_rfp_asr_clarifies_locally_without_mutation(workspace, tool_name):
     client, provider, operator = workspace
+    provider.tool_name = tool_name
     before = protected(client)
     frames = ask(client)
     result = tool_result(frames)
     assert result['assistant_text'] == CLARIFICATION
     assert result['status'] == 'needs_clarification' and result['read_only'] is True
     assert result['proposal'] is None and result.get('action_result') is None
+    assert provider.executed_messages == [''.join(RFP_CHUNKS)]
     assert operator.calls == []
     assert protected(client) == before
     assert provider.tool_response.response['required_spoken_response'] == CLARIFICATION
@@ -151,8 +167,10 @@ def test_existing_local_clarification_releases_grounded_pcm_at_finalization(work
     'Prepare an earlier delivery request for quotation for the supply gap using our current plan. Save the draft without sending it.',
     BRIDGE,
 ])
-def test_unambiguous_operate_saves_exact_bridge_and_download_with_audio(workspace, words):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_unambiguous_operate_saves_exact_bridge_and_download_with_audio(workspace, words, tool_name):
     client, provider, operator = workspace
+    provider.tool_name = tool_name
     provider.chunks = (words,)
     plan = client.get('/api/demo/session').json()['plan']
     frames = ask(client)
@@ -181,8 +199,10 @@ def test_unambiguous_operate_saves_exact_bridge_and_download_with_audio(workspac
     'Prepare an earlier delivery document for the supply gap. Save the draft without sending it.',
     'Prepare an earlier delivery RFP or RFQ for the supply gap using our current plan.',
 ])
-def test_ambiguous_document_guards_fail_closed_locally(workspace, words):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_ambiguous_document_guards_fail_closed_locally(workspace, words, tool_name):
     client, provider, operator = workspace
+    provider.tool_name = tool_name
     provider.chunks = (words,)
     before = protected(client)
     result = tool_result(ask(client))
@@ -193,13 +213,18 @@ def test_ambiguous_document_guards_fail_closed_locally(workspace, words):
 
 
 @pytest.mark.parametrize('reply', ['contradictory', 'interrupted'])
-def test_clarification_does_not_release_contradictory_or_interrupted_audio(workspace, reply):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_clarification_does_not_release_contradictory_or_interrupted_audio(workspace, reply, tool_name):
     client, provider, operator = workspace
-    provider.chunks = ('Prepare a bridge RFQ if the supplier agrees.',)
+    provider.tool_name = tool_name
+    provider.chunks = RFP_CHUNKS
     provider.reply = reply
+    before = protected(client)
     frames = ask(client)
+    assert tool_result(frames)['assistant_text'] == CLARIFICATION
     assert not any(frame['type'] == 'audio' for frame in frames)
     assert not any('sent it' in frame.get('text', '') for frame in frames)
+    assert protected(client) == before and operator.calls == []
 
 
 @pytest.mark.parametrize('reply', ['caption_only', 'silent'])
@@ -214,18 +239,24 @@ def test_clarification_without_pcm_finishes_with_bounded_error(workspace, monkey
     assert client.get('/api/demo/session').json()['drafts'] == []
 
 
-@pytest.mark.parametrize('chunks', [RFP_CHUNKS, ('Prepare a bridge RFQ if the supplier agrees.',)])
-def test_model_arguments_cannot_replace_ambiguous_or_conditional_asr(workspace, chunks):
+@pytest.mark.parametrize('chunks', [RFP_CHUNKS, ('Prepare a bridge RFQ if the supplier agrees.',),
+    ('Prepare an earlier delivery RFQ for polymer using our current plan.',),
+    ('Draft a bridge RFQ for Northstar Foods.',)])
+@pytest.mark.parametrize('model_message', [BRIDGE, 'Read the current plan'])
+def test_model_arguments_cannot_replace_ambiguous_or_conditional_asr(workspace, chunks, model_message):
     client, provider, operator = workspace
-    provider.chunks, provider.model_message = chunks, BRIDGE
+    provider.chunks, provider.model_message = chunks, model_message
     before = protected(client)
     result = tool_result(ask(client))
     assert result['status'] == 'needs_clarification' and result.get('action_result') is None
+    assert provider.executed_messages == [''.join(chunks)]
     assert protected(client) == before and operator.calls == []
 
 
-def test_model_bridge_arguments_without_any_asr_cannot_create_draft(workspace):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_model_bridge_arguments_without_any_asr_cannot_create_draft(workspace, tool_name):
     client, provider, operator = workspace
+    provider.tool_name = tool_name
     provider.chunks, provider.stale, provider.turn = (BRIDGE,), True, 1
     before = protected(client)
     result = tool_result(ask(client))
@@ -233,8 +264,10 @@ def test_model_bridge_arguments_without_any_asr_cannot_create_draft(workspace):
     assert protected(client) == before and operator.calls == []
 
 
-def test_replayed_operate_cannot_borrow_completed_asr(workspace):
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_replayed_operate_cannot_borrow_completed_asr(workspace, tool_name):
     client, provider, operator = workspace
+    provider.tool_name = tool_name
     provider.chunks, provider.stale = (BRIDGE,), True
     session = client.get('/api/demo/session').json()
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
@@ -252,3 +285,53 @@ def test_replayed_operate_cannot_borrow_completed_asr(workspace):
         assert tool_result(second).get('action_result') is None
         assert protected(client) == before and operator.calls == []
         socket.send_json({'type': 'stop'})
+
+
+@pytest.mark.parametrize('change_plan', [False, True])
+def test_nonbridge_call_never_executes_closed_bridge_asr(workspace, change_plan):
+    client, provider, operator = workspace
+    provider.chunks, provider.stale = (BRIDGE,), True
+    session = client.get('/api/demo/session').json()
+    with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                  headers={'origin': 'https://demo.test'}) as socket:
+        socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                          'expected_context_version': session['context_version']})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        assert tool_result(receive_turn(socket))['action_result']['tool'] == 'prepare_rfq'
+        assert provider.executed_messages == [BRIDGE]
+        if change_plan:
+            previous_plan = protected(client)['plan']
+            operator.intent = operator.action = 'compare'
+            compared = client.post('/api/demo/operator', headers={
+                'Origin': 'https://demo.test', 'X-CSRF-Token': session['csrf_token']}, json={
+                    'message': 'Compare suppliers for copper.',
+                    'expected_context_version': session['context_version'],
+                    'idempotency_key': 'typed-new-plan'})
+            assert compared.status_code == 200, compared.text
+            assert protected(client)['plan']['plan_id'] != previous_plan['plan_id']
+        before = protected(client)
+        operator.intent, operator.action = 'recovery', 'recovery'
+        provider.model_message = 'Read the current plan'
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        result = tool_result(receive_turn(socket))
+        assert provider.executed_messages == [BRIDGE, 'Read the current plan']
+        assert result['read_only'] is True and result.get('action_result') is None
+        assert protected(client) == before
+        socket.send_json({'type': 'stop'})
+
+
+def test_generic_ordinary_rfq_stays_on_ordinary_action_path(workspace):
+    client, provider, operator = workspace
+    provider.tool_name = 'prepare_rfq'
+    provider.chunks = ('Prepare an RFQ for the current sourcing plan.',)
+    plan = protected(client)['plan']
+    frames = ask(client)
+    result = tool_result(frames)
+    state = client.get('/api/demo/session').json()
+    assert result['status'] == 'completed' and result['action_result']['tool'] == 'prepare_rfq'
+    assert provider.executed_messages == [] and operator.calls == []
+    assert state['rfq'].get('bridge', False) is False
+    assert state['rfq']['status'] == 'draft_unsent' and len(state['drafts']) == 1
+    assert state['plan'] == plan and state['simulated_outbox'] == []
+    assert_audio(frames)

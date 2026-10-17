@@ -1,4 +1,5 @@
 """Hosted ASR regressions through the real public socket and operator boundary."""
+import asyncio
 import base64
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -30,21 +31,66 @@ class ClarificationProvider(Provider):
         self.model_message = None
         self.tool_name = 'operate_workspace'
         self.executed_messages = []
+        self.marker = 'final'
+        self.order = 'asr_first'
+        self.input_script = None
+        self.renew_first = False
+        self.script_audio_bytes = 0
+        self.received_bytes = 0
+        self.original_complete = False
+        self.early_start = None
+
+    def caption(self, text):
+        frame = event(text=text)
+        if self.marker == 'absent':
+            frame.server_content.input_transcription = NS(text=text)
+        elif self.marker == 'sdk_default':
+            from google.genai.types import Transcription
+            frame.server_content.input_transcription = Transcription(text=text)
+        return frame
 
     async def send_realtime_input(self, **kwargs):
         if not kwargs.get('audio'):
             return
+        self.received_bytes += len(kwargs['audio'].data)
+        if self.early_start is not None:
+            await self.events.put(event(activity=('ACTIVITY_START', self.early_start)))
+            self.early_start = None
+        if self.received_bytes < self.script_audio_bytes:
+            return
         self.turn += 1
-        if not self.stale or self.turn == 1:
-            await self.events.put(event(activity=('ACTIVITY_START', '0s')))
-            for index, chunk in enumerate(self.chunks):
-                await self.events.put(event(text=chunk, finished=index == len(self.chunks) - 1))
-            await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
-        # A new tool ID with no fresh ASR must not borrow the preceding turn.
+        if self.renew_first and self.turn == 1:
+            await self.events.put(NS(go_away=NS(time_left='0s')))
+            return
         args = ({'message': self.model_message or ''.join(self.chunks)}
                 if self.tool_name == 'operate_workspace' else {})
-        await self.events.put(event(call=NS(name=self.tool_name,
-            args=args, id=f'operate-{self.turn}')))
+        call = event(call=NS(name=self.tool_name, args=args, id=f'operate-{self.turn}'))
+        if self.input_script is not None:
+            for frame in self.input_script:
+                if isinstance(frame, float):
+                    await asyncio.sleep(frame)
+                else:
+                    await self.events.put(frame)
+            await self.events.put(call)
+            if self.original_complete:
+                await self.events.put(event(complete=True))
+            return
+        if not self.stale or self.turn == 1:
+            await self.events.put(event(activity=('ACTIVITY_START', '0s')))
+            if self.order != 'asr_first':
+                await self.events.put(call)
+            if self.order == 'after_vad':
+                await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
+            for index, chunk in enumerate(self.chunks):
+                frame = self.caption(chunk)
+                if self.marker == 'final':
+                    frame.server_content.input_transcription.finished = index == len(self.chunks) - 1
+                await self.events.put(frame)
+            if self.order != 'after_vad':
+                await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
+        # A new tool ID with no fresh ASR must not borrow the preceding turn.
+        if self.order == 'asr_first':
+            await self.events.put(call)
 
     async def send_tool_response(self, *, function_responses):
         self.tool_response = function_responses
@@ -98,18 +144,21 @@ def receive_turn(socket):
     while True:
         frame = socket.receive_json()
         frames.append(frame)
-        if frame['type'] in {'turn_complete', 'error'}:
+        if frame['type'] == 'error' or (frame['type'] == 'turn_complete'
+                and any(item['type'] == 'tool_result' for item in frames)):
             return frames
 
 
-def ask(client):
+def ask(client, *, audio_bytes=4):
     session = client.get('/api/demo/session').json()
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
                                   headers={'origin': 'https://demo.test'}) as socket:
         socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
                           'expected_context_version': session['context_version']})
         assert socket.receive_json()['type'] == 'ready'
-        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        for offset in range(0, audio_bytes, 32000):
+            chunk = PCM * (min(32000, audio_bytes - offset) // len(PCM))
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(chunk).decode()})
         frames = receive_turn(socket)
         socket.send_json({'type': 'stop'})
     return frames
@@ -243,9 +292,11 @@ def test_clarification_without_pcm_finishes_with_bounded_error(workspace, monkey
     ('Prepare an earlier delivery RFQ for polymer using our current plan.',),
     ('Draft a bridge RFQ for Northstar Foods.',)])
 @pytest.mark.parametrize('model_message', [BRIDGE, 'Read the current plan'])
-def test_model_arguments_cannot_replace_ambiguous_or_conditional_asr(workspace, chunks, model_message):
+@pytest.mark.parametrize('marker', ['final', 'sdk_default'])
+def test_model_arguments_cannot_replace_ambiguous_or_conditional_asr(workspace, chunks, model_message, marker):
     client, provider, operator = workspace
     provider.chunks, provider.model_message = chunks, model_message
+    provider.marker = marker
     before = protected(client)
     result = tool_result(ask(client))
     assert result['status'] == 'needs_clarification' and result.get('action_result') is None
@@ -265,9 +316,11 @@ def test_model_bridge_arguments_without_any_asr_cannot_create_draft(workspace, t
 
 
 @pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
-def test_replayed_operate_cannot_borrow_completed_asr(workspace, tool_name):
+@pytest.mark.parametrize('marker', ['final', 'sdk_default'])
+def test_replayed_operate_cannot_borrow_completed_asr(workspace, tool_name, marker):
     client, provider, operator = workspace
     provider.tool_name = tool_name
+    provider.marker = marker
     provider.chunks, provider.stale = (BRIDGE,), True
     session = client.get('/api/demo/session').json()
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
@@ -335,3 +388,262 @@ def test_generic_ordinary_rfq_stays_on_ordinary_action_path(workspace):
     assert state['rfq']['status'] == 'draft_unsent' and len(state['drafts']) == 1
     assert state['plan'] == plan and state['simulated_outbox'] == []
     assert_audio(frames)
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+@pytest.mark.parametrize('marker', ['absent', 'sdk_default'])
+@pytest.mark.parametrize('order', ['asr_first', 'tool_first', 'after_vad'])
+@pytest.mark.parametrize('document', ['proposal', 'quotation'])
+def test_optional_finished_marker_uses_settled_current_asr(workspace, tool_name, marker, order, document):
+    client, provider, operator = workspace
+    provider.tool_name, provider.marker, provider.order = tool_name, marker, order
+    provider.chunks = (f'Prepare an earlier delivery request for {document} for the supply gap using our current plan.',
+                       ' Save the draft without sending it.')
+    before = protected(client)
+    frames = ask(client)
+    result = tool_result(frames)
+    if document == 'proposal':
+        assert result['status'] == 'needs_clarification' and result['read_only'] is True
+        assert result['assistant_text'] == CLARIFICATION
+        assert protected(client) == before
+    else:
+        state = client.get('/api/demo/session').json()
+        assert result['status'] == 'completed' and result['action_result']['tool'] == 'prepare_rfq'
+        assert state['rfq']['bridge'] is True and state['rfq']['status'] == 'draft_unsent'
+        assert state['rfq']['quantity_kg'] == '1333.3' and state['rfq']['need_by'] == '2026-10-20'
+        assert state['plan'] == before['plan'] and state['simulated_outbox'] == []
+        assert len(state['drafts']) == 1
+        assert client.get(f"/api/demo/rfq/{state['rfq']['draft_id']}/download").text == state['rfq']['text']
+    assert provider.executed_messages == [''.join(provider.chunks)]
+    assert operator.calls == []
+    assert_audio(frames)
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+@pytest.mark.parametrize('marker', ['final', 'sdk_default'])
+@pytest.mark.parametrize('case', ['late_negation', 'late_correction', 'late_foreign',
+    'explicit_incomplete', 'empty_incomplete', 'incomplete_then_omitted',
+    'late_after_settlement', 'late_empty_incomplete', 'no_asr', 'no_vad', 'stale_vad', 'closed_turn',
+    'caption_deadline'])
+def test_optional_marker_adversarial_input_cannot_save(workspace, monkeypatch, tool_name, marker, case):
+    client, provider, operator = workspace
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .03)
+    monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .08)
+    provider.tool_name, provider.marker, provider.chunks = tool_name, marker, (BRIDGE,)
+    start = event(activity=('ACTIVITY_START', '0s'))
+    end = event(activity=('ACTIVITY_END', '0.000125s'))
+    empty_incomplete = event()
+    empty_incomplete.server_content.input_transcription = NS(text=None, finished=False)
+    script = [start, provider.caption(BRIDGE), end]
+    if case in {'late_negation', 'late_correction', 'late_foreign'}:
+        tail = {'late_negation': ' Do not create the draft.',
+                'late_correction': 'Do not ' + BRIDGE,
+                'late_foreign': ' For Harvest Foods.'}[case]
+        script += [.01, provider.caption(tail)]
+    elif case == 'explicit_incomplete':
+        script = [start, event(text=BRIDGE, finished=False), end]
+    elif case == 'empty_incomplete':
+        script += [empty_incomplete]
+    elif case == 'incomplete_then_omitted':
+        script = [start, event(text='Prepare an earlier delivery', finished=False), end,
+                  event(text=BRIDGE, finished=None)]
+    elif case == 'late_after_settlement':
+        script += [.05, provider.caption(' Do not create the draft.')]
+    elif case == 'late_empty_incomplete':
+        script += [.05, empty_incomplete]
+    elif case == 'no_asr':
+        script = [start, end]
+    elif case == 'no_vad':
+        script = [provider.caption(BRIDGE)]
+    elif case == 'stale_vad':
+        script = [start, provider.caption(BRIDGE), event(activity=('ACTIVITY_END', '1s'))]
+    elif case == 'closed_turn':
+        script += [.05, event(complete=True), provider.caption(BRIDGE)]
+    elif case == 'caption_deadline':
+        # Every delta postpones quiet; the absolute input cap must deny, not
+        # authorize the most recent unquiet positive transcript or wait forever.
+        script += [.02, provider.caption(' ' + BRIDGE)] * 5
+    provider.input_script = script
+    before = protected(client)
+    frames = ask(client)
+    result = tool_result(frames)
+    assert result['status'] == 'needs_clarification' and result.get('action_result') is None
+    assert protected(client) == before and operator.calls == []
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+@pytest.mark.parametrize('mode', ['late_first_caption', 'empty_final_marker'])
+def test_optional_marker_waits_for_current_input_before_routing(workspace, monkeypatch, tool_name, mode):
+    client, provider, operator = workspace
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .03)
+    monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .15)
+    provider.tool_name, provider.marker, provider.chunks = tool_name, 'sdk_default', (BRIDGE,)
+    start = event(activity=('ACTIVITY_START', '0s'))
+    end = event(activity=('ACTIVITY_END', '0.000125s'))
+    if mode == 'late_first_caption':
+        provider.input_script = [start, end, .05, provider.caption(BRIDGE)]
+    else:
+        final = event()
+        final.server_content.input_transcription = NS(text=None, finished=True)
+        provider.input_script = [start, event(text=BRIDGE, finished=False), end, .01, final]
+    frames = ask(client)
+    assert tool_result(frames)['status'] == 'completed'
+    assert provider.executed_messages == [BRIDGE] and operator.calls == []
+    assert client.get('/api/demo/session').json()['rfq']['quantity_kg'] == '1333.3'
+    assert_audio(frames)
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_optional_marker_after_renewal_requires_fresh_vad_and_audio(workspace, tool_name):
+    client, provider, operator = workspace
+    provider.tool_name, provider.marker, provider.chunks = tool_name, 'sdk_default', (BRIDGE,)
+    provider.renew_first = True
+    session = client.get('/api/demo/session').json()
+    with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                  headers={'origin': 'https://demo.test'}) as socket:
+        socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                          'expected_context_version': session['context_version']})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        assert socket.receive_json()['state'] == 'reconnecting'
+        assert socket.receive_json()['state'] == 'ready'
+        assert protected(client)['drafts'] == []
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        frames = receive_turn(socket)
+        assert tool_result(frames)['status'] == 'completed'
+        assert provider.executed_messages == [BRIDGE] and operator.calls == []
+        assert client.get('/api/demo/session').json()['rfq']['quantity_kg'] == '1333.3'
+        assert_audio(frames)
+        socket.send_json({'type': 'stop'})
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+@pytest.mark.parametrize('document', ['quotation', 'proposal'])
+def test_captured_provider_8_2_second_vad_and_early_turn_complete(workspace, monkeypatch, tool_name, document):
+    client, provider, operator = workspace
+    # Real bounds and captured order: 0.2s START, 127-character ASR with
+    # omitted finished, 8.4s END, tool, turn_complete before 250ms settlement.
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .25)
+    provider.tool_name, provider.marker = tool_name, 'sdk_default'
+    words = (f'Prepare an earlier delivery request for {document}. For the supply gap using our current plan, '
+             'save the draft without sending.')
+    provider.chunks = (words,)
+    provider.script_audio_bytes = 268800  # 8.4 seconds of actual PCM16 input.
+    provider.original_complete = True
+    provider.input_script = [event(activity=('ACTIVITY_START', '0.200s')),
+        provider.caption(words), event(activity=('ACTIVITY_END', '8.400s'))]
+    before = protected(client)
+    frames = ask(client, audio_bytes=provider.script_audio_bytes)
+    result = tool_result(frames)
+    if document == 'quotation':
+        assert result['status'] == 'completed' and result['action_result']['tool'] == 'prepare_rfq'
+        state = client.get('/api/demo/session').json()
+        assert state['rfq']['bridge'] is True and state['rfq']['status'] == 'draft_unsent'
+        assert state['rfq']['quantity_kg'] == '1333.3' and state['rfq']['need_by'] == '2026-10-20'
+        assert state['plan'] == before['plan'] and state['simulated_outbox'] == []
+        assert len(state['drafts']) == 1
+        assert client.get(f"/api/demo/rfq/{state['rfq']['draft_id']}/download").text == state['rfq']['text']
+    else:
+        assert result['assistant_text'] == CLARIFICATION
+        assert result['status'] == 'needs_clarification' and result['read_only'] is True
+        assert result['proposal'] is None and result.get('action_result') is None
+        assert protected(client) == before
+    assert provider.executed_messages == [words] and operator.calls == []
+    assert provider.received_bytes == 268800
+    assert_audio(frames)
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+@pytest.mark.parametrize('case', ['over_command_limit', 'outside_audio', 'missing_start',
+    'stale_start', 'interrupted', 'explicit_incomplete', 'empty_incomplete', 'late_negation'])
+def test_long_command_vad_guards_never_authorize_from_timeout(workspace, monkeypatch, tool_name, case):
+    client, provider, operator = workspace
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .03)
+    monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .1)
+    provider.tool_name, provider.marker, provider.chunks = tool_name, 'sdk_default', (BRIDGE,)
+    provider.script_audio_bytes = (31 * 32000 if case == 'over_command_limit' else 268800)
+    script = [event(activity=('ACTIVITY_START', '0.200s')), provider.caption(BRIDGE),
+              event(activity=('ACTIVITY_END', '8.400s'))]
+    if case == 'over_command_limit':
+        # Start is observed before the retained consent ring has rolled over.
+        provider.early_start = '0.200s'
+        script = [provider.caption(BRIDGE),
+                  event(activity=('ACTIVITY_END', '31s'))]
+    elif case == 'outside_audio':
+        script[-1] = event(activity=('ACTIVITY_END', '8.500s'))
+    elif case == 'missing_start':
+        script = script[1:]
+    elif case == 'stale_start':
+        script = [event(activity=('ACTIVITY_START', '0s')),
+                  event(activity=('ACTIVITY_END', '0.200s'))] + script
+        script[2] = event(activity=('ACTIVITY_START', '0.100s'))
+    elif case == 'interrupted':
+        interrupted = event()
+        interrupted.server_content.interrupted = True
+        script += [interrupted]
+    elif case == 'explicit_incomplete':
+        script[1] = event(text=BRIDGE, finished=False)
+    elif case == 'empty_incomplete':
+        incomplete = event()
+        incomplete.server_content.input_transcription = NS(text=None, finished=False)
+        script += [incomplete]
+    elif case == 'late_negation':
+        script += [.01, provider.caption(' Do not create the draft.')]
+    provider.input_script = script
+    before = protected(client)
+    result = tool_result(ask(client, audio_bytes=provider.script_audio_bytes))
+    assert result['status'] == 'needs_clarification' and result.get('action_result') is None
+    assert protected(client) == before and operator.calls == []
+
+
+@pytest.mark.parametrize('tool_name', ['operate_workspace', 'prepare_rfq'])
+def test_ordinary_command_at_30_second_ceiling_can_settle(workspace, tool_name):
+    client, provider, operator = workspace
+    provider.tool_name, provider.marker, provider.chunks = tool_name, 'sdk_default', (BRIDGE,)
+    provider.script_audio_bytes = 30 * 32000
+    provider.early_start = '0s'
+    provider.input_script = [provider.caption(BRIDGE), event(activity=('ACTIVITY_END', '30s'))]
+    frames = ask(client, audio_bytes=provider.script_audio_bytes)
+    assert tool_result(frames)['status'] == 'completed'
+    assert provider.executed_messages == [BRIDGE] and operator.calls == []
+    assert client.get('/api/demo/session').json()['rfq']['quantity_kg'] == '1333.3'
+    assert_audio(frames)
+
+
+@pytest.mark.parametrize('gate_kind', ['research', 'action'])
+def test_long_command_window_does_not_expand_consent_clip(gate_kind):
+    from test_demo_voice_research_consent import (scenario as research_scenario,
+        prepare, send_pcm, finish, QUERY)
+    from test_demo_voice_workspace_actions import scenario as action_scenario
+
+    async def check():
+        verified = []
+        async def verify(clip):
+            verified.append(clip)
+            return 'confirm ' + gate_kind
+
+        if gate_kind == 'research':
+            _, _, socket, provider, calls, task = await research_scenario(verifier=verify)
+            await prepare(socket, provider)
+            review = f'Search for: {QUERY} Say confirm research to start.'
+            name, proposal_id = 'confirm_research', 'proposal-1'
+        else:
+            _, _, socket, provider, calls, task, review = await action_scenario(verify)
+            name, proposal_id = 'confirm_workspace_action', 'watch-1'
+        try:
+            await provider.spoken('output', review, complete=True)
+            await socket.next('turn_complete')
+            for _ in range(8):
+                await send_pcm(socket, provider)
+            await send_pcm(socket, provider, size=12800)
+            await provider.activity('ACTIVITY_START', '0.200s')
+            await provider.spoken('input', 'confirm ' + gate_kind, finished=None)
+            await socket.next('transcript', 'input')
+            await provider.activity('ACTIVITY_END', '8.400s')
+            await provider.call(name, {'proposal_id': proposal_id}, 'overlong-consent')
+            result = (await socket.next('tool_result'))['result']
+            assert result['read_only'] is True and result.get('action_result') is None
+            assert len(calls) == 1 and verified == []
+        finally:
+            await finish(socket, task)
+    asyncio.run(check())

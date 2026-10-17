@@ -44,6 +44,14 @@ MAX_CONNECTIONS = 2
 MAX_PROCESS_STARTS = 24
 PROCESS_WINDOW_SECONDS = 3600
 MAX_INPUT_CHUNK = 32_000  # One second of mono PCM16 at 16 kHz.
+# Ordinary requests include material, timing and document intent plus VAD
+# hangover. They are not eight-second consent clips. This ceiling consumes
+# the existing rolling input budget; it does not increase that budget.
+MAX_COMMAND_CLIP_BYTES = 30 * 32_000
+# Preserve the initial observation phase and the existing 30-second late
+# transport phase (39 seconds total with input wait). Together they cover
+# the command ceiling without extending stale-generation attribution.
+COMMAND_INITIAL_ACTIVITY_SECONDS = 8
 RECOVERY_CAPTION_SETTLE_SECONDS = .25
 RECOVERY_INPUT_WAIT_SECONDS = 1.0
 RECOVERY_TRANSPORT_LATENESS_SECONDS = 30.0
@@ -1044,6 +1052,8 @@ async def run_live_voice(
                 recovery_late_generation_abandoned = False
                 recovery_caption_limit = None
                 recovery_caption_finished = False
+                rfq_caption_quiet_at = None
+                rfq_caption_settled = False
                 rfq_input_closed = False
                 recovery_held_calls = []
                 recovery_speech_pending = False
@@ -1584,7 +1594,7 @@ async def run_live_voice(
                                     activity_start_global = offset
                             elif kind.endswith('ACTIVITY_END'):
                                 if (activity_start_global is None or offset <= activity_start_global or
-                                        offset - activity_start_global > MAX_CONSENT_CLIP_BYTES):
+                                        offset - activity_start_global > MAX_COMMAND_CLIP_BYTES):
                                     activity_valid = False
                                 else:
                                     accepted_activity_end = offset
@@ -1614,6 +1624,8 @@ async def run_live_voice(
                             recovery_deadline = None
                             recovery_transport_deadline = None
                             recovery_caption_limit = None
+                            rfq_caption_quiet_at = None
+                            rfq_caption_settled = False
                             recovery_settled = False
                             recovery_held_calls.clear()
                             recovery_speech_pending = False
@@ -1635,10 +1647,12 @@ async def run_live_voice(
                             recovery_asr_incomplete = False
                             recovery_result = None
                             recovery_settled = False
-                            recovery_deadline = monotonic() + MAX_CONSENT_CLIP_BYTES / 32_000 + RECOVERY_INPUT_WAIT_SECONDS
+                            recovery_deadline = monotonic() + COMMAND_INITIAL_ACTIVITY_SECONDS + RECOVERY_INPUT_WAIT_SECONDS
                             recovery_transport_deadline = None
                             recovery_caption_limit = None
                             recovery_caption_finished = False
+                            rfq_caption_quiet_at = None
+                            rfq_caption_settled = False
                             recovery_held_calls.clear()
                             recovery_speech_pending = False
                             recovery_speech_deadline = None
@@ -1655,16 +1669,26 @@ async def run_live_voice(
                                 monotonic() + RECOVERY_INPUT_WAIT_SECONDS)
                         caption = getattr(content, 'input_transcription', None)
                         heard = getattr(caption, 'text', None)
+                        caption_changed = isinstance(heard, str) and bool(heard.strip())
+                        caption_finished = getattr(caption, 'finished', None)
+                        if (recovery_vad_started and recovery_settled and
+                                (caption_changed or caption_finished is False)):
+                            # Unlabelled corrections after the bounded snapshot
+                            # cannot authorize a later tool using its old words.
+                            # Only a new valid VAD generation can reopen it.
+                            rfq_input_closed = True
                         if (recovery_vad_started and not recovery_settled and
                                 not recovery_late_generation_abandoned and
-                                isinstance(heard, str) and heard.strip()):
-                            recovery_spoken = _append_transcription(recovery_spoken, heard)[:1201]
-                            if getattr(caption, 'finished', None) is False:
+                                (caption_changed or caption_finished is not None)):
+                            if caption_changed:
+                                recovery_spoken = _append_transcription(recovery_spoken, heard)[:1201]
+                            if caption_finished is False:
                                 recovery_asr_incomplete = True
                                 recovery_caption_finished = False
-                            elif getattr(caption, 'finished', None) is True:
+                            elif caption_finished is True:
                                 recovery_asr_incomplete = False
                                 recovery_caption_finished = True
+                            rfq_caption_quiet_at = monotonic() + RECOVERY_CAPTION_SETTLE_SECONDS
                             if recovery_result is None and recovery_vad_ended:
                                 recovery_settled = False
                                 recovery_deadline = min(recovery_caption_limit, monotonic() + (
@@ -1672,16 +1696,19 @@ async def run_live_voice(
                                     else RECOVERY_INPUT_WAIT_SECONDS))
                         if (activity is not None and activity_valid and kind.endswith('ACTIVITY_END')
                                 and recovery_vad_started):
+                            rfq_caption_quiet_at = (monotonic() + RECOVERY_CAPTION_SETTLE_SECONDS
+                                if recovery_spoken else None)
                             recovery_deadline = (recovery_transport_deadline
                                 if recovery_transport_deadline is not None and
                                 (not recovery_spoken or recovery_asr_incomplete) else
-                                monotonic() + (RECOVERY_INPUT_WAIT_SECONDS if recovery_asr_incomplete
+                                monotonic() + (RECOVERY_INPUT_WAIT_SECONDS if recovery_asr_incomplete or not recovery_spoken
                                     else RECOVERY_CAPTION_SETTLE_SECONDS))
                         recovery_release = []
                         if (recovery_deadline is not None and monotonic() >= recovery_deadline):
                             if not recovery_vad_ended and recovery_transport_deadline is None:
-                                # The physical clip wait has elapsed, but this same
-                                # VAD utterance may still be in provider transport.
+                                # The initial observation wait has elapsed. This
+                                # same bounded VAD utterance may still be arriving;
+                                # retain the existing late-generation safeguards.
                                 recovery_transport_deadline = (monotonic() +
                                     RECOVERY_TRANSPORT_LATENESS_SECONDS)
                                 recovery_deadline = None
@@ -1696,6 +1723,12 @@ async def run_live_voice(
                                 else:
                                     recovery_deadline = None
                                     recovery_settled = True
+                                    # finished is optional in the SDK. Authorize
+                                    # RFQ routing from the bounded quiet snapshot,
+                                    # never by treating an omitted marker as True.
+                                    # A hard input deadline without quiet fails shut.
+                                    rfq_caption_settled = (rfq_caption_quiet_at is not None
+                                        and monotonic() >= rfq_caption_quiet_at)
                                     if recovery_transport_deadline is not None and (
                                             monotonic() >= recovery_transport_deadline or
                                             not recovery_vad_ended or recovery_asr_incomplete):
@@ -1939,16 +1972,16 @@ async def run_live_voice(
                             recovery_route = (recovery_result is not None and
                                 _explicit_recovery_request(recovery_spoken) and
                                 name in {'read_workspace', 'operate_workspace'})
+                            settled_rfq_input = (fresh_input_ready and recovery_vad_started
+                                and recovery_settled and recovery_vad_ended and rfq_caption_settled
+                                and not recovery_asr_incomplete and not recovery_late_generation_abandoned
+                                and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200)
                             rfq_route = (_fresh_rfq_route(recovery_spoken)
-                                if name == 'prepare_rfq' and recovery_settled and recovery_vad_ended
-                                and recovery_caption_finished and not recovery_asr_incomplete
-                                and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200 else None)
+                                if name == 'prepare_rfq' and settled_rfq_input else None)
                             bridge_operate = name == 'operate_workspace' and any(
                                 _BRIDGE_REQUEST.search(words) or _BRIDGE_AMBIGUOUS_REQUEST.search(words)
                                 for words in (args['message'], recovery_spoken if not rfq_input_closed else ''))
-                            fresh_bridge_operate = (bridge_operate and recovery_settled and recovery_vad_ended
-                                and recovery_caption_finished and not recovery_asr_incomplete
-                                and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200
+                            fresh_bridge_operate = (bridge_operate and settled_rfq_input
                                 and (_BRIDGE_REQUEST.search(recovery_spoken)
                                      or _BRIDGE_AMBIGUOUS_REQUEST.search(recovery_spoken)))
                             routed_name = (rfq_route or name) if name == 'prepare_rfq' else (

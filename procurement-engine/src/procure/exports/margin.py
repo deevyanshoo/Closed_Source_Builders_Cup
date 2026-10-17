@@ -8,7 +8,7 @@ a suppressed unit value or a missing FX rate means no figure and an exact list o
 """
 from __future__ import annotations
 
-from decimal import Context, Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Context, Decimal, InvalidOperation
 
 LABEL = 'scenario from your inputs and historical customs unit values, not a buyer price, quote or forecast'
 TARIFF_UNAVAILABLE = 'tariff unavailable, check the official schedule'
@@ -25,6 +25,17 @@ _CTX = Context(prec=28)
 def _plain(value: Decimal) -> str:
     value = value.normalize()
     return format(value, 'f') if value != 0 else '0'
+
+
+def _money(value: Decimal) -> str:
+    """Display only: 2 decimal places with separators; fields keep the exact value."""
+    return f'{value.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN):,.2f}'
+
+
+def _qty(value: Decimal) -> str:
+    text = _plain(value)
+    whole, _, fraction = text.partition('.')
+    return f'{int(whole):,}' + (f'.{fraction}' if fraction else '') if whole.lstrip('-').isdigit() else text
 
 
 def _parse(name: str, text) -> Decimal | None:
@@ -83,26 +94,27 @@ def margin_scenario(*, market: dict, inputs: dict, fx: dict | None, reporting_cu
     tariff_rate, capacity, share = values['tariff_rate_percent'], values['capacity_kg_per_year'], values['target_share_percent']
     basis = unit_value.get('basis')
     fx_text = '' if fx_view is None else f" x {fx_view['rate']} {fx_view['quote']} ({fx_view['month']})"
-    lines = [f"unit value: {_plain(usd)} USD/kg{fx_text} = {_plain(price)} {c}/kg ({basis}, {unit_value['year']})"]
+    usd_text = f'{usd.quantize(Decimal("0.0001"), rounding=ROUND_HALF_EVEN)}'
+    lines = [f"unit value: {usd_text} USD/kg{fx_text} = {_money(price)} {c}/kg ({basis}, {unit_value['year']})"]
     if basis == 'FOB':
         delivered = price + freight
         base['notes'].append('FOB-valued imports exclude freight and insurance: freight is added once to reach a '
                              'delivered value and deducted once as your cost.')
-        lines.append(f'delivered value: {_plain(price)} + {_plain(freight)} freight and insurance = {_plain(delivered)} {c}/kg')
+        lines.append(f'delivered value: {_money(price)} + {_money(freight)} freight and insurance = {_money(delivered)} {c}/kg')
         customs = delivered
-        cost_line = f'{_plain(cost)} (unit cost) - {_plain(freight)} (shipping)'
+        cost_line = f'{_money(cost)} (unit cost) - {_money(freight)} (shipping)'
     else:
         customs = price
-        cost_line = f'{_plain(cost)} (unit cost) - {_plain(freight)} (freight and insurance)'
+        cost_line = f'{_money(cost)} (unit cost) - {_money(freight)} (freight and insurance)'
     tariff = customs * tariff_rate / 100
     margin = customs - cost - freight - tariff
-    lines.append(f'tariff: {_plain(tariff_rate)}% x {_plain(customs)} = {_plain(tariff)} {c}/kg')
-    lines.append(f'margin per kg: {_plain(customs)} - {cost_line} - {_plain(tariff)} (tariff) = {_plain(margin)} {c}/kg')
+    lines.append(f'tariff: {_plain(tariff_rate)}% x {_money(customs)} = {_money(tariff)} {c}/kg')
+    lines.append(f'margin per kg: {_money(customs)} - {cost_line} - {_money(tariff)} (tariff) = {_money(margin)} {c}/kg')
     market_kg = Decimal(unit_value['net_weight_kg'])
     volume = min(capacity, market_kg * share / 100)
-    lines.append(f'volume: min({_plain(capacity)} kg capacity, {_plain(share)}% x {_plain(market_kg)} kg market imports) = {_plain(volume)} kg')
+    lines.append(f'volume: min({_qty(capacity)} kg capacity, {_plain(share)}% x {_qty(market_kg)} kg market imports) = {_qty(volume)} kg')
     contribution = margin * volume
-    lines.append(f'contribution: {_plain(margin)} x {_plain(volume)} = {_plain(contribution)} {c}')
+    lines.append(f'contribution: {_money(margin)} x {_qty(volume)} = {_money(contribution)} {c}')
     if margin < 0:
         base['notes'].append('At these inputs each kg is sold at a loss against the historical unit value.')
     return {**base, 'status': 'available', 'missing': [], 'fx': fx_view, 'basis': basis,

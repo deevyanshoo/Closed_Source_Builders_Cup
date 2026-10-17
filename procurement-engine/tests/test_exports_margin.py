@@ -87,3 +87,14 @@ def test_no_defaults_and_no_float_drift():
                              'freight_insurance_per_kg': '0.1', 'tariff_rate_percent': '0'}, fx=None, reporting_currency='USD')
     assert result['margin_per_kg'] == '-0.2'
     assert 'loss' in ' '.join(result['notes'])
+
+
+def test_arithmetic_text_rounds_for_display_while_fields_stay_exact():
+    long = market(usd_per_kg='9.236253773289553798445969341', weight='31832834.0')
+    result = margin_scenario(market=long, inputs={**FULL, 'unit_cost_per_kg': '600', 'freight_insurance_per_kg': '45',
+                                                  'tariff_rate_percent': '0', 'capacity_kg_per_year': '200000',
+                                                  'target_share_percent': '1'},
+                             fx={**FX['INR'], 'rate': '123.100769', 'quote': 'INR per USD'}, reporting_currency='INR')
+    assert result['margin_per_kg'] == '491.989942171095732255569831'
+    assert result['arithmetic'][0] == 'unit value: 9.2363 USD/kg x 123.100769 INR per USD (2026-08) = 1,136.99 INR/kg (CIF, 2024)'
+    assert result['arithmetic'][-1] == 'contribution: 491.99 x 200,000 = 98,397,988.43 INR'

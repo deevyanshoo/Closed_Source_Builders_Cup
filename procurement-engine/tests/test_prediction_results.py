@@ -16,10 +16,13 @@ RUN = ROOT / 'evaluation' / 'prediction_backtest_v1'
 
 
 REL_TOL = 1e-3  # statsmodels on Linux differs from macOS in the 4th to 5th significant digit
+BOOTSTRAP_REL_TOL = 1e-2  # the bootstrap interval amplifies that noise (0.13% seen on Linux)
+BOOTSTRAP_KEYS = {'bootstrap_ci_lower', 'bootstrap_ci_upper'}
 
 
 def assert_same_outlook(actual, expected, path='$'):
-    """Statuses, models, labels, months and other text must match exactly; floats within REL_TOL."""
+    """Statuses, models, labels, months and other text must match exactly; floats within REL_TOL
+    (BOOTSTRAP_REL_TOL for the bootstrap interval bounds)."""
     if isinstance(expected, dict):
         assert isinstance(actual, dict) and actual.keys() == expected.keys(), path
         for key in expected:
@@ -30,7 +33,8 @@ def assert_same_outlook(actual, expected, path='$'):
             assert_same_outlook(a, e, f'{path}[{i}]')
     elif isinstance(expected, float) or (isinstance(actual, float) and not isinstance(expected, (bool, str)) and expected is not None):
         assert not isinstance(actual, bool) and isinstance(actual, (int, float)), path
-        assert math.isclose(actual, expected, rel_tol=REL_TOL), (path, actual, expected)
+        tol = BOOTSTRAP_REL_TOL if path.rsplit('.', 1)[-1] in BOOTSTRAP_KEYS else REL_TOL
+        assert math.isclose(actual, expected, rel_tol=tol), (path, actual, expected)
     else:
         assert actual == expected and type(actual) is type(expected), (path, actual, expected)
 
@@ -45,10 +49,14 @@ def test_reproduction_check_allows_float_noise_but_not_a_changed_status(results)
     noisy = json.loads(json.dumps(entry))
     noisy['horizons'][0]['backtest']['mape'] *= 1 + 4e-4
     noisy['latest_value'] *= 1 - 4e-4
+    noisy['horizons'][2]['backtest']['bootstrap_ci_lower'] = 0.50229  # Linux value; committed 0.50296
+    noisy['horizons'][2]['backtest']['bootstrap_ci_upper'] *= 1 - 8e-3
     assert_same_outlook(noisy, entry)
     for path, value in ((('horizons', 0, 'status'), 'PREDICTION'), (('horizons', 0, 'label'), 'x'),
                         (('horizons', 1, 'target_month'), '1999-01'), (('selection', 'selected_model'), 'gbm'),
-                        (('horizons', 0, 'backtest', 'mape'), entry['horizons'][0]['backtest']['mape'] * 1.002)):
+                        (('horizons', 0, 'backtest', 'mape'), entry['horizons'][0]['backtest']['mape'] * 1.002),
+                        (('horizons', 2, 'backtest', 'bootstrap_ci_lower'), entry['horizons'][2]['backtest']['bootstrap_ci_lower'] * 1.02),
+                        (('horizons', 2, 'backtest', 'bootstrap_ci_upper'), entry['horizons'][2]['backtest']['bootstrap_ci_upper'] * 0.98)):
         changed = json.loads(json.dumps(entry))
         target = changed
         for key in path[:-1]:

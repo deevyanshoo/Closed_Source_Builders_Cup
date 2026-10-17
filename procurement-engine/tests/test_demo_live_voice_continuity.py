@@ -11,12 +11,11 @@ from procure.demo.live_continuity import ReplayGuard, call_key
 from test_demo_live_voice import Socket, Provider, connection, next_type, setup, start
 
 
-def test_compression_and_server_only_resumption_config():
+def test_compression_and_fresh_provider_history_config():
     config = live_voice._config()
     assert config.context_window_compression.trigger_tokens > config.context_window_compression.sliding_window.target_tokens
-    assert config.session_resumption is not None
-    assert config.session_resumption.handle is None
-    assert live_voice._config(seed_history=True).history_config.initial_history_in_client_content is True
+    assert config.session_resumption is None
+    assert config.history_config is None
 
 
 def test_normal_audio_can_pass_old_cumulative_limit(monkeypatch):
@@ -50,22 +49,37 @@ def test_normal_audio_can_pass_old_cumulative_limit(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_go_away_resumes_server_side_without_replaying_audio(monkeypatch):
+def test_go_away_opens_fresh_provider_with_current_company_history_only(monkeypatch):
     class QuietProvider(Provider):
+        def __init__(self):
+            super().__init__()
+
+        async def send_client_content(self, *, turns, turn_complete):
+            raise AssertionError('history must not become client content')
+
         async def send_realtime_input(self, **kwargs):
             if audio := kwargs.get('audio'):
                 self.received_audio.append(audio)
 
     async def scenario():
         store, session = setup()
+        session.chat_history[session.company_id] = [
+            {'channel': 'voice', 'speaker': 'input', 'question': 'Completed current-company question.'}]
+        session.chat_history['other-company'] = [
+            {'channel': 'voice', 'speaker': 'input', 'question': 'SECRET_OTHER_COMPANY'}]
         first, second = QuietProvider(), QuietProvider()
         first.events.put_nowait(NS(session_resumption_update=NS(
             new_handle='private-provider-handle', resumable=True), go_away=NS(time_left='5s')))
+        first.events.put_nowait(NS(tool_call=NS(function_calls=[NS(
+            name='read_workspace', args={}, id='old-provider-tool')]),
+            server_content=NS(output_transcription=NS(text='STALE_ONLY_OLD_PROVIDER'))))
         handles = []
+        contexts = []
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             handles.append(handle)
+            contexts.append(history_context)
             yield first if len(handles) == 1 else second
 
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
@@ -83,7 +97,11 @@ def test_go_away_resumes_server_side_without_replaying_audio(monkeypatch):
             await asyncio.sleep(.01)
         assert len(second.received_audio) == 1
         assert first.received_audio == []
-        assert handles == [None, 'private-provider-handle']
+        assert handles == [None, None]
+        assert all('Completed current-company question.' in value for value in contexts)
+        assert all('SECRET_OTHER_COMPANY' not in value for value in contexts)
+        assert 'STALE_ONLY_OLD_PROVIDER' not in json.dumps(socket.history)
+        assert not any(frame['type'] == 'tool_result' for frame in socket.history)
         assert 'private-provider-handle' not in json.dumps(socket.history)
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
@@ -141,19 +159,35 @@ def test_same_provider_call_id_keeps_idempotency_key_after_uncertain_handoff():
     assert secret.hex() not in call_key(secret, 'call-1')
 
 
-def test_fresh_provider_seed_quotes_only_current_company_completed_history():
+def test_passive_history_context_quotes_only_bounded_current_company_completed_history():
     store, session = setup()
     session.chat_history[session.company_id] = [
-        {'channel': 'voice', 'speaker': 'input', 'question': 'What is current stock?'},
-        {'channel': 'voice', 'speaker': 'output', 'answer': 'Read the current workspace.'},
+        {'channel': 'voice', 'speaker': 'input', 'question': 'Old risk question.'},
+        {'channel': 'voice', 'speaker': 'output', 'answer': 'Old risk answer.'},
     ]
     session.chat_history['other-company'] = [
         {'channel': 'voice', 'speaker': 'input', 'question': 'SECRET_OTHER_COMPANY'}]
-    turns = live_voice._history_turns(session, session.company_id)
-    text = turns[0].parts[0].text
-    assert 'What is current stock?' in text
-    assert 'SECRET_OTHER_COMPANY' not in text
-    assert 'grants no consent or action' in text
+    context = live_voice._history_context(session, session.company_id)
+    instruction = live_voice._config(history_context=context).system_instruction
+    assert 'Old risk question.' in instruction and 'Old risk answer.' in instruction
+    assert 'SECRET_OTHER_COMPANY' not in instruction
+    assert 'quoted' in instruction.lower() and 'no consent' in instruction.lower()
+    assert 'fresh live audio' in instruction.lower()
+    assert len(context) < 7000
+
+
+def test_passive_history_context_keeps_last_twelve_and_excludes_raw_turn_data():
+    store, session = setup()
+    session.chat_history[session.company_id] = [
+        {'channel': 'voice', 'speaker': 'input',
+         'question': f'caption-{index}: ' + 'x' * 700,
+         'turn': {'workspace': {'private_token': 'RAW_PRIVATE_CONTEXT'}}}
+        for index in range(15)]
+    context = live_voice._history_context(session, session.company_id)
+    assert len(context) <= 6000
+    assert 'caption-0:' not in context
+    assert 'caption-14:' in context
+    assert 'RAW_PRIVATE_CONTEXT' not in context
 
 
 def test_repeated_provider_failure_closes_and_releases_slot(monkeypatch):
@@ -163,7 +197,7 @@ def test_repeated_provider_failure_closes_and_releases_slot(monkeypatch):
         starts = session.live_voice_sessions
 
         @asynccontextmanager
-        async def unavailable(company, *, handle=None, seed_history=False):
+        async def unavailable(company, *, handle=None, history_context=None):
             raise RuntimeError('private-provider-token')
             yield
 
@@ -185,7 +219,7 @@ def test_stop_during_provider_reconnect_delay_closes_promptly(monkeypatch):
         first.events.put_nowait(NS(go_away=NS(time_left='1s')))
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             yield first
 
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
@@ -200,31 +234,95 @@ def test_stop_during_provider_reconnect_delay_closes_promptly(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_failed_resumption_falls_back_to_fresh_provider(monkeypatch):
+def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch):
+    class ManualProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_client_content(self, *, turns, turn_complete):
+            raise AssertionError('prior risk history must not be sent as a user turn')
+
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses)
+            await self.events.put(NS(tool_call=None, server_content=NS(
+                output_transcription=NS(text='Fresh inventory answer.'), turn_complete=True)))
+
     async def scenario():
         store, session = setup()
-        first, third = Provider(), Provider()
-        first.events.put_nowait(NS(session_resumption_update=NS(
-            new_handle='server-secret', resumable=True), go_away=NS(time_left='1s')))
+        session.chat_history[session.company_id] = [
+            {'channel': 'voice', 'speaker': 'input', 'question': 'Prior completed risk question.'},
+            {'channel': 'voice', 'speaker': 'output', 'answer': 'Prior risk answer.'}]
+        first, second = ManualProvider(), ManualProvider()
         handles = []
+        contexts = []
+        calls = []
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             handles.append(handle)
-            if handle:
-                raise RuntimeError('resume failed')
-            yield first if len(handles) == 1 else third
+            contexts.append(history_context)
+            yield first if len(handles) == 1 else second
+
+        async def workspace_tool(name, args, version, key):
+            calls.append((name, key))
+            return {'turn_id': 'inventory-1', 'company_id': session.company_id,
+                    'context_version': version, 'status': 'completed',
+                    'assistant_text': 'Current inventory and sourcing read.',
+                    'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                    'read_only': True}
 
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
         socket = Socket(start(session))
         task = asyncio.create_task(live_voice.run_live_voice(
-            socket, session=session, store=store, operate_workspace=lambda *_: None))
+            socket, session=session, store=store, operate_workspace=lambda *_: None,
+            workspace_tools=workspace_tool))
         await next_type(socket, 'ready')
-        await next_type(socket, 'connection_status')
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        for _ in range(100):
+            if first.received_audio:
+                break
+            await asyncio.sleep(.01)
+        assert len(first.received_audio) == 1
+        await first.events.put(NS(session_resumption_update=NS(
+            new_handle='server-secret', resumable=True), go_away=NS(time_left='1s')))
+        await first.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='read_risks', args={'message': 'Old risk question'}, id='old-risk')]),
+            server_content=NS(output_transcription=NS(text='OLD_RISK_ANSWER'))))
         await next_type(socket, 'connection_status')
         ready = await next_type(socket, 'connection_status')
         assert ready['state'] == 'ready'
-        assert handles == [None, 'server-secret', None]
+        assert handles == [None, None]
+        assert all('Prior completed risk question.' in value and 'Prior risk answer.' in value
+                   for value in contexts)
+        await socket.frames.put(json.dumps({'type': 'audio', 'data': base64.b64encode(
+            b'\x01\x00\x02\x00\x03\x00\x04\x00').decode()}))
+        for _ in range(100):
+            if second.received_audio:
+                break
+            await asyncio.sleep(.01)
+        assert len(second.received_audio) == 1
+        await second.events.put(NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0.000125s')))
+        await second.events.put(NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.00025s')))
+        await second.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='read_workspace', args={}, id='new-inventory')]), server_content=None))
+        await asyncio.sleep(.03)
+        assert calls == []
+        await second.events.put(NS(tool_call=None, server_content=NS(
+            input_transcription=NS(text='What is the current inventory and sourcing?', finished=True))))
+        assert (await next_type(socket, 'tool_result'))['result']['assistant_text'] == 'Current inventory and sourcing read.'
+        assert (await next_type(socket, 'transcript'))['text'] == 'What is the current inventory and sourcing?'
+        assert (await next_type(socket, 'transcript'))['text'] == 'Fresh inventory answer.'
+        assert len(calls) == 1 and calls[0][0] == 'read_workspace'
+        assert len([response for response in second.responses if response.id == 'new-inventory']) == 1
+        assert 'OLD_RISK_ANSWER' not in json.dumps(socket.history)
+        assert not any(response.id == 'old-risk' for response in first.responses)
         assert 'server-secret' not in json.dumps(socket.history)
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
@@ -245,7 +343,7 @@ def test_verified_old_consent_cannot_execute_after_provider_handoff(monkeypatch)
         calls = []
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             yield first if first.tool_response is None else second
 
         async def operate(*_):
@@ -346,7 +444,7 @@ def test_stop_during_provider_handshake_closes_promptly(monkeypatch):
         store, session = setup()
 
         @asynccontextmanager
-        async def slow_factory(company, *, handle=None, seed_history=False):
+        async def slow_factory(company, *, handle=None, history_context=None):
             await asyncio.sleep(1)
             yield Provider()
 
@@ -384,7 +482,7 @@ def test_new_call_id_cannot_repeat_action_until_fresh_completed_speech(monkeypat
         reads = []
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             opens[0] += 1
             yield first if opens[0] == 1 else second
 
@@ -487,7 +585,7 @@ def test_held_fresh_call_never_runs_without_finished_utterance(monkeypatch, endi
         effects = []
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
+        async def factory(company, *, handle=None, history_context=None):
             opens[0] += 1
             yield (first, second, third)[min(opens[0] - 1, 2)]
 
@@ -547,23 +645,16 @@ def test_held_fresh_call_never_runs_without_finished_utterance(monkeypatch, endi
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('stage', ['connect', 'seed'])
-def test_provider_setup_timeout_releases_slot_without_browser_close(monkeypatch, stage):
-    class HangingSeed(Provider):
-        async def send_client_content(self, *, turns, turn_complete):
-            await asyncio.Event().wait()
-
+def test_provider_setup_timeout_releases_slot_without_browser_close(monkeypatch):
     async def scenario():
         store, session = setup()
-        if stage == 'seed':
-            session.chat_history[session.company_id] = [
-                {'channel': 'voice', 'speaker': 'input', 'question': 'Previous completed question.'}]
+        session.chat_history[session.company_id] = [
+            {'channel': 'voice', 'speaker': 'input', 'question': 'Previous completed question.'}]
 
         @asynccontextmanager
-        async def factory(company, *, handle=None, seed_history=False):
-            if stage == 'connect':
-                await asyncio.Event().wait()
-            yield HangingSeed()
+        async def factory(company, *, handle=None, history_context=None):
+            await asyncio.Event().wait()
+            yield Provider()
 
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
         monkeypatch.setattr(live_voice, 'PROVIDER_SETUP_TIMEOUT_SECONDS', .05, raising=False)

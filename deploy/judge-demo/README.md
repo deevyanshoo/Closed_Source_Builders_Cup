@@ -24,7 +24,7 @@ The intended Cloud Run envelope is **min instances 0, max instances 1, 1 CPU, 1 
 
 ## Continuous voice
 
-Voice has no fixed application conversation duration. A healthy conversation keeps its microphone and completed history while Gemini uses server-held session resumption and context compression. A fresh provider connection can recover bounded completed chat context when resumption is unavailable. Handoffs clear pending consent and require a fresh utterance before new tools can run; actions with uncertain results are never automatically replayed.
+Voice has no fixed application conversation duration. A healthy conversation keeps its microphone while Gemini connections renew using fresh model sessions and context compression. Bounded completed current-company history is supplied as passive configuration context, never queued again as a user message. Provider resumption tokens are not reused. Handoffs clear pending consent and require a fresh utterance before new tools can run; actions with uncertain results are never automatically replayed.
 
 Cloud Run WebSockets still have a per-request timeout. The 3,600-second runtime envelope is paired with bounded browser reconnection, preserving the open voice interface. End, company changes, expired authentication, terminal provider errors and exhausted usage budgets still stop voice safely. Startup and reconnection deadlines remain bounded; they are not conversation timers. Rolling audio/tool allowances and the existing company/process connection-start budgets remain in place. Provider renewals inside one socket do not create another visitor start. A persistent outage is reported instead of retried forever.
 

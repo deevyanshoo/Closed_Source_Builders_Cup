@@ -26,6 +26,7 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
+from .price_outlook import price_outlook_router
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -2175,6 +2176,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             context(value, data)
         store.invalidate(value)
         return session_response(store.create())
+
+    app.include_router(price_outlook_router(session=session, now=store.now))
 
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()

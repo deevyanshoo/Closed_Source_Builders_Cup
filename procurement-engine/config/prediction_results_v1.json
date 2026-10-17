@@ -1,0 +1,2833 @@
+{
+ "results_version": "prediction-results-v1",
+ "built_on": "2026-10-16",
+ "snapshot_sha256": "e04ddfe16c68d97a6f951bf7eddccd6d732769d39709a0ff12bfada63ef3b6b9",
+ "engine": {
+  "package": "procure/prediction/engine.py",
+  "gbm_backend": "sklearn",
+  "config": {
+   "models": [
+    "naive",
+    "ets",
+    "gbm",
+    "ridge"
+   ],
+   "windows": [
+    36,
+    60
+   ],
+   "horizons": [
+    1,
+    3,
+    6
+   ],
+   "test_months": 24,
+   "validation_months": 24,
+   "scale_grid": [
+    0.8,
+    0.9,
+    1.0,
+    1.1,
+    1.2,
+    1.35,
+    1.5
+   ],
+   "n_paths": 1000,
+   "gbm_refit_every": 6,
+   "min_improvement_vs_naive": 0.02,
+   "bootstrap_replicates": 1000,
+   "bootstrap_seed": 0,
+   "as_of_month": "2026-10"
+  },
+  "rules": {
+   "min_skill": 0.02,
+   "coverage_band": [
+    0.7,
+    0.9
+   ],
+   "min_test_origins": 18
+  },
+  "labels": {
+   "PREDICTION": "Projection with uncertainty, not a recommendation",
+   "RANGE_ONLY": "range based on past volatility, not a directional forecast",
+   "NO_RELIABLE_FORECAST": "naive baseline, not a prediction"
+  }
+ },
+ "series": {
+  "commodity:aluminium": {
+   "series_id": "commodity:aluminium",
+   "kind": "commodity",
+   "unit": "USD per mt",
+   "source_series": "Aluminum",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 3251.0,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.07979076877,
+     "ets": 0.1104721034,
+     "gbm": 0.1209054533,
+     "ridge": 0.08723702589
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.09332228821,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.9,
+    "ets": 1.2,
+    "gbm": 1.35,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 2961.738707,
+     "p50": 3251.0,
+     "p90": 3542.091228,
+     "naive_value": 3251.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.06114248992234047,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 2859.137062,
+     "p50": 3251.0,
+     "p90": 3635.041037,
+     "naive_value": 3251.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.08025064448985018,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 3251.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0992290884872797,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.6666666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:copper": {
+   "series_id": "commodity:copper",
+   "kind": "commodity",
+   "unit": "USD per mt",
+   "source_series": "Copper",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 14326.0,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.0793555228,
+     "ets": 0.1012448231,
+     "gbm": 0.100521464,
+     "ridge": 0.08205388314
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.03400343473,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.0,
+    "ets": 1.35,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 13220.29766,
+     "p50": 14326.0,
+     "p90": 15561.8455,
+     "naive_value": 14326.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.05001467897253018,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 12908.85383,
+     "p50": 14326.0,
+     "p90": 15982.06097,
+     "naive_value": 14326.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.07305509473088982,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 14326.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.11611669474122899,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.625,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:cotton": {
+   "series_id": "commodity:cotton",
+   "kind": "commodity",
+   "unit": "USD per kg",
+   "source_series": "Cotton, A Index",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 2.11,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.1253679526,
+     "ets": 0.1282283918,
+     "gbm": 0.1916150747,
+     "ridge": 0.1448087861
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.02281635091,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.2,
+    "ets": 1.35,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 2.11,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.034378972049999824,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9166666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1.781656679,
+     "p50": 2.11,
+     "p90": 2.446688362,
+     "naive_value": 2.11,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.054334902825998066,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 2.11,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.08579077780056217,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9583333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:nickel": {
+   "series_id": "commodity:nickel",
+   "kind": "commodity",
+   "unit": "USD per mt",
+   "source_series": "Nickel",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 16751.0,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.1473279605,
+     "ets": 0.1987738388,
+     "gbm": 0.2004301725,
+     "ridge": 0.1920273757
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.3034007601,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.1,
+    "ets": 1.2,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 16751.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.04314296396188846,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9166666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 16751.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.05852075644569888,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 16751.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.08719437692254907,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:sugar": {
+   "series_id": "commodity:sugar",
+   "kind": "commodity",
+   "unit": "USD per kg",
+   "source_series": "Sugar, world",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 0.38,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.1128085753,
+     "ets": 0.127340965,
+     "gbm": 0.1272072674,
+     "ridge": 0.1264752078
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 36,
+     "gbm": 36,
+     "ridge": 36
+    },
+    "improvement_vs_naive": -0.1211488795,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.5,
+    "ets": 1.35,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.38,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.05299761944330242,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9583333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.38,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.08390351784154489,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.38,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.11654899454615131,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:sunflower_oil": {
+   "series_id": "commodity:sunflower_oil",
+   "kind": "commodity",
+   "unit": "USD per mt",
+   "source_series": "Sunflower oil",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 1484.0,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.1524363445,
+     "ets": 0.1859071663,
+     "gbm": 0.2266750032,
+     "ridge": 0.2293421521
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.2195724511,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 1.2,
+    "gbm": 1.35,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1431.142817,
+     "p50": 1484.0,
+     "p90": 1542.556465,
+     "naive_value": 1484.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0404463597604719,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 1484.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.07085945431241154,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9166666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1385.155793,
+     "p50": 1484.0,
+     "p90": 1612.912266,
+     "naive_value": 1484.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.12748186586150165,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "commodity:wheat": {
+   "series_id": "commodity:wheat",
+   "kind": "commodity",
+   "unit": "USD per mt",
+   "source_series": "Wheat, US HRW",
+   "source": {
+    "publisher": "World Bank",
+    "url": "https://www.worldbank.org/en/research/commodity-markets",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet), updated 2 October 2026.",
+    "retrieved_at": "2026-10-08T16:31:57Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 330.0,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.1076090055,
+     "ets": 0.1394711506,
+     "gbm": 0.1524185833,
+     "ridge": 0.1695581125
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.296091809,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 1.1,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 309.8306227,
+     "p50": 330.0,
+     "p90": 352.5585904,
+     "naive_value": 330.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.05004080162585356,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 302.5357567,
+     "p50": 330.0,
+     "p90": 364.5469238,
+     "naive_value": 330.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0701310432563057,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7083333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 294.2829855,
+     "p50": 330.0,
+     "p90": 373.4695241,
+     "naive_value": 330.0,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.09963488559118522,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.75,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:AED": {
+   "series_id": "fx:AED",
+   "kind": "fx",
+   "unit": "AED per USD",
+   "source_series": "WS_XRU M.AE.AED.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 3.6725,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.0,
+     "ets": 0.0,
+     "gbm": 0.0,
+     "ridge": 0.0
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 36,
+     "gbm": 36,
+     "ridge": 36
+    },
+    "improvement_vs_naive": null,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 0.8,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 3.6725,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 3.6725,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 3.6725,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:BDT": {
+   "series_id": "fx:BDT",
+   "kind": "fx",
+   "unit": "BDT per USD",
+   "source_series": "WS_XRU M.BD.BDT.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 123.100769,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ridge",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.04687786042,
+     "ets": 0.04152743171,
+     "gbm": 0.03420212117,
+     "ridge": 0.02921060652
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 36,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.3768784185,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.5,
+    "ets": 1.5,
+    "gbm": 1.35,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 123.100769,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.012139615015444276,
+      "naive_mape": 0.007246769124606804,
+      "mape_ratio": 1.675176179,
+      "directional_acc": 0.7916666666666666,
+      "coverage": 0,
+      "naive_coverage": 1,
+      "skill": -0.6780759088122066,
+      "bootstrap_ci_lower": -1.2188587063541667,
+      "bootstrap_ci_upper": -0.004736787916666666
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 123.100769,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.022298101323038555,
+      "naive_mape": 0.012863841549081623,
+      "mape_ratio": 1.733393655,
+      "directional_acc": 0.8333333333333334,
+      "coverage": 0,
+      "naive_coverage": 1,
+      "skill": -0.742683847768166,
+      "bootstrap_ci_lower": -2.802331204375,
+      "bootstrap_ci_upper": 0.40300298333333334
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 117.9412885,
+     "p50": 123.100769,
+     "p90": 130.1758113,
+     "naive_value": 123.100769,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.04096185152657412,
+      "naive_mape": 0.026251284405664228,
+      "mape_ratio": 1.560375138,
+      "directional_acc": 0.875,
+      "coverage": 0,
+      "naive_coverage": 0.875,
+      "skill": -0.572956474045254,
+      "bootstrap_ci_lower": -5.158274259791667,
+      "bootstrap_ci_upper": 1.0153031635416667
+     }
+    }
+   ]
+  },
+  "fx:BWP": {
+   "series_id": "fx:BWP",
+   "kind": "fx",
+   "unit": "BWP per USD",
+   "source_series": "WS_XRU M.BW.BWP.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 13.1325,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.03621733184,
+     "ets": 0.03621890262,
+     "gbm": 0.04812056636,
+     "ridge": 0.03820745235
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -4.337094756e-05,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 1.2,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 12.91407662,
+     "p50": 13.1325,
+     "p90": 13.33898372,
+     "naive_value": 13.1325,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.014753556333644696,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 13.1325,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.01886522296620228,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9583333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 13.1325,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.022322222086417765,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:CHF": {
+   "series_id": "fx:CHF",
+   "kind": "fx",
+   "unit": "CHF per USD",
+   "source_series": "WS_XRU M.CH.CHF.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 0.807554,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.03123660095,
+     "ets": 0.03170104475,
+     "gbm": 0.03533794094,
+     "ridge": 0.03183330608
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 36,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.01486857679,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.2,
+    "ets": 1.35,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.7762354988,
+     "p50": 0.807554,
+     "p90": 0.8402257967,
+     "naive_value": 0.807554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.024308064420969982,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.7633655911,
+     "p50": 0.807554,
+     "p90": 0.8557137624,
+     "naive_value": 0.807554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.038981874403230816,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.7471051166,
+     "p50": 0.807554,
+     "p90": 0.8726253138,
+     "naive_value": 0.807554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.043781871418046035,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:CNY": {
+   "series_id": "fx:CNY",
+   "kind": "fx",
+   "unit": "CNY per USD",
+   "source_series": "WS_XRU M.CN.CNY.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 6.736097,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "gbm",
+    "best_challenger": "gbm",
+    "validation_mape": {
+     "naive": 0.02705626041,
+     "ets": 0.03417895652,
+     "gbm": 0.02490344984,
+     "ridge": 0.02639381445
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 36,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.07956792762,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.35,
+    "ets": 1.35,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 6.736097,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.011727802112247299,
+      "naive_mape": 0.009713162580292546,
+      "mape_ratio": 1.207413344,
+      "directional_acc": 0.5416666666666666,
+      "coverage": 0.8333333333333334,
+      "naive_coverage": 1,
+      "skill": -0.21111744853822845,
+      "bootstrap_ci_lower": -0.027024945864583334,
+      "bootstrap_ci_upper": -0.0009151935666666666
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 6.736097,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.02753682331455141,
+      "naive_mape": 0.01709842960318374,
+      "mape_ratio": 1.610488446,
+      "directional_acc": 0.25,
+      "coverage": 0.5833333333333334,
+      "naive_coverage": 1,
+      "skill": -0.6083303548601812,
+      "bootstrap_ci_lower": -0.10698518064270833,
+      "bootstrap_ci_upper": -0.037888023147916665
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 6.736097,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.045782012563992475,
+      "naive_mape": 0.022694999369679187,
+      "mape_ratio": 2.017273137,
+      "directional_acc": 0.3333333333333333,
+      "coverage": 0.5,
+      "naive_coverage": 1,
+      "skill": -1.0141953283291447,
+      "bootstrap_ci_lower": -0.22796886698645832,
+      "bootstrap_ci_upper": -0.07303097400208333
+     }
+    }
+   ]
+  },
+  "fx:EUR": {
+   "series_id": "fx:EUR",
+   "kind": "fx",
+   "unit": "EUR per USD",
+   "source_series": "WS_XRU M.DE.EUR.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 0.862603,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.02849027649,
+     "ets": 0.03361594799,
+     "gbm": 0.03914326394,
+     "ridge": 0.03092085424
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.0853125364,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.2,
+    "ets": 1.5,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.8325527273,
+     "p50": 0.862603,
+     "p90": 0.8945895341,
+     "naive_value": 0.862603,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.021722602606378687,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.7916666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.8232052979,
+     "p50": 0.862603,
+     "p90": 0.907620181,
+     "naive_value": 0.862603,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.03192565393750312,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.75,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 0.8042041791,
+     "p50": 0.862603,
+     "p90": 0.9220618429,
+     "naive_value": 0.862603,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.03739045769949039,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:INR": {
+   "series_id": "fx:INR",
+   "kind": "fx",
+   "unit": "INR per USD",
+   "source_series": "WS_XRU M.IN.INR.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 95.446733,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ets",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.01349149136,
+     "ets": 0.01043457282,
+     "gbm": 0.01454498362,
+     "ridge": 0.01329824369
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.2265812176,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 0.8,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 95.446733,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.013453562317777307,
+      "naive_mape": 0.014488637264724416,
+      "mape_ratio": 0.9285595375,
+      "directional_acc": 0.7916666666666666,
+      "coverage": 0.5,
+      "naive_coverage": 0.4583333333333333,
+      "skill": 0.07338817146144765,
+      "bootstrap_ci_lower": -0.1737545355,
+      "bootstrap_ci_upper": 0.35201081254166666
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 95.446733,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.020407620247265095,
+      "naive_mape": 0.024782609951596656,
+      "mape_ratio": 0.8234653367,
+      "directional_acc": 0.75,
+      "coverage": 0.4583333333333333,
+      "naive_coverage": 0.3333333333333333,
+      "skill": 0.18256057222125474,
+      "bootstrap_ci_lower": -0.3327177562083333,
+      "bootstrap_ci_upper": 0.8303612546458333
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 95.446733,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.02465974881722782,
+      "naive_mape": 0.03523856491835589,
+      "mape_ratio": 0.6997943553,
+      "directional_acc": 0.875,
+      "coverage": 0.5833333333333334,
+      "naive_coverage": 0.4166666666666667,
+      "skill": 0.2951129091980851,
+      "bootstrap_ci_lower": 0.5029593194479167,
+      "bootstrap_ci_upper": 1.23112440425
+     }
+    }
+   ]
+  },
+  "fx:JPY": {
+   "series_id": "fx:JPY",
+   "kind": "fx",
+   "unit": "JPY per USD",
+   "source_series": "WS_XRU M.JP.JPY.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 158.801365,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ridge",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.05148551219,
+     "ets": 0.06405877265,
+     "gbm": 0.05029891973,
+     "ridge": 0.0490213569
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 36,
+     "ridge": 36
+    },
+    "improvement_vs_naive": 0.04786113967,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.35,
+    "ets": 1.5,
+    "gbm": 1.35,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 158.801365,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.024283988961235754,
+      "naive_mape": 0.024822924660509695,
+      "mape_ratio": 0.9782887912,
+      "directional_acc": 0.6666666666666666,
+      "coverage": 0,
+      "naive_coverage": 0.9166666666666666,
+      "skill": 0.021877485397059727,
+      "bootstrap_ci_lower": -0.23721851,
+      "bootstrap_ci_upper": 0.4724122467708333
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 158.801365,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.04139876745275097,
+      "naive_mape": 0.037868446785656054,
+      "mape_ratio": 1.093225917,
+      "directional_acc": 0.5,
+      "coverage": 0,
+      "naive_coverage": 1,
+      "skill": -0.08900591098165857,
+      "bootstrap_ci_lower": -1.0932241630208333,
+      "bootstrap_ci_upper": 1.0953629371875
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 158.801365,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.05821508205392856,
+      "naive_mape": 0.03691089781661556,
+      "mape_ratio": 1.577178706,
+      "directional_acc": 0.5416666666666666,
+      "coverage": 0,
+      "naive_coverage": 1,
+      "skill": -0.5560721663230747,
+      "bootstrap_ci_lower": -7.018822220104167,
+      "bootstrap_ci_upper": 1.60838146875
+     }
+    }
+   ]
+  },
+  "fx:KES": {
+   "series_id": "fx:KES",
+   "kind": "fx",
+   "unit": "KES per USD",
+   "source_series": "WS_XRU M.KE.KES.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 129.42,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ets",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.07494454716,
+     "ets": 0.06816976271,
+     "gbm": 0.07255706653,
+     "ridge": 0.07310000877
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.09039729649,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.5,
+    "ets": 1.5,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 129.42,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.0028652057573031148,
+      "naive_mape": 0.004038954492294962,
+      "mape_ratio": 0.709392929,
+      "directional_acc": 0.4583333333333333,
+      "coverage": 1,
+      "naive_coverage": 1,
+      "skill": 0.29063766445522965,
+      "bootstrap_ci_lower": 0.06755340989583333,
+      "bootstrap_ci_upper": 0.2745425763541667
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 129.42,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.007319794734095156,
+      "naive_mape": 0.008250022262906423,
+      "mape_ratio": 0.8872454523,
+      "directional_acc": 0.3333333333333333,
+      "coverage": 1,
+      "naive_coverage": 1,
+      "skill": 0.11284419285548504,
+      "bootstrap_ci_lower": -0.10341518916666667,
+      "bootstrap_ci_upper": 0.415275935625
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 129.42,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ets",
+      "n_origins": 24,
+      "mape": 0.030540309162552372,
+      "naive_mape": 0.021140000553588095,
+      "mape_ratio": 1.44466927,
+      "directional_acc": 0.375,
+      "coverage": 0.875,
+      "naive_coverage": 0.9583333333333334,
+      "skill": -0.4448005275041734,
+      "bootstrap_ci_lower": -3.0735849433333335,
+      "bootstrap_ci_upper": 0.46776071625
+     }
+    }
+   ]
+  },
+  "fx:KRW": {
+   "series_id": "fx:KRW",
+   "kind": "fx",
+   "unit": "KRW per USD",
+   "source_series": "WS_XRU M.KR.KRW.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 1402.986286,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "gbm",
+    "best_challenger": "gbm",
+    "validation_mape": {
+     "naive": 0.03736222696,
+     "ets": 0.04635162598,
+     "gbm": 0.0358382278,
+     "ridge": 0.03771942181
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.04078983733,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.2,
+    "ets": 1.5,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1335.465776,
+     "p50": 1402.986286,
+     "p90": 1461.899287,
+     "naive_value": 1402.986286,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.029599317050708767,
+      "naive_mape": 0.025086203444938653,
+      "mape_ratio": 1.17990421,
+      "directional_acc": 0.5416666666666666,
+      "coverage": 0.7916666666666666,
+      "naive_coverage": 0.7916666666666666,
+      "skill": -0.17497346035292138,
+      "bootstrap_ci_lower": -15.55586895625,
+      "bootstrap_ci_upper": 1.55447111875
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 1402.986286,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.03899295489633706,
+      "naive_mape": 0.035149214395939606,
+      "mape_ratio": 1.109354948,
+      "directional_acc": 0.5416666666666666,
+      "coverage": 0.875,
+      "naive_coverage": 0.9166666666666666,
+      "skill": -0.10581099053618032,
+      "bootstrap_ci_lower": -13.268923197916667,
+      "bootstrap_ci_upper": 7.259690009375
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 1402.986286,
+     "backtest": {
+      "split": "test",
+      "selected_model": "gbm",
+      "n_origins": 24,
+      "mape": 0.03298616966330468,
+      "naive_mape": 0.03968621652314478,
+      "mape_ratio": 0.8311744619,
+      "directional_acc": 0.75,
+      "coverage": 1,
+      "naive_coverage": 1,
+      "skill": 0.17605164309871013,
+      "bootstrap_ci_lower": 1.758171415625,
+      "bootstrap_ci_upper": 33.512605609375
+     }
+    }
+   ]
+  },
+  "fx:MXN": {
+   "series_id": "fx:MXN",
+   "kind": "fx",
+   "unit": "MXN per USD",
+   "source_series": "WS_XRU M.MX.MXN.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 17.063554,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.04234798546,
+     "ets": 0.04234278045,
+     "gbm": 0.05112785672,
+     "ridge": 0.04601339571
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 36,
+     "gbm": 36,
+     "ridge": 36
+    },
+    "improvement_vs_naive": 0.0001229104512,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.35,
+    "ets": 1.2,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 16.30087081,
+     "p50": 17.063554,
+     "p90": 18.15077199,
+     "naive_value": 17.063554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.023066356188605405,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.85922748,
+     "p50": 17.063554,
+     "p90": 18.71576794,
+     "naive_value": 17.063554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.04542035849201081,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.38139425,
+     "p50": 17.063554,
+     "p90": 19.10943969,
+     "naive_value": 17.063554,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.08250796893294564,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.75,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:MYR": {
+   "series_id": "fx:MYR",
+   "kind": "fx",
+   "unit": "MYR per USD",
+   "source_series": "WS_XRU M.MY.MYR.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 4.065023,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.02858547495,
+     "ets": 0.03233909878,
+     "gbm": 0.03150551691,
+     "ridge": 0.02877758179
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 36,
+     "ridge": 60
+    },
+    "improvement_vs_naive": -0.006720435478,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 1.5,
+    "ets": 1.5,
+    "gbm": 1.5,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 4.065023,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.023257157427621748,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9583333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 3.768620599,
+     "p50": 4.065023,
+     "p90": 4.329192775,
+     "naive_value": 4.065023,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.04013262096364781,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.8333333333333334,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 4.065023,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.052876499275615226,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.9166666666666666,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:NAD": {
+   "series_id": "fx:NAD",
+   "kind": "fx",
+   "unit": "NAD per USD",
+   "source_series": "WS_XRU M.NA.NAD.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 16.1794,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.03976390567,
+     "ets": 0.04102586189,
+     "gbm": 0.04596478884,
+     "ridge": 0.03900032693
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.01920281037,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 0.9,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.63694256,
+     "p50": 16.1794,
+     "p90": 16.82078118,
+     "naive_value": 16.1794,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.025279213625571822,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.37374313,
+     "p50": 16.1794,
+     "p90": 17.0829756,
+     "naive_value": 16.1794,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.03644661455846995,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.12889857,
+     "p50": 16.1794,
+     "p90": 17.32773341,
+     "naive_value": 16.1794,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.04882022879421785,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 0.875,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:OMR": {
+   "series_id": "fx:OMR",
+   "kind": "fx",
+   "unit": "OMR per USD",
+   "source_series": "WS_XRU M.OM.OMR.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 0.3845,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "naive",
+    "best_challenger": "ets",
+    "validation_mape": {
+     "naive": 0.0,
+     "ets": 0.0,
+     "gbm": 0.0,
+     "ridge": 0.0
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 36,
+     "gbm": 36,
+     "ridge": 36
+    },
+    "improvement_vs_naive": null,
+    "beats_naive_on_validation": false
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 0.8,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.3845,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.3845,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 0.3845,
+     "backtest": {
+      "split": "test",
+      "selected_model": "naive",
+      "n_origins": 24,
+      "mape": null,
+      "naive_mape": 0.0,
+      "mape_ratio": null,
+      "directional_acc": null,
+      "coverage": null,
+      "naive_coverage": 1,
+      "skill": null,
+      "bootstrap_ci_lower": null,
+      "bootstrap_ci_upper": null
+     }
+    }
+   ]
+  },
+  "fx:SGD": {
+   "series_id": "fx:SGD",
+   "kind": "fx",
+   "unit": "SGD per USD",
+   "source_series": "WS_XRU M.SG.SGD.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 1.276283,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ridge",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.01943286386,
+     "ets": 0.02006681965,
+     "gbm": 0.01918559521,
+     "ridge": 0.01880653889
+    },
+    "best_window": {
+     "naive": 36,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 36
+    },
+    "improvement_vs_naive": 0.03223019389,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 1.2,
+    "ets": 1.35,
+    "gbm": 1.35,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1.24801285,
+     "p50": 1.276283,
+     "p90": 1.304470038,
+     "naive_value": 1.276283,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.012934028121092109,
+      "naive_mape": 0.014417136551095113,
+      "mape_ratio": 0.8971287797,
+      "directional_acc": 0.75,
+      "coverage": 0,
+      "naive_coverage": 0.7916666666666666,
+      "skill": 0.10255028622613638,
+      "bootstrap_ci_lower": 0.00022798230520833332,
+      "bootstrap_ci_upper": 0.005503976073958333
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 1.236010854,
+     "p50": 1.276283,
+     "p90": 1.316603857,
+     "naive_value": 1.276283,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.018133364658393453,
+      "naive_mape": 0.02090512492015076,
+      "mape_ratio": 0.8674124038,
+      "directional_acc": 0.7083333333333334,
+      "coverage": 0,
+      "naive_coverage": 0.7916666666666666,
+      "skill": 0.13047063277058638,
+      "bootstrap_ci_lower": 0.0010111473739583333,
+      "bootstrap_ci_upper": 0.008936669048958333
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "NO_RELIABLE_FORECAST",
+     "label": "naive baseline, not a prediction",
+     "model": "naive",
+     "p10": null,
+     "p50": null,
+     "p90": null,
+     "naive_value": 1.276283,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.01586352471115954,
+      "naive_mape": 0.01932577893725043,
+      "mape_ratio": 0.8208478821,
+      "directional_acc": 0.7083333333333334,
+      "coverage": 0,
+      "naive_coverage": 0.9166666666666666,
+      "skill": 0.17545289351940518,
+      "bootstrap_ci_lower": -0.0008774097385416666,
+      "bootstrap_ci_upper": 0.01140603833125
+     }
+    }
+   ]
+  },
+  "fx:ZAR": {
+   "series_id": "fx:ZAR",
+   "kind": "fx",
+   "unit": "ZAR per USD",
+   "source_series": "WS_XRU M.ZA.ZAR.A",
+   "source": {
+    "publisher": "Bank for International Settlements (BIS)",
+    "url": "https://data.bis.org/topics/XRU",
+    "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+    "attribution": "Source: BIS bilateral exchange rate statistics.",
+    "retrieved_at": "2026-10-16T06:35:33Z"
+   },
+   "data_date": "2026-08",
+   "latest_value": 16.161613,
+   "issue_month": "2026-09",
+   "freshness_state": "HISTORICAL_NOT_CURRENT",
+   "selection": {
+    "selected_model": "ridge",
+    "best_challenger": "ridge",
+    "validation_mape": {
+     "naive": 0.03975081442,
+     "ets": 0.04132633177,
+     "gbm": 0.04528931602,
+     "ridge": 0.03875434715
+    },
+    "best_window": {
+     "naive": 60,
+     "ets": 60,
+     "gbm": 60,
+     "ridge": 60
+    },
+    "improvement_vs_naive": 0.02506784539,
+    "beats_naive_on_validation": true
+   },
+   "scales": {
+    "naive": 0.8,
+    "ets": 0.8,
+    "gbm": 0.9,
+    "ridge": 1.0
+   },
+   "horizons": [
+    {
+     "horizon": 1,
+     "target_month": "2026-10",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.64073204,
+     "p50": 16.161613,
+     "p90": 16.78791202,
+     "naive_value": 16.161613,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.029415415565086544,
+      "naive_mape": 0.024751491392864127,
+      "mape_ratio": 1.188430026,
+      "directional_acc": 0.2916666666666667,
+      "coverage": 0,
+      "naive_coverage": 0.875,
+      "skill": -0.18213274650638353,
+      "bootstrap_ci_lower": -0.17309769936458333,
+      "bootstrap_ci_upper": 0.0313257858125
+     }
+    },
+    {
+     "horizon": 3,
+     "target_month": "2026-12",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.36881047,
+     "p50": 16.161613,
+     "p90": 17.05929949,
+     "naive_value": 16.161613,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.0463719909888537,
+      "naive_mape": 0.03546241970746212,
+      "mape_ratio": 1.307637532,
+      "directional_acc": 0.2916666666666667,
+      "coverage": 0,
+      "naive_coverage": 0.875,
+      "skill": -0.298352122546471,
+      "bootstrap_ci_lower": -0.3495133575,
+      "bootstrap_ci_upper": 0.021738761760416666
+     }
+    },
+    {
+     "horizon": 6,
+     "target_month": "2027-03",
+     "status": "RANGE_ONLY",
+     "label": "range based on past volatility, not a directional forecast",
+     "model": "naive",
+     "p10": 15.12522417,
+     "p50": 16.161613,
+     "p90": 17.37852123,
+     "naive_value": 16.161613,
+     "backtest": {
+      "split": "test",
+      "selected_model": "ridge",
+      "n_origins": 24,
+      "mape": 0.07196932419365575,
+      "naive_mape": 0.04808432118996977,
+      "mape_ratio": 1.496731625,
+      "directional_acc": 0.20833333333333334,
+      "coverage": 0,
+      "naive_coverage": 0.875,
+      "skill": -0.48795602505870544,
+      "bootstrap_ci_lower": -0.6172391675,
+      "bootstrap_ci_upper": -0.05782617284375
+     }
+    }
+   ]
+  }
+ },
+ "unavailable": {
+  "fx:TZS": "BIS series not eligible in the catalog (incomplete_or_invalid_required_window); values are not interpolated or taken from another source."
+ },
+ "material_map": [
+  {
+   "company_id": "solara-cables",
+   "material_id": "copper",
+   "series_id": "commodity:copper",
+   "match": "exact",
+   "note": "Copper cathode, LME grade A benchmark."
+  },
+  {
+   "company_id": "forgeline-components",
+   "material_id": "copper",
+   "series_id": "commodity:copper",
+   "match": "proxy",
+   "note": "Copper rod: cathode benchmark, rod premium not included."
+  },
+  {
+   "company_id": "solara-cables",
+   "material_id": "aluminium",
+   "series_id": "commodity:aluminium",
+   "match": "proxy",
+   "note": "Aluminium conductor: primary ingot benchmark, processing premium not included."
+  },
+  {
+   "company_id": "harvest-foods",
+   "material_id": "wheat",
+   "series_id": "commodity:wheat",
+   "match": "proxy",
+   "note": "Wheat grain: US hard red winter benchmark; other origins and grades differ."
+  },
+  {
+   "company_id": "harvest-foods",
+   "material_id": "sugar",
+   "series_id": "commodity:sugar",
+   "match": "proxy",
+   "note": "Refined sugar: world raw sugar benchmark; refined trades at a premium."
+  },
+  {
+   "company_id": "loomworks",
+   "material_id": "cotton",
+   "series_id": "commodity:cotton",
+   "match": "exact",
+   "note": "Cotton fibre, Cotton A Index."
+  },
+  {
+   "company_id": "harvest-foods",
+   "material_id": "oil",
+   "series_id": "commodity:sunflower_oil",
+   "match": "exact",
+   "note": "Sunflower oil per tonne; quotes per litre need a stated density."
+  },
+  {
+   "company_id": "gridspring-batteries",
+   "material_id": "nickel",
+   "series_id": "commodity:nickel",
+   "match": "proxy",
+   "note": "Nickel sulfate: nickel metal benchmark, sulfate processing not included."
+  }
+ ]
+}

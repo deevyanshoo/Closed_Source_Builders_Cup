@@ -261,6 +261,41 @@ def _coverage_display(value):
     return f'about {concise}' if rounded != amount else concise
 
 
+def is_coverage_read(message):
+    """Only classify; never derive coverage or authorize an operation."""
+    return (isinstance(message, str) and 0 < len(message) <= 1200
+            and bool(_COVERAGE_QUESTION.search(message))
+            # Keep bridge/document requests on their existing guarded path,
+            # including "request", which is not a general operational verb.
+            and not (_BRIDGE_REQUEST.search(message) or _BRIDGE_AMBIGUOUS_REQUEST.search(message))
+            and not _OPERATIONAL_ACTION.search(message))
+
+
+def resolve_native_coverage(snapshot, message, *, now):
+    """Small read-only adapter over the shared resolver, without baseline fallback."""
+    if not is_coverage_read(message):
+        return None
+    plan = snapshot.get('plan') or {}
+    plan_ids = _explicit_plan_ids(message)
+    selected_reference = re.search(r'\bselected\s+(?:procurement\s+)?material\b', message, re.I)
+    selected = snapshot.get('selected_material_id')
+    buyer = snapshot.get('buyer_draft') or {}
+    if plan_ids and plan_ids != {plan.get('plan_id')}:
+        result = _base(snapshot, 'needs_input')
+        result.update(missing_inputs=['current_plan'],
+                      answer='Which current plan should I assess? The named plan is not current.')
+        return result
+    if selected_reference and (not selected or buyer and buyer.get('material') != selected):
+        result = _base(snapshot, 'needs_input')
+        result.update(missing_inputs=['selected_material'],
+                      answer='Which selected material should I assess? Please review the current selection.')
+        return result
+    result = resolve_judge_turn(snapshot, message, now=now)
+    if (result or {}).get('kind') in {'internal_answer', 'needs_input'}:
+        return result
+    return None
+
+
 def _coverage_read(snapshot, message):
     if not _COVERAGE_QUESTION.search(message) or _OPERATIONAL_ACTION.search(message):
         return None

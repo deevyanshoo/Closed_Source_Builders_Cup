@@ -2216,6 +2216,28 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise
 
         async def saved_workspace_tools(name, args, context_version, key):
+            if name == '_read_current_plan_coverage':
+                # Broker-only: no model declaration, operator fallback, proposal,
+                # persistence or action. Use the same owned snapshot/resolver as chat.
+                from .judge_resolver import resolve_native_coverage
+                shape(args, ('message',))
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    plan = active_plan(value)
+                    if plan is not None:
+                        validate_plan_current(value, plan)
+                    resolved = resolve_native_coverage(operator_snapshot(value, include_risks=False),
+                        args['message'], now=store.now())
+                    if resolved is None:
+                        raise SessionError('invalid_read', 'Please ask a current-plan supply coverage question.', 422)
+                    return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': context_version,
+                        'status': 'completed' if resolved['kind'] == 'internal_answer' else 'needs_clarification',
+                        'assistant_text': resolved['answer'], 'evidence_ids': resolved.get('evidence_refs', []),
+                        'agent_steps': [{'agent': 'workspace', 'model': 'none', 'provider_call': 'none',
+                            'tool': 'judge_read', 'status': 'completed', 'role': 'Grounded local evidence',
+                            'summary': 'Read current owned plan coverage.'}],
+                        'proposal': None, 'read_only': True}
             result = await workspace_tools(name, args, context_version, key)
             with value.lock:
                 store.save(value)

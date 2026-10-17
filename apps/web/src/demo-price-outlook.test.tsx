@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { acceptOutlook, PriceOutlookView, priceOutlookExport, requestFxOutlook, requestPriceOutlook } from './demo-price-outlook';
-import type { FxOutlook, PriceOutlook } from './demo-price-outlook';
+import { acceptBudget, acceptOutlook, PriceOutlookView, priceOutlookExport, requestBudgetAtRisk, requestFxOutlook, requestPriceOutlook } from './demo-price-outlook';
+import type { BudgetAtRisk, FxOutlook, PriceOutlook } from './demo-price-outlook';
 
 const backtest = (o: Partial<Record<string, number | string | null>> = {}) => ({ split: 'test', selected_model: 'naive', n_origins: 24, mape: null, naive_mape: 0.041, mape_ratio: null, directional_acc: null, coverage: null, naive_coverage: 0.792, skill: null, bootstrap_ci_lower: null, bootstrap_ci_upper: null, ...o });
 const series = {
@@ -63,5 +63,70 @@ describe('price outlook panel (#111)', () => {
     const exported = priceOutlookExport(price, fx);
     expect(exported).toMatchObject({ schema: 'price-outlook-export.v1', company_id: 'solara-cables', context_version: 3, label: 'Projection with uncertainty, not a recommendation' });
     expect(() => priceOutlookExport(price, { ...fx, company_id: 'terrapack' })).toThrow('scope');
+  });
+});
+
+const money = (amount: string, display: string, change?: string, changeDisplay?: string, pct?: string) => ({ amount, display, ...(change ? { change, change_display: changeDisplay, change_percent: pct } : {}) });
+const budget = {
+  kind: 'budget', company_id: 'solara-cables', context_version: 3, plan_id: 'plan-1', material_id: 'copper', status: 'available', currency: 'USD',
+  label: 'benchmark cost exposure, not a supplier quote, landed cost or recommendation', match: 'proxy', note: 'Copper rod: cathode benchmark, rod premium not included.',
+  quantity: { value: '8000', unit: 'kg', benchmark_quantity: '8', benchmark_unit: 'mt' }, benchmark_unit: 'USD per mt', data_date: '2026-08', issue_month: '2026-09', freshness_state: 'HISTORICAL_NOT_CURRENT',
+  source: series.source, fx: null, fx_note: null, today: money('114608.0', '114,608.00'),
+  horizons: [
+    { horizon: 1, target_month: '2026-10', status: 'RANGE_ONLY', label: 'range based on past volatility, not a directional forecast', low: money('105762.38128', '105,762.38', '-8845.61872', '-8,845.62', '-7.72'), mid: money('114608.0', '114,608.00', '0.0', '0.00', '0.00'), high: money('124494.764', '124,494.76', '9886.764', '9,886.76', '8.63'), hit_rate: { value: '0.7916666666666666', basis: 'naive band coverage', test_origins: 24 } },
+    { horizon: 6, target_month: '2027-02', status: 'NO_RELIABLE_FORECAST', label: 'naive baseline, not a prediction', reason: 'no tested range for this horizon' },
+  ],
+} as unknown as BudgetAtRisk;
+
+describe('budget at risk (#130)', () => {
+  it('shows today, each tested horizon in money with its hit rate, and the reason otherwise', () => {
+    const html = renderToStaticMarkup(<PriceOutlookView price={price} fx={fx} budget={budget} />);
+    expect(html).toContain('Budget at risk for this purchase');
+    expect(html).toContain('Benchmark cost today for 8000 kg copper: <strong>USD 114,608.00</strong>');
+    expect(html).toContain('USD 105,762.38 to USD 124,494.76');
+    expect(html).toContain('middle USD 114,608.00');
+    expect(html).toContain('-8,845.62 (-7.72%) to +9,886.76 (+8.63%)');
+    expect(html).toContain('range held 79% of the time on 24 test months (naive band coverage)');
+    expect(html).toContain('no tested range for this horizon');
+    expect(html).toContain('benchmark cost exposure, not a supplier quote, landed cost or recommendation');
+    expect(html).toContain('Proxy benchmark: Copper rod: cathode benchmark, rod premium not included.');
+    expect(html.indexOf('Budget at risk')).toBeLessThan(html.indexOf('Benchmark price: copper'));
+    const block = renderToStaticMarkup(<PriceOutlookView price={null} fx={null} budget={budget} />).replace('Projection with uncertainty, not a recommendation', '');
+    expect(block.replace(budget.label ?? '', '')).not.toMatch(/\b(buy|wait|saving|recommend)/i);
+  });
+
+  it('shows the FX month and note for a converted currency and the reason when no figure is possible', () => {
+    const inr = { ...budget, currency: 'INR', fx: { rate: '95.446733', quote: 'INR per USD', month: '2026-08', series_id: 'fx:INR', source: 'Source: BIS bilateral exchange rate statistics.', publisher: 'Bank for International Settlements (BIS)', url: 'https://data.bis.org/topics/XRU' }, fx_note: 'FX held at 2026-08 rate; see the FX outlook for currency uncertainty.' } as unknown as BudgetAtRisk;
+    const html = renderToStaticMarkup(<PriceOutlookView price={null} fx={null} budget={inr} />);
+    expect(html).toContain('95.446733 INR per USD (2026-08, Bank for International Settlements (BIS))');
+    expect(html).toContain('FX held at 2026-08 rate; see the FX outlook for currency uncertainty.');
+    const litre = { ...budget, status: 'unit_basis_required', reason: 'The plan quantity is in litre and the benchmark is USD per mt; a stated mass per litre is needed (for example oil per litre needs a stated density). No mass is assumed.', horizons: [], today: undefined } as unknown as BudgetAtRisk;
+    const reason = renderToStaticMarkup(<PriceOutlookView price={null} fx={null} budget={litre} />);
+    expect(reason).toContain('needs a stated density');
+    expect(reason).not.toContain('Benchmark cost today');
+    const none = { ...litre, status: 'no_current_plan', reason: 'Run a comparison first.', plan_id: null } as unknown as BudgetAtRisk;
+    expect(renderToStaticMarkup(<PriceOutlookView price={null} fx={null} budget={none} />)).toContain('Run a comparison first.');
+  });
+
+  it('accepts a budget reply only for the same plan id as well as session, company, context and generation', () => {
+    const owner = { sessionId: 's1', companyId: 'solara-cables', contextVersion: 3, generation: 1, planId: 'plan-1' };
+    expect(acceptBudget(owner, owner, budget)).toBe(true);
+    expect(acceptBudget(owner, { ...owner, planId: 'plan-2', generation: 2 }, budget)).toBe(false);
+    expect(acceptBudget(owner, owner, { ...budget, plan_id: 'plan-0' })).toBe(false);
+    expect(acceptBudget(owner, { ...owner, companyId: 'harvest-foods', contextVersion: 4, generation: 2 }, budget)).toBe(false);
+    expect(acceptBudget(owner, { ...owner, contextVersion: 5, generation: 3 }, budget)).toBe(false);
+    const none = { ...owner, planId: null };
+    expect(acceptBudget(none, none, { ...budget, status: 'no_current_plan', plan_id: null })).toBe(true);
+  });
+
+  it('requests the plan-bound route and exports the budget with the outlook', async () => {
+    const send = vi.fn(async () => new Response(JSON.stringify(budget), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await requestBudgetAtRisk(send as unknown as typeof fetch, 'copper', 'plan 1');
+    expect(send).toHaveBeenCalledWith('/api/demo/budget-at-risk?material_id=copper&plan_id=plan%201', { credentials: 'same-origin' });
+    await requestBudgetAtRisk(send as unknown as typeof fetch, 'copper', null);
+    expect(send).toHaveBeenCalledWith('/api/demo/budget-at-risk?material_id=copper', { credentials: 'same-origin' });
+    expect(priceOutlookExport(price, fx, budget).budget).toEqual(budget);
+    expect(priceOutlookExport(price, fx).budget).toBeNull();
+    expect(() => priceOutlookExport(price, fx, { ...budget, context_version: 9 })).toThrow('scope');
   });
 });

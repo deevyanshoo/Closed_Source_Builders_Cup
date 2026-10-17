@@ -285,7 +285,7 @@ export class VoiceController {
       if (generation !== this.generation || this.disposed) return;
       const identity = this.state.identity;
       if (!identity) { this.signedOut(); return; }
-      if (identity.role !== 'editor') throw new VoiceError('Only an editor can save or replace a synthetic context.', 'validation');
+      if (identity.role !== 'editor') throw new VoiceError('Only an editor can save or replace a sample context.', 'validation');
       const snapshot = parseSnapshot(this.state.snapshotText, identity.workspace_id);
       const latest = await this.checkIdentity();
       if (generation !== this.generation || this.disposed) return;
@@ -509,7 +509,7 @@ export class VoiceController {
     try { await cleanup; } catch (error) { if (generation === this.generation) this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Cleanup failed.' }); return; }
     if (generation !== this.generation || this.disposed) return;
     const identity = this.state.identity; const selected = this.state.selected;
-    if (!identity || this.state.source !== 'saved' || !selected || selected.workspace_id !== identity.workspace_id) { this.emit({ kind: 'failed', message: 'Select a saved synthetic context first.' }); return; }
+    if (!identity || this.state.source !== 'saved' || !selected || selected.workspace_id !== identity.workspace_id) { this.emit({ kind: 'failed', message: 'Select a saved sample context first.' }); return; }
     if (!utterance.trim() || byteLength(utterance) > 4096) { this.emit({ kind: 'failed', message: 'Enter a text proposal request of at most 4096 UTF-8 bytes.' }); return; }
     let latest: SessionResponse;
     try { latest = await this.checkIdentity(); } catch (error) { if (generation === this.generation) this.signedOut(error instanceof VoiceError ? error.message : undefined); return; }

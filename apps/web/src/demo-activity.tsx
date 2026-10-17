@@ -27,11 +27,11 @@ export function ActivityIndicator({ state, label, detail, size = 20, theme = 'li
 export function workspaceActivity(busy: string, extractor: 'gemini' | 'rules'): { state: ActivityState; label: string; detail: string } | null {
   if (!busy) return null;
   if (busy === 'extract') return extractor === 'gemini'
-    ? { state: 'thinking', label: 'Gemini is reading the quote', detail: 'Extracting terms from this synthetic document. Review the returned fields before acceptance.' }
+    ? { state: 'thinking', label: 'Gemini is reading the quote', detail: 'Extracting document terms. Review the returned fields before acceptance.' }
     : { state: 'working', label: 'Reading the quote with rules', detail: 'Rule-based extraction; this request does not call an AI model.' };
   if (busy === 'plan') return { state: 'solving', label: 'Comparing supplier options', detail: 'Deterministic cost, quantity and arrival checks using your reviewed inputs.' };
   if (busy === 'recovery') return { state: 'solving', label: 'Checking recovery options', detail: 'Deterministic comparison under the hypothetical supplier delay.' };
   if (busy === 'rfq') return { state: 'composing', label: 'Preparing the RFQ draft', detail: 'Building an unsent draft from the reviewed plan. No supplier message is sent.' };
-  if (busy === 'company') return { state: 'connecting', label: 'Opening the company workspace', detail: 'Restoring this company’s temporary demo data.' };
+  if (busy === 'company') return { state: 'connecting', label: 'Opening the company workspace', detail: 'Restoring this company workspace and its current context.' };
   return { state: 'working', label: 'Updating the workspace', detail: 'Waiting for the service to confirm the current state.' };
 }

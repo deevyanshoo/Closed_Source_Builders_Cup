@@ -22,7 +22,7 @@ describe('dispatch review panel', () => {
     const html = renderToStaticMarkup(<DemoDispatchPanel view={{ ...view, shipments: [...many, planned] }} busy={false} onRefresh={() => {}} onReviewDelay={() => {}} />);
     expect(html).toMatch(/<label[^>]*>Shipment<select[^>]*id="demo-dispatch-chooser"/);
     expect((html.match(/<option /g) ?? []).length).toBe(25);
-    expect(html).toMatch(/<option value="planned-1" selected="">Copper · Plan-demand scenario<\/option>/);
+    expect(html).toMatch(/<option value="planned-1" selected="">Copper · Accepted plan scenario<\/option>/);
     expect(html).toContain('ORDER-23');
     expect(dispatchSelection('company-a:4:plan-a', 'expected-3')).toEqual({ selected: { key: 'company-a:4:plan-a', shipmentId: 'expected-3' }, delay: { key: 'company-a:4:plan-a', shipmentId: 'expected-3', value: '0' } });
   });
@@ -45,7 +45,10 @@ describe('dispatch review panel', () => {
     expect(html).toContain('100 kg');
     expect(html).toContain('2026-11-02');
     expect(html).toContain('Plan decision');
-    expect(html).toContain('synthetic_plan_assumption');
+    expect(html).toContain('Accepted plan assumption');
+    expect(html).toContain('Expected company order');
+    expect(html).not.toContain('synthetic_plan_assumption');
+    expect(html).not.toContain('fictional_company_profile_expected_order');
     expect(html).toContain('No live shipment tracking.');
     expect(html).toContain('Review recovery');
     const onlyExpected = renderToStaticMarkup(<DemoDispatchPanel view={{ ...view, plan_id: null, shipments: [expected] }} busy={false} onRefresh={() => {}} onReviewDelay={() => {}} />);

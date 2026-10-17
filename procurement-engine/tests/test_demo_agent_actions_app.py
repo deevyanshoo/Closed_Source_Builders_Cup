@@ -131,6 +131,7 @@ def test_load_quotes_stages_only_owned_drafts_and_retries_without_duplicates(cli
     assert first.status_code == 200, first.text
     offers = first.json()['session']['offers']
     assert len(offers) == 3
+    assert first.json()['action_result']['summary'] == '3 quotes are ready for review.'
     assert all(offer['status'] != 'saved' for offer in offers)
     assert all(offer['fixture_id'].startswith('solara-cables-polymer-') for offer in offers)
     assert client.post('/api/demo/operator', headers=headers, json=request).json()['turn_id'] == first.json()['turn_id']

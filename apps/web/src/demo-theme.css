@@ -157,3 +157,6 @@
 @media (max-width: 760px) {
   :root[data-zoorq-theme="dark"] .zoorq-page .demo-assistant-panel .demo-operator-voice > .demo-voice-controls { background: var(--zoorq-white); border-color: var(--zoorq-line); }
 }
+:root[data-zoorq-theme="dark"] .zoorq-page .company-preview :is(input,.company-preview-consent,.company-preview-result,blockquote){background:var(--zoorq-soft);color:var(--zoorq-ink);border-color:var(--zoorq-line)}
+:root[data-zoorq-theme="dark"] .zoorq-page .company-preview :is(a,.company-preview-kicker){color:var(--zoorq-blue)}
+:root[data-zoorq-theme="dark"] .zoorq-page .company-preview button{background:var(--zoorq-action);border-color:var(--zoorq-action);color:#fff}

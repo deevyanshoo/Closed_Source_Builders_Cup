@@ -20,8 +20,23 @@ class NamedProvider(Provider):
     async def send_realtime_input(self, **kwargs):
         if kwargs.get('audio') and self.next_call is not None:
             name, args, call_id = self.next_call
+            if name == 'operate_workspace':
+                await self.events.put(NS(server_content=None, voice_activity=NS(
+                    voice_activity_type='ACTIVITY_START', audio_offset='0.000s')))
+                await self.events.put(NS(server_content=NS(input_transcription=NS(
+                    text=args['message'], finished=True))))
+                await self.events.put(NS(server_content=None, voice_activity=NS(
+                    voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
             await self.events.put(NS(tool_call=NS(function_calls=[NS(
                 name=name, args=args, id=call_id)]), server_content=None))
+
+    async def send_tool_response(self, *, function_responses):
+        self.tool_response = function_responses
+        response = function_responses.response
+        await self.events.put(NS(server_content=NS(
+            output_transcription=NS(text=response.get('required_spoken_response', response.get('assistant_text', ''))),
+            model_turn=NS(parts=[NS(inline_data=NS(data=b'\1\0' * 10,
+                mime_type='audio/pcm;rate=24000'))]), turn_complete=True)))
 
 
 def voice_tool(client, provider, name, args, call_id):
@@ -45,6 +60,7 @@ def voice_tool(client, provider, name, args, call_id):
         while True:
             event = socket.receive_json()
             provider.last_frames.append(event['type'])
+            assert event['type'] != 'error', event
             if event['type'] == 'turn_complete':
                 break
         socket.send_json({'type': 'stop'})

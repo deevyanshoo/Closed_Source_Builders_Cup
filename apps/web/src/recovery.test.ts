@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { recoveryExamples } from '../../../contracts/generated/recovery-examples';
 import { buildComparisonRequest, createExample, requestComparison, validateComparisonResponse } from './recovery';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
+import { RecoveryPage } from './recovery-page';
+import { createElement } from 'react';
+
+it('opens receipt recovery with a plain scenario heading', () => {
+  const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(RecoveryPage)));
+  expect(html).toContain('Receipt recovery comparison');
+  expect(html).not.toContain('SYNTHETIC RECEIPT RECOVERY');
+});
 
 const response = () => structuredClone((recoveryExamples as Record<string, unknown>).recovery);
 

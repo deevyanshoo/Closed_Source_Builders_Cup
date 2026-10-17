@@ -34,5 +34,7 @@ describe('assistant activity feedback', () => {
     expect(activity.workspaceActivity('plan', 'gemini').detail).toContain('Deterministic');
     expect(activity.workspaceActivity('recovery', 'gemini').detail).toContain('Deterministic');
     expect(activity.workspaceActivity('rfq', 'gemini').detail).toContain('unsent');
+    expect(activity.workspaceActivity('company', 'gemini').detail).toContain('company workspace');
+    expect(activity.workspaceActivity('extract', 'gemini').detail).not.toContain('synthetic');
   });
 });

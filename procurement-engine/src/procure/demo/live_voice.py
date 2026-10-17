@@ -32,16 +32,22 @@ from .presentation import present_turn, supplier_display_name
 from .company import get_company
 from .voice_cues import load_cue_pcm
 from .live_continuity import RollingBudget, ReplayGuard, call_key
+from .experience_service import _explicit_recovery_request, resolve_voice_recovery
 
 
 MODEL = 'gemini-3.8-live'
 LOCATION = 'us-central1'
 USAGE_WINDOW_SECONDS = 180
 MAX_CONNECTIONS = 2
-MAX_COMPANY_STARTS = 6
 MAX_PROCESS_STARTS = 24
 PROCESS_WINDOW_SECONDS = 3600
 MAX_INPUT_CHUNK = 32_000  # One second of mono PCM16 at 16 kHz.
+RECOVERY_CAPTION_SETTLE_SECONDS = .25
+RECOVERY_INPUT_WAIT_SECONDS = 1.0
+RECOVERY_TRANSPORT_LATENESS_SECONDS = 30.0
+RECOVERY_SPEECH_WAIT_SECONDS = 60.0
+RECOVERY_DRAIN_WAIT_SECONDS = 3.0
+RECOVERY_REVIEW_AUDIO_BYTES = 60 * 48_000
 # ScriptProcessor callbacks and network delivery batch otherwise normal PCM.
 # Two seconds of headroom preserves the 32 kB/s rolling rate in practice.
 MAX_INPUT_BYTES = (USAGE_WINDOW_SECONDS + 2) * 32_000
@@ -288,7 +294,8 @@ def _selected_purchase_model_result(name: str, result: dict, model_result: dict,
                'expected_order_omitted': omitted_orders}}
 
 INSTRUCTION = (
-    "You are the procurement workspace operator. Speak in concise, composed English "
+    "You are the procurement workspace operator. Answer naturally in the user's spoken or requested language, including Hindi, English, or Portuguese; keep identifiers, quantities, currencies, dates and source names intact. "
+    "Translate explanatory prose when useful. For recovery preparation, ask for a fresh explicit request in English when the current words cannot bind one exact action; never translate a request into authorization. Speak the complete recovery review in English using the exact shown review text, then require a separate fresh verified English confirm action. Keep the exact confirm research command in English. Use concise, composed speech "
     "with light British wit; do not imitate a character or actor. Answer general business "
     "questions directly. Omit repeated fixture qualifiers and never speak bracketed "
     "[SYNTHETIC] supplier annotations; the workspace has one demo disclosure. "
@@ -395,7 +402,7 @@ class _Stale(Exception):
 
 
 class _Capacity(Exception):
-    """The process or session has exhausted its voice allowance."""
+    """The process has exhausted its temporary shared voice allowance."""
 
     def __init__(self, scope: str):
         self.scope = scope
@@ -832,6 +839,7 @@ async def run_live_voice(
     accepted_activity_end = 0
     cue_tasks: set[asyncio.Task] = set()
     research_operation = None
+    recovery_generation = 0
     renewal_budget = RollingBudget(4, 30, monotonic)
 
     def cancel_cues() -> None:
@@ -895,8 +903,6 @@ async def run_live_voice(
             company_starts = by_company.get(session.company_id, 0)
             if _PROCESS_STARTS >= MAX_PROCESS_STARTS:
                 raise _Capacity('process')
-            if company_starts >= MAX_COMPANY_STARTS:
-                raise _Capacity('company')
             _PROCESS_STARTS += 1
             session.live_voice_sessions += 1
             by_company[session.company_id] = company_starts + 1
@@ -909,7 +915,7 @@ async def run_live_voice(
         supplier_names = [supplier['name'] for supplier in company['suppliers']]
         async def connection_round(provider, *, first):
             nonlocal research_gate, research_operation, consent_ring_start
-            nonlocal accepted_activity_end, suppress_failed_speech, provider_ready
+            nonlocal accepted_activity_end, suppress_failed_speech, provider_ready, recovery_generation
             if first:
                 await send_frame({'type': 'ready', 'input_mime_type': 'audio/pcm;rate=16000',
                                   'output_mime_type': 'audio/pcm;rate=24000',
@@ -925,6 +931,11 @@ async def run_live_voice(
             fresh_activity_end = False
             fresh_transcript_ready = False
             fresh_explicit_incomplete = False
+            recovery_spoken = ''
+            recovery_asr_incomplete = False
+            recovery_vad_started = False
+            recovery_vad_ended = False
+            recovery_result = None
             provider_events = asyncio.Queue(maxsize=16)
             background_tasks = set()
 
@@ -960,6 +971,7 @@ async def run_live_voice(
                         if research_gate is not None and research_gate.get('gate_kind') == 'workspace_action':
                             research_gate = None
                         await send_frame({'type': 'interrupted'})
+                        await provider_events.put(('browser_interrupt',))
                         if research_operation is not None:
                             research_operation['cue_started'] = False
                         continue
@@ -981,6 +993,7 @@ async def run_live_voice(
             async def from_provider():
                 nonlocal output_bytes, produced_output_bytes, tool_calls, suppress_failed_speech, research_gate, accepted_activity_end, research_operation
                 nonlocal fresh_input_ready, fresh_activity_start, fresh_activity_end, fresh_transcript_ready, fresh_explicit_incomplete
+                nonlocal recovery_spoken, recovery_asr_incomplete, recovery_vad_started, recovery_vad_ended, recovery_result, recovery_generation
                 from google.genai import types
                 pending_confirm = None
                 pending_deadline = None
@@ -993,6 +1006,116 @@ async def run_live_voice(
                 waiting_research_calls = []
                 waiting_action_calls = []
                 held_action_ids = set()
+                # One bounded wait owns caption settlement and early provider
+                # calls. No synthetic function call or function ID is created.
+                recovery_settled = False
+                recovery_deadline = None
+                recovery_transport_deadline = None
+                # Live captions carry no utterance ID. An abandoned late
+                # generation requires a new provider round before another
+                # recovery request can be attributed to fresh microphone input.
+                recovery_late_generation_abandoned = False
+                recovery_caption_limit = None
+                recovery_caption_finished = False
+                recovery_held_calls = []
+                recovery_speech_pending = False
+                recovery_speech_deadline = None
+                recovery_required_speech = ''
+                recovery_output_text = ''
+                recovery_output_audio = []
+                recovery_original_complete = False
+                recovery_review_dispatched = False
+                recovery_review_aborted = False
+                recovery_drain_deadline = None
+
+                async def request_recovery_review():
+                    nonlocal recovery_review_dispatched, recovery_drain_deadline
+                    if (recovery_review_dispatched or recovery_review_aborted or
+                            recovery_result is None or recovery_held_calls):
+                        return
+                    recovery_review_dispatched = True
+                    recovery_drain_deadline = None
+                    public = {k: v for k, v in recovery_result.items() if k != 'session'}
+                    await provider.send_client_content(turns=[types.Content(role='user', parts=[types.Part(
+                        text=json.dumps({'trusted_recovery_result': public,
+                            'required_spoken_response': recovery_required_speech,
+                            'instruction': 'Speak the validated English review or clarification in full. Wait for separate fresh English confirm action before applying.'},
+                            ensure_ascii=True))])], turn_complete=True)
+
+                def recovery_denied():
+                    return {'turn_id': secrets.token_urlsafe(18),
+                        'company_id': session.company_id, 'context_version': context_version,
+                        'status': 'needs_clarification', 'assistant_text':
+                            'Please finish a fresh explicit recovery request with the current material and one exact delay. No change was applied.',
+                        'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+                def block_ungrounded_recovery(result, previous, key):
+                    """The app may have prepared a model candidate; revoke it before delivery."""
+                    public = result.get('proposal') or {}
+                    if public.get('kind') != 'recovery':
+                        return result
+                    denied = recovery_denied()
+                    with session.lock:
+                        current = session.pending_proposal or {}
+                        if current.get('proposal_id') == public.get('proposal_id'):
+                            session.pending_proposal = previous
+                        entry = session.idempotency.get(key)
+                        if entry is not None:
+                            entry['result'] = deepcopy(denied)
+                        for row in session.chat_history.get(session.company_id, []):
+                            if row.get('id') == result.get('turn_id'):
+                                row['turn'] = deepcopy(denied)
+                        store.save(session)
+                    return denied
+
+                async def finish_recovery_input():
+                    nonlocal recovery_result, recovery_speech_pending, recovery_speech_deadline
+                    nonlocal recovery_required_speech, research_gate, tool_calls, recovery_drain_deadline
+                    nonlocal recovery_review_dispatched
+                    if (not _explicit_recovery_request(recovery_spoken) or
+                            not 0 < len(recovery_spoken) <= 1200 or recovery_result is not None):
+                        return
+                    _current(session, store, context_version)
+                    operation_key = call_key(socket_secret, f'recovery-{recovery_generation}')
+                    with session.lock:
+                        previous = deepcopy(session.pending_proposal)
+                    preflight = resolve_voice_recovery(session, recovery_spoken, now=store.now())
+                    if recovery_asr_incomplete or not recovery_vad_ended or not tool_budget.allow():
+                        raw = recovery_denied()
+                    else:
+                        tool_calls += 1
+                        try:
+                            raw = await operate_workspace(recovery_spoken, context_version, operation_key)
+                        except SessionError as exc:
+                            raw = {**recovery_denied(), 'assistant_text': exc.message}
+                        except Exception:
+                            raw = {**recovery_denied(), 'status': 'unavailable',
+                                'assistant_text': 'Recovery verification is unavailable. No change was applied.'}
+                    recovery_result = research_result(raw)
+                    public = recovery_result.get('proposal') or {}
+                    expected = (preflight or {}).get('recovery_parameters')
+                    if public.get('kind') == 'recovery' and (not expected or any(
+                            public.get('parameters', {}).get(field) != value for field, value in expected.items())):
+                        recovery_result = block_ungrounded_recovery(recovery_result, previous, operation_key)
+                    research_gate = _workspace_action_gate(session, store, context_version, recovery_result)
+                    if (recovery_result.get('proposal') or {}).get('kind') == 'recovery' and research_gate is None:
+                        recovery_result = block_ungrounded_recovery(recovery_result, previous, operation_key)
+                    if research_gate is not None:
+                        recovery_result = {**recovery_result, 'assistant_text': recovery_result['assistant_text'] +
+                            ' For voice approval, wait for the full spoken review, then say confirm action in English.'}
+                    recovery_required_speech = (research_gate['query'] + ' Say confirm action to apply.'
+                        if research_gate is not None else recovery_result['assistant_text'])
+                    recovery_speech_pending = True
+                    recovery_speech_deadline = monotonic() + RECOVERY_SPEECH_WAIT_SECONDS
+                    await send_frame({'type': 'tool_result', 'result': recovery_result})
+                    if recovery_held_calls:
+                        # The existing real function call supplies the review turn.
+                        recovery_review_dispatched = True
+                    else:
+                        if recovery_original_complete:
+                            await request_recovery_review()
+                        else:
+                            recovery_drain_deadline = monotonic() + RECOVERY_DRAIN_WAIT_SECONDS
 
                 async def progress(phase: str, gate: dict) -> None:
                     if gate.get('gate_kind') == 'workspace_action' or research_tools is None or phase not in {
@@ -1209,7 +1332,9 @@ async def run_live_voice(
                 async def received():
                     while True:
                         deadlines = [deadline for deadline in
-                                     (pending_deadline, fresh_call_deadline) if deadline is not None]
+                                     (pending_deadline, fresh_call_deadline, recovery_deadline,
+                                      recovery_transport_deadline,
+                                      recovery_speech_deadline, recovery_drain_deadline) if deadline is not None]
                         timeout = (None if not deadlines else max(0, min(deadlines) - monotonic()))
                         try:
                             yield await asyncio.wait_for(provider_events.get(), timeout)
@@ -1250,6 +1375,7 @@ async def run_live_voice(
                 while True:
                     async for event in received():
                         _current(session, store, context_version)
+                        browser_interrupt = event == ('browser_interrupt',)
                         if getattr(event, 'go_away', None) is not None:
                             raise _Renew()
                         if consent_task is not None and consent_task.done() and consent_task.cancelled():
@@ -1350,7 +1476,7 @@ async def run_live_voice(
                                     role='user', parts=[types.Part(text=brief)])], turn_complete=True)
                             continue
                         content = getattr(event, 'server_content', None)
-                        interrupted_frame = bool(getattr(content, 'interrupted', False))
+                        interrupted_frame = browser_interrupt or bool(getattr(content, 'interrupted', False))
                         # A Live event may carry both the user's transcription
                         # and the model's function call. Authenticate that input
                         # before considering the call, exactly once per event.
@@ -1436,6 +1562,164 @@ async def run_live_voice(
                                 activity_start_global = None
                             else:
                                 activity_valid = False
+                        # Only the current microphone utterance can nominate a
+                        # recovery action. History and provider tool arguments
+                        # never enter this buffer.
+                        if recovery_held_calls and (interrupted_frame or activity is not None and
+                                (not activity_valid or kind.endswith('ACTIVITY_START'))):
+                            for held in recovery_held_calls:
+                                denied = {'status': 'unavailable', 'read_only': True,
+                                    'tool_succeeded': False, 'action_applied': False,
+                                    'required_spoken_response': 'That unfinished request was interrupted. Please ask again.'}
+                                held_binding = json.dumps([held.name, held.args], sort_keys=True)
+                                cache_tool(held.id, held_binding, 'handoff', denied)
+                                await provider.send_tool_response(function_responses=types.FunctionResponse(
+                                    name=held.name, id=held.id, response=denied))
+                        if interrupted_frame or activity is not None and not activity_valid:
+                            recovery_late_generation_abandoned |= recovery_transport_deadline is not None
+                            recovery_spoken = ''
+                            recovery_vad_started = recovery_vad_ended = False
+                            recovery_asr_incomplete = False
+                            recovery_result = None
+                            recovery_deadline = None
+                            recovery_transport_deadline = None
+                            recovery_caption_limit = None
+                            recovery_settled = False
+                            recovery_held_calls.clear()
+                            recovery_speech_pending = False
+                            recovery_speech_deadline = None
+                            recovery_output_text = ''
+                            recovery_output_audio.clear()
+                            recovery_original_complete = False
+                            recovery_review_dispatched = False
+                            recovery_review_aborted = False
+                            recovery_drain_deadline = None
+                        elif activity is not None and kind.endswith('ACTIVITY_START'):
+                            recovery_late_generation_abandoned |= recovery_transport_deadline is not None
+                            recovery_generation += 1
+                            recovery_spoken = ''
+                            recovery_vad_started = True
+                            recovery_vad_ended = False
+                            recovery_asr_incomplete = False
+                            recovery_result = None
+                            recovery_settled = False
+                            recovery_deadline = monotonic() + MAX_CONSENT_CLIP_BYTES / 32_000 + RECOVERY_INPUT_WAIT_SECONDS
+                            recovery_transport_deadline = None
+                            recovery_caption_limit = None
+                            recovery_caption_finished = False
+                            recovery_held_calls.clear()
+                            recovery_speech_pending = False
+                            recovery_speech_deadline = None
+                            recovery_required_speech = ''
+                            recovery_output_text = ''
+                            recovery_output_audio.clear()
+                            recovery_original_complete = False
+                            recovery_review_dispatched = False
+                            recovery_review_aborted = False
+                            recovery_drain_deadline = None
+                        elif activity is not None and kind.endswith('ACTIVITY_END') and recovery_vad_started:
+                            recovery_vad_ended = True
+                            recovery_caption_limit = (recovery_transport_deadline or
+                                monotonic() + RECOVERY_INPUT_WAIT_SECONDS)
+                        caption = getattr(content, 'input_transcription', None)
+                        heard = getattr(caption, 'text', None)
+                        if (recovery_vad_started and not recovery_settled and
+                                not recovery_late_generation_abandoned and
+                                isinstance(heard, str) and heard.strip()):
+                            recovery_spoken = _append_transcription(recovery_spoken, heard)[:1201]
+                            if getattr(caption, 'finished', None) is False:
+                                recovery_asr_incomplete = True
+                                recovery_caption_finished = False
+                            elif getattr(caption, 'finished', None) is True:
+                                recovery_asr_incomplete = False
+                                recovery_caption_finished = True
+                            if recovery_result is None and recovery_vad_ended:
+                                recovery_settled = False
+                                recovery_deadline = min(recovery_caption_limit, monotonic() + (
+                                    RECOVERY_CAPTION_SETTLE_SECONDS if recovery_vad_ended and not recovery_asr_incomplete
+                                    else RECOVERY_INPUT_WAIT_SECONDS))
+                        if (activity is not None and activity_valid and kind.endswith('ACTIVITY_END')
+                                and recovery_vad_started):
+                            recovery_deadline = (recovery_transport_deadline
+                                if recovery_transport_deadline is not None and
+                                (not recovery_spoken or recovery_asr_incomplete) else
+                                monotonic() + (RECOVERY_INPUT_WAIT_SECONDS if recovery_asr_incomplete
+                                    else RECOVERY_CAPTION_SETTLE_SECONDS))
+                        recovery_release = []
+                        if (recovery_deadline is not None and monotonic() >= recovery_deadline):
+                            if not recovery_vad_ended and recovery_transport_deadline is None:
+                                # The physical clip wait has elapsed, but this same
+                                # VAD utterance may still be in provider transport.
+                                recovery_transport_deadline = (monotonic() +
+                                    RECOVERY_TRANSPORT_LATENESS_SECONDS)
+                                recovery_deadline = None
+                            else:
+                                preflight = (resolve_voice_recovery(session, recovery_spoken, now=store.now())
+                                    if recovery_vad_ended and not recovery_asr_incomplete and
+                                    _explicit_recovery_request(recovery_spoken) else None)
+                                if (recovery_caption_limit is not None and monotonic() < recovery_caption_limit
+                                        and not recovery_caption_finished and _explicit_recovery_request(recovery_spoken)
+                                        and (preflight or {}).get('kind') != 'recovery_proposal'):
+                                    recovery_deadline = recovery_caption_limit
+                                else:
+                                    recovery_deadline = None
+                                    recovery_settled = True
+                                    if recovery_transport_deadline is not None and (
+                                            monotonic() >= recovery_transport_deadline or
+                                            not recovery_vad_ended or recovery_asr_incomplete):
+                                        recovery_late_generation_abandoned = True
+                                        recovery_spoken = ''
+                                    recovery_transport_deadline = None
+                                    if not recovery_late_generation_abandoned:
+                                        await finish_recovery_input()
+                                    recovery_release, recovery_held_calls = recovery_held_calls, []
+                        if (recovery_transport_deadline is not None and
+                                monotonic() >= recovery_transport_deadline):
+                            recovery_late_generation_abandoned = True
+                            recovery_transport_deadline = None
+                            recovery_deadline = None
+                            recovery_settled = True
+                            recovery_spoken = ''
+                            recovery_release, recovery_held_calls = recovery_held_calls, []
+                        if recovery_late_generation_abandoned:
+                            # The old provider may still emit an unlabelled ASR
+                            # fragment. Answer any held real calls before closing
+                            # it, then use the existing bounded round renewal.
+                            for held in recovery_release:
+                                denied = {'status': 'unavailable', 'read_only': True,
+                                    'tool_succeeded': False, 'action_applied': False,
+                                    'required_spoken_response':
+                                        'That unfinished request was interrupted. Please ask again.'}
+                                held_binding = json.dumps([held.name, held.args], sort_keys=True)
+                                cache_tool(held.id, held_binding, 'handoff', denied)
+                                await provider.send_tool_response(function_responses=types.FunctionResponse(
+                                    name=held.name, id=held.id, response=denied))
+                            recovery_speech_pending = False
+                            recovery_speech_deadline = None
+                            recovery_output_text = ''
+                            recovery_output_audio.clear()
+                            raise _Renew()
+                        if (recovery_drain_deadline is not None and monotonic() >= recovery_drain_deadline):
+                            recovery_drain_deadline = None
+                            recovery_review_aborted = True
+                            recovery_speech_pending = False
+                            recovery_speech_deadline = None
+                            research_gate = None
+                            await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
+                                'message': 'The recovery result is on screen, but the prior spoken turn did not finish. Review it on screen before approving.'})
+                        if (recovery_speech_deadline is not None and monotonic() >= recovery_speech_deadline):
+                            recovery_speech_deadline = None
+                            recovery_speech_pending = False
+                            recovery_review_aborted = True
+                            recovery_drain_deadline = None
+                            research_gate = None
+                            await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
+                                'message': 'The recovery result is on screen, but its spoken review was unavailable. Review it on screen before approving.'})
+                        recovery_request = None
+                        if (recovery_settled and recovery_vad_ended and not recovery_asr_incomplete and
+                                0 < len(recovery_spoken) <= 1200):
+                            if _explicit_recovery_request(recovery_spoken):
+                                recovery_request = recovery_spoken
                         if (research_tools is not None and activity is not None and not activity_valid
                                 and consent_task is not None and research_gate is not None
                                 and research_gate['armed'] and not research_gate['consumed']):
@@ -1525,7 +1809,7 @@ async def run_live_voice(
                                     if not fresh_explicit_incomplete:
                                         fresh_transcript_ready = True
                             fresh_input_ready = fresh_activity_end and fresh_transcript_ready
-                        calls = list(getattr(getattr(event, 'tool_call', None), 'function_calls', None) or [])
+                        calls = recovery_release + list(getattr(getattr(event, 'tool_call', None), 'function_calls', None) or [])
                         if pending_fresh is not None:
                             expired = (fresh_call_deadline is not None and
                                        monotonic() >= fresh_call_deadline)
@@ -1617,6 +1901,10 @@ async def run_live_voice(
                                      (not isinstance(args['research_id'], str) or
                                       not 0 < len(args['research_id']) <= 128))):
                                 raise _Invalid()
+                            recovery_route = (recovery_result is not None and
+                                _explicit_recovery_request(recovery_spoken) and
+                                name in {'read_workspace', 'operate_workspace'})
+                            routed_name = 'operate_workspace' if recovery_route else name
                             binding = json.dumps([name, args], sort_keys=True)
                             if not fresh_input_ready:
                                 if pending_fresh is not None and call_id == pending_fresh[0].id:
@@ -1639,6 +1927,17 @@ async def run_live_voice(
                                 cache_tool(call_id, binding, 'handoff', unavailable)
                                 await provider.send_tool_response(function_responses=types.FunctionResponse(
                                     name=name, id=call_id, response=unavailable))
+                                continue
+                            if (name in {'read_workspace', 'operate_workspace'} and
+                                    recovery_vad_started and not recovery_settled):
+                                old = next((item for item in recovery_held_calls if item.id == call_id), None)
+                                if old is not None:
+                                    if json.dumps([old.name, old.args], sort_keys=True) != binding:
+                                        raise _Invalid()
+                                elif len(recovery_held_calls) < 4:
+                                    recovery_held_calls.append(call)
+                                else:
+                                    raise _Invalid()
                                 continue
                             if call_id not in tool_results and replay_guard.seen(call_id):
                                 unavailable = {'status': 'unavailable', 'read_only': True,
@@ -1772,6 +2071,8 @@ async def run_live_voice(
                                 and _research_current(session, store, context_version, research_gate))
                             if allowed_action and not repeated:
                                 research_gate['consumed'] = True
+                            with session.lock:
+                                prior_recovery_proposal = deepcopy(session.pending_proposal)
                             try:
                                 if name == 'confirm_research' and repeated:
                                     cached = tool_results[call_id][2]
@@ -1821,12 +2122,24 @@ async def run_live_voice(
                                         'assistant_text': 'Please ask the exact risk or inventory question for this company or all ten companies.',
                                         'agent_steps': [], 'evidence_ids': [], 'proposal': None,
                                         'read_only': True}
-                                elif name == 'operate_workspace':
-                                    if workspace_tools is not None and _broad_inventory_read(args['message']):
+                                elif (name == 'operate_workspace' and recovery_request is None and
+                                        (_explicit_recovery_request(args['message']) or
+                                         recovery_vad_started and (recovery_asr_incomplete or not recovery_vad_ended))):
+                                    result = recovery_denied()
+                                elif recovery_route and recovery_result is not None:
+                                    result = recovery_result
+                                elif routed_name == 'operate_workspace':
+                                    exact_message = (recovery_spoken if recovery_settled and recovery_vad_ended
+                                        and not recovery_asr_incomplete and recovery_spoken else args['message'])
+                                    if workspace_tools is not None and _broad_inventory_read(exact_message):
                                         result = await workspace_tools('read_risks',
-                                            {'message': args['message']}, context_version, key)
+                                            {'message': exact_message}, context_version, key)
                                     else:
-                                        result = await operate_workspace(args['message'], context_version, key)
+                                        operation_key = (call_key(socket_secret, f'recovery-{recovery_generation}')
+                                            if recovery_route else key)
+                                        result = await operate_workspace(exact_message, context_version, operation_key)
+                                    if recovery_route:
+                                        recovery_result = result
                                 elif workspace_tools is not None:
                                     result = await workspace_tools(name, args, context_version, key)
                                 else:
@@ -1859,21 +2172,28 @@ async def run_live_voice(
                                         canonical.get('company_id') != session.company_id or
                                         canonical.get('context_version') != context_version):
                                     raise _Invalid()
+                            if not recovery_route:
+                                result = block_ungrounded_recovery(result, prior_recovery_proposal, key)
                             result = present_turn(result, supplier_names)
-                            if name in {'prepare_research','operate_workspace'}:
-                                research_gate = _research_gate(session, store, context_version, result)
-                                if research_gate is None:
-                                    research_gate = _workspace_action_gate(session, store, context_version, result)
+                            if routed_name in {'prepare_research','operate_workspace'}:
+                                if not (recovery_route and research_gate is not None and
+                                        research_gate['proposal_id'] == (result.get('proposal') or {}).get('proposal_id')):
+                                    research_gate = _research_gate(session, store, context_version, result)
+                                    if research_gate is None:
+                                        research_gate = _workspace_action_gate(session, store, context_version, result)
                                 if research_operation is not None and research_operation['result'] is not None:
                                     research_operation = None
                             elif name == 'confirm_research' and allowed_research and not repeated:
                                 research_gate = None
-                            elif name != 'confirm_research':
+                            elif name != 'confirm_research' and not (
+                                    name == 'confirm_workspace_action' and not allowed_action and
+                                    recovery_speech_pending):
                                 research_gate = None
                             if not repeated:
                                 cache_tool(call_id, binding, key, result)
                             await send_frame({'type': 'tool_result', 'result': result})
-                            suppress_failed_speech = (result['status'] == 'unavailable'
+                            suppress_failed_speech = not recovery_route and not (
+                                name == 'confirm_workspace_action' and recovery_speech_pending) and (result['status'] == 'unavailable'
                                 or result['status'] == 'needs_clarification' and name != 'estimate_carbon'
                                 or name == 'confirm_research' and result['status'] == 'proposal')
                             if suppress_failed_speech:
@@ -1886,20 +2206,22 @@ async def run_live_voice(
                             active_plan = (session.recovery['scenario'] if session.recovery is not None
                                            else session.last_plan)
                             _selected_purchase_model_result(name, result, model_result, active_plan)
-                            if name in {'prepare_research','operate_workspace'} and research_gate is not None:
+                            if routed_name in {'prepare_research','operate_workspace'} and research_gate is not None:
                                 model_result['required_spoken_response'] = (
                                     research_gate['query'] + ' Say confirm action to apply.'
                                     if research_gate.get('gate_kind') == 'workspace_action' else
                                     judge_research_spoken_response(result,research_gate['query']))
+                            if recovery_route and 'required_spoken_response' not in model_result:
+                                model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'preview_supplier_delay':
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'estimate_carbon':
                                 model_result = carbon_spoken_result(result)
                             if name == 'read_risks' and result.get('analytics') is not None:
                                 model_result['required_spoken_response'] = result['assistant_text']
-                            if name == 'operate_workspace' and result.get('analytics') is not None:
+                            if routed_name == 'operate_workspace' and result.get('analytics') is not None:
                                 model_result['required_spoken_response'] = result['assistant_text']
-                            if name in {'read_risks', 'operate_workspace'} and _owned_risk_speech(result, session):
+                            if routed_name in {'read_risks', 'operate_workspace'} and _owned_risk_speech(result, session):
                                 model_result['required_spoken_response'] = result['assistant_text']
                                 model_result['instruction'] = ('Speak required_spoken_response in full, '
                                     'including its conditional timing and next review option. '
@@ -1967,13 +2289,19 @@ async def run_live_voice(
                                 operation['cue_started'] = False
                         if content is None:
                             continue
+                        hold_recovery_output = (recovery_vad_started and (
+                            recovery_transport_deadline is not None or
+                            not recovery_settled and (_explicit_recovery_request(recovery_spoken) or bool(recovery_held_calls))
+                            or recovery_review_aborted
+                            or recovery_speech_pending and not recovery_review_dispatched and not recovery_held_calls))
                         if interrupted_frame:
                             provider_output_active = False
                             suppress_failed_speech = False
                             if (research_operation is None or
                                     research_operation['gate'] is not research_gate):
                                 research_gate = None
-                            await send_frame({'type': 'interrupted'})
+                            if not browser_interrupt:
+                                await send_frame({'type': 'interrupted'})
                             if research_operation is not None:
                                 research_operation['cue_started'] = False
                             # Discard delivery below, but validate/count every audio byte.
@@ -1982,8 +2310,13 @@ async def run_live_voice(
                             transcription = getattr(content, field, None)
                             value = getattr(transcription, 'text', None)
                             if isinstance(value, str) and value and not interrupted_frame and (speaker == 'input' or not suppress_failed_speech):
-                                await send_frame({'type': 'transcript', 'direction': speaker,
-                                                           'text': value[:MAX_TRANSCRIPT_CHARS]})
+                                if speaker == 'output' and hold_recovery_output:
+                                    continue
+                                if speaker == 'output' and recovery_speech_pending:
+                                    recovery_output_text = _append_transcription(recovery_output_text, value)[-3000:]
+                                else:
+                                    await send_frame({'type': 'transcript', 'direction': speaker,
+                                                               'text': value[:MAX_TRANSCRIPT_CHARS]})
                                 if research_gate is not None:
                                     if speaker == 'output' and not research_gate['armed']:
                                         research_gate['spoken'] = _append_transcription(
@@ -2002,10 +2335,15 @@ async def run_live_voice(
                             produced_output_bytes += len(audio)
                             if not produced_budget.allow(len(audio)):
                                 raise _Invalid()
-                            if suppress_failed_speech or interrupted_frame:
+                            if suppress_failed_speech or interrupted_frame or hold_recovery_output:
                                 continue
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['prompt_audio'] = True
+                            if recovery_speech_pending:
+                                if sum(len(chunk) for chunk in recovery_output_audio) + len(audio) > RECOVERY_REVIEW_AUDIO_BYTES:
+                                    raise _Invalid()
+                                recovery_output_audio.append(audio)
+                                continue
                             if not output_budget.allow(len(audio)):
                                 raise _Invalid()
                             output_bytes += len(audio)
@@ -2013,6 +2351,42 @@ async def run_live_voice(
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
                             provider_output_active = False
+                            if recovery_vad_started and not recovery_settled and not recovery_held_calls:
+                                recovery_original_complete = True
+                            if (recovery_vad_started and
+                                    (recovery_result is not None or _explicit_recovery_request(recovery_spoken)) and
+                                    not recovery_review_dispatched and
+                                    not recovery_held_calls and not recovery_review_aborted):
+                                recovery_original_complete = True
+                                if recovery_result is not None:
+                                    await request_recovery_review()
+                                continue
+                            if hold_recovery_output:
+                                continue
+                            if recovery_speech_pending:
+                                compact = lambda text: re.sub(r'\W+', '', text.casefold())
+                                reviewed = (_spoken_prompt(research_gate) if research_gate is not None else
+                                    bool(recovery_output_audio and compact(recovery_required_speech) in compact(recovery_output_text)))
+                                recovery_speech_pending = False
+                                recovery_speech_deadline = None
+                                if not reviewed:
+                                    recovery_output_audio.clear()
+                                    recovery_output_text = ''
+                                    research_gate = None
+                                    await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
+                                        'message': 'The recovery result is on screen, but its spoken review was incomplete. Review it on screen before approving.'})
+                                    continue
+                                for index in range(0, len(recovery_output_text), MAX_TRANSCRIPT_CHARS):
+                                    await send_frame({'type': 'transcript', 'direction': 'output',
+                                        'text': recovery_output_text[index:index + MAX_TRANSCRIPT_CHARS]})
+                                for audio in recovery_output_audio:
+                                    if not output_budget.allow(len(audio)):
+                                        raise _Invalid()
+                                    output_bytes += len(audio)
+                                    await send_frame({'type': 'audio', 'sample_rate_hertz': 24000,
+                                        'data': base64.b64encode(audio).decode('ascii')})
+                                recovery_output_audio.clear()
+                                recovery_output_text = ''
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['armed'] = _spoken_prompt(research_gate)
                                 research_gate['audio_at_arm'] = input_frames
@@ -2119,8 +2493,7 @@ async def run_live_voice(
         message = ('Workspace changed or expired. Refresh the demo session before starting voice again.' if code == 'stale_context' else
                    'Live voice is busy. Try again shortly.' if code == 'voice_busy' else
                    'Google live voice could not connect or was interrupted. Try again shortly.' if code == 'voice_unavailable' else
-                   'The live voice service has reached its hourly usage limit. Try again later.' if isinstance(exc, _Capacity) and exc.scope == 'process' else
-                   'This company has reached its voice start limit for this demo session. Refresh the session to continue.' if isinstance(exc, _Capacity) else
+                   'The shared live voice service has reached its temporary hourly usage guard. Try again later.' if isinstance(exc, _Capacity) else
                    'Invalid live voice request.')
         try:
             await send_frame({'type': 'error', 'code': code, 'message': message})

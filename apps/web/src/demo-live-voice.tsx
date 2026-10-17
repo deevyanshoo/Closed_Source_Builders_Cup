@@ -350,7 +350,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
       if (!matchesLiveSession(canonical, captured, synchronized?.csrf_token ?? csrf)) {
         onSession(canonical);
-        setError('The demo session changed or expired. The current workspace has been restored; review it, then start voice again.');
+        setError('The workspace session changed or expired. The current workspace has been restored; review it, then start voice again.');
         setStatus('idle');
         return;
       }
@@ -405,7 +405,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         current.socketGeneration += 1;
         oldSocket.onopen = oldSocket.onmessage = oldSocket.onerror = oldSocket.onclose = null;
         oldSocket.close();
-        if (!current.everReady) { failConnection('The live voice connection closed before it became ready. Refresh the demo session, then try again.'); return; }
+        if (!current.everReady) { failConnection('The live voice connection closed before it became ready. Refresh the workspace session, then try again.'); return; }
         const delay = nextVoiceReconnectDelay(current.reconnectAttempts);
         if (delay === null) { failConnection('The live voice connection could not be restored. Check your connection, then start again.'); return; }
         current.reconnectAttempts += 1;
@@ -429,7 +429,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
             if (historyWriteFailed) { failConnection('Voice history could not be saved. Review the current workspace, then start again.'); return; }
             if (verified.state === 'changed') {
               onSession(verified.session!);
-              failConnection('The demo session changed or expired. Review the current workspace, then start voice again.');
+              failConnection('The workspace session changed or expired. Review the current workspace, then start voice again.');
               return;
             }
             const replacement = new WebSocket(`${scheme}//${location.host}/api/demo/voice/live`);
@@ -579,9 +579,9 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         if (!stream) {
           if (cause instanceof Error && cause.name === 'NotAllowedError') setError('Microphone access was denied. Allow microphone access for this site, then try again.');
           else if (cause instanceof Error && cause.name === 'NotFoundError') setError('No microphone was found. Connect one, then try again.');
-          else if (cause instanceof DemoApiError && (cause.code === 'session_expired' || [401, 403, 410].includes(cause.status))) { onUnknown(); setError('The demo session could not be checked. Refresh the session, then start voice again.'); }
+          else if (cause instanceof DemoApiError && (cause.code === 'session_expired' || [401, 403, 410].includes(cause.status))) { onUnknown(); setError('The workspace session could not be checked. Refresh the session, then start voice again.'); }
           else if (cause instanceof DemoApiError) setError(cause.message);
-          else setError('The microphone or demo session could not be opened. Check your device and connection, then try again.');
+          else setError('The microphone or workspace session could not be opened. Check your device and connection, then try again.');
         } else setError('The microphone audio connection could not start. Try again.');
       }
     } finally {

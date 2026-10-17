@@ -7,14 +7,15 @@ import { ShipmentRecoveryPage } from './shipment-recovery-page';
 describe('dispatch workspace discoverability', () => {
   it('offers labelled dispatch navigation from planning while retaining recovery navigation', () => {
     const html = renderToStaticMarkup(<PlanningPage />);
-    expect(html).toMatch(/href="\/dispatch"[^>]*>Synthetic dispatch workspace<\/a>/);
+    expect(html).toMatch(/href="\/dispatch"[^>]*>Dispatch workspace<\/a>/);
+    expect(html).toContain('Supplier offers');
     expect(html).toContain('href="/shipment-recovery"');
     expect(html).toContain('href="/recovery"');
   });
 
   it('offers labelled dispatch navigation from shipment recovery while retaining existing exits', () => {
     const html = renderToStaticMarkup(<MemoryRouter><ShipmentRecoveryPage /></MemoryRouter>);
-    expect(html).toMatch(/href="\/dispatch"[^>]*>Synthetic dispatch workspace<\/a>/);
+    expect(html).toMatch(/href="\/dispatch"[^>]*>Dispatch workspace<\/a>/);
     expect(html).toContain('href="/planning"');
     expect(html).toContain('href="/recovery"');
   });

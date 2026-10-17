@@ -26,11 +26,11 @@ describe('top navigation', () => {
     expect(nav).toContain('aria-label="Workspace pages"');
   });
 
-  it('marks this page as current and keeps the synthetic local-adapter labels', () => {
+  it('marks this page as current and explains the local sample boundary once', () => {
     expect(nav).toMatch(/aria-current="page"[^>]*href="\/offers"|href="\/offers"[^>]*aria-current="page"/);
     expect(nav.match(/aria-current="page"/g)?.length).toBe(1);
-    expect(html).toContain('Synthetic · local adapter');
-    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY');
+    expect(html).toContain('Sample quote data · local adapter · not connected to the gateway');
+    expect(html).not.toContain('Synthetic · local adapter');
   });
 });
 
@@ -148,9 +148,9 @@ describe('service quote mode', () => {
   });
   it('keeps fixture and service controls separate and labels service as local unavailable until selected', () => {
     const html = renderToStaticMarkup(<MemoryRouter initialEntries={['/offers']}><OffersPage /></MemoryRouter>);
-    expect(html).toContain('Synthetic fixtures');
+    expect(html).toContain('Sample quotes');
     expect(html).toContain('Local quote service');
-    expect(html).toContain('SYNTHETIC FIXTURE DATA · LOCAL ADAPTER');
+    expect(html).toContain('Sample quote data · local adapter');
   });
   it('keeps reviewer assertions separate and an index-linked final price unknown', () => {
     const userField = { name: 'settlement_currency', kind: 'currency', status: 'corrected', value: 'USD', critical: true,

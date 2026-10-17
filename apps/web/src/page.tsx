@@ -260,9 +260,9 @@ export function PlanningPage() {
   return <div className="shell">
     <header className="masthead">
       <div className="brand">CLOSED <span>SOURCE</span><sup> / PLANNING</sup></div>
-      <a className="recovery-back" href="/recovery">Synthetic recovery comparison</a>
+      <a className="recovery-back" href="/recovery">Recovery comparison</a>
       <a className="recovery-back" href="/shipment-recovery">Shipment recovery evidence</a>
-      <a className="recovery-back" href="/dispatch">Synthetic dispatch workspace</a>
+      <a className="recovery-back" href="/dispatch">Dispatch workspace</a>
       <a className="recovery-back" href="/scenarios">Typed scenarios</a>
       <div className="masthead-meta"><span className="red-dot" aria-hidden="true">●</span> {identityCopy.masthead}</div>
     </header>
@@ -271,7 +271,7 @@ export function PlanningPage() {
         <div className="eyebrow">01 / SOURCING DECISION WORKSPACE</div>
         <h1 id="page-title">Demand to<br />recommendation<span className="accent">.</span></h1>
         <p>Enter a material need and current stock. Compare a computed buying schedule with its source evidence and stated limits.</p>
-        <p><a className="recovery-back" href="/offers">Review synthetic supplier offers →</a></p>
+        <p><a className="recovery-back" href="/offers">Supplier offers →</a></p>
       </section>
       <section className="saved-strip" aria-label="Saved plans">
         <div><span className="eyebrow">SAVED PLANS</span><p>{identityCopy.details}</p></div>

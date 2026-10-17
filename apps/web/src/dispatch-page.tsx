@@ -17,14 +17,14 @@ type Load<T> = { kind: 'loading' } | { kind: 'error'; message: string } | { kind
 
 // Same destinations as the planning header, plus planning and offers; NavLink marks the current page.
 const WORKSPACE_PAGES: [string, string][] = [
-  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Synthetic dispatch workspace'],
-  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Synthetic recovery comparison'], ['/scenarios', 'Typed scenarios'],
+  ['/planning', 'Planning'], ['/offers', 'Supplier offers'], ['/dispatch', 'Dispatch workspace'],
+  ['/shipment-recovery', 'Shipment recovery evidence'], ['/recovery', 'Recovery comparison'], ['/scenarios', 'Typed scenarios'],
 ];
 
 function HostedNav() {
   return <nav className="workspace-nav" aria-label="Workspace pages">
     <a className="recovery-back" href="/demo">Back to the demo</a>
-    <NavLink className="recovery-back" to="/dispatch?from=demo" end>Synthetic dispatch workspace</NavLink>
+    <NavLink className="recovery-back" to="/dispatch?from=demo" end>Dispatch workspace</NavLink>
   </nav>;
 }
 
@@ -190,7 +190,7 @@ export function ReplaySamplePicker({ samples, selected, onSelect }: { samples: R
     {samples.map(sample => <li key={sample.sample_id}>
       <button type="button" aria-pressed={selected === sample.sample_id} onClick={() => onSelect(sample.sample_id)}>
         <strong>{sample.title}</strong>
-        <span className="dispatch-chip" data-kind="synthetic">synthetic</span>
+        <span className="dispatch-chip" data-kind="synthetic">Sample</span>
         <small>{sample.description}</small>
       </button>
     </li>)}
@@ -240,7 +240,7 @@ export function ReplayResult({ result }: { result: ReplayResponse }) {
     {timeline && <>
       <h3>Milestones for {timeline.shipment_id}, after the replay</h3>
       <ol className="dispatch-timeline">{timeline.after.map(event => <li key={event.event_id} data-injected={event.replay_injected}>
-        <div className="dispatch-event-head"><strong>{humanize(event.event_type)}</strong>{event.replay_injected ? <span className="dispatch-chip" data-kind="synthetic">Injected (synthetic)</span> : <code>{event.event_id}</code>}</div>
+        <div className="dispatch-event-head"><strong>{humanize(event.event_type)}</strong>{event.replay_injected ? <span className="dispatch-chip" data-kind="synthetic">Simulated replay</span> : <code>{event.event_id}</code>}</div>
         <p>Occurred {formatInstant(event.occurred_at, event.occurred_at_offset)}{event.eta ? ` · stated ETA ${formatInstant(event.eta)}` : ''}</p>
       </li>)}</ol>
     </>}
@@ -280,7 +280,7 @@ function ReplaySection({ adapter }: { adapter: DispatchAdapter }) {
 
   return <section className="dispatch-replay" aria-label="Replay a sample delay">
     <h2>Replay a sample delay</h2>
-    <p className="field-hint">Inject one synthetic event over the same fixtures and compare before and after. Nothing is saved, and recovery is not computed here.</p>
+    <p className="field-hint">Inject one sample event over the same records and compare before and after. Nothing is saved, and recovery is not computed here.</p>
     {samples.kind === 'loading' && <StateNotice kind="loading" />}
     {samples.kind === 'error' && <StateNotice kind="error" message={samples.message} />}
     {samples.kind === 'ready' && <>
@@ -394,7 +394,7 @@ export function DispatchPage() {
   return <HostedDemoContext.Provider value={hostedDemo}><main className="shell dispatch-shell">
     <header className="masthead workspace-masthead">
       <div className="brand">CLOSED<span>SOURCE</span><sup>DISPATCH</sup></div>
-      <div className="masthead-meta">Synthetic · local adapter<span className="red-dot" aria-hidden="true">●</span></div>
+      <div className="masthead-meta">Local adapter<span className="red-dot" aria-hidden="true">●</span></div>
       {hostedDemo ? <HostedNav /> : <WorkspaceNav />}
     </header>
     <section className="recovery-intro">
@@ -403,8 +403,8 @@ export function DispatchPage() {
       <p>Status comes from evidence: delayed and on time compare with the plan baseline, at risk needs current route evidence, and unknown means neither is available. Nearby hazards are exposure, not confirmed delays.</p>
     </section>
     <div className="dispatch-adapter" role="note">
-      <strong>SYNTHETIC FIXTURE DATA · LOCAL ADAPTER · NOT CONNECTED TO THE GATEWAY</strong>
-      <span>{dispatchFixtureInfo.notice} Cutoff {formatInstant(dispatchFixtureInfo.asOf)}, exported at revision {dispatchFixtureInfo.revision}. Read only.</span>
+      <strong>Sample shipment data · local adapter · not connected to the gateway</strong>
+      <span>Cutoff {formatInstant(dispatchFixtureInfo.asOf)}, exported at revision {dispatchFixtureInfo.revision}. Read only.</span><details><summary>Data source note</summary><p>{dispatchFixtureInfo.notice}</p></details>
     </div>
     {(age.stale || (list.kind === 'ready' && list.value.status === 'stale')) &&
       <StateNotice kind="stale" message={`Data cutoff is ${hours} hours old. Statuses describe that cutoff, not now.`} />}
@@ -442,6 +442,6 @@ export function DispatchPage() {
       </div>
     </div>
     <ReplaySection adapter={adapter} />
-    <footer><span>Synthetic shipments, ports and hazards only</span><span>Read only · no supplier messages or plan changes</span></footer>
+    <footer><span>Shipment evidence</span><span>Read only · no supplier messages or plan changes</span></footer>
   </main></HostedDemoContext.Provider>;
 }

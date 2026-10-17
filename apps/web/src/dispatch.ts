@@ -170,7 +170,7 @@ export function createDispatchFixtureAdapter() {
       if (data.unavailable_affected_event_ids?.includes(eventId))
         throw new DispatchError('Affected shipments unavailable because this event’s evidence expired.', 'unavailable');
       const found = data.affected[eventId];
-      if (!found) throw new DispatchError(`No accepted event ${eventId} in the synthetic data.`, 'not_found');
+      if (!found) throw new DispatchError(`No accepted event ${eventId} in the sample data.`, 'not_found');
       return readable(found);
     },
     async routeEvidence(shipmentId: string): Promise<EvidenceResponse> {
@@ -183,7 +183,7 @@ export function createDispatchFixtureAdapter() {
     },
     async replay(sampleId: string): Promise<ReplayResponse> {
       const found = data.replay.results[sampleId];
-      if (!found) throw new DispatchError(`No synthetic replay sample ${sampleId}.`, 'not_found');
+      if (!found) throw new DispatchError(`No replay sample ${sampleId}.`, 'not_found');
       return readableReplay(found, sampleId);
     },
     async hazards(shipmentId: string): Promise<HazardResponse> {

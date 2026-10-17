@@ -116,6 +116,8 @@ def test_read_only_utilities_and_simulated_email_are_bounded():
         result = turn(value, message, SmartProvider(intent, 'copper', parameters=parameters))
         assert result['utility']['kind'] == intent
         assert result['candidate'] is None
+        if intent == 'load_quotes':
+            assert result['assistant_text'] == 'Load immutable quotes for copper into review; none is saved.'
     with pytest.raises(OperatorValidationError):
         turn(value, 'Navigate to news', SmartProvider('navigate', 'copper', parameters={'view': 'admin'}))
     for view in ('overview', 'inventory', 'routes', 'shipments'):
@@ -285,6 +287,7 @@ def test_typed_review_loaded_sample_quotes_proposes_only_current_owned_drafts():
     result = turn(value, 'Review loaded copper sample quotes',
                   SmartProvider('review_quotes', 'copper', parameters={}))
     assert result['status'] == 'proposal'
+    assert result['assistant_text'] == 'Review exact source-backed values for 3 copper quote drafts.'
     assert result['candidate'] == {'kind': 'review_quotes', 'parameters': {
         'material_id': 'copper', 'offer_ids': [offer['offer_id'] for offer in value['offers']]}}
     value['offers'][0]['status'] = 'saved'
@@ -294,6 +297,13 @@ def test_typed_review_loaded_sample_quotes_proposes_only_current_owned_drafts():
     with pytest.raises(OperatorValidationError):
         turn(value, 'Review loaded copper sample quotes', SmartProvider('review_quotes', 'copper',
              parameters={'offer_ids': [value['offers'][0]['offer_id']]}))
+
+
+def test_watch_proposal_uses_clean_human_wording_and_keeps_material_parameter():
+    result = turn(snapshot(), 'Watch copper', SmartProvider('watch', 'copper'))
+    assert result['status'] == 'proposal'
+    assert result['assistant_text'] == 'Review a watch item for copper; nothing has been saved yet.'
+    assert result['candidate']['parameters']['material_id'] == 'copper'
 
 
 def test_correct_plain_supplier_answer_is_bound_to_canonical_supplier_fact():

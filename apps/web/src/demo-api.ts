@@ -75,7 +75,7 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {
-      throw new DemoApiError('The demo service could not be reached. Check your connection and try again.');
+      throw new DemoApiError('The workspace could not be reached. Check your connection and try again.');
     }
     if (!response.ok) {
       let error: unknown;
@@ -85,20 +85,20 @@ export function createDemoApi(send: typeof fetch = fetch, key: () => string = ()
       const code = detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string' ? detail.code : 'request_failed';
       const message = typeof detail === 'string' ? detail : detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string' ? detail.message :
         response.status === 409 ? 'This quote changed. Refresh the session and try again.' :
-        response.status === 403 ? 'This demo session expired. Refresh the page to start again.' :
+        response.status === 403 ? 'This workspace session expired. Refresh the page to start again.' :
         response.status === 503 ? 'The extraction service is unavailable. Try again shortly.' :
         'The request could not be completed. Review the inputs and try again.';
       throw new DemoApiError(message, response.status, code);
     }
     if (response.status === 204) return undefined as T;
     try { return await response.json() as T; }
-    catch { throw new DemoApiError('The demo service returned an unreadable response. Please try again.'); }
+    catch { throw new DemoApiError('The workspace returned an unreadable response. Please try again.'); }
   }
 
   async function encode(file: File): Promise<string> {
-    if (file.size > MAX_UPLOAD_BYTES) throw new DemoApiError('Choose a synthetic document smaller than 500 KB.', 0, 'file_too_large');
+    if (file.size > MAX_UPLOAD_BYTES) throw new DemoApiError('Choose a listed sample document smaller than 500 KB.', 0, 'file_too_large');
     const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new DemoApiError('Choose a synthetic document smaller than 500 KB.', 0, 'file_too_large');
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new DemoApiError('Choose a listed sample document smaller than 500 KB.', 0, 'file_too_large');
     let binary = '';
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     return btoa(binary);

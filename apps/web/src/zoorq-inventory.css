@@ -1,4 +1,4 @@
-.zoorq-page .zoorq-inventory{max-width:1480px;margin:auto;padding:clamp(20px,2.5vw,36px) clamp(16px,2.5vw,36px) 72px;color:var(--zoorq-ink)}
+.zoorq-page .zoorq-inventory{max-width:1480px;margin:auto;padding:20px clamp(18px,2.4vw,32px) 72px;color:var(--zoorq-ink)}
 .zoorq-page .zoorq-inventory-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin-bottom:22px}
 .zoorq-page .zoorq-inventory-head h1{max-width:24ch;margin:7px 0 5px;font-size:clamp(28px,3vw,42px);font-weight:740;line-height:1.08;letter-spacing:-.055em;text-wrap:balance}
 .zoorq-page .zoorq-inventory-head p,.zoorq-page .zoorq-inventory-list-head p{margin:0;color:var(--zoorq-muted);font-size:13px;line-height:1.5}
@@ -100,3 +100,4 @@
   .zoorq-page .zoorq-material>summary>.zoorq-material-expand{position:absolute;top:12px;right:16px;grid-column:auto;grid-row:auto}
 }
 @media(prefers-reduced-motion:reduce){.zoorq-page .zoorq-material summary,.zoorq-page .zoorq-material-expand{transition:none}}
+@media(max-width:620px){.zoorq-page .zoorq-inventory{padding:18px 18px 90px}}

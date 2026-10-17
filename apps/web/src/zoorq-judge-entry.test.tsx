@@ -16,6 +16,9 @@ describe('judge entry', () => {
       { label: 'Matching supplier lead', value: '10 days', basis: 'Synthetic supplier profile' },
     ] }} companyCount={10} {...actions} />);
     expect(html).toContain('Solara Cables');
+    expect(html).toContain('Supplier disruption to stock gap');
+    expect(html).toContain('compare recovery');
+    expect(html).toContain('prepare a draft');
     expect(html).toContain('Prepared scenario');
     expect(html.replace(/<[^>]+>/g, '')).toContain('6 days');
     expect(html.replace(/<[^>]+>/g, '')).toContain('10 days');
@@ -93,11 +96,12 @@ describe('judge entry', () => {
     expect(html).toContain('Route');expect(html).toContain('News');expect(html).toContain('What if');
   });
 
-  it('gives first-visit facts full-width columns while preserving the continuing mobile actions', () => {
+  it('keeps first-visit facts alongside the story and retains compact mobile actions', () => {
     const css=readFileSync(new URL('./zoorq-judge-entry.css',import.meta.url),'utf8');
-    expect(css).toMatch(/\.zoorq-judge-entry-facts\{[^}]*grid-column:1\/-1;[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+    expect(css).toMatch(/\.zoorq-judge-entry-facts-shell\{grid-column:2;/);
+    expect(css).toMatch(/\.zoorq-judge-entry-facts\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
     expect(css).toMatch(/\.zoorq-judge-entry-fact-value\{[^}]*white-space:nowrap/);
-    expect(css).toMatch(/@media\(max-width:760px\)\{[^\n]*\.zoorq-judge-entry-facts\{[^}]*grid-template-columns:1fr/);
+    expect(css).toMatch(/@media\(max-width:760px\)\{[^\n]*\.zoorq-judge-entry-facts-shell\{grid-column:1;/);
     expect(css).toMatch(/\.zoorq-judge-entry\{[^}]*max-width:100%;min-width:0;box-sizing:border-box/);
     expect(css).toMatch(/@media\(max-width:760px\)[^{]*\{[^}]*\.zoorq-judge-entry\.is-continuing\{[^}]*flex-direction:column;align-items:stretch/);
     expect(css).toMatch(/\.zoorq-judge-entry\.is-continuing \.zoorq-judge-entry-actions\{[^}]*flex:none;display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);

@@ -26,6 +26,18 @@ const report: RiskReport = {
 };
 
 describe('InventoryWorkspace', () => {
+  it('shows clean operational watch text without changing the risk report', () => {
+    const raw = { ...report.companies[0].alerts[0], title: 'Copper order has synthetic lead-time exposure',
+      impact: 'Potential late arrival under fictional order and supplier assumptions; no actual shipment delay has been observed.',
+      recovery_actions: [{ action_id: 'quotes', label: 'Review synthetic alternatives', message: 'Load copper sample quotes for review.', requires_review: true }] };
+    const source = { ...report, companies: [{ ...report.companies[0], alerts: [raw] }] };
+    const html = renderToStaticMarkup(<InventoryWorkspace company={company} report={source} onAsk={() => {}} />);
+    expect(html).toContain('Copper order has lead-time exposure');
+    expect(html).toContain('no actual shipment delay has been observed');
+    expect(html).toContain('Review alternatives');
+    expect(raw.title).toContain('synthetic');
+    expect(raw.recovery_actions[0].message).toBe('Load copper sample quotes for review.');
+  });
   it('prioritizes the uncovered material and keeps unit-bearing stock and demand separate', () => {
     const html = renderToStaticMarkup(<InventoryWorkspace company={company} />);
     expect(html.indexOf('Copper</')).toBeLessThan(html.indexOf('Polymer</'));
@@ -117,5 +129,12 @@ describe('InventoryWorkspace', () => {
     const html = renderToStaticMarkup(<InventoryWorkspace company={tagged} />);
     expect(html).toContain('Copper Works · India');
     expect(html).not.toContain('Copper Works [SYNTHETIC]');
+  });
+  it('keeps inventory provenance available without repeating the workspace disclosure in the header', () => {
+    const html = renderToStaticMarkup(<InventoryWorkspace company={company} />);
+    expect(html).toContain('Inventory &amp; demand</span>');
+    expect(html).not.toContain('Inventory &amp; demand / synthetic profile');
+    expect(html).toContain('How this comparison is made');
+    expect(html).toContain('not an accepted quote arrival, forecast, or purchase commitment');
   });
 });

@@ -13,6 +13,7 @@ _PREPARE_RECOVERY = re.compile(
     r'(?:prepare|create|draft)\s+(?:a\s+|the\s+)?(?:recovery|replacement)\b', re.I)
 _PREVIEW_ONLY = re.compile(r'\b(?:what[- ]if|suppose|simulate|preview|assume|assuming)\b', re.I)
 _NEGATED_ACTION = re.compile(r"\b(?:do\s+not|don.t|never|without)\s+(?:\w+\s+){0,3}?(?:prepare|create|draft)\b", re.I)
+_EXAMPLE_ONLY = re.compile(r'\b(?:for example|as an example|example only|hypothetical example)\b', re.I)
 _DAY_NUMBER = (r'(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|'
                r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|'
                r'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)')
@@ -23,7 +24,7 @@ _ZERO_DURATION = re.compile(r'\b(?:0+|zero)\s*[- ]\s*(?:days?|weeks?)\b', re.I)
 
 def _explicit_recovery_request(message):
     return (bool(_PREPARE_RECOVERY.search(message)) and not _PREVIEW_ONLY.search(message)
-            and not _NEGATED_ACTION.search(message))
+            and not _NEGATED_ACTION.search(message) and not _EXAMPLE_ONLY.search(message))
 
 
 def _recovery_clarification(snapshot, missing, answer):
@@ -53,6 +54,41 @@ def _multiple_materials(snapshot, message):
                if re.search(r'(?<!\w)(?:' + re.escape(row['material_id']) + '|' +
                             re.escape(row['name']) + r')(?!\w)', message, re.I)}
     return len(matches) > 1
+
+
+def resolve_voice_recovery(session, message, *, now):
+    """Preflight fresh ASR with the typed resolver; this never prepares a proposal."""
+    from .company import get_company
+    from .dispatch_view import build_dispatch_view
+    with session.lock:
+        company = get_company(session.company_id)
+        offers = deepcopy(list(session.offers.values()))
+        plan = deepcopy(session.recovery['scenario'] if session.recovery else session.last_plan)
+        snapshot = {'company': company, 'company_id': session.company_id,
+            'context_version': session.context_version, 'offers': offers, 'plan': plan,
+            'last_plan': deepcopy(session.last_plan), 'recovery': deepcopy(session.recovery),
+            'selected_material_id': session.selected_material_id,
+            'shipments': build_dispatch_view(company, offers, plan, session.recovery)}
+    resolved = resolve_local_turn(snapshot, message, now=now)
+    if ((resolved or {}).get('kind') == 'recovery_proposal' or
+            not _explicit_recovery_request(message) or _ambiguous_recovery_duration(message) or
+            _multiple_materials(snapshot, message)):
+        return resolved
+    # Native shipment-ID preparation already has its own deterministic app
+    # path, including requests which omit the word "scenario" or material.
+    from .integration_tools import integration_outcome
+    from .judge_resolver import _material
+    from .operator import _stated_day_values
+    candidate = ((integration_outcome(snapshot, message) or {}).get('candidate') or {})
+    parameters = candidate.get('parameters') or {}
+    row = next((row for row in snapshot['shipments']['shipments']
+                if row.get('recovery_available') and row['shipment_id'] == parameters.get('shipment_id')), None)
+    days = list((parameters.get('delay_days_by_offer') or {}).values())
+    if (candidate.get('kind') == 'recovery' and row and len(days) == 1 and days[0] > 0
+            and _stated_day_values(message) == set(days)
+            and _material(snapshot, message) in (None, row['material_id'])):
+        return {'kind': 'recovery_proposal', 'recovery_parameters': parameters}
+    return resolved
 
 def fixture(name):
     return json.loads((CONFIG / name).read_text(encoding='utf-8'))

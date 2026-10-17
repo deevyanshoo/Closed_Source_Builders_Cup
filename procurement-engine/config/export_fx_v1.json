@@ -1,0 +1,191 @@
+{
+  "fx_version": "export-fx-v1",
+  "note": "Latest observed monthly BIS rate per currency, copied unchanged from the price outlook snapshot so the margin scenario can convert without a runtime fetch. Held at that month; not a forecast or a transaction rate.",
+  "copied_from": {
+    "file": "procurement-engine/config/prediction_results_v1.json",
+    "branch": "feature/price-prediction (PR #125)",
+    "revision": "ba9002b",
+    "sha256": "9fbb7092ab2cd1ac85adebd29efa884f9ff3dce50de155f79a7a33e8208439f1"
+  },
+  "unavailable": {
+    "fx:TZS": "BIS series not eligible in the catalog (incomplete_or_invalid_required_window); values are not interpolated or taken from another source."
+  },
+  "rates": {
+    "AED": {
+      "rate": "3.6725",
+      "quote": "AED per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.AE.AED.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "BDT": {
+      "rate": "123.100769",
+      "quote": "BDT per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.BD.BDT.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "BWP": {
+      "rate": "13.1325",
+      "quote": "BWP per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.BW.BWP.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "CHF": {
+      "rate": "0.807554",
+      "quote": "CHF per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.CH.CHF.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "CNY": {
+      "rate": "6.736097",
+      "quote": "CNY per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.CN.CNY.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "EUR": {
+      "rate": "0.862603",
+      "quote": "EUR per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.DE.EUR.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "INR": {
+      "rate": "95.446733",
+      "quote": "INR per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.IN.INR.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "JPY": {
+      "rate": "158.801365",
+      "quote": "JPY per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.JP.JPY.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "KES": {
+      "rate": "129.42",
+      "quote": "KES per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.KE.KES.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "KRW": {
+      "rate": "1402.986286",
+      "quote": "KRW per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.KR.KRW.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "MXN": {
+      "rate": "17.063554",
+      "quote": "MXN per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.MX.MXN.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "MYR": {
+      "rate": "4.065023",
+      "quote": "MYR per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.MY.MYR.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "NAD": {
+      "rate": "16.1794",
+      "quote": "NAD per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.NA.NAD.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "OMR": {
+      "rate": "0.3845",
+      "quote": "OMR per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.OM.OMR.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "SGD": {
+      "rate": "1.276283",
+      "quote": "SGD per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.SG.SGD.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    },
+    "ZAR": {
+      "rate": "16.161613",
+      "quote": "ZAR per USD",
+      "month": "2026-08",
+      "source_series": "WS_XRU M.ZA.ZAR.A",
+      "publisher": "Bank for International Settlements (BIS)",
+      "url": "https://data.bis.org/topics/XRU",
+      "licence": "BIS statistics terms: unrestricted use with the BIS cited as source",
+      "attribution": "Source: BIS bilateral exchange rate statistics.",
+      "retrieved_at": "2026-10-16T06:35:33Z"
+    }
+  }
+}

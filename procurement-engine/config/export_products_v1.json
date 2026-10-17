@@ -1,0 +1,181 @@
+{
+  "mapping_version": "export-products-v1",
+  "checked_on": "2026-10-17",
+  "hs_revision": "HS 2022 (UN Comtrade classification H6)",
+  "hs_reference": {
+    "publisher": "UN Comtrade (United Nations Statistics Division)",
+    "url": "https://comtradeapi.un.org/files/v1/app/reference/H6.json",
+    "retrieved_on": "2026-10-17"
+  },
+  "note": "Each fictional company is mapped to one HS heading so its home country can be queried. The mapping is illustrative, not a statement about any real exporter.",
+  "companies": [
+    {
+      "company_id": "solara-cables",
+      "home_country": "India",
+      "home_reporter_code": 699,
+      "home_reporter_name": "India",
+      "product": "Insulated copper and aluminium power cable",
+      "hs_heading": "8544",
+      "hs_description": "Insulated wire, cable and other electric conductors, connector fitted or not; optical fibre cables of individually sheathed fibres, whether or not assembled with electric conductors or fitted with connectors",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Cable maker buying copper, aluminium conductor and insulation polymer; insulated cable is heading 8544.",
+      "existing_export_markets": []
+    },
+    {
+      "company_id": "terrapack",
+      "home_country": "India",
+      "home_reporter_code": 699,
+      "home_reporter_name": "India",
+      "product": "Plastic packaging film",
+      "hs_heading": "3920",
+      "hs_description": "Plastics; plates, sheets, film, foil and strip (not self-adhesive); non-cellular and not reinforced, laminated, supported or similarly combined with other materials, n.e.c. in chapter 39",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Flexible packaging-film producer buying PET resin, inks and foil; non-cellular plastic film is heading 3920.",
+      "existing_export_markets": [
+        {
+          "name": "United Arab Emirates",
+          "code": 784,
+          "source": "company.py route terrapack-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "loomworks",
+      "home_country": "Bangladesh",
+      "home_reporter_code": 50,
+      "home_reporter_name": "Bangladesh",
+      "product": "Woven cotton fabric",
+      "hs_heading": "5208",
+      "hs_description": "Woven fabrics of cotton, containing 85% or more by weight of cotton, weighing not more than 200 g/m2",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Fabric mill buying cotton fibre, dyes and yarn; light woven cotton fabric (85% or more cotton, up to 200 g/m2) is heading 5208.",
+      "existing_export_markets": []
+    },
+    {
+      "company_id": "harvest-foods",
+      "home_country": "Kenya",
+      "home_reporter_code": 404,
+      "home_reporter_name": "Kenya",
+      "product": "Biscuits and bakery products",
+      "hs_heading": "1905",
+      "hs_description": "Bread, pastry, cakes, biscuits, other bakers' wares, whether or not containing cocoa; communion wafers, empty cachets suitable for pharmaceutical use, sealing wafers, rice paper and similar products",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Food processor buying wheat, sunflower oil, sugar and cartons, which together match baked goods (1905) better than flour alone (1101).",
+      "existing_export_markets": [
+        {
+          "name": "Uganda",
+          "code": 800,
+          "source": "company.py route harvest-foods-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "meridian-pharma",
+      "home_country": "Switzerland",
+      "home_reporter_code": 757,
+      "home_reporter_name": "Switzerland",
+      "product": "Finished medicines in measured doses",
+      "hs_heading": "3004",
+      "hs_description": "Medicaments; (not goods of heading no. 3002, 3005 or 3006) consisting of mixed or unmixed products for therapeutic or prophylactic use, put up in measured doses (incl. those in the form of transdermal admin. systems) or packed for retail sale",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Pharmaceutical manufacturer buying API, vials and ethanol; dosed medicaments are heading 3004.",
+      "existing_export_markets": [
+        {
+          "name": "Ireland",
+          "code": 372,
+          "source": "company.py route meridian-pharma-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "forgeline-components",
+      "home_country": "Mexico",
+      "home_reporter_code": 484,
+      "home_reporter_name": "Mexico",
+      "product": "Motor vehicle parts",
+      "hs_heading": "8708",
+      "hs_description": "Motor vehicles; parts and accessories, of heading no. 8701 to 8705",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Automotive component maker buying steel, copper and bearings; parts of motor vehicles are heading 8708.",
+      "existing_export_markets": [
+        {
+          "name": "USA",
+          "code": 842,
+          "source": "company.py route forgeline-components-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "gridspring-batteries",
+      "home_country": "South Korea",
+      "home_reporter_code": 410,
+      "home_reporter_name": "Rep. of Korea",
+      "product": "Lithium-ion battery cells and packs",
+      "hs_heading": "8507",
+      "hs_description": "Electric accumulators, including separators therefor; whether or not rectangular (including square)",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Battery assembler buying lithium, nickel, graphite, separators and cell cans; electric accumulators are heading 8507.",
+      "existing_export_markets": [
+        {
+          "name": "Viet Nam",
+          "code": 704,
+          "source": "company.py route gridspring-batteries-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "circuitpeak-systems",
+      "home_country": "Malaysia",
+      "home_reporter_code": 458,
+      "home_reporter_name": "Malaysia",
+      "product": "Assembled circuit boards for computers",
+      "hs_heading": "8473",
+      "hs_description": "Machinery; parts and accessories (other than covers, carrying cases and the like) suitable for use solely or principally with machines of headings 84.70 to 84.72",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Electronics assembler buying chips (8542) and bare boards and shipping assembled boards; printed circuit assemblies for computers are parts under 8473 (8473.30). 8542 is its input, not its product.",
+      "existing_export_markets": [
+        {
+          "name": "Singapore",
+          "code": 702,
+          "source": "company.py route circuitpeak-systems-route-2"
+        }
+      ]
+    },
+    {
+      "company_id": "atlas-petrochem",
+      "home_country": "UAE",
+      "home_reporter_code": 784,
+      "home_reporter_name": "United Arab Emirates",
+      "product": "Refined petroleum products and lubricant blends",
+      "hs_heading": "2710",
+      "hs_description": "Petroleum oils and oils from bituminous minerals, not crude; preparations n.e.c, containing by weight 70% or more of petroleum oils or oils from bituminous minerals; these being the basic constituents of the preparations; waste oils",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Petrochemical blender buying naphtha, methanol and light hydrocarbons; refined petroleum oils and lubricant preparations are heading 2710.",
+      "existing_export_markets": [
+        {
+          "name": "India",
+          "code": 699,
+          "source": "company.py route atlas-petrochem-route-2 (ships from Sohar, Oman, not the home country)"
+        }
+      ]
+    },
+    {
+      "company_id": "stonebridge-materials",
+      "home_country": "South Africa",
+      "home_reporter_code": 710,
+      "home_reporter_name": "South Africa",
+      "product": "Cement",
+      "hs_heading": "2523",
+      "hs_description": "Portland cement, aluminous cement (ciment fondu), slag cement, supersulphate cement and similar hydraulic cements, whether or not coloured or in the form of clinkers",
+      "note": "illustrative mapping for a fictional company",
+      "reason": "Construction-material supplier buying kiln and mineral inputs; Portland and similar hydraulic cements are heading 2523.",
+      "existing_export_markets": [
+        {
+          "name": "Mozambique",
+          "code": 508,
+          "source": "company.py route stonebridge-materials-route-2"
+        }
+      ]
+    }
+  ]
+}

@@ -113,6 +113,35 @@ def _broad_inventory_read(message: str) -> bool:
         and not re.search(r'\b(?:risks?|alerts?|headlines?|news)\b', message, re.I))
 
 
+def _owned_risk_speech(result: dict, session) -> bool:
+    """Bind a short spoken contract only to a completed current-company risk read."""
+    if (result.get('status') != 'completed' or result.get('read_only') is not True
+            or result.get('proposal') is not None or result.get('action_result') is not None
+            or result.get('company_id') != session.company_id
+            or result.get('context_version') != session.context_version):
+        return False
+    summary = result.get('assistant_text')
+    if not isinstance(summary, str) or not summary.strip() or len(summary) > 2400:
+        return False
+    steps = result.get('agent_steps')
+    if (not isinstance(steps, list) or not steps
+            or not all(isinstance(step, dict) and step.get('status') == 'completed'
+                       and step.get('model') == 'none'
+                       and step.get('provider_call') == 'none' for step in steps)
+            or not any(step.get('tool') == 'read_risks' for step in steps)):
+        return False
+    workspace = result.get('workspace')
+    risks = workspace.get('risks') if isinstance(workspace, dict) else None
+    if (not isinstance(risks, dict) or not isinstance(risks.get('companies'), list)
+            or len(risks['companies']) != 1):
+        return False
+    company = risks['companies'][0]
+    return (isinstance(company, dict) and company.get('company_id') == session.company_id
+            and isinstance(company.get('company_name'), str)
+            and company['company_name'] in summary
+            and isinstance(company.get('alerts'), list))
+
+
 VOICE_CUE_FILE = Path(__file__).resolve().parents[3] / 'demo_fixtures/voice-cues/research-checking.wav'
 _SLOTS = threading.BoundedSemaphore(MAX_CONNECTIONS)
 _START_LOCK = threading.Lock()
@@ -272,6 +301,7 @@ INSTRUCTION = (
     "Never use the first catalogue material or a previous company's selection for this reference. "
     "For broad factual inventory and sourcing analysis across all materials, call operate_workspace with the user's exact words; do not use risk alerts as stock or cover analytics. "
     "Use read_risks for proactive risk alerts and conditional impacts for the current or all ten companies. Pass the user's exact words. "
+    "When a completed current-company risk result has required_spoken_response, speak it in full, including conditional timing and the reviewed recovery option; never imply a confirmed shipment delay. "
     "Explain provenance, conditional impact and recovery options; headline exposure never confirms a shipment delay. "
     "never invent stock, prices, dates, news, or outcomes. Use fill_buyer_form to update "
     "explicit buyer inputs, load_sample_quotes to load drafts, review_sample_quotes to "
@@ -1647,6 +1677,11 @@ async def run_live_voice(
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'operate_workspace' and result.get('analytics') is not None:
                                 model_result['required_spoken_response'] = result['assistant_text']
+                            if name in {'read_risks', 'operate_workspace'} and _owned_risk_speech(result, session):
+                                model_result['required_spoken_response'] = result['assistant_text']
+                                model_result['instruction'] = ('Speak required_spoken_response in full, '
+                                    'including its conditional timing and next review option. '
+                                    'Do not claim a confirmed shipment delay or an applied action.')
                             if name == 'prepare_rfq' and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = result['assistant_text']
                             if name == 'confirm_research' and allowed_research and research_succeeded(result):

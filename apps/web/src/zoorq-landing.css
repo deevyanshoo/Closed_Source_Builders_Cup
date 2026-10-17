@@ -64,7 +64,8 @@
 .zoorq-sculpture-callouts b{color:var(--zoorq-blue);font-size:10px;font-weight:700;letter-spacing:.08em}
 .zoorq-callout-signal{top:20%;left:27%}
 .zoorq-callout-break{top:73%;left:34%}
-.zoorq-callout-break b{color:#b87936}
+.zoorq-callout-break b{color:#8a4b08}
+:root[data-zoorq-theme="dark"] .zoorq-page .zoorq-callout-break b{color:#ffbd69}
 .zoorq-callout-route{top:27%;right:22%}
 .zoorq-sculpture-callouts span::after{content:"";display:block;position:absolute;height:1px;background:var(--zoorq-line)}
 .zoorq-callout-signal::after{width:68px;left:calc(100% + 12px);top:50%}

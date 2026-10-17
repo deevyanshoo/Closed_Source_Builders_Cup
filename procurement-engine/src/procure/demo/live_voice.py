@@ -33,6 +33,7 @@ from .company import get_company
 from .voice_cues import load_cue_pcm
 from .live_continuity import RollingBudget, ReplayGuard, call_key
 from .experience_service import _explicit_recovery_request, resolve_voice_recovery
+from .judge_resolver import _BRIDGE_COMMAND, _BRIDGE_REQUEST, _DRAFT_NEGATION, _HYPOTHETICAL
 
 
 MODEL = 'gemini-3.8-live'
@@ -323,8 +324,10 @@ INSTRUCTION = (
     "and explicitly requested recovery preparation. For a supplier-delay what-if question, "
     "use preview_supplier_delay with the user's exact words; it returns a read-only preview "
     "or asks for missing details. Do not use operate_workspace or action tools for a what-if. "
-    "For any request to draft or prepare an RFQ or request "
-    "for quotation for the current sourcing plan, use prepare_rfq. It uses the current "
+    "For stockout or continuous-supply questions, and earlier-delivery or bridge RFQ requests, "
+    "call operate_workspace with the user's exact fresh words. Bridge RFQs request new price, "
+    "capacity and terms for the supply gap; save them unsent when explicitly requested. "
+    "For an ordinary order RFQ for the current sourcing plan, use prepare_rfq. It uses the current "
     "reviewed plan and selected quote; if there is no eligible purchase, explain what "
     "needs review. Never substitute a simulated email for an RFQ. Use "
     "prepare_simulated_email only when the user explicitly requests a simulated email. "
@@ -580,6 +583,25 @@ def _spoken_negation(value: str) -> bool:
     return 'no' in words or any(word in compact for word in ('not', 'never', 'cancel', 'stop', 'dont'))
 
 
+def _fresh_rfq_route(message: str) -> str | None:
+    """Classify only settled ASR, never model arguments or conversation history."""
+    text = re.sub(r'[-‐‑–—]', ' ', message).strip()
+    if _DRAFT_NEGATION.search(text) or _HYPOTHETICAL.search(text):
+        return None
+    if any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
+           for clause in re.split(r'[.,;!?]', text)):
+        return 'operate_workspace'
+    # Unknown modifiers need clarification, never a silent full-order draft.
+    if re.fullmatch(
+            r"(?:(?:please)\s+|(?:can|could|would)\s+you\s+(?:please\s+)?|"
+            r"i\s+(?:want|need)\s+you\s+to\s+)?(?:draft|prepare|create)\s+"
+            r"(?:(?:an?|the|our)\s+)?(?:unsent\s+)?(?:rfq|request for quotation)"
+            r"(?:\s+draft)?(?:\s+for\s+(?:(?:the|our)\s+)?(?:current\s+)?"
+            r"(?:(?:sourcing|purchase|order)\s+)?plan)?[.!]?", text, re.I):
+        return 'prepare_rfq'
+    return None
+
+
 def _append_transcription(previous: str, value: str) -> str:
     # Live transcriptions may arrive as deltas or cumulative replacements.
     if previous and value.casefold().startswith(previous.casefold()):
@@ -687,7 +709,7 @@ def _config(company=None, *, history_context=''):
         ('review_sample_quotes', 'Prepare all current owned unmodified synthetic quote drafts for this material for human review; never invent offer IDs.',
          {'material_id': text}, ['material_id']),
         ('compare_suppliers', 'Run the procurement planner on saved quotes and current buyer inputs.', {'material_id': text}, ['material_id']),
-        ('prepare_rfq', 'Prepare an unsent, reviewed RFQ draft from the current eligible sourcing plan and selected quote. Use for RFQ or request-for-quotation requests.', {}, []),
+        ('prepare_rfq', 'Prepare an unsent, reviewed ordinary order RFQ from the current eligible sourcing plan and selected quote. For earlier-delivery or bridge RFQs use operate_workspace with the exact fresh user words.', {}, []),
         ('prepare_simulated_email', 'Prepare a reviewed simulated email only when explicitly requested as an email; never use for an RFQ and never sends externally.',
          {'material_id': text, 'recipient_label': {'type': 'string', 'maxLength': 160},
           'subject': {'type': 'string', 'maxLength': 120}, 'body': {'type': 'string', 'maxLength': 1000}}, ['material_id']),
@@ -1017,6 +1039,7 @@ async def run_live_voice(
                 recovery_late_generation_abandoned = False
                 recovery_caption_limit = None
                 recovery_caption_finished = False
+                rfq_input_closed = False
                 recovery_held_calls = []
                 recovery_speech_pending = False
                 recovery_speech_deadline = None
@@ -1597,6 +1620,7 @@ async def run_live_voice(
                         elif activity is not None and kind.endswith('ACTIVITY_START'):
                             recovery_late_generation_abandoned |= recovery_transport_deadline is not None
                             recovery_generation += 1
+                            rfq_input_closed = False
                             recovery_spoken = ''
                             recovery_vad_started = True
                             recovery_vad_ended = False
@@ -1904,7 +1928,12 @@ async def run_live_voice(
                             recovery_route = (recovery_result is not None and
                                 _explicit_recovery_request(recovery_spoken) and
                                 name in {'read_workspace', 'operate_workspace'})
-                            routed_name = 'operate_workspace' if recovery_route else name
+                            rfq_route = (_fresh_rfq_route(recovery_spoken)
+                                if name == 'prepare_rfq' and recovery_settled and recovery_vad_ended
+                                and recovery_caption_finished and not recovery_asr_incomplete
+                                and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200 else None)
+                            routed_name = (rfq_route or name) if name == 'prepare_rfq' else (
+                                'operate_workspace' if recovery_route else name)
                             binding = json.dumps([name, args], sort_keys=True)
                             if not fresh_input_ready:
                                 if pending_fresh is not None and call_id == pending_fresh[0].id:
@@ -1928,7 +1957,7 @@ async def run_live_voice(
                                 await provider.send_tool_response(function_responses=types.FunctionResponse(
                                     name=name, id=call_id, response=unavailable))
                                 continue
-                            if (name in {'read_workspace', 'operate_workspace'} and
+                            if (name in {'read_workspace', 'operate_workspace', 'prepare_rfq'} and
                                     recovery_vad_started and not recovery_settled):
                                 old = next((item for item in recovery_held_calls if item.id == call_id), None)
                                 if old is not None:
@@ -2050,7 +2079,8 @@ async def run_live_voice(
                             else:
                                 if not new_call_counted:
                                     tool_calls += 1
-                                key = call_key(socket_secret, call_id)
+                                key = call_key(socket_secret,
+                                    f'rfq-{recovery_generation}' if name == 'prepare_rfq' and rfq_route else call_id)
                             allowed_research = (name == 'confirm_research' and research_gate is not None
                                 and research_gate.get('gate_kind') != 'workspace_action'
                                 and not research_gate['consumed'] and research_gate['armed']
@@ -2120,6 +2150,13 @@ async def run_live_voice(
                                         'company_id': session.company_id, 'context_version': context_version,
                                         'status': 'needs_clarification',
                                         'assistant_text': 'Please ask the exact risk or inventory question for this company or all ten companies.',
+                                        'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                                        'read_only': True}
+                                elif name == 'prepare_rfq' and rfq_route is None:
+                                    result = {'turn_id': secrets.token_urlsafe(18),
+                                        'company_id': session.company_id, 'context_version': context_version,
+                                        'status': 'needs_clarification',
+                                        'assistant_text': 'Please state the complete RFQ request again, including whether it is for the current order or earlier delivery for the supply gap. No draft was changed.',
                                         'agent_steps': [], 'evidence_ids': [], 'proposal': None,
                                         'read_only': True}
                                 elif (name == 'operate_workspace' and recovery_request is None and
@@ -2350,6 +2387,8 @@ async def run_live_voice(
                             await send_frame({'type': 'audio', 'sample_rate_hertz': 24000,
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
+                            if not recovery_held_calls:
+                                rfq_input_closed = True
                             provider_output_active = False
                             if recovery_vad_started and not recovery_settled and not recovery_held_calls:
                                 recovery_original_complete = True

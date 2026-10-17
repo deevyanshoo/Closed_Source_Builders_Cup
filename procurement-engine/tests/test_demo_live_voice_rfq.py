@@ -12,13 +12,26 @@ from fastapi.testclient import TestClient
 from procure.demo.app import create_app
 from test_demo_live_voice import Provider
 from test_demo_operator import Provider as OperatorProvider
+from test_demo_live_voice_supply_coverage import BRIDGE, REGULAR, event, rfq_call
 
 
 class RfqProvider(Provider):
+    spoken = REGULAR
+    tool_first = False
+    duplicate = False
+
     async def send_realtime_input(self, **kwargs):
         if kwargs.get('audio'):
-            await self.events.put(NS(tool_call=NS(function_calls=[NS(
-                name='prepare_rfq', args={}, id='rfq-call')]), server_content=None))
+            await self.events.put(event(activity=('ACTIVITY_START', '0s')))
+            if self.tool_first:
+                call_event = event(call=rfq_call())
+                if self.duplicate:
+                    call_event.tool_call.function_calls.append(rfq_call('second-rfq-call'))
+                await self.events.put(call_event)
+            await self.events.put(event(text=self.spoken))
+            await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
+            if not self.tool_first:
+                await self.events.put(event(call=rfq_call()))
 
 
 class ModelApprovalProvider(Provider):
@@ -131,6 +144,32 @@ class NativeVoiceRfqTests(unittest.TestCase):
         assert applied.json()['result'] == rfq
         assert len(self.client.get('/api/demo/session').json()['drafts']) == 1
         assert self.client.get('/api/demo/session').json()['simulated_outbox'] == []
+
+    def test_generic_native_tool_saves_canonical_bridge_ledger_and_download(self):
+        started = self.client.post('/api/demo/judge/start', headers=self.headers, json={
+            'expected_context_version': 1, 'idempotency_key': 'native-bridge-start'})
+        assert started.status_code == 200, started.text
+        plan = started.json()['session']['plan']
+        self.provider.spoken = BRIDGE
+        self.provider.tool_first = True
+        self.provider.duplicate = True
+        result, model_result = ask_for_rfq(self.client, self.provider)
+        state = self.client.get('/api/demo/session').json()
+        rfq = state['rfq']
+        assert result['status'] == 'completed', result
+        assert rfq['bridge'] is True and rfq['status'] == 'draft_unsent'
+        assert rfq['quantity_kg'] == plan['supply_coverage']['bridge_quantity']
+        assert rfq['need_by'] == plan['supply_coverage']['bridge_needed_by']
+        assert state['plan'] == plan and state['simulated_outbox'] == []
+        assert len(state['drafts']) == 1
+        assert state['drafts'][0]['draft_id'] == rfq['draft_id']
+        assert state['drafts'][0]['body'] == rfq['text']
+        assert 'price' in rfq['text'].lower() and 'capacity' in rfq['text'].lower()
+        assert 'terms' in rfq['text'].lower()
+        assert result['session']['rfq'] == rfq
+        assert model_result['required_spoken_response'] == result['assistant_text']
+        download = self.client.get(f"/api/demo/rfq/{rfq['draft_id']}/download")
+        assert download.status_code == 200 and download.text == rfq['text']
 
     def test_model_supplied_operate_message_cannot_use_typed_approval(self):
         voice_provider = ModelApprovalProvider()

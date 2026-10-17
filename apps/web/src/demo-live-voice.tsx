@@ -7,12 +7,61 @@ import { isCurrentSavedDraft } from './demo-operator-contract';
 
 const api = createDemoApi();
 const CONNECT_TIMEOUT_MS = 15000;
+const RECONNECT_STABLE_MS = 30000;
+export function shouldReconnectVoiceError(code: unknown, everReady: boolean): boolean {
+  return everReady && code === 'voice_unavailable';
+}
+type VoiceHealth = { ready: boolean; reconnectAttempts: number; healthyTimer?: ReturnType<typeof setTimeout> };
+export function clearVoiceHealthyTimer(current: VoiceHealth): void {
+  clearTimeout(current.healthyTimer);
+  current.healthyTimer = undefined;
+}
+export function armVoiceHealthyTimer(current: VoiceHealth, stillCurrent: () => boolean): void {
+  if (!current.ready || current.healthyTimer || current.reconnectAttempts === 0) return;
+  current.healthyTimer = setTimeout(() => {
+    current.healthyTimer = undefined;
+    if (current.ready && stillCurrent()) current.reconnectAttempts = 0;
+  }, RECONNECT_STABLE_MS);
+}
+export function nextVoiceReconnectDelay(attempts: number): number | null {
+  return attempts >= 3 ? null : 500 * 2 ** attempts;
+}
+export function acceptsVoiceConnectionStatus(event: Record<string, unknown>, scope: LiveScope): 'reconnecting' | 'ready' | null {
+  return event.type === 'connection_status' && event.context_version === scope.contextVersion &&
+    (event.state === 'reconnecting' || event.state === 'ready') ? event.state : null;
+}
+export function isTerminalVoiceClose(code: number): boolean {
+  return code === 1008 || (code >= 4000 && code <= 4999);
+}
 
 export type LiveScope = { sessionId: string; companyId: string; contextVersion: number; epoch: number };
 export const sameLiveScope = (a: LiveScope, b: LiveScope) => a.sessionId === b.sessionId && a.companyId === b.companyId && a.contextVersion === b.contextVersion && a.epoch === b.epoch;
 export const matchesLiveSession = (session: DemoSession, scope: LiveScope, csrf: string) =>
   session.session_id === scope.sessionId && session.company?.company_id === scope.companyId &&
   session.context_version === scope.contextVersion && session.csrf_token === csrf;
+export async function verifyVoiceReconnect(write: Promise<void>, read: () => Promise<DemoSession>,
+  captured: LiveScope, current: () => boolean, csrf: string, signal?: AbortSignal): Promise<{ state: 'current' | 'changed' | 'cancelled' | 'timeout'; session?: DemoSession }> {
+  if (signal?.aborted || !current()) return { state: 'cancelled' };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const interrupted = new Promise<{ state: 'cancelled' | 'timeout' }>(resolve => {
+    timer = setTimeout(() => resolve({ state: 'timeout' }), CONNECT_TIMEOUT_MS);
+    onAbort = () => resolve({ state: 'cancelled' });
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  const verified = (async () => {
+    await write;
+    if (signal?.aborted || !current()) return { state: 'cancelled' as const };
+    const session = await read();
+    if (signal?.aborted || !current()) return { state: 'cancelled' as const };
+    return matchesLiveSession(session, captured, csrf) ? { state: 'current' as const, session } : { state: 'changed' as const, session };
+  })();
+  try { return await Promise.race([verified, interrupted]); }
+  finally {
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
 export async function restoreLiveSession(read: () => Promise<DemoSession>, captured: LiveScope,
   current: () => LiveScope, onSession: (session: DemoSession) => void, onUnknown: () => void): Promise<void> {
   try {
@@ -97,7 +146,7 @@ export function voiceResearchLabel(phase: VoiceResearchPhase | null | undefined)
     phase === 'unavailable' ? 'Research unavailable' : null;
 }
 
-type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; timer: ReturnType<typeof setTimeout>; startupTimer: ReturnType<typeof setTimeout>; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null; outputMeter?: AnalyserNode; inputLevel?: number };
+type ActiveVoice = { socket: WebSocket; stream: MediaStream; input: AudioContext; output: AudioContext; source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode; playback: Set<AudioBufferSourceNode>; nextTime: number; startupTimer: ReturnType<typeof setTimeout>; reconnectTimer?: ReturnType<typeof setTimeout>; reconnectAbort?: AbortController; healthyTimer?: ReturnType<typeof setTimeout>; reconnectAttempts: number; socketGeneration: number; everReady: boolean; reconnecting: boolean; scope: LiveScope; ready: boolean; muted: boolean; responsePending: boolean; researchPhase?: VoiceResearchPhase | null; researchProposalId?: string | null; outputMeter?: AnalyserNode; inputLevel?: number };
 type Caption = { direction: 'input' | 'output'; text: string; sealed?: true };
 type VoiceVisualState = 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted';
 export function liveVoiceStatusLabel(status: 'idle' | VoiceVisualState, permissionPending: boolean): string | null {
@@ -182,7 +231,10 @@ export function queueLivePlayback(current: Pick<ActiveVoice, 'output' | 'playbac
   onState();
 }
 export function releaseLiveVoice(current: ActiveVoice): void {
-  clearTimeout(current.timer); clearTimeout(current.startupTimer);
+  clearTimeout(current.startupTimer); clearTimeout(current.reconnectTimer); clearVoiceHealthyTimer(current);
+  current.reconnectAbort?.abort();
+  current.socketGeneration += 1;
+  current.socket.onopen = current.socket.onmessage = current.socket.onerror = current.socket.onclose = null;
   current.processor.onaudioprocess = null;
   current.processor.disconnect(); current.source.disconnect();
   current.outputMeter?.disconnect();
@@ -290,6 +342,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     let output: AudioContext | null = null;
     let socket: WebSocket | null = null;
     let requestTimer: ReturnType<typeof setTimeout> | null = null;
+    let historyWriteFailed = false;
     try {
       const synchronized = beforeStart ? await beforeStart() : null;
       if (attempt !== generation.current || !sameLiveScope(scopeRef.current, captured)) return;
@@ -318,8 +371,8 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
       const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(`${scheme}//${location.host}/api/demo/voice/live`);
       const current: ActiveVoice = { socket, stream, input, output, source, processor, playback: new Set(), nextTime: 0,
-        timer: setTimeout(() => { setError('This voice conversation reached its three-minute limit. Start another conversation.'); end(); }, 180000),
         startupTimer: setTimeout(() => { setError('The live voice service did not become ready. Try starting again.'); end(); }, CONNECT_TIMEOUT_MS),
+        reconnectAttempts: 0, socketGeneration: 0, everReady: false, reconnecting: false,
         scope: captured, ready: false, muted: false, responsePending: false };
       try {
         const outputMeter = output.createAnalyser();
@@ -329,6 +382,71 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
       } catch { /* Metering is optional; playback can use the existing destination. */ }
       active.current = current;
       let pending: number[] = [];
+      const isCurrent = (target: WebSocket, socketGeneration: number) => active.current === current &&
+        current.socket === target && current.socketGeneration === socketGeneration && sameLiveScope(scopeRef.current, captured);
+      const clearPendingInteraction = () => {
+        pending = [];
+        pendingCaptions.current = [];
+        setCaptions(old => updateLiveCaptions(old, { type: 'interrupted' }));
+        stopPlayback(current);
+        current.responsePending = false;
+        current.researchPhase = null;
+        current.researchProposalId = null;
+        thinking.current = false;
+        setResearchPhase(null);
+      };
+      const failConnection = (message: string) => { setError(message); end(); };
+      const scheduleReconnect = () => {
+        if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
+        clearTimeout(current.startupTimer);
+        clearVoiceHealthyTimer(current);
+        current.reconnectAbort?.abort();
+        const oldSocket = current.socket;
+        current.socketGeneration += 1;
+        oldSocket.onopen = oldSocket.onmessage = oldSocket.onerror = oldSocket.onclose = null;
+        oldSocket.close();
+        if (!current.everReady) { failConnection('The live voice connection closed before it became ready. Refresh the demo session, then try again.'); return; }
+        const delay = nextVoiceReconnectDelay(current.reconnectAttempts);
+        if (delay === null) { failConnection('The live voice connection could not be restored. Check your connection, then start again.'); return; }
+        current.reconnectAttempts += 1;
+        current.ready = false;
+        current.reconnecting = true;
+        clearPendingInteraction();
+        setStatus('connecting');
+        current.reconnectTimer = setTimeout(async () => {
+          current.reconnectTimer = undefined;
+          if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
+          try {
+            if (historyWriteFailed) { failConnection('Voice history could not be saved. Review the current workspace, then start again.'); return; }
+            current.reconnectAbort = new AbortController();
+            const verified = await verifyVoiceReconnect(historyWrites.current, () => api.session(), captured,
+              () => active.current === current && sameLiveScope(scopeRef.current, captured), canonical.csrf_token, current.reconnectAbort.signal);
+            if (verified.state === 'cancelled') return;
+            if (verified.state === 'timeout') {
+              failConnection('Voice history or session verification timed out. A pending history save may still complete; review the workspace before starting again.');
+              return;
+            }
+            if (historyWriteFailed) { failConnection('Voice history could not be saved. Review the current workspace, then start again.'); return; }
+            if (verified.state === 'changed') {
+              onSession(verified.session!);
+              failConnection('The demo session changed or expired. Review the current workspace, then start voice again.');
+              return;
+            }
+            const replacement = new WebSocket(`${scheme}//${location.host}/api/demo/voice/live`);
+            current.socket = replacement;
+            bindSocket(replacement);
+          } catch (cause) {
+            if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
+            if (cause instanceof DemoApiError && (cause.code === 'session_expired' || cause.code === 'stale_context' || [401, 403, 410, 429].includes(cause.status))) {
+              if (cause.status !== 429) onUnknown();
+              failConnection(cause.message);
+            } else scheduleReconnect();
+          }
+        }, delay);
+      };
+      const markHealthyActivity = () => {
+        armVoiceHealthyTimer(current, () => active.current === current && sameLiveScope(scopeRef.current, captured));
+      };
       processor.onaudioprocess = event => {
         if (active.current !== current || !sameLiveScope(scopeRef.current, captured) || !current.ready || current.socket.readyState !== WebSocket.OPEN) return;
         const samples = event.inputBuffer.getChannelData(0);
@@ -339,15 +457,38 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
         while (pending.length >= count) {
           const chunk = pending.splice(0, count);
           current.socket.send(JSON.stringify({ type: 'audio', data: pcm16Base64(new Float32Array(chunk), input!.sampleRate) }));
+          markHealthyActivity();
         }
       };
-      socket.onopen = () => { if (active.current === current) socket!.send(JSON.stringify({ type: 'start', csrf_token: canonical.csrf_token, expected_context_version: captured.contextVersion })); };
-      socket.onmessage = event => {
-        if (active.current !== current || !sameLiveScope(scopeRef.current, captured)) return;
+      function bindSocket(target: WebSocket) {
+        const socketGeneration = current.socketGeneration;
+        current.startupTimer = setTimeout(() => {
+          if (isCurrent(target, socketGeneration)) scheduleReconnect();
+        }, CONNECT_TIMEOUT_MS);
+        target.onopen = () => { if (isCurrent(target, socketGeneration)) target.send(JSON.stringify({ type: 'start', csrf_token: canonical.csrf_token, expected_context_version: captured.contextVersion })); };
+        target.onmessage = event => {
+        if (!isCurrent(target, socketGeneration)) return;
         let data: Record<string, unknown>;
         try { data = JSON.parse(String(event.data)); } catch { setError('Live voice returned an unreadable event.'); end(); return; }
-        if (data.type === 'ready') { clearTimeout(current.startupTimer); current.ready = true; setStatus(voiceVisualState(current, thinking.current)); }
-        else if (data.type === 'research_progress') {
+        const connectionStatus = acceptsVoiceConnectionStatus(data, captured);
+        if (data.type === 'connection_status' && !connectionStatus) return;
+        if (connectionStatus === 'reconnecting') {
+          current.ready = false; current.reconnecting = true;
+          clearVoiceHealthyTimer(current);
+          clearPendingInteraction(); setStatus('connecting');
+          clearTimeout(current.startupTimer);
+          current.startupTimer = setTimeout(() => { if (isCurrent(target, socketGeneration)) scheduleReconnect(); }, CONNECT_TIMEOUT_MS);
+          return;
+        }
+        if (data.type === 'ready' || connectionStatus === 'ready') {
+          clearTimeout(current.startupTimer);
+          current.ready = true; current.everReady = true; current.reconnecting = false;
+          if (current.muted) markHealthyActivity();
+          setStatus(voiceVisualState(current, thinking.current)); return;
+        }
+        if (!current.ready && data.type !== 'error') return;
+        if (['transcript', 'audio', 'tool_result', 'turn_complete', 'research_progress'].includes(String(data.type))) markHealthyActivity();
+        if (data.type === 'research_progress') {
           const phase = acceptedResearchProgress(data, captured, scopeRef.current, current.researchProposalId ?? null, current.researchPhase);
           if (phase) {
             current.researchPhase = phase; setResearchPhase(phase);
@@ -386,6 +527,7 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
             historyWrites.current = historyWrites.current.then(async () => {
               await api.appendOperatorVoice(canonical.csrf_token, caption.text, caption.direction, captured.contextVersion);
             }).catch(cause => {
+              historyWriteFailed = true;
               if (active.current === current && sameLiveScope(scopeRef.current, captured)) setError(`Voice history could not be saved: ${cause instanceof Error ? cause.message : 'Unknown error'}`);
             });
           }
@@ -410,14 +552,22 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
           onTurnRef.current(data.result, captured);
         }
         else if (data.type === 'error') {
+          if (shouldReconnectVoiceError(data.code, current.everReady)) { scheduleReconnect(); return; }
           if (data.code === 'session_expired' || data.code === 'stale_context') {
             void restoreLiveSession(() => api.session(), captured, () => scopeRef.current, onSession, onUnknown);
           }
           setError(typeof data.message === 'string' ? data.message : 'Live voice is unavailable.'); end();
         }
-      };
-      socket.onerror = () => { if (active.current === current) { setError('The live voice connection failed. Check your connection, refresh the demo session, then try again.'); end(); } };
-      socket.onclose = () => { if (active.current === current) { setError(current.ready ? 'The live voice connection ended. Start another conversation.' : 'The live voice connection closed before it became ready. Refresh the demo session, then try again.'); end(); } };
+        };
+        target.onerror = () => { if (isCurrent(target, socketGeneration)) scheduleReconnect(); };
+        target.onclose = event => {
+          if (!isCurrent(target, socketGeneration)) return;
+          if (isTerminalVoiceClose(event.code)) failConnection('The live voice session was rejected or its quota was reached. Review the session before starting again.');
+          else scheduleReconnect();
+        };
+      }
+      clearTimeout(current.startupTimer);
+      bindSocket(socket);
     } catch (cause) {
       if (requestTimer && permissionTimer.current === requestTimer) { clearTimeout(requestTimer); permissionTimer.current = null; }
       if (attempt === generation.current) setPermissionPending(false);
@@ -442,14 +592,15 @@ export const LiveVoice = forwardRef<LiveVoiceHandle, LiveVoiceProps>(function Li
     const current = active.current;
     if (!current) return;
     current.muted = !current.muted;
-    if (current.muted && current.socket.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ type: 'audio_end' }));
+    if (current.muted && current.ready && current.socket.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ type: 'audio_end' }));
+    if (current.muted && current.ready) armVoiceHealthyTimer(current, () => active.current === current && sameLiveScope(scopeRef.current, current.scope));
     setMicrophoneMuted(current.muted);
     setStatus(voiceVisualState(current, thinking.current));
   }
   const visible = visibleLiveVoiceState(status, error, captionScope, scope);
   const orbState = visible.error ? 'error' : visible.status;
   const researchLabel = captionScope && sameLiveScope(captionScope, scope) ? voiceResearchLabel(researchPhase) : null;
-  const statusLabel = researchLabel && visible.status !== 'idle' && visible.status !== 'connecting' && visible.status !== 'speaking' && visible.status !== 'muted' ? researchLabel : visible.status === 'connecting' ? liveVoiceStatusLabel(visible.status, permissionPending) :
+  const statusLabel = researchLabel && visible.status !== 'idle' && visible.status !== 'connecting' && visible.status !== 'speaking' && visible.status !== 'muted' ? researchLabel : visible.status === 'connecting' && active.current?.reconnecting ? 'Reconnecting…' : visible.status === 'connecting' ? liveVoiceStatusLabel(visible.status, permissionPending) :
     visible.status === 'listening' ? 'Listening' : visible.status === 'thinking' ? active.current?.responsePending && !thinking.current ? 'Finishing response…' : 'Thinking' :
     visible.status === 'speaking' ? microphoneMuted ? 'Speaking · microphone muted' : 'Speaking' :
     visible.status === 'muted' ? 'Microphone muted' : 'Voice is off. Text chat is available.';

@@ -1,6 +1,6 @@
 # ZOORQ hosted judge demo: deployment and operator guide
 
-**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. Current verification and remaining voice acceptance are recorded in the [latest QA report](../../docs/ZOORQ_QA_REPAIR_20261017.md). The [earlier judge release report](../../docs/releases/2026-10-17-zoorq-judge-experience.md) retains its historical results and failures. The older `closed-source-quote-demo` service is a retained rollback option; check its health before using it.
+**Current destination:** https://zoorq-963802031195.asia-south1.run.app (`/demo`). Identify the exact active ZOORQ revision from `/-/health` and the Cloud Run release record before testing; this guide does not pin a future revision. The [continuous voice release report](../../docs/ZOORQ_CONTINUOUS_VOICE_20261017.md) records the latest voice revision and evidence. The [broader QA report](../../docs/ZOORQ_QA_REPAIR_20261017.md) preserves the preceding release results. The [earlier judge release report](../../docs/releases/2026-10-17-zoorq-judge-experience.md) retains its historical results and failures. The older `closed-source-quote-demo` service is a retained rollback option; check its health before using it.
 
 ## What the demo does
 

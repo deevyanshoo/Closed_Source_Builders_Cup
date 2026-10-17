@@ -1,5 +1,7 @@
 # ZOORQ QA repair — 17 October 2026
 
+> Historical release evidence: the subsequent [continuous voice release](ZOORQ_CONTINUOUS_VOICE_20261017.md) supersedes this report's voice-duration and active-revision details.
+
 Reviewed source `cfdec187c995aa57981079b3cb475ad92d6fda58` is deployed to the existing [ZOORQ demo](https://zoorq-963802031195.asia-south1.run.app/demo) as `zoorq-riskvoice-63b86ce`, serving 100% of traffic with Firestore persistence. The final backend gate, ten-company risk and inventory reads, exact Atlas risk speech, native carbon/RFQ/recovery approval and world-news speech passed. Coverage and remaining checks are separated below.
 
 ## Delivered changes

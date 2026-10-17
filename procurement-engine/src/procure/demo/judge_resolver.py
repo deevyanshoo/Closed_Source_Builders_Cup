@@ -21,6 +21,12 @@ _COVERAGE_QUESTION = re.compile(
     r'continuous\s+supply|supply\s+gap|production\s+supply|uncovered\s+days|bridge\s+quantity)\b', re.I)
 _BRIDGE_REQUEST = re.compile(r'\b(?:draft|prepare|create|request)\b.*\b(?:bridge|earlier\s+delivery)\b.*\b(?:rfq|quotation|quote)\b|'
                              r'\b(?:draft|prepare|create|request)\b.*\b(?:rfq|quotation|quote)\b.*\b(?:bridge|earlier\s+delivery)\b', re.I)
+# A routing boundary only, never authority to turn an RFP into an RFQ. ASR
+# can insert punctuation between "earlier delivery" and the document name.
+_BRIDGE_AMBIGUOUS_REQUEST = re.compile(
+    r'(?=.*\b(?:draft|prepare|create|request|save)\b)'
+    r'(?=.*\b(?:bridge|earlier[\s-]+delivery|supply\s+gap)\b)'
+    r'(?=.*\b(?:rfp|proposal|document|draft|request)\b)', re.I | re.S)
 _BRIDGE_COMMAND = re.compile(
     r'^\s*(?:(?:please)\s+|(?:can|could|would)\s+you\s+(?:please\s+)?|'
     r'i\s+(?:want|need)\s+you\s+to\s+)?(?:draft|prepare|create|request)\b', re.I)
@@ -318,10 +324,17 @@ def _explicit_plan_ids(message):
 
 
 def _bridge_intent(snapshot, message):
+    quotation_request = bool(_BRIDGE_REQUEST.search(message))
+    ambiguous_request = bool(_BRIDGE_AMBIGUOUS_REQUEST.search(message))
+    document_unclear = not quotation_request or bool(re.search(r'\b(?:rfp|proposal)\b', message, re.I))
     command = any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
                   for clause in re.split(r'[.,;!?]', message))
-    if not _BRIDGE_REQUEST.search(message):
+    if not quotation_request and not ambiguous_request:
         return None
+    if document_unclear and ambiguous_request:
+        # Punctuation may split this read-only clarification, but must never
+        # relax the clause-bound authorization used to create a quotation draft.
+        command = bool(_BRIDGE_COMMAND.match(message))
     result = _base(snapshot, 'needs_input')
     if not command or _DRAFT_NEGATION.search(message) or _HYPOTHETICAL.search(message) or _DRAFT_DEFERRED.search(message):
         result['missing_inputs'] = ['explicit_draft_request']
@@ -333,7 +346,7 @@ def _bridge_intent(snapshot, message):
     # keywords are never searched throughout prose or used for fuzzy substitution.
     catalogue = [row for company in list_companies() for row in company['materials']]
     materials = set(_named_materials({'company': {'materials': catalogue}}, message))
-    target = re.search(r'\b(?:rfq|quotation|quote)\s+for\s+(.+?)(?=[.,;!?]|$)', message, re.I)
+    target = re.search(r'\b(?:rfq|quotation|quote|rfp|proposal|document)\s+for\s+(.+?)(?=[.,;!?]|$)', message, re.I)
     unsupported = False
     if target:
         phrase = re.split(r'\b(?:earlier\s+delivery|using|to\s+cover|needed|in)\b',
@@ -363,6 +376,9 @@ def _bridge_intent(snapshot, message):
         missing = (coverage.get('missing_inputs') or ['positive_supply_gap'])[0]
         result['missing_inputs'] = [missing]
         result['answer'] = f'Which verified {missing} should support an earlier-delivery request?'
+    elif document_unclear:
+        result['missing_inputs'] = ['document_type']
+        result['answer'] = 'Should I prepare an earlier-delivery quotation request for the current supply gap?'
     else:
         result['kind'] = 'bridge_rfq_request'
         result['answer'] = ('Prepare an unsent bridge RFQ for the calculated gap. '

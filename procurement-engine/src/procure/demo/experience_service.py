@@ -127,8 +127,8 @@ def resolve_local_turn(snapshot, message, *, now):
     if not isinstance(snapshot.get('context_version'),int):
         return None  # Legacy pure-reader snapshots have no session context.
     resolved = resolve_judge_turn(snapshot, message, now=now)
-    from .judge_resolver import _BRIDGE_REQUEST
-    if resolved and _BRIDGE_REQUEST.search(message):
+    from .judge_resolver import _BRIDGE_REQUEST, _BRIDGE_AMBIGUOUS_REQUEST
+    if resolved and (_BRIDGE_REQUEST.search(message) or _BRIDGE_AMBIGUOUS_REQUEST.search(message)):
         return resolved
     if _explicit_recovery_request(message):
         if resolved and resolved.get('missing_inputs') == ['company']:

@@ -33,7 +33,8 @@ from .company import get_company
 from .voice_cues import load_cue_pcm
 from .live_continuity import RollingBudget, ReplayGuard, call_key
 from .experience_service import _explicit_recovery_request, resolve_voice_recovery
-from .judge_resolver import _BRIDGE_COMMAND, _BRIDGE_REQUEST, _DRAFT_NEGATION, _DRAFT_DEFERRED, _HYPOTHETICAL
+from .judge_resolver import (_BRIDGE_COMMAND, _BRIDGE_REQUEST, _BRIDGE_AMBIGUOUS_REQUEST,
+                             _DRAFT_NEGATION, _DRAFT_DEFERRED, _HYPOTHETICAL)
 
 
 MODEL = 'gemini-3.8-live'
@@ -1042,6 +1043,7 @@ async def run_live_voice(
                 rfq_input_closed = False
                 recovery_held_calls = []
                 recovery_speech_pending = False
+                clarification_speech_pending = False
                 recovery_speech_deadline = None
                 recovery_required_speech = ''
                 recovery_output_text = ''
@@ -1599,6 +1601,7 @@ async def run_live_voice(
                                 await provider.send_tool_response(function_responses=types.FunctionResponse(
                                     name=held.name, id=held.id, response=denied))
                         if interrupted_frame or activity is not None and not activity_valid:
+                            clarification_speech_pending = False
                             recovery_late_generation_abandoned |= recovery_transport_deadline is not None
                             recovery_spoken = ''
                             recovery_vad_started = recovery_vad_ended = False
@@ -1618,6 +1621,7 @@ async def run_live_voice(
                             recovery_review_aborted = False
                             recovery_drain_deadline = None
                         elif activity is not None and kind.endswith('ACTIVITY_START'):
+                            clarification_speech_pending = False
                             recovery_late_generation_abandoned |= recovery_transport_deadline is not None
                             recovery_generation += 1
                             rfq_input_closed = False
@@ -1738,7 +1742,10 @@ async def run_live_voice(
                             recovery_drain_deadline = None
                             research_gate = None
                             await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
-                                'message': 'The recovery result is on screen, but its spoken review was unavailable. Review it on screen before approving.'})
+                                'message': ('The clarification is on screen, but its spoken response was unavailable. Please ask again.'
+                                    if clarification_speech_pending else
+                                    'The recovery result is on screen, but its spoken review was unavailable. Review it on screen before approving.')})
+                            clarification_speech_pending = False
                         recovery_request = None
                         if (recovery_settled and recovery_vad_ended and not recovery_asr_incomplete and
                                 0 < len(recovery_spoken) <= 1200):
@@ -1932,6 +1939,14 @@ async def run_live_voice(
                                 if name == 'prepare_rfq' and recovery_settled and recovery_vad_ended
                                 and recovery_caption_finished and not recovery_asr_incomplete
                                 and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200 else None)
+                            bridge_operate = name == 'operate_workspace' and any(
+                                _BRIDGE_REQUEST.search(words) or _BRIDGE_AMBIGUOUS_REQUEST.search(words)
+                                for words in (args['message'], recovery_spoken if not rfq_input_closed else ''))
+                            fresh_bridge_operate = (bridge_operate and recovery_settled and recovery_vad_ended
+                                and recovery_caption_finished and not recovery_asr_incomplete
+                                and not rfq_input_closed and 0 < len(recovery_spoken) <= 1200
+                                and (_BRIDGE_REQUEST.search(recovery_spoken)
+                                     or _BRIDGE_AMBIGUOUS_REQUEST.search(recovery_spoken)))
                             routed_name = (rfq_route or name) if name == 'prepare_rfq' else (
                                 'operate_workspace' if recovery_route else name)
                             binding = json.dumps([name, args], sort_keys=True)
@@ -2152,7 +2167,8 @@ async def run_live_voice(
                                         'assistant_text': 'Please ask the exact risk or inventory question for this company or all ten companies.',
                                         'agent_steps': [], 'evidence_ids': [], 'proposal': None,
                                         'read_only': True}
-                                elif name == 'prepare_rfq' and rfq_route is None:
+                                elif (name == 'prepare_rfq' and rfq_route is None or
+                                      bridge_operate and not fresh_bridge_operate):
                                     result = {'turn_id': secrets.token_urlsafe(18),
                                         'company_id': session.company_id, 'context_version': context_version,
                                         'status': 'needs_clarification',
@@ -2233,6 +2249,27 @@ async def run_live_voice(
                                 name == 'confirm_workspace_action' and recovery_speech_pending) and (result['status'] == 'unavailable'
                                 or result['status'] == 'needs_clarification' and name != 'estimate_carbon'
                                 or name == 'confirm_research' and result['status'] == 'proposal')
+                            # Local read-only clarifications use the same bounded
+                            # native PCM/caption finalization as recovery reviews.
+                            # Never launch a second speech turn or trust unreviewed
+                            # provider wording just because a tool returned text.
+                            grounded_clarification = (suppress_failed_speech
+                                and result['status'] == 'needs_clarification' and result['read_only']
+                                and result.get('proposal') is None and result.get('action_result') is None
+                                and bool(result['agent_steps']) and all(
+                                    step.get('provider_call') == 'none' and step.get('model') == 'none'
+                                    and step.get('agent') == 'workspace' for step in result['agent_steps']))
+                            if grounded_clarification:
+                                suppress_failed_speech = False
+                                clarification_speech_pending = True
+                                recovery_speech_pending = True
+                                recovery_speech_deadline = monotonic() + RECOVERY_SPEECH_WAIT_SECONDS
+                                recovery_required_speech = result['assistant_text']
+                                recovery_output_text = ''
+                                recovery_output_audio.clear()
+                                # The real function response requests this review;
+                                # no synthetic user turn or duplicate TTS is needed.
+                                recovery_review_dispatched = True
                             if suppress_failed_speech:
                                 await send_frame({'type': 'interrupted'})
                                 await send_frame({'type': 'transcript', 'direction': 'output',
@@ -2265,6 +2302,10 @@ async def run_live_voice(
                                     'Do not claim a confirmed shipment delay or an applied action.')
                             if name == 'prepare_rfq' and result['status'] == 'completed':
                                 model_result['required_spoken_response'] = result['assistant_text']
+                            if grounded_clarification:
+                                model_result.update(tool_succeeded=False, action_applied=False,
+                                    required_spoken_response=result['assistant_text'],
+                                    instruction='Speak required_spoken_response exactly once, with no additions. No draft was created or sent.')
                             if name == 'confirm_research' and allowed_research and research_succeeded(result):
                                 model_result = completed_research_speech(result)
                             elif name == 'confirm_research' and result['status'] == 'completed':
@@ -2404,7 +2445,10 @@ async def run_live_voice(
                                 continue
                             if recovery_speech_pending:
                                 compact = lambda text: re.sub(r'\W+', '', text.casefold())
-                                reviewed = (_spoken_prompt(research_gate) if research_gate is not None else
+                                reviewed = (bool(recovery_output_audio and
+                                    compact(recovery_required_speech) == compact(recovery_output_text))
+                                    if clarification_speech_pending else
+                                    _spoken_prompt(research_gate) if research_gate is not None else
                                     bool(recovery_output_audio and compact(recovery_required_speech) in compact(recovery_output_text)))
                                 recovery_speech_pending = False
                                 recovery_speech_deadline = None
@@ -2413,7 +2457,10 @@ async def run_live_voice(
                                     recovery_output_text = ''
                                     research_gate = None
                                     await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
-                                        'message': 'The recovery result is on screen, but its spoken review was incomplete. Review it on screen before approving.'})
+                                        'message': ('The clarification is on screen, but its spoken response was incomplete. Please ask again.'
+                                            if clarification_speech_pending else
+                                            'The recovery result is on screen, but its spoken review was incomplete. Review it on screen before approving.')})
+                                    clarification_speech_pending = False
                                     continue
                                 for index in range(0, len(recovery_output_text), MAX_TRANSCRIPT_CHARS):
                                     await send_frame({'type': 'transcript', 'direction': 'output',
@@ -2426,6 +2473,7 @@ async def run_live_voice(
                                         'data': base64.b64encode(audio).decode('ascii')})
                                 recovery_output_audio.clear()
                                 recovery_output_text = ''
+                                clarification_speech_pending = False
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['armed'] = _spoken_prompt(research_gate)
                                 research_gate['audio_at_arm'] = input_frames

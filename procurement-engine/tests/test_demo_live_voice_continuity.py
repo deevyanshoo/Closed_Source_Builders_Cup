@@ -234,7 +234,9 @@ def test_stop_during_provider_reconnect_delay_closes_promptly(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch):
+@pytest.mark.parametrize('asr_before_end', [True, False])
+@pytest.mark.parametrize('finished', [True, None, 'omitted'])
+def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch, asr_before_end, finished):
     class ManualProvider(Provider):
         def __init__(self):
             super().__init__()
@@ -268,8 +270,9 @@ def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch):
             contexts.append(history_context)
             yield first if len(handles) == 1 else second
 
-        async def workspace_tool(name, args, version, key):
-            calls.append((name, key))
+        async def operate(message, version, key):
+            assert message == 'Analyze our inventory and sourcing across all materials.'
+            calls.append(('operate_workspace', key))
             return {'turn_id': 'inventory-1', 'company_id': session.company_id,
                     'context_version': version, 'status': 'completed',
                     'assistant_text': 'Current inventory and sourcing read.',
@@ -279,8 +282,7 @@ def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch):
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
         socket = Socket(start(session))
         task = asyncio.create_task(live_voice.run_live_voice(
-            socket, session=session, store=store, operate_workspace=lambda *_: None,
-            workspace_tools=workspace_tool))
+            socket, session=session, store=store, operate_workspace=operate))
         await next_type(socket, 'ready')
         await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
         for _ in range(100):
@@ -299,33 +301,267 @@ def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch):
         assert handles == [None, None]
         assert all('Prior completed risk question.' in value and 'Prior risk answer.' in value
                    for value in contexts)
-        await socket.frames.put(json.dumps({'type': 'audio', 'data': base64.b64encode(
-            b'\x01\x00\x02\x00\x03\x00\x04\x00').decode()}))
+        for _ in range(5):
+            await socket.frames.put(json.dumps({'type': 'audio', 'data': base64.b64encode(
+                b'\x01\x00' * 16_000).decode()}))
         for _ in range(100):
-            if second.received_audio:
+            if len(second.received_audio) == 5:
                 break
             await asyncio.sleep(.01)
-        assert len(second.received_audio) == 1
+        assert len(second.received_audio) == 5
+        # Real Google offsets and ASR; the hosted model omits finished.
         await second.events.put(NS(tool_call=None, server_content=None,
-            voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0.000125s')))
-        await second.events.put(NS(tool_call=None, server_content=None,
-            voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.00025s')))
+            voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0.280s')))
+        caption = NS(text='Analyze our inventory and sourcing across all materials.')
+        if finished != 'omitted':
+            caption.finished = finished
+        asr = NS(tool_call=None, server_content=NS(input_transcription=caption))
+        end = NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='4.560s'))
+        await second.events.put(asr if asr_before_end else end)
         await second.events.put(NS(tool_call=NS(function_calls=[NS(
-            name='read_workspace', args={}, id='new-inventory')]), server_content=None))
+            name='operate_workspace', args={
+                'message': 'Analyze our inventory and sourcing across all materials.'},
+            id='new-inventory')]), server_content=None))
         await asyncio.sleep(.03)
         assert calls == []
-        await second.events.put(NS(tool_call=None, server_content=NS(
-            input_transcription=NS(text='What is the current inventory and sourcing?', finished=True))))
+        await second.events.put(end if asr_before_end else asr)
         assert (await next_type(socket, 'tool_result'))['result']['assistant_text'] == 'Current inventory and sourcing read.'
-        assert (await next_type(socket, 'transcript'))['text'] == 'What is the current inventory and sourcing?'
-        assert (await next_type(socket, 'transcript'))['text'] == 'Fresh inventory answer.'
-        assert len(calls) == 1 and calls[0][0] == 'read_workspace'
+        await next_type(socket, 'turn_complete')
+        captions = [frame['text'] for frame in socket.history if frame['type'] == 'transcript']
+        assert 'Analyze our inventory and sourcing across all materials.' in captions
+        assert captions.count('Fresh inventory answer.') == 1
+        assert len(calls) == 1 and calls[0][0] == 'operate_workspace'
         assert len([response for response in second.responses if response.id == 'new-inventory']) == 1
         assert 'OLD_RISK_ANSWER' not in json.dumps(socket.history)
         assert not any(response.id == 'old-risk' for response in first.responses)
         assert 'server-secret' not in json.dumps(socket.history)
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('missing_evidence', [
+    'stale', 'no_audio', 'no_asr', 'blank_asr', 'pre_start_asr', 'invalid_end',
+    'explicit_false_before_end', 'explicit_false_after_end', 'false_after_candidate',
+    'interrupted_after_end', 'expired_hold',
+])
+def test_renewed_provider_with_incomplete_fresh_evidence_never_executes(monkeypatch, missing_evidence):
+    class ManualProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses)
+
+    async def scenario():
+        store, session = setup()
+        first, second = ManualProvider(), ManualProvider()
+        first.events.put_nowait(NS(go_away=NS(time_left='1s')))
+        opens = [0]
+        effects = []
+
+        @asynccontextmanager
+        async def factory(company, *, history_context=None):
+            opens[0] += 1
+            yield first if opens[0] == 1 else second
+
+        async def workspace_tool(*args):
+            effects.append(args)
+            raise AssertionError('incomplete fresh input executed a tool')
+
+        def asr(text='Read inventory', **kwargs):
+            return NS(tool_call=None, server_content=NS(
+                input_transcription=NS(text=text, **kwargs)))
+
+        start_event = NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0.000125s'))
+        end_event = NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.00025s'))
+        call = NS(tool_call=NS(function_calls=[NS(
+            name='read_workspace', args={}, id='must-not-run')]), server_content=None)
+        monkeypatch.setattr(live_voice, '_vertex_connection', factory)
+        monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .06)
+        socket = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store, operate_workspace=lambda *_: None,
+            workspace_tools=workspace_tool))
+        await next_type(socket, 'ready')
+        await next_type(socket, 'connection_status')
+        await next_type(socket, 'connection_status')
+        if missing_evidence != 'no_audio':
+            await socket.frames.put('{"type":"audio","data":"AQACAAEAAwA="}')
+            for _ in range(100):
+                if second.received_audio:
+                    break
+                await asyncio.sleep(.01)
+            assert len(second.received_audio) == 1
+        if missing_evidence == 'pre_start_asr':
+            await second.events.put(asr())
+        await second.events.put(start_event)
+        if missing_evidence == 'expired_hold':
+            await second.events.put(call)
+            for _ in range(100):
+                if second.responses:
+                    break
+                await asyncio.sleep(.01)
+            assert second.responses and second.responses[0].response['status'] == 'unavailable'
+        if missing_evidence in {'explicit_false_before_end', 'false_after_candidate'}:
+            if missing_evidence == 'false_after_candidate':
+                await second.events.put(asr())
+            await second.events.put(asr(finished=False))
+        if missing_evidence == 'invalid_end':
+            end_event.voice_activity.audio_offset = '0.001s'
+        await second.events.put(end_event)
+        if missing_evidence == 'interrupted_after_end':
+            await second.events.put(NS(tool_call=None, server_content=NS(interrupted=True)))
+        if missing_evidence == 'explicit_false_after_end':
+            await second.events.put(asr(finished=False))
+        elif missing_evidence == 'blank_asr':
+            await second.events.put(asr('  '))
+        elif missing_evidence not in {
+                'no_asr', 'pre_start_asr', 'explicit_false_before_end', 'false_after_candidate'}:
+            await second.events.put(asr())
+        if missing_evidence == 'stale':
+            with session.lock:
+                session.select_company('terrapack')
+        await second.events.put(call)
+        if missing_evidence == 'stale':
+            assert (await next_type(socket, 'error'))['code'] == 'stale_context'
+        else:
+            for _ in range(100):
+                if second.responses:
+                    break
+                await asyncio.sleep(.01)
+            assert second.responses and second.responses[-1].response['status'] == 'unavailable'
+        await asyncio.sleep(.02)
+        assert effects == []
+        assert not any(frame['type'] == 'tool_result' for frame in socket.history)
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('completion', [
+    'none_before_end', 'none_after_end', 'blank_true',
+    'true_before_end', 'true_after_end', 'new_start',
+])
+def test_explicit_incomplete_fresh_utterance_stays_latched_until_completed_or_replaced(monkeypatch, completion):
+    class ManualProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses)
+
+    async def scenario():
+        store, session = setup()
+        first, second = ManualProvider(), ManualProvider()
+        first.events.put_nowait(NS(go_away=NS(time_left='1s')))
+        opens = [0]
+        effects = []
+
+        @asynccontextmanager
+        async def factory(company, *, history_context=None):
+            opens[0] += 1
+            yield first if opens[0] == 1 else second
+
+        async def workspace_tool(name, args, version, key):
+            effects.append(key)
+            return {'turn_id': f'read-{len(effects)}', 'company_id': session.company_id,
+                    'context_version': version, 'status': 'completed',
+                    'assistant_text': 'Current inventory.', 'agent_steps': [],
+                    'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+        def asr(text='Read inventory', finished=None):
+            return NS(tool_call=None, server_content=NS(
+                input_transcription=NS(text=text, finished=finished)))
+
+        def activity(kind, offset):
+            return NS(tool_call=None, server_content=None,
+                voice_activity=NS(voice_activity_type=kind, audio_offset=offset))
+
+        def call(call_id):
+            return NS(tool_call=NS(function_calls=[NS(
+                name='read_workspace', args={}, id=call_id)]), server_content=None)
+
+        monkeypatch.setattr(live_voice, '_vertex_connection', factory)
+        monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .3)
+        socket = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store, operate_workspace=lambda *_: None,
+            workspace_tools=workspace_tool))
+        await next_type(socket, 'ready')
+        await next_type(socket, 'connection_status')
+        await next_type(socket, 'connection_status')
+        await socket.frames.put('{"type":"audio","data":"AQACAAEAAwA="}')
+        for _ in range(100):
+            if second.received_audio:
+                break
+            await asyncio.sleep(.01)
+        assert len(second.received_audio) == 1
+        await second.events.put(activity('ACTIVITY_START', '0.000125s'))
+        await second.events.put(asr())
+        await second.events.put(asr(finished=False))
+        if completion != 'none_after_end':
+            await second.events.put(asr())
+        if completion == 'blank_true':
+            await second.events.put(asr('  ', finished=True))
+            await second.events.put(asr())
+        if completion != 'new_start':
+            await second.events.put(call('held-read'))
+        await asyncio.sleep(.02)
+        assert effects == []
+        if completion == 'true_before_end':
+            await second.events.put(asr(finished=True))
+        await second.events.put(activity('ACTIVITY_END', '0.00025s'))
+        if completion == 'none_after_end':
+            await second.events.put(asr())
+        if completion == 'true_after_end':
+            await asyncio.sleep(.02)
+            assert effects == []
+            await second.events.put(asr(finished=True))
+        if completion == 'new_start':
+            await socket.frames.put('{"type":"audio","data":"AQACAAEAAwA="}')
+            for _ in range(100):
+                if len(second.received_audio) == 2:
+                    break
+                await asyncio.sleep(.01)
+            assert len(second.received_audio) == 2
+            await second.events.put(activity('ACTIVITY_START', '0.000375s'))
+            await second.events.put(asr())
+            await second.events.put(call('held-read'))
+            await second.events.put(activity('ACTIVITY_END', '0.0005s'))
+        if completion in {'none_before_end', 'none_after_end', 'blank_true'}:
+            for _ in range(100):
+                if second.responses:
+                    break
+                await asyncio.sleep(.01)
+            assert effects == []
+            assert second.responses[0].response['status'] == 'unavailable'
+        else:
+            assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
+            assert len(effects) == 1
+            assert len([response for response in second.responses if response.id == 'held-read']) == 1
+            # The initial fresh-utterance gate is not rearmed on later captions.
+            await second.events.put(asr(finished=False))
+            await second.events.put(call('later-read'))
+            assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
+            assert len(effects) == 2
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
     asyncio.run(scenario())
 
 

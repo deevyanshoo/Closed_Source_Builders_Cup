@@ -923,7 +923,8 @@ async def run_live_voice(
             fresh_input_ready = first
             fresh_activity_start = None
             fresh_activity_end = False
-            fresh_transcript_finished = False
+            fresh_transcript_ready = False
+            fresh_explicit_incomplete = False
             provider_events = asyncio.Queue(maxsize=16)
             background_tasks = set()
 
@@ -979,7 +980,7 @@ async def run_live_voice(
 
             async def from_provider():
                 nonlocal output_bytes, produced_output_bytes, tool_calls, suppress_failed_speech, research_gate, accepted_activity_end, research_operation
-                nonlocal fresh_input_ready, fresh_activity_start, fresh_activity_end, fresh_transcript_finished
+                nonlocal fresh_input_ready, fresh_activity_start, fresh_activity_end, fresh_transcript_ready, fresh_explicit_incomplete
                 from google.genai import types
                 pending_confirm = None
                 pending_deadline = None
@@ -1486,13 +1487,19 @@ async def run_live_voice(
                             else:
                                 gate['voice_invalid'] = True
                         if not fresh_input_ready:
-                            if (activity is not None and activity_valid and
+                            if interrupted_frame:
+                                fresh_activity_start = None
+                                fresh_activity_end = False
+                                fresh_transcript_ready = False
+                                fresh_explicit_incomplete = False
+                            elif (activity is not None and activity_valid and
                                     kind.endswith('ACTIVITY_START') and
                                     offset is not None and offset >= round_audio_start and
                                     input_bytes > round_audio_start):
                                 fresh_activity_start = offset
                                 fresh_activity_end = False
-                                fresh_transcript_finished = False
+                                fresh_transcript_ready = False
+                                fresh_explicit_incomplete = False
                             elif (activity is not None and activity_valid and
                                     kind.endswith('ACTIVITY_END') and
                                     fresh_activity_start is not None and
@@ -1501,14 +1508,23 @@ async def run_live_voice(
                             elif activity is not None and not activity_valid:
                                 fresh_activity_start = None
                                 fresh_activity_end = False
-                                fresh_transcript_finished = False
+                                fresh_transcript_ready = False
+                                fresh_explicit_incomplete = False
                             fresh_transcript = getattr(content, 'input_transcription', None)
                             fresh_text = getattr(fresh_transcript, 'text', None)
-                            if (fresh_activity_start is not None and input_bytes > round_audio_start
-                                    and getattr(fresh_transcript, 'finished', None) is True
-                                    and isinstance(fresh_text, str) and fresh_text.strip()):
-                                fresh_transcript_finished = True
-                            fresh_input_ready = fresh_activity_end and fresh_transcript_finished
+                            if fresh_activity_start is not None and input_bytes > round_audio_start:
+                                finished = getattr(fresh_transcript, 'finished', None)
+                                if finished is not True and finished is not None:
+                                    fresh_transcript_ready = False
+                                    fresh_explicit_incomplete = True
+                                elif isinstance(fresh_text, str) and fresh_text.strip():
+                                    # Google may omit finished. Only a valid VAD
+                                    # END completes that fresh nonempty transcript.
+                                    if finished is True:
+                                        fresh_explicit_incomplete = False
+                                    if not fresh_explicit_incomplete:
+                                        fresh_transcript_ready = True
+                            fresh_input_ready = fresh_activity_end and fresh_transcript_ready
                         calls = list(getattr(getattr(event, 'tool_call', None), 'function_calls', None) or [])
                         if pending_fresh is not None:
                             expired = (fresh_call_deadline is not None and
@@ -1529,7 +1545,8 @@ async def run_live_voice(
                                 fresh_call_deadline = None
                                 fresh_activity_start = None
                                 fresh_activity_end = False
-                                fresh_transcript_finished = False
+                                fresh_transcript_ready = False
+                                fresh_explicit_incomplete = False
                                 fresh_input_ready = False
                             elif fresh_input_ready:
                                 calls.insert(0, pending_fresh[0])

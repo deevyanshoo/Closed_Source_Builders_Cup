@@ -846,6 +846,26 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             # for the canonical session draft so the owned download resolves.
             rfq = deepcopy(rfq_preview)
             rfq['draft_id'] = proposal['proposal_id']
+        bridge_semantics = None
+        if not is_email and rfq.get('bridge') is True:
+            bridge_semantics = {key: deepcopy(item) for key, item in rfq.items()
+                                if key not in {'draft_id', 'created_at'}}
+            current_semantics = {key: item for key, item in (value.rfq or {}).items()
+                                 if key not in {'draft_id', 'created_at'}}
+            existing = next((row for row in value.drafts
+                             if (row.get('bridge_semantics') == bridge_semantics or (
+                                 'bridge_semantics' not in row
+                                 and row.get('draft_id') == (value.rfq or {}).get('draft_id')
+                                 and current_semantics == bridge_semantics))
+                             and current_rfq_artifact(value, row.get('draft_id')) is row
+                             and row.get('body') == rfq['text']
+                             and row.get('recipient_label') == rfq['supplier']), None)
+            if existing is not None:
+                proposal['proposal_id'] = existing['draft_id']
+                parameters['draft_preview'] = deepcopy(existing)
+                value.rfq = {**deepcopy(bridge_semantics), 'draft_id': existing['draft_id'],
+                             'created_at': existing['created_at']}
+                return
         artifact = {'draft_id': proposal['proposal_id'], 'kind': 'email' if is_email else 'rfq',
             'status': 'draft_unsent', 'company_id': value.company_id,
             'context_version': value.context_version,
@@ -858,6 +878,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             'offer_versions': deepcopy(proposal['offer_versions'])}
         if not is_email:
             artifact['selected_offer_id'] = active_plan(value)['selected_offer_id']
+            if bridge_semantics is not None:
+                artifact['bridge_semantics'] = bridge_semantics
             value.rfq = rfq
         value.drafts.append(artifact)
         del value.drafts[:-24]
@@ -2399,7 +2421,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     if existing is None:
                         value.watch_items.append(deepcopy(result))
                 elif kind == 'recovery':
-                    from .recovery import compare
+                    from .recovery import compare, with_recovery_coverage
                     baseline = value.last_plan
                     if baseline is None or proposal['plan_id'] != baseline.get('plan_id'):
                         raise SessionError('stale_plan', 'Baseline plan changed.', 409)
@@ -2413,7 +2435,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                      today=store.now().date())
                     result['comparison_id'] = secrets.token_urlsafe(18)
                     result['scenario']['plan_id'] = secrets.token_urlsafe(18)
-                    result['scenario'] = covered_plan(value, result['scenario'])
+                    result = with_recovery_coverage(get_company(value.company_id), result, offers=selected)
                     value.recovery = deepcopy(result)
                     value.rfq = None
                 elif kind == 'simulate_email':
@@ -2848,11 +2870,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             try:
                 if 'shipment_id' in data:
                     bound_shipment(value, data['shipment_id'], baseline, delays)
-                from .recovery import compare
+                from .recovery import compare, with_recovery_coverage
                 comparison = compare(baseline, original_request, selected, delays, today=store.now().date())
                 comparison['comparison_id'] = secrets.token_urlsafe(18)
                 comparison['scenario']['plan_id'] = secrets.token_urlsafe(18)
-                comparison['scenario'] = covered_plan(value, comparison['scenario'])
+                comparison = with_recovery_coverage(get_company(value.company_id), comparison, offers=selected)
                 result = complete(value, key, comparison)
                 value.recovery = deepcopy(result)
                 value.rfq = None
@@ -2905,7 +2927,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 remember_prepared_draft(value, {
                     'proposal_id': draft['draft_id'], 'kind': 'rfq', 'parameters': {},
                     'plan_id': plan['plan_id'], 'offer_versions': plan['offer_versions']}, rfq_preview=draft)
-                result = complete(value, key, draft)
+                result = complete(value, key, deepcopy(value.rfq))
                 value.rfq = deepcopy(result)
                 value.pending_proposal = None
                 return result

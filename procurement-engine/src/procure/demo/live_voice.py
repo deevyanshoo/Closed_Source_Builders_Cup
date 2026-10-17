@@ -33,7 +33,7 @@ from .company import get_company
 from .voice_cues import load_cue_pcm
 from .live_continuity import RollingBudget, ReplayGuard, call_key
 from .experience_service import _explicit_recovery_request, resolve_voice_recovery
-from .judge_resolver import _BRIDGE_COMMAND, _BRIDGE_REQUEST, _DRAFT_NEGATION, _HYPOTHETICAL
+from .judge_resolver import _BRIDGE_COMMAND, _BRIDGE_REQUEST, _DRAFT_NEGATION, _DRAFT_DEFERRED, _HYPOTHETICAL
 
 
 MODEL = 'gemini-3.8-live'
@@ -586,7 +586,7 @@ def _spoken_negation(value: str) -> bool:
 def _fresh_rfq_route(message: str) -> str | None:
     """Classify only settled ASR, never model arguments or conversation history."""
     text = re.sub(r'[-‐‑–—]', ' ', message).strip()
-    if _DRAFT_NEGATION.search(text) or _HYPOTHETICAL.search(text):
+    if _DRAFT_NEGATION.search(text) or _HYPOTHETICAL.search(text) or _DRAFT_DEFERRED.search(text):
         return None
     if any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
            for clause in re.split(r'[.,;!?]', text)):

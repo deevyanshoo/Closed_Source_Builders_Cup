@@ -29,6 +29,7 @@ _DRAFT_NEGATION = re.compile(
     r"(?:(?:ever|also|just|please)\s+)*"
     r"(?:(?:send|sending)\s+(?:or|and)\s+)?"
     r"(?:draft(?:ing)?|prepar(?:e|ing)|creat(?:e|ing)|request(?:ing)?|sav(?:e|ing))\b", re.I)
+_DRAFT_DEFERRED = re.compile(r'\b(?:if|unless|until|once|after|pending|when)\b', re.I)
 _SOURCING = re.compile(r'\b(sourcing|source|sources|suppliers?|procurement)\b', re.I)
 _OPERATIONAL_ACTION = re.compile(r'\b(send|draft|prepare|approve|apply|save|update|change|edit|'
                                  r'load|place|buy|purchase|execute|submit|create)\b', re.I)
@@ -319,17 +320,39 @@ def _explicit_plan_ids(message):
 def _bridge_intent(snapshot, message):
     command = any(_BRIDGE_COMMAND.match(clause) and _BRIDGE_REQUEST.search(clause)
                   for clause in re.split(r'[.,;!?]', message))
-    if not command or _DRAFT_NEGATION.search(message) or _HYPOTHETICAL.search(message):
+    if not _BRIDGE_REQUEST.search(message):
         return None
     result = _base(snapshot, 'needs_input')
+    if not command or _DRAFT_NEGATION.search(message) or _HYPOTHETICAL.search(message) or _DRAFT_DEFERRED.search(message):
+        result['missing_inputs'] = ['explicit_draft_request']
+        result['answer'] = 'Should I prepare the unsent bridge RFQ now? No draft has been saved.'
+        return result
     plan = snapshot.get('plan') or {}
     coverage = plan.get('supply_coverage') or {}
-    materials = _named_materials(snapshot, message)
-    material = _material(snapshot, message)
+    # Exact catalogue identities/names and explicit-target aliases only. Broad news
+    # keywords are never searched throughout prose or used for fuzzy substitution.
+    catalogue = [row for company in list_companies() for row in company['materials']]
+    materials = set(_named_materials({'company': {'materials': catalogue}}, message))
+    target = re.search(r'\b(?:rfq|quotation|quote)\s+for\s+(.+?)(?=[.,;!?]|$)', message, re.I)
+    unsupported = False
+    if target:
+        phrase = re.split(r'\b(?:earlier\s+delivery|using|to\s+cover|needed|in)\b',
+                          target.group(1), maxsplit=1, flags=re.I)[0].strip()
+        phrase = re.sub(r'^(?:the|our|a|an)\s+', '', phrase, flags=re.I).casefold()
+        exact = {row['material_id'] for row in catalogue
+                 if phrase in {row['material_id'].casefold(), row['name'].casefold()}}
+        aliases = exact or {row['material_id'] for row in catalogue
+                            if phrase in {word.casefold() for word in row.get('keywords', [])}}
+        generic = re.fullmatch(
+            r'(?:(?:current|selected|this|reviewed)\s+)*(?:plan|material|order|'
+            r'(?:production\s+)?supply\s+gap|gap|bridge(?:\s+quantity)?)', phrase)
+        unsupported = bool(phrase and not aliases and not generic)
+        materials.update(aliases)
+    material = next(iter(materials)) if len(materials) == 1 else None
     plan_ids = _explicit_plan_ids(message)
     plural_materials = re.search(
         r'\b(?:all|both|multiple|several)\s+(?:(?:current|owned|company)\s+)?materials\b', message, re.I)
-    if plural_materials or len(materials) > 1 or (material is not None and material != plan.get('material')):
+    if unsupported or plural_materials or len(materials) > 1 or (material is not None and material != plan.get('material')):
         result['missing_inputs'] = ['material']
         result['answer'] = 'Which single material in the current reviewed plan should receive the bridge request?'
     elif (plan_ids and plan_ids != {plan.get('plan_id')}) or (

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DemoSession, PlanView, SupplyCoverage } from './demo-api';
 import { applyDemoResult, DemoPage, DraftsWorkspace, initialDemoState, PlanResults, RecoveryResults } from './demo-page';
 import { WorkspaceOverview } from './zoorq-workspace';
-import { SupplyAssessment, prepareBridgeDraft } from './demo-supply-assessment';
+import { SupplyAssessment, bridgeEligibility, prepareBridgeDraft } from './demo-supply-assessment';
 
 const coverage: SupplyCoverage = {
   schema: 1, company_id: 'solara-cables', plan_id: 'p1', material_id: 'copper', quantity_unit: 'kg',
@@ -137,14 +137,19 @@ describe('reviewed supply assessment', () => {
     }
   });
 
-  it('uses the operator mutation boundary and opens only a saved unsent draft', async () => {
+  it.each(['fresh comparison', 'new draft', 'existing draft'])('opens the canonical draft from this operator turn: %s', async source => {
     const session = { session_id: 's1', csrf_token: 'csrf', context_version: 3, company: { company_id: 'solara-cables' }, offers: [{ offer_id: 'q1', version: 1, status: 'saved' }], plan, drafts: [] } as unknown as DemoSession;
     const draft = { draft_id: 'bridge-1', kind: 'rfq' as const, status: 'draft_unsent' as const, company_id: 'solara-cables', material_id: 'copper', recipient_label: 'Swift', subject: 'Earlier delivery', body: bridgeBody, created_at: '2026-10-14', plan_id: 'p1', offer_versions: { q1: 1 }, selected_offer_id: 'q1' };
     const saved = { ...session, rfq: { draft_id: 'bridge-1', status: 'draft_unsent', bridge: true, company_id: 'solara-cables', plan_id: 'p1', offer_versions: { q1: 1 }, supplier: 'Swift', material: 'copper', quantity: '1333.30', quantity_unit: 'kg', need_by: '2026-10-20', arithmetic_bridge_quantity: '1333.30', text: bridgeBody, total_cost: null }, drafts: [draft] } as unknown as DemoSession;
     const operatorTurn = vi.fn().mockResolvedValue({ status: 'completed', company_id: 'solara-cables', context_version: 3, action_result: { tool: 'prepare_rfq' }, session: saved, workspace: { drafts: [draft] } });
     const refresh = vi.fn().mockResolvedValue(saved);
     const onSaved = vi.fn();
-    const result = await prepareBridgeDraft({ operatorTurn, session: refresh }, session, { ...plan, supply_coverage: coverage }, onSaved);
+    let current = source === 'existing draft' ? saved : session;
+    if (source === 'fresh comparison') {
+      const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...session, plan: null }, epoch: 0 });
+      current = applyDemoResult(loaded, { type: 'plan', plan: { ...plan, supply_coverage: coverage }, epoch: 0 }).session!;
+    }
+    const result = await prepareBridgeDraft({ operatorTurn, session: refresh }, current, { ...plan, supply_coverage: coverage }, onSaved);
     expect(operatorTurn).toHaveBeenCalledWith('csrf', expect.stringContaining('Prepare an unsent earlier-delivery or bridge RFQ'), 3);
     expect(refresh).toHaveBeenCalledOnce();
     expect(result.draft_id).toBe('bridge-1');
@@ -175,4 +180,30 @@ describe('reviewed supply assessment', () => {
     await expect(prepareBridgeDraft({ operatorTurn: vi.fn().mockResolvedValue({ status: 'needs_clarification', session, workspace: { drafts: [] } }), session: vi.fn().mockResolvedValue(refreshed) }, session, { ...plan, supply_coverage: coverage }, onSaved)).rejects.toThrow();
     expect(onSaved).not.toHaveBeenCalled();
   });
+});
+
+
+it('keeps fresh comparisons, recovery and offer edits coherent without reload and rejects stale epochs', () => {
+  const session = { session_id: 's1', csrf_token: 'csrf', context_version: 3, company: currentCompany, offers: [currentOffer], plan: null, recovery: null } as unknown as DemoSession;
+  let state = applyDemoResult(initialDemoState, { type: 'session', session, epoch: 0 });
+  const first = { ...plan, supply_coverage: coverage };
+  state = applyDemoResult(state, { type: 'plan', plan: first, request: { material: 'copper' } as never, epoch: 0 });
+  expect(bridgeEligibility(state.session, state.plan, state.plan?.supply_coverage)).toBe(true);
+  expect(state.session?.plan).toEqual(first);
+  const revised = { ...first, plan_id: 'p2', supply_coverage: { ...coverage, plan_id: 'p2' } };
+  state = applyDemoResult(state, { type: 'plan', plan: revised, epoch: 0 });
+  expect(bridgeEligibility(state.session, revised, revised.supply_coverage)).toBe(true);
+  expect(bridgeEligibility(state.session, first, coverage)).toBe(false);
+  const scenario = { ...revised, plan_id: 'p3', supply_coverage: { ...coverage, plan_id: 'p3' } };
+  const recovery = { comparison_id: 'r1', baseline: revised, scenario, scenario_supply_coverage: scenario.supply_coverage } as never;
+  state = applyDemoResult(state, { type: 'recovery', recovery, epoch: 0 });
+  expect(bridgeEligibility(state.session, state.plan, state.plan?.supply_coverage)).toBe(true);
+  expect(state.session?.recovery).toEqual(recovery);
+  state = applyDemoResult(state, { type: 'offer', offer: { ...currentOffer, version: 2 }, epoch: 0 });
+  expect(state.session?.offers[0].version).toBe(2);
+  expect(state.session?.plan).toBeNull();
+  expect(state.session?.recovery).toBeNull();
+  expect(bridgeEligibility(state.session, scenario, scenario.supply_coverage)).toBe(false);
+  state = applyDemoResult(state, { type: 'invalidate' });
+  expect(applyDemoResult(state, { type: 'plan', plan: revised, epoch: 0 })).toBe(state);
 });

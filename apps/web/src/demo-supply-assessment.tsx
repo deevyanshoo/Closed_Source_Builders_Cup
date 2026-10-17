@@ -58,7 +58,6 @@ export async function prepareBridgeDraft(api: BridgeApi, session: DemoSession, p
   const selectedSupplier = plan.alternatives.find(item => item.offer_id === selectedId)!.supplier;
   const companyId = session.company!.company_id;
   const contextVersion = session.context_version!;
-  const priorIds = new Set((session.drafts ?? []).map(draft => draft.draft_id));
   const turn = await api.operatorTurn(session.csrf_token,
     `Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan ${plan.plan_id}. Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.`, contextVersion);
   const refreshed = await api.session();
@@ -71,7 +70,7 @@ export async function prepareBridgeDraft(api: BridgeApi, session: DemoSession, p
     turn.company_id !== companyId || turn.context_version !== contextVersion ||
     turn.session?.rfq?.draft_id !== rfq.draft_id || turn.session.rfq?.text !== rfq.text ||
     !turn.workspace?.drafts?.some(item => item.draft_id === rfq.draft_id && item.body === rfq.text) ||
-    rfq.bridge !== true || rfq.status !== 'draft_unsent' || rfq.company_id !== companyId || rfq.total_cost !== null || priorIds.has(rfq.draft_id) ||
+    rfq.bridge !== true || rfq.status !== 'draft_unsent' || rfq.company_id !== companyId || rfq.total_cost !== null ||
     rfq.plan_id !== plan.plan_id || !sameVersions(rfq.offer_versions, plan.offer_versions) ||
     rfq.supplier !== selectedSupplier || rfq.material !== plan.material || rfq.quantity_unit !== plan.quantity_unit ||
     !positiveQuantity(rfq.quantity) || rfq.need_by !== coverage.bridge_needed_by ||

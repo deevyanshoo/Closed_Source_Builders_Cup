@@ -41,6 +41,14 @@ export type DemoAction = { type: 'session'; session: DemoSession; epoch: number 
 const currentVersions = (offers: OfferView[], versions: Record<string, number>) => Object.entries(versions).every(([id, version]) => offers.some(o => o.offer_id === id && o.version === version && acceptedStatus(o.status)));
 
 export function applyDemoResult(state: DemoState, action: DemoAction): DemoState {
+  const next = reduceDemoResult(state, action);
+  if (next === state || !next.session || action.type === 'session') return next;
+  // Accepted manual responses are also the current snapshot used by guarded actions.
+  return { ...next, session: { ...next.session, offers: next.offers, plan: next.plan,
+    plan_request: next.planRequest, recovery: next.recovery, rfq: next.rfq } };
+}
+
+function reduceDemoResult(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset-start' || action.type === 'company-start') return { ...initialDemoState, epoch: state.epoch + 1 };
   if (action.type === 'invalidate') return { ...state, epoch: state.epoch + 1, plan: null, planRequest: null, recovery: null, rfq: null, reviewed: false, dirty: true };
   if (action.type === 'scenario-edit') return { ...state, epoch: state.epoch + 1, rfq: null, reviewed: false, dirty: true };

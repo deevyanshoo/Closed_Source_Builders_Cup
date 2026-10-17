@@ -198,3 +198,13 @@ def test_rfq_handoff_rejects_history_and_preserves_replay_idempotency(monkeypatc
             await socket.frames.put('{"type":"stop"}')
             await asyncio.wait_for(task, 2)
     asyncio.run(scenario())
+
+@pytest.mark.parametrize('message', [
+    'Prepare a bridge RFQ only if we approve the extra cost.',
+    'Prepare a bridge RFQ unless we reject the extra cost.',
+    'Prepare a bridge RFQ until we approve the extra cost.',
+    'Prepare a bridge RFQ once we approve the extra cost.',
+    'Prepare a bridge RFQ after approval.',
+])
+def test_conditional_settled_generic_rfq_has_no_regular_fallback(monkeypatch, message):
+    run_case(monkeypatch, message, expected=None)

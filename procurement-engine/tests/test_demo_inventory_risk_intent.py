@@ -80,7 +80,15 @@ def test_actual_text_and_native_operator_do_not_substitute_generic_stock(signal)
 def test_native_operate_workspace_keeps_signal_request_on_operator_path(message):
     async def scenario():
         store, session = setup()
-        socket, provider = Socket(start(session)), NamedProvider()
+        audio_received = asyncio.Event()
+
+        class RiskProvider(NamedProvider):
+            async def send_realtime_input(self, **kwargs):
+                if audio := kwargs.get('audio'):
+                    self.received_audio.append(audio)
+                    audio_received.set()
+
+        socket, provider = Socket(start(session)), RiskProvider()
         calls = []
 
         async def operate(words, version, key):
@@ -98,8 +106,17 @@ def test_native_operate_workspace_keeps_signal_request_on_operator_path(message)
             socket, session=session, store=store, operate_workspace=operate,
             workspace_tools=workspace, client_factory=connection(provider)))
         await next_type(socket, 'ready')
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        await asyncio.wait_for(audio_received.wait(), 2)
+        await provider.events.put(NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+        await provider.events.put(NS(tool_call=None, server_content=NS(
+            input_transcription=NS(text=message, finished=True))))
+        await provider.events.put(NS(tool_call=None, server_content=None,
+            voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
         await provider.events.put(NS(tool_call=NS(function_calls=[NS(
-            name='operate_workspace', args={'message': message}, id='risk-intent')]),
+            # The tool argument cannot supply or replace the current user request.
+            name='operate_workspace', args={'message': 'Show current stock.'}, id='risk-intent')]),
             server_content=None))
         result = (await next_type(socket, 'tool_result'))['result']
         assert result['status'] == 'unavailable'

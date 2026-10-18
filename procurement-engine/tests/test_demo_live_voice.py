@@ -43,11 +43,15 @@ class Provider:
     async def send_realtime_input(self, **kwargs):
         if audio := kwargs.get('audio'):
             self.received_audio.append(audio)
+            await self.events.put(NS(tool_call=None, server_content=None,
+                voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+            await self.events.put(NS(tool_call=None, server_content=NS(
+                input_transcription=NS(text='Watch copper', finished=True))))
+            await self.events.put(NS(tool_call=None, server_content=None,
+                voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
             await self.events.put(NS(tool_call=NS(function_calls=[NS(
                 name='operate_workspace', args={'message': 'Watch copper'}, id='call-1')]),
-                server_content=NS(input_transcription=NS(text='Watch copper'),
-                                  output_transcription=None, interrupted=False,
-                                  model_turn=None, turn_complete=False)))
+                server_content=None))
 
     async def send_tool_response(self, *, function_responses):
         self.tool_response = function_responses
@@ -255,12 +259,20 @@ def test_expired_session_closes_open_socket():
 
 def test_repeated_provider_call_id_reuses_verified_operator_turn():
     class DuplicateProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses.response)
+            await super().send_tool_response(function_responses=function_responses)
+
         async def send_realtime_input(self, **kwargs):
             await super().send_realtime_input(**kwargs)
             if kwargs.get('audio'):
-                event = self.events.get_nowait()
-                self.events.put_nowait(event)
-                self.events.put_nowait(event)
+                self.events.put_nowait(NS(tool_call=NS(function_calls=[NS(
+                    name='operate_workspace', args={'message': 'Watch copper'}, id='call-1')]),
+                    server_content=None))
 
     async def scenario():
         store, session = setup()
@@ -280,10 +292,17 @@ def test_repeated_provider_call_id_reuses_verified_operator_turn():
         await next_type(socket, 'ready')
         await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
         await next_type(socket, 'tool_result')
+        # Pending retries coalesce; a retry after completion replays the cache.
+        await provider.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='operate_workspace', args={'message': 'Watch copper'}, id='call-1')]),
+            server_content=None))
         await next_type(socket, 'tool_result')
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
-        assert len(keys) == 2 and keys[0] == keys[1]
+        assert len(keys) == 1
+        assert len(provider.responses) == 2
+        assert provider.responses[0] == provider.responses[1]
+        assert provider.responses[0]["turn_id"] == "one"
     asyncio.run(scenario())
 
 
@@ -510,6 +529,12 @@ def test_oversized_workspace_keeps_only_bounded_current_selection_for_voice():
     class ReadProvider(Provider):
         async def send_realtime_input(self, **kwargs):
             if kwargs.get('audio'):
+                await self.events.put(NS(tool_call=None, server_content=None,
+                    voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+                await self.events.put(NS(tool_call=None, server_content=NS(
+                    input_transcription=NS(text='Read the current workspace.', finished=True))))
+                await self.events.put(NS(tool_call=None, server_content=None,
+                    voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
                 await self.events.put(NS(tool_call=NS(function_calls=[NS(
                     name='read_workspace', args={}, id='read-call')]), server_content=None))
 

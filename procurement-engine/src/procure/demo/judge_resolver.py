@@ -522,6 +522,13 @@ def resolve_judge_turn(snapshot: dict, message: str, *, now: datetime,
         result['missing_inputs'] = ['company']
         result['answer'] = 'Choose the active company workspace before using its evidence.'
         return result
+    if integration_request(snapshot, message) == 'read_market':
+        read = integration_read(snapshot, 'read_market', message)
+        result = _base(snapshot, 'internal_read')
+        result['answer'] = read['assistant_text']
+        result['workspace'] = read.get('workspace', {})
+        result['evidence_refs'] = [f"market:{snapshot['prediction_context']['market_run_hash']}"]
+        return result
     bridge = _bridge_intent(snapshot, message)
     if bridge is not None:
         return bridge

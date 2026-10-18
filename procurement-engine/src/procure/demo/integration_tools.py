@@ -34,7 +34,21 @@ def navigation_request(message: str) -> str | None:
 def integration_request(snapshot: dict, message: str) -> str | None:
     """Recognize narrow fact reads or an explicit reviewable shipment delay."""
     text = message.casefold()
-    if is_workspace_news_question(message) or _EXTERNAL_TOPIC.search(text):
+    # A user forbidding public search is still asking for an internal read.
+    # Remove only the explicit prohibition before checking for positive search
+    # intent; an affirmative search request must keep its consent path.
+    intent_text = re.sub(
+        r"\b(?:do\s+not|don't|never|without)\s+(?:search(?:ing)?|brows(?:e|ing))\s+"
+        r"(?:the\s+)?(?:internet|web)\b", '', text)
+    # Internal market reference and existing operations facts answer these
+    # reads. A question about timing does not authorize a purchase.
+    if (re.search(r'\b(?:forecast|prediction|market|buy\s+(?:now|versus\s+wait)|wait\s+or\s+buy|what\s+if\b.{0,40}\bprice)\b', text)
+            and re.search(r'\b(?:our|my|current|this|workspace)\b', text)
+            and not re.search(r'\b(?:send|place|submit|approve|execute|purchase\s+now|search|browse|internet|news|headlines?|latest)\b', intent_text)
+            and not any(c['company_id'] != snapshot['company_id'] and c['name'].casefold() in text
+                        for c in list_companies())):
+        return 'read_market'
+    if is_workspace_news_question(message) or _EXTERNAL_TOPIC.search(intent_text):
         return None
     if any(c['company_id'] != snapshot['company_id'] and c['name'].casefold() in text
            for c in list_companies()):
@@ -217,6 +231,29 @@ def _read_routes(snapshot, message):
 
 def integration_read(snapshot: dict, kind: str, message: str = '') -> dict:
     company = snapshot['company']['name']
+    if kind == 'read_market':
+        from .market_prediction import market_read_model
+        from .operations_decision import preview_from_snapshot
+        named, own = _material_scope(snapshot, message)
+        if named - own:
+            return {'assistant_text': 'That material is outside this company workspace. Choose an owned material.',
+                    'workspace': {}}
+        material_id = next(iter(named), None) or snapshot.get('selected_material_id') or snapshot['company']['materials'][0]['material_id']
+        if material_id not in own:
+            return {'assistant_text': 'Choose a material from this company workspace.', 'workspace': {}}
+        market = market_read_model()
+        preview = preview_from_snapshot(snapshot, material_id, market)
+        gap = (preview.get('service_trace') or {}).get('first_gap_date')
+        if preview['status'] == 'REPLAN_REQUIRED':
+            action = f'The current dated supply path leaves a stock gap from {gap}; replan before committing.'
+        else:
+            needed = ', '.join(field.replace('_', ' ') for field in preview['missing_inputs'][:4])
+            action = f'An actionable buy or wait decision needs {needed}.'
+        answer = (f'{action} {company} {material_id}: market reference is dated '
+                  f"{market['anchor_market_session_date']} and its influence is "
+                  f"{preview['market_influence']['status'].lower().replace('_', ' ')}. "
+                  'Accepted quote costs stay fixed. No order or currency exchange was made.')
+        return {'assistant_text': answer, 'workspace': {'prediction': preview}}
     if kind == 'read_routes':
         return _read_routes(snapshot, message)
     named, own = _material_scope(snapshot, message)

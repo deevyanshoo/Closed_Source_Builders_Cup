@@ -255,8 +255,14 @@ def test_coverage_renewal_requires_fresh_audio_and_vad(workspace, tool):
         # ID cannot borrow the previous generation's grounded answer.
         provider.stale = True
         socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
-        frames = receive_turn(socket)
-        assert not any('11,400' in f.get('text', '') for f in frames)
+        # A renewed transport denies stale calls without publishing a UI result.
+        frames = []
+        while not frames or frames[-1]['type'] != 'turn_complete':
+            frames.append(socket.receive_json())
+        assert provider.tool_response.id == 'operate-3'
+        assert provider.tool_response.response['status'] == 'unavailable'
+        assert provider.tool_response.response['action_applied'] is False
+        assert not any(f['type'] == 'tool_result' or '11,400' in f.get('text', '') for f in frames)
         socket.send_json({'type': 'stop'})
     assert protected(client) == before and operator.calls == []
     assert provider.executed_messages == []

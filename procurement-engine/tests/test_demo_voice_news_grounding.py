@@ -2,12 +2,22 @@
 from contextlib import asynccontextmanager
 from types import SimpleNamespace as NS
 import json
+import base64
 import pytest
 from fastapi.testclient import TestClient
 from procure.demo.app import create_app
 from procure.demo.company import list_companies, get_company
 from test_demo_proactive_risks_app import NOW, News
 from test_demo_live_voice import Provider
+
+async def current_question(provider):
+    await provider.events.put(NS(tool_call=None, server_content=None,
+        voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+    await provider.events.put(NS(tool_call=None, server_content=NS(
+        input_transcription=NS(text=QUESTION, finished=True))))
+    await provider.events.put(NS(tool_call=None, server_content=None,
+        voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='1s')))
+
 
 QUESTION = "What's happening in the world that can affect my business procurement?"
 
@@ -17,6 +27,7 @@ def test_world_briefing_reads_news_on_first_turn_without_research_or_mutation(to
     class NewsProvider(Provider):
         async def send_realtime_input(self, **kwargs):
             if kwargs.get('audio'):
+                await current_question(self)
                 await self.events.put(NS(tool_call=NS(function_calls=[NS(name=tool,
                     args={'message': QUESTION} if tool == 'prepare_research' else {}, id='news')]),
                     server_content=None))
@@ -35,7 +46,7 @@ def test_world_briefing_reads_news_on_first_turn_without_research_or_mutation(to
         with client.websocket_connect('wss://demo.test/api/demo/voice/live', headers={'origin': 'https://demo.test'}) as ws:
             ws.send_json({'type': 'start', 'csrf_token': before['csrf_token'], 'expected_context_version': before['context_version']})
             assert ws.receive_json()['type'] == 'ready'
-            ws.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            ws.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             events = []
             while True:
                 event = ws.receive_json(); events.append(event)
@@ -72,6 +83,7 @@ def test_news_unavailable_is_spoken_as_a_coverage_gap_without_private_error():
     class NewsProvider(Provider):
         async def send_realtime_input(self, **kwargs):
             if kwargs.get('audio'):
+                await current_question(self)
                 await self.events.put(NS(tool_call=NS(function_calls=[NS(name='read_news',args={},id='news')]),server_content=None))
     provider = NewsProvider()
     @asynccontextmanager
@@ -83,7 +95,7 @@ def test_news_unavailable_is_spoken_as_a_coverage_gap_without_private_error():
         with client.websocket_connect('wss://demo.test/api/demo/voice/live', headers={'origin': 'https://demo.test'}) as ws:
             ws.send_json({'type':'start','csrf_token':before['csrf_token'],'expected_context_version':1})
             assert ws.receive_json()['type'] == 'ready'
-            ws.send_json({'type':'audio','data':'AQACAA=='})
+            ws.send_json({'type':'audio','data':base64.b64encode(b'\x01\x00' * 16_000).decode()})
             events=[]
             while True:
                 event=ws.receive_json();events.append(event)
@@ -103,7 +115,13 @@ def test_large_workspace_preserves_news_when_other_model_context_is_trimmed():
     from test_demo_live_voice import Socket, setup, start, connection, next_type
     async def scenario():
         store, session = setup()
-        provider, socket = Provider(), Socket(start(session))
+        class ReadProvider(Provider):
+            async def send_realtime_input(self, **kwargs):
+                if kwargs.get('audio'):
+                    await current_question(self)
+                    await self.events.put(NS(tool_call=NS(function_calls=[NS(
+                        name='read_workspace', args={}, id='read')]), server_content=None))
+        provider, socket = ReadProvider(), Socket(start(session))
         async def tool(*_):
             return {'turn_id': 'news', 'company_id': session.company_id, 'context_version': 1,
                 'status': 'completed', 'assistant_text': 'Dated news is ready.', 'agent_steps': [],
@@ -114,7 +132,8 @@ def test_large_workspace_preserves_news_when_other_model_context_is_trimmed():
         task = asyncio.create_task(live_voice.run_live_voice(socket, session=session, store=store,
             operate_workspace=lambda *_:None, workspace_tools=tool, client_factory=connection(provider)))
         await next_type(socket, 'ready')
-        await provider.events.put(NS(tool_call=NS(function_calls=[NS(name='read_workspace', args={}, id='read')]),server_content=None))
+        await socket.frames.put(json.dumps({'type': 'audio',
+            'data': base64.b64encode(b'\x01\x00' * 16_000).decode()}))
         await next_type(socket, 'tool_result'); await next_type(socket, 'turn_complete')
         assert provider.tool_response.response['workspace']['news_brief']['headlines'][0]['title']=='Copper port closure'
         assert 'company' not in provider.tool_response.response['workspace']

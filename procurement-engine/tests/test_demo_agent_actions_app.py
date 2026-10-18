@@ -1,7 +1,9 @@
 """Agent actions operate the same owned synthetic workspace as the UI."""
+import json
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from types import SimpleNamespace as NS
+import anyio
 from fastapi.testclient import TestClient
 import pytest
 
@@ -632,13 +634,32 @@ def test_native_voice_repeat_generic_turn_reuses_paid_operator_result(monkeypatc
     monkeypatch.setattr(live_voice, '_PROCESS_STARTS', 0)
 
     class DuplicateProvider(LiveProvider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+            self.activity_offsets = []
+
         async def send_realtime_input(self, **kwargs):
-            if kwargs.get('audio'):
-                event = NS(tool_call=NS(function_calls=[NS(
+            if audio := kwargs.get('audio'):
+                start_bytes = sum(len(chunk.data) for chunk in self.received_audio)
+                start_offset = f'{start_bytes / 32_000}s'
+                end_offset = f'{(start_bytes + len(audio.data)) / 32_000}s'
+                self.activity_offsets.append((start_offset, end_offset))
+                self.received_audio.append(audio)
+                await self.events.put(NS(tool_call=None, server_content=None,
+                    voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset=start_offset)))
+                await self.events.put(NS(tool_call=None, server_content=NS(
+                    input_transcription=NS(text='Inspect copper inventory', finished=True))))
+                await self.events.put(NS(tool_call=None, server_content=None,
+                    voice_activity=NS(voice_activity_type='ACTIVITY_END',
+                                      audio_offset=end_offset)))
+                await self.events.put(NS(tool_call=NS(function_calls=[NS(
                     name='operate_workspace', args={'message': 'Inspect copper inventory'},
-                    id='same-generic-call')]), server_content=None)
-                await self.events.put(event)
-                await self.events.put(event)
+                    id='same-generic-call')]), server_content=None))
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses.response)
+            await super().send_tool_response(function_responses=function_responses)
 
     provider, operator_provider = DuplicateProvider(), OperatorProvider(intent='inspect', action='none', evidence=())
 
@@ -652,17 +673,55 @@ def test_native_voice_repeat_generic_turn_reuses_paid_operator_result(monkeypatc
         session = voice_client.get('/api/demo/session').json()
         with voice_client.websocket_connect('wss://demo.test/api/demo/voice/live',
                                             headers={'origin': 'https://demo.test'}) as socket:
+            async def bounded_receive():
+                with anyio.fail_after(3):
+                    message = await socket._send_rx.receive()
+                socket._raise_on_close(message)
+                return json.loads(message['text'])
+
+            def next_event():
+                return socket.portal.call(bounded_receive)
+
             socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
                               'expected_context_version': 1})
-            while socket.receive_json()['type'] != 'ready':
-                pass
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            for _ in range(8):
+                if next_event()['type'] == 'ready':
+                    break
+            else:
+                pytest.fail('voice socket did not become ready')
             results = []
-            while len(results) < 2:
-                event = socket.receive_json()
-                assert event['type'] != 'error', event
-                if event['type'] == 'tool_result':
-                    results.append(event['result'])
-            assert results[0]['turn_id'] == results[1]['turn_id']
+            for _ in range(2):
+                # A completed retry follows a fresh, settled spoken request.
+                socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+                for _ in range(16):
+                    event = next_event()
+                    assert event['type'] != 'error', event
+                    if event['type'] == 'tool_result':
+                        results.append(event['result'])
+                        break
+                else:
+                    pytest.fail('voice socket did not return a tool result')
+                for _ in range(16):
+                    event = next_event()
+                    assert event['type'] != 'error', event
+                    if event['type'] == 'turn_complete':
+                        break
+                else:
+                    pytest.fail('voice socket did not complete its turn')
+            assert results[0] == results[1]
+            assert results[0]['read_only'] is True
+            assert results[0].get('action_result') is None
+            assert len(provider.received_audio) == 2
+            assert provider.activity_offsets == [
+                ('0.0s', '0.000125s'), ('0.000125s', '0.00025s')]
             assert len(operator_provider.calls) == 3
+            assert {role for role, _ in operator_provider.calls} == {
+                'coordinator', 'evidence', 'procurement'}
+            assert len(provider.responses) == 2
+            assert provider.responses[0] == provider.responses[1]
+            assert provider.responses[0]['turn_id'] == results[0]['turn_id']
             socket.send_json({'type': 'stop'})
+        current = voice_client.get('/api/demo/session').json()
+        assert current['context_version'] == session['context_version']
+        assert current['drafts'] == session['drafts']
+        assert current['simulated_outbox'] == session['simulated_outbox']

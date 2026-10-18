@@ -5,6 +5,7 @@ import json
 import sys
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -163,6 +164,7 @@ class Provider:
         self.responses = asyncio.Queue()
         self.audio = asyncio.Event()
         self.audio_bytes = 0
+        self.offset_base = Decimal(0)
         self.ends = 0
         self.client_content = asyncio.Queue()
 
@@ -195,6 +197,12 @@ class Provider:
                 if direction == 'output' else None), turn_complete=complete)))
 
     async def activity(self, kind, offset):
+        # Test offsets are relative to the end of the initial request. Keep the
+        # stream cumulative across audio_end; negative malformed offsets stay invalid.
+        if isinstance(offset, str) and offset.endswith('s'):
+            value = Decimal(offset[:-1])
+            if value.is_finite() and value >= 0:
+                offset = f'{value + self.offset_base:f}s'
         await self.events.put(NS(tool_call=None, server_content=None,
             voice_activity=NS(voice_activity_type=kind, audio_offset=offset)))
 
@@ -249,6 +257,15 @@ def turn(session, status, *, proposal=None, text='Review the public query.', wor
 
 
 async def prepare(socket, provider):
+    # A real current request precedes the model's query readback. No proposal or
+    # consent exists during this PCM/VAD/complete-ASR turn.
+    await send_pcm(socket, provider, pcm=b'\x01\x00' * 16_000)
+    await provider.activity('ACTIVITY_START', '0.100s')
+    await provider.spoken('input', QUERY, finished=True)
+    await provider.activity('ACTIVITY_END', '0.900s')
+    await socket.next('transcript', 'input')
+    provider.offset_base = Decimal(provider.audio_bytes) / Decimal(32_000)
+    provider.audio.clear()
     await provider.call('prepare_research', {'message': QUERY}, 'prepare-1')
     result = await socket.next('tool_result')
     assert result['result']['proposal']['proposal_id'] == 'proposal-1'

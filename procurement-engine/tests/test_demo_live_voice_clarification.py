@@ -139,17 +139,17 @@ def workspace(monkeypatch):
         yield client, provider, operator
 
 
-def receive_turn(socket):
+def receive_turn(socket, *, stop_at_result=False):
     frames = []
     while True:
         frame = socket.receive_json()
         frames.append(frame)
-        if frame['type'] == 'error' or (frame['type'] == 'turn_complete'
+        if (stop_at_result and frame['type'] == 'tool_result') or frame['type'] == 'error' or (frame['type'] == 'turn_complete'
                 and any(item['type'] == 'tool_result' for item in frames)):
             return frames
 
 
-def ask(client, *, audio_bytes=4):
+def ask(client, *, audio_bytes=4, stop_at_result=False):
     session = client.get('/api/demo/session').json()
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
                                   headers={'origin': 'https://demo.test'}) as socket:
@@ -159,7 +159,7 @@ def ask(client, *, audio_bytes=4):
         for offset in range(0, audio_bytes, 32000):
             chunk = PCM * (min(32000, audio_bytes - offset) // len(PCM))
             socket.send_json({'type': 'audio', 'data': base64.b64encode(chunk).decode()})
-        frames = receive_turn(socket)
+        frames = receive_turn(socket, stop_at_result=stop_at_result)
         socket.send_json({'type': 'stop'})
     return frames
 
@@ -367,7 +367,22 @@ def test_nonbridge_call_never_executes_closed_bridge_asr(workspace, change_plan)
         operator.intent, operator.action = 'recovery', 'recovery'
         provider.model_message = 'Read the current plan'
         socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        # Closed bridge ASR cannot authorize this new model call.
+        while socket.receive_json()['type'] != 'turn_complete':
+            pass
+        assert provider.tool_response.response['status'] == 'needs_clarification'
+        assert provider.tool_response.response['action_applied'] is False
+        assert provider.executed_messages == [BRIDGE]
+        assert protected(client) == before
+        # A different call ID and real current microphone ASR/VAD permit a read.
+        provider.input_script = [
+            event(activity=('ACTIVITY_START', '0.00025s')),
+            event(text='Read the current plan'),
+            event(activity=('ACTIVITY_END', '0.000375s')),
+        ]
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
         result = tool_result(receive_turn(socket))
+        assert provider.tool_response.id == 'operate-3'
         assert provider.executed_messages == [BRIDGE, 'Read the current plan']
         assert result['read_only'] is True and result.get('action_result') is None
         assert protected(client) == before
@@ -465,7 +480,11 @@ def test_optional_marker_adversarial_input_cannot_save(workspace, monkeypatch, t
         script += [.02, provider.caption(' ' + BRIDGE)] * 5
     provider.input_script = script
     before = protected(client)
-    frames = ask(client)
+    # No ASR means no spoken turn is deliverable; inspect the denied tool result.
+    frames = ask(client, stop_at_result=case == 'no_asr')
+    if case == 'no_asr':
+        assert not any(frame['type'] == 'audio' or frame.get('direction') == 'output'
+                       for frame in frames)
     result = tool_result(frames)
     assert result['status'] == 'needs_clarification' and result.get('action_result') is None
     assert protected(client) == before and operator.calls == []

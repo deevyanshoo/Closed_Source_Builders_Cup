@@ -21,6 +21,10 @@ def cue_file(tmp_path, *, rate=24000, channels=1, width=2, seconds=0.05):
 
 async def claimed_research(research):
     store, session, socket, provider, calls, task = await scenario(research=research)
+    await send_pcm(socket, provider)
+    await provider.activity('ACTIVITY_START', '0.100s')
+    await provider.spoken('input', QUERY, finished=True)
+    await provider.activity('ACTIVITY_END', '0.600s')
     await prepare(socket, provider)
     await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
     await socket.next('turn_complete')

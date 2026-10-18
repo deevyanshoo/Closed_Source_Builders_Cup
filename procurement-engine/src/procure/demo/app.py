@@ -292,6 +292,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'watch_items': deepcopy(value.watch_items), 'buyer_draft': deepcopy(value.buyer_draft),
                 'selected_material_id': value.selected_material_id,
                 'simulated_outbox': deepcopy(value.simulated_outbox)}
+        from .market_prediction import market_read_model, influence_for_material
+        market = market_read_model()
+        selected_market_material = value.selected_material_id or snapshot['company']['materials'][0]['material_id']
+        snapshot['prediction_context'] = influence_for_material(snapshot['company'], selected_market_material, market)
         snapshot['carbon_assessment'] = current_carbon_assessment(
             value, active_plan, validate_plan_current)
         snapshot['shipments'] = dispatch_view(value)
@@ -435,6 +439,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         fields['carbon_assessment'] = snapshot.get('carbon_assessment')
         fields['shipments'] = snapshot.get('shipments')
         fields['completed_research'] = snapshot.get('completed_research', [])
+        fields['prediction_context'] = snapshot.get('prediction_context')
         return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
                                          default=str).encode()).hexdigest()
 
@@ -993,6 +998,52 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     @app.get('/api/demo/companies')
     async def companies():
         return {'companies': list_companies()}
+
+    @app.get('/api/demo/v1/market-forecasts')
+    async def market_forecasts(request: Request):
+        from .market_prediction import market_read_model
+        value = session(request)
+        with value.lock:
+            active(value)
+        try:
+            return market_read_model()
+        except (OSError, ValueError, KeyError, TypeError):
+            raise SessionError('market_unavailable', 'Verified market reference is unavailable.', 503)
+
+    @app.post('/api/demo/v1/company-decisions/preview')
+    async def company_decision_preview(request: Request):
+        from .market_prediction import market_read_model
+        from .operations_decision import preview_from_snapshot
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('expected_context_version', 'idempotency_key'), ('material_id', 'overrides'))
+        overrides = data.get('overrides')
+        if overrides == {}:
+            overrides = None
+        with value.lock:
+            context(value, data, explicit=True)
+            material_id = data.get('material_id') or value.selected_material_id or get_company(value.company_id)['materials'][0]['material_id']
+            if not isinstance(material_id, str) or material_id not in {
+                    row['material_id'] for row in get_company(value.company_id)['materials']}:
+                raise SessionError('material_not_found', 'Choose a material from this company.', 404)
+            key, replay = start(value, data, 'company_decision_preview')
+            if replay is not None:
+                if value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_context', 'Workspace changed since this preview.', 409)
+                return replay
+            try:
+                snapshot = operator_snapshot(value, include_risks=False)
+                try:
+                    result = preview_from_snapshot(snapshot, material_id, market_read_model(), overrides=overrides)
+                except (ValueError, TypeError, OverflowError):
+                    raise SessionError('invalid_override', 'Use bounded decimal quantities, dates and at most 12 dated receipts.', 422)
+                result['request_idempotency_key'] = key
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = snapshot_marker(snapshot)
+                return result
+            except Exception:
+                failed(value, key)
+                raise
 
     @app.get('/api/demo/judge/config')
     async def judge_config(request: Request):
@@ -1568,6 +1619,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                                   provider_call='mocked' if operator_injected else 'real',
                                                   context_cache=context_cache,
                                                   cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest()))
+                    if resolved is not None and resolved.get('kind') == 'internal_read':
+                        outcome['workspace'] = deepcopy(resolved.get('workspace', {}))
             except (OperatorUnavailable, OperatorValidationError) as exc:
                 category = 'provider' if isinstance(exc, OperatorUnavailable) else 'validation'
                 fingerprint = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
@@ -2067,6 +2120,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                             result['workspace'] = {'company': deepcopy(snapshot['company']),
                                 'buyer_draft': deepcopy(value.buyer_draft),
                                 'selected_material_id': value.selected_material_id,
+                                'prediction_context': deepcopy(snapshot['prediction_context']),
                                 'drafts': [{key: item[key] for key in
                                             ('draft_id', 'kind', 'status', 'material_id', 'recipient_label', 'subject')}
                                            for item in visible_drafts(value)[-12:]],

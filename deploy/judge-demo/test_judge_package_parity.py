@@ -7,7 +7,8 @@ ROOT=Path(__file__).resolve().parents[2]
 def test_runtime_config_allowlist_covers_route_replay_hindi_carbon_and_news():
     tree=ast.parse((ROOT/'deploy/judge-demo/prepare_package.py').read_text())
     literals={node.value for node in ast.walk(tree) if isinstance(node,ast.Constant) and isinstance(node.value,str)}
-    for name in ('route_display_v1.json','judge_suez_2021_v1.json','judge_hindi_case_v1.json','locations_v1.json','news_sources_v1.json','carbon_factors_v1.json'):
+    for name in ('route_display_v1.json','judge_suez_2021_v1.json','judge_hindi_case_v1.json','locations_v1.json','news_sources_v1.json','carbon_factors_v1.json',
+                 'market_reference_snapshot_v1.json','market_reference_manifest_v1.json','market_reference_registry_v1.json','market_reference_sources_v1.json'):
         assert name in literals, f'missing runtime package asset: {name}'
         assert (ROOT/'procurement-engine/config'/name).is_file()
 
@@ -33,7 +34,8 @@ def test_actual_prepared_package_contains_runtime_config_and_public_share_image(
     assert run.returncode==0,run.stderr
     manifest=json.loads((package/'source-manifest.json').read_text())
     records={row['path']:row for row in manifest['files']}
-    assets=['procurement-engine/config/'+name for name in ('route_display_v1.json','judge_suez_2021_v1.json','judge_hindi_case_v1.json','locations_v1.json','news_sources_v1.json','carbon_factors_v1.json')]
+    assets=['procurement-engine/config/'+name for name in ('route_display_v1.json','judge_suez_2021_v1.json','judge_hindi_case_v1.json','locations_v1.json','news_sources_v1.json','carbon_factors_v1.json',
+                                                            'market_reference_snapshot_v1.json','market_reference_manifest_v1.json','market_reference_registry_v1.json','market_reference_sources_v1.json')]
     assets+=['apps/web/dist/assets/zoorq-share-card.png','apps/web/dist/index.html','procurement-engine/src/procure/demo/experience_service.py']
     for path in assets:
         assert path in records

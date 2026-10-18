@@ -45,7 +45,12 @@ def owned_risk_result(session):
 
 async def native_result(name, mutate=lambda result, session: None):
     store, session = setup()
-    socket, provider = Socket(start(session)), Provider()
+    class RiskProvider(Provider):
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+    socket, provider = Socket(start(session)), RiskProvider()
     result = owned_risk_result(session)
     mutate(result, session)
     original = deepcopy(result)
@@ -63,6 +68,17 @@ async def native_result(name, mutate=lambda result, session: None):
         socket, session=session, store=store, operate_workspace=operate,
         workspace_tools=workspace, client_factory=connection(provider)))
     await next_type(socket, 'ready')
+    await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+    async def wait_for_mic():
+        while not provider.received_audio:
+            await asyncio.sleep(0)
+    await asyncio.wait_for(wait_for_mic(), 2)
+    await provider.events.put(NS(tool_call=None, server_content=None,
+        voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+    await provider.events.put(NS(tool_call=None, server_content=NS(
+        input_transcription=NS(text=QUESTION, finished=True))))
+    await provider.events.put(NS(tool_call=None, server_content=None,
+        voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
     arguments = {'message': QUESTION} if name in {'read_risks', 'operate_workspace'} else {}
     await provider.events.put(NS(tool_call=NS(function_calls=[NS(
         name=name, args=arguments, id='owned-risk-call')]),

@@ -47,6 +47,8 @@ def test_generic_rfq_never_mutates_without_current_explicit_request(monkeypatch,
 def run_case(monkeypatch, message, *, mode='asr_first', expected):
     monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .01)
     monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .04)
+    # Explicitly bound the pre-VAD denial phase within the test's wait.
+    monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .06)
     async def scenario():
         store, session = setup()
         provider = Provider()
@@ -128,6 +130,7 @@ def test_provider_config_distinguishes_bridge_and_ordinary_rfq():
 
 def test_rfq_handoff_rejects_history_and_preserves_replay_idempotency(monkeypatch):
     from contextlib import asynccontextmanager
+    monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .06)
     monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .01)
     class Manual(Provider):
         def __init__(self):
@@ -171,6 +174,8 @@ def test_rfq_handoff_rejects_history_and_preserves_replay_idempotency(monkeypatc
             await first.events.put(event(text=BRIDGE))
             await first.events.put(event(activity=('ACTIVITY_END', '0.000125s'), call=rfq_call('old')))
             await next_type(socket, 'tool_result')
+            original = await asyncio.wait_for(first.responses.get(), 2)
+            assert original.id == 'old'
             assert len(invoked) == 1
             await first.events.put(NS(go_away=NS(time_left='0s')))
             await next_type(socket, 'connection_status')
@@ -193,7 +198,8 @@ def test_rfq_handoff_rejects_history_and_preserves_replay_idempotency(monkeypatc
             replay = await asyncio.wait_for(second.responses.get(), 2)
             assert replay.id == 'old'
             assert {key for _, key in invoked} == {invoked[0][1], invoked[1][1]}
-            assert invoked[-1][1] == invoked[0][1]
+            assert len(invoked) == 2
+            assert replay.response == original.response
         finally:
             await socket.frames.put('{"type":"stop"}')
             await asyncio.wait_for(task, 2)

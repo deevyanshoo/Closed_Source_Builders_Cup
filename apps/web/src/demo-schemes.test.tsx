@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { requestSchemes, SchemesPanel } from './demo-schemes';
+import { currentSchemes } from './demo-schemes';
 import type { SchemeResult } from './demo-schemes';
 
 const base = { country: 'India', publisher: 'Ministry of MSME', checked_on: '2026-10-16', who: 'MSMEs with Udyam Registration.', eligibility: 'possibly eligible, check conditions', matched_on: ['company location in India'], numbers_used: ['Women-owned MSMEs: free ZED certification.'] };
@@ -51,5 +52,16 @@ describe('carbon programmes and green finance (#109, review fixes)', () => {
     expect(url).toBe('/api/demo/carbon/schemes');
     expect((init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf1');
     expect(JSON.parse(init.body as string)).toEqual({ inputs_by_scheme: { 'in-sidbi-green-finance': { loan_amount: '100', offered_rate_percent: '9' } }, expected_context_version: 4 });
+  });
+});
+
+describe('scheme result scope (#115 review)', () => {
+  it('shows a stored result only for the same company and context version', () => {
+    const stored = { ...result, context_version: 1 } as unknown as SchemeResult;
+    expect(currentSchemes(stored, 'terrapack', 1)).toBe(stored);
+    expect(currentSchemes(stored, 'terrapack', 3)).toBeNull(); // A to B to A: same company, newer context
+    expect(currentSchemes(stored, 'solara-cables', 1)).toBeNull();
+    expect(currentSchemes(result, 'terrapack', 1)).toBeNull(); // a reply without a context version is not trusted
+    expect(currentSchemes(null, 'terrapack', 1)).toBeNull();
   });
 });

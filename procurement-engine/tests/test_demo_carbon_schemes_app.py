@@ -69,3 +69,31 @@ def test_deploy_package_ships_the_scheme_registry(tmp_path):
     assert prepared.returncode == 0, prepared.stderr
     packaged = destination / 'procurement-engine/config/carbon_schemes_v1.json'
     assert json.loads(packaged.read_text())['registry_version'] == 'carbon-schemes-v1'
+
+
+def test_a_to_b_to_a_never_brings_back_the_old_scheme_result(client):
+    value, headers = client
+    first = value.post('/api/demo/carbon/schemes', headers=headers, json={'inputs_by_scheme': {}}).json()
+    assert first['context_version'] == 1
+    away = value.post('/api/demo/company', headers=headers, json={'company_id': 'harvest-foods', 'expected_context_version': 1,
+                                                                   'idempotency_key': 'switch-away'}).json()
+    back = value.post('/api/demo/company', headers=headers, json={
+        'company_id': 'solara-cables', 'expected_context_version': away['context_version'], 'idempotency_key': 'switch-back'})
+    assert back.status_code == 200, back.text
+    assert value.get('/api/demo/export').json()['carbon_schemes'] is None
+    again = value.post('/api/demo/carbon/schemes', headers=headers, json={
+        'inputs_by_scheme': {}, 'expected_context_version': back.json()['context_version']}).json()
+    assert again['context_version'] == back.json()['context_version']
+    assert value.get('/api/demo/export').json()['carbon_schemes'] == again
+
+
+def test_stored_schemes_are_safely_absent_after_a_session_state_round_trip():
+    from procure.demo.carbon_api import schemes_export
+    from procure.demo.sessions import SessionStore
+    store = SessionStore(clock=lambda: datetime(2026, 10, 15, tzinfo=timezone.utc))
+    session = store.create()
+    session.carbon_schemes = {'company_id': session.company_id, 'context_version': 1, 'result': {'matches': []}}
+    restored = SessionStore._restore(session.session_id, SessionStore._snapshot(session), None,
+                                     now=datetime(2026, 10, 15, tzinfo=timezone.utc))
+    restored = restored[0] if isinstance(restored, tuple) else restored
+    assert getattr(restored, 'carbon_schemes', None) is None and schemes_export(restored) is None

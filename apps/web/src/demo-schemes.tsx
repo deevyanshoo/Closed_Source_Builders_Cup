@@ -5,12 +5,17 @@ type InputField = { name: string; label: string; unit: string; note?: string };
 type Benefit = { kind: string; amount: string; currency: string; direction?: 'interest_reduction' | 'extra_cost' | 'no_difference'; label: string; formula: string; arithmetic: string; inputs: { name: string; value: string; unit: string; source: string }[] };
 export type SchemeMatch = { scheme_id: string; country: string; official_name: string; publisher: string; official_url: string; checked_on: string; offers: string; offers_text: string; who: string; numbers_used: string[];
   eligibility: string; matched_on: string[]; benefit_status: 'available' | 'unavailable'; benefit_reason: string | null; benefit_label: string | null; benefit_formula: string | null; input_fields: InputField[]; missing_inputs: string[]; benefit: Benefit | null };
-export type SchemeResult = { company_id: string; registry_version: string; checked_on: string; label: string; matches: SchemeMatch[]; not_verified_countries?: Record<string, string>; no_match_reason: string | null };
+export type SchemeResult = { company_id: string; context_version?: number; registry_version: string; checked_on: string; label: string; matches: SchemeMatch[]; not_verified_countries?: Record<string, string>; no_match_reason: string | null };
 type Inputs = Record<string, Record<string, string>>;
 
 const OFFERS: Record<string, string> = { certificates: 'Carbon certificates', subsidy: 'Subsidy', green_financing: 'Green financing', compliance_exposure: 'Possible compliance exposure' };
 const DIRECTION: Record<string, string> = { interest_reduction: 'Interest reduction', extra_cost: 'Extra cost', no_difference: 'No difference' };
 const sentence = (text: string) => text ? text[0].toUpperCase() + text.slice(1) : text;
+
+/** A scheme result is shown only for the company and context version it was computed for. */
+export function currentSchemes(result: SchemeResult | null, companyId: string, contextVersion: number): SchemeResult | null {
+  return result && result.company_id === companyId && result.context_version === contextVersion ? result : null;
+}
 
 export async function requestSchemes(send: typeof fetch, csrf: string, inputs: Inputs, contextVersion?: number): Promise<SchemeResult> {
   const entered = Object.fromEntries(Object.entries(inputs).map(([id, values]) => [id, Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim() !== '').map(([k, v]) => [k, v.trim()]))]));

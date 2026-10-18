@@ -55,9 +55,9 @@ def carbon_export(value, active_plan, validate_plan_current=None) -> dict | None
 
 
 def schemes_export(value) -> dict | None:
-    """The stored scheme list only while the same company is active."""
+    """The stored scheme list only for the same company and context version (never after A to B to A)."""
     stored = getattr(value, 'carbon_schemes', None)
-    if not stored or stored['company_id'] != value.company_id:
+    if not stored or (stored.get('company_id'), stored.get('context_version')) != (value.company_id, value.context_version):
         return None
     return deepcopy(stored['result'])
 
@@ -125,5 +125,7 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
                 result = find_schemes(schemes(), get_company(value.company_id), data['inputs_by_scheme'])
             except SchemeInputError as error:
                 raise SessionError('invalid_scheme_input', str(error), 422) from None
-            value.carbon_schemes = {'company_id': value.company_id, 'result': deepcopy(result)}
+            result['context_version'] = value.context_version
+            value.carbon_schemes = {'company_id': value.company_id, 'context_version': value.context_version,
+                                    'result': deepcopy(result)}
             return result

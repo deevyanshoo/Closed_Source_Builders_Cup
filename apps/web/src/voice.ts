@@ -88,6 +88,15 @@ const defaultPause = (ms: number, signal: AbortSignal) => new Promise<void>((res
   const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
   signal.addEventListener('abort', onAbort, { once: true });
 });
+/** Editable inputs for a base request: each receipt's supplied arrival (its scenario replacement, if any) and the
+ * recovery assignment. Initial load and example selection share this, so the first run sends the example's change. */
+function baseInputs(base: RecoveryComparisonRequest): Pick<VoiceView, 'arrivals' | 'assignments'> {
+  return {
+    arrivals: Object.fromEntries(base.snapshot.receipts.map(item => [item.receipt_id,
+      base.scenario.arrival_replacements.find(change => change.receipt_id === item.receipt_id)?.arrival_at ?? item.arrival_at])),
+    assignments: Object.fromEntries(base.recovery.assignments.map(item => [item.order_id, item.period_id])),
+  };
+}
 export function voiceExample(example: VoiceExample, workspace: string): RecoveryComparisonRequest {
   const source = example === 'recovery' || example === 'recovery_precision' ? recoveryExamples[example] : JSON.parse(example === 'recovery_noop' ? noopRaw : unsupportedRaw) as RecoveryComparisonRequest;
   const request = structuredClone(source) as RecoveryComparisonRequest;
@@ -213,8 +222,7 @@ export class VoiceController {
   }
   private setBase(base: RecoveryComparisonRequest) {
     this.modified = false;
-    this.emit({ base, arrivals: Object.fromEntries(base.snapshot.receipts.map(item => [item.receipt_id, item.arrival_at])),
-      assignments: Object.fromEntries(base.recovery.assignments.map(item => [item.order_id, item.period_id])) });
+    this.emit({ base, ...baseInputs(base) });
   }
   selectSource(source: 'inline' | 'saved'): void {
     if (source === this.state.source) return;
@@ -348,8 +356,7 @@ export class VoiceController {
     void this.retire('idle').catch(error => this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Cleanup failed.' }));
     const identity = this.state.identity; const base = identity && this.state.source === 'inline' ? voiceExample(example, identity.workspace_id) : undefined;
     this.modified = false;
-    this.emit({ example, base, arrivals: base ? Object.fromEntries(base.snapshot.receipts.map(item => [item.receipt_id, base.scenario.arrival_replacements.find(change => change.receipt_id === item.receipt_id)?.arrival_at ?? item.arrival_at])) : this.state.arrivals,
-      assignments: base ? Object.fromEntries(base.recovery.assignments.map(item => [item.order_id, item.period_id])) : this.state.assignments });
+    this.emit({ example, base, ...(base ? baseInputs(base) : { arrivals: this.state.arrivals, assignments: this.state.assignments }) });
   }
   editArrival(id: string, value: string): void { this.modified = true; void this.retire('idle').catch(error => this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Cleanup failed.' })); this.emit({ arrivals: { ...this.state.arrivals, [id]: value } }); }
   editAssignment(id: string, value: string): void { this.modified = true; void this.retire('idle').catch(error => this.emit({ kind: 'failed', message: error instanceof Error ? error.message : 'Cleanup failed.' })); this.emit({ assignments: { ...this.state.assignments, [id]: value } }); }

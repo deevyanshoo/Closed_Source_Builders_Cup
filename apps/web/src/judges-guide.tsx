@@ -48,7 +48,8 @@ export function JudgesGuide() {
         dialog.setAttribute('open', '');
         setFallback(true);
       }
-      dialog.querySelector<HTMLButtonElement>('.judges-guide-primary')?.focus();
+      dialog.querySelector<HTMLHeadingElement>('#judges-guide-title')?.focus({ preventScroll: true });
+      dialog.scrollTop = 0;
     } else if (!isOpen && dialog.open) {
       if (typeof dialog.close === 'function' && !fallback) dialog.close();
       else dialog.removeAttribute('open');
@@ -76,7 +77,7 @@ export function JudgesGuide() {
       >
         <div className="judges-guide-content">
           <p className="judges-guide-kicker">A two-minute tour</p>
-          <h1 id="judges-guide-title">Welcome to ZOORQ <span>— a product by ClosedSource</span></h1>
+          <h1 id="judges-guide-title" tabIndex={-1}>Welcome to ZOORQ <span>— a product by ClosedSource</span></h1>
           <p id="judges-guide-tagline" className="judges-guide-tagline">See disruption. Close the stock gap.</p>
 
           <section aria-labelledby="judges-guide-start">

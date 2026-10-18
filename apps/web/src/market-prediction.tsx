@@ -20,8 +20,8 @@ export function MarketEvidence({ market, preview }: { market: MarketForecastRead
   const gapDays = intervals.map(({ start, end }) => start === end ? `on ${start}` : `from ${start} through ${end}`).join(', and ');
   return <section className="zoorq-market" aria-label="Market and decision context">
     <span className="demo-kicker">Decision context</span>
-    <h3>{blocked ? 'Replan required' : 'More facts needed before a purchase decision'}</h3>
-    <p>{blocked && gap ? `The dated plan has uncovered demand ${gapDays || `on ${gap}`}; peak shortfall is ${preview.service_trace?.gap_quantity ?? 'unknown'} ${preview.service_trace?.unit ?? preview.quantity_unit} under the stated daily assumption.` :
+    <h3>{blocked ? 'Confirm incoming deliveries' : 'More facts needed before a purchase decision'}</h3>
+    <p>{blocked ? 'Quoted arrivals are not confirmed receipts. Confirm incoming supply before relying on this stock-only risk scenario.' :
       'The current workspace cannot verify a safe buy or wait action from the facts on hand.'}</p>
     <div className="zoorq-market-facts">
       <div><span>Market influence</span><strong>{preview.market_influence.status === 'UNSUPPORTED' ? 'No matching model' : preview.market_influence.status === 'CONTEXT_ONLY' ? 'Context only' : preview.market_influence.status.toLowerCase().replaceAll('_', ' ')}</strong></div>
@@ -29,6 +29,7 @@ export function MarketEvidence({ market, preview }: { market: MarketForecastRead
     </div>
     <p className="demo-muted">{market.status === 'STALE' ? 'Stale market context' : 'Reference replay'} · {market.forecast_count} market cells · {market.artifact_role_count} model roles. Existing accepted quote prices stay fixed.</p>
     <details><summary>Evidence and missing inputs</summary>
+      {blocked && gap && <p>Confirmed-stock scenario: The dated plan has uncovered demand {gapDays || `on ${gap}`}; peak shortfall is {preview.service_trace?.gap_quantity ?? 'unknown'} {preview.service_trace?.unit ?? preview.quantity_unit} under the stated daily assumption. The quote comparison above assumes quoted arrivals.</p>}
       <p>As of {market.as_of_utc}. {preview.market_influence.reason_code.replaceAll('_', ' ').toLowerCase()}.</p>
       {preview.service_trace?.assumption && <p>{preview.service_trace.assumption}</p>}
       {market.delivery_state === 'BUNDLED_REFERENCE_REMOTE_UNAVAILABLE' && <p>Private archive unavailable; bundled dated reference shown.</p>}

@@ -53,6 +53,95 @@ def test_number_and_date_provenance_cannot_be_waived():
     assert not grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', '16-10-2026'))
 
 
+@pytest.mark.parametrize('written_date', ['2026/10/16', '2026 10 16', '२०२६/१०/१६', '२०२६ १० १६'])
+def test_full_year_first_date_separator_preserves_provenance(written_date):
+    caption = HINDI.replace('2026-10-16', written_date)
+    assert grounding.numeric_provenance(CANONICAL, caption)
+    assert not grounding.english_exact('What do our models say?', CANONICAL,
+                                      CANONICAL.replace('2026-10-16', written_date))
+
+
+@pytest.mark.parametrize('written_date', [
+    '2026/10/17', '2027/10/16', '2026 10 17', '2027 10 16',
+    '16/10/2026', '16 10 2026', '2026/10 16', '2026 10/16',
+    '2026.10.16', '2026/1/16', '2026 10 1', '2026/02/30',
+    'twenty twenty six/10/16', 'x2026/10/16', '2026/10/16x',
+])
+def test_changed_ambiguous_or_malformed_year_first_date_rejects(written_date):
+    assert not grounding.numeric_provenance(CANONICAL,
+        HINDI.replace('2026-10-16', written_date))
+
+
+@pytest.mark.parametrize('caption', [
+    HINDI.replace('2026-10-16', '2026/10/16') + ' 500',
+    HINDI.replace('2026-10-16', '2026/10/16').replace('कोई ऑर्डर', 'कोई 9 ऑर्डर'),
+    HINDI.replace('2026-10-16', '2026 10 16').replace('। लागतें', ' 16। लागतें'),
+    HINDI.replace('2026-10-16', ''),
+])
+def test_alternate_date_cannot_hide_extra_or_missing_numbers(caption):
+    assert not grounding.numeric_provenance(CANONICAL, caption)
+
+
+def test_safe_date_format_diagnostic_has_no_source_values(caplog):
+    with caplog.at_level('INFO', logger='procure.demo'):
+        assert grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', '2026/10/16'))
+        assert not grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', '2026 10 17'))
+    entries = [json.loads(record.message) for record in caplog.records
+        if 'voice_market_numeric_review' in record.message]
+    assert entries == [
+        {'event': 'voice_market_numeric_review', 'date_format': 'ymd_slash',
+         'recognized_date_count': 1, 'remaining_number_count': 0, 'provenance_match': True},
+        {'event': 'voice_market_numeric_review', 'date_format': 'ymd_space',
+         'recognized_date_count': 1, 'remaining_number_count': 0, 'provenance_match': False},
+    ]
+    assert '2026' not in ''.join(record.message for record in caplog.records)
+
+
+def test_safe_diagnostic_counts_remaining_number_without_logging_value(caplog):
+    canonical = 'On 2026-10-16, cost 500.50 USD.'
+    caption = 'On 2026/10/16, cost 500.51 USD.'
+    with caplog.at_level('INFO', logger='procure.demo'):
+        assert not grounding.numeric_provenance(canonical, caption)
+    entry, = [json.loads(record.message) for record in caplog.records
+        if 'voice_market_numeric_review' in record.message]
+    assert entry == {'event': 'voice_market_numeric_review', 'date_format': 'ymd_slash',
+                     'recognized_date_count': 1, 'remaining_number_count': 1,
+                     'provenance_match': False}
+    assert '500' not in ''.join(record.message for record in caplog.records)
+
+
+@pytest.mark.parametrize('written_date', ['2026/10/16', '2026 10 16'])
+def test_alternate_date_still_requires_all_four_provider_booleans(written_date):
+    caption = HINDI.replace('2026-10-16', written_date)
+    for field in grounding._FIELDS:
+        flags = dict.fromkeys(grounding._FIELDS, True)
+        flags[field] = False
+        async def generate_content(**kwargs):
+            return response(json.dumps(flags))
+        client = NS(aio=NS(models=NS(generate_content=generate_content)))
+        assert not asyncio.run(grounding.verify_market_caption(
+            'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+
+
+def test_alternate_date_provider_timeout_rejects():
+    async def generate_content(**kwargs):
+        raise asyncio.TimeoutError
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    caption = HINDI.replace('2026-10-16', '2026/10/16')
+    assert not asyncio.run(grounding.verify_market_caption(
+        'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+
+
+@pytest.mark.parametrize('written_date', ['2026/10/16', '2026 10 16'])
+def test_alternate_date_only_accepts_after_positive_semantic_verdict(written_date):
+    async def generate_content(**kwargs):
+        return response(json.dumps(dict.fromkeys(grounding._FIELDS, True)))
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    caption = HINDI.replace('2026-10-16', written_date)
+    assert asyncio.run(grounding.verify_market_caption(
+        'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+
+
 @pytest.mark.parametrize('written_date', [
     'October 16, 2026', 'October16,2026', '16 October 2026',
     '16 de outubro de 2026', '16deoutubrode2026',

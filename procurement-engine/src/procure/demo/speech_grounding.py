@@ -5,6 +5,7 @@ import asyncio
 from collections import Counter
 from datetime import date
 import json
+import logging
 import os
 import re
 import unicodedata
@@ -51,6 +52,8 @@ _MONTH_PATTERN = '|'.join(re.escape(name) for name in sorted(_MONTH_NUMBER, key=
 _DATE_PATTERN = re.compile(
     rf'(?<!\d)(?:'
     rf'(?P<iso_year>\d{{4}})-(?P<iso_month>\d{{2}})-(?P<iso_day>\d{{2}})'
+    rf'|(?<![\w./-])(?P<ymd_year>\d{{4}})(?P<ymd_sep>/| )'
+    rf'(?P<ymd_month>\d{{2}})(?P=ymd_sep)(?P<ymd_day>\d{{2}})(?![\w./-])'
     rf'|(?P<first_month>{_MONTH_PATTERN})\s*(?P<first_day>\d{{1,2}})'
     rf'(?:st|nd|rd|th)?\s*,?\s*(?P<first_year>\d{{4}})'
     rf'|(?P<last_day>\d{{1,2}})(?:st|nd|rd|th)?\s*(?:de\s*)?'
@@ -58,7 +61,7 @@ _DATE_PATTERN = re.compile(
     rf')(?!\d)', re.IGNORECASE)
 
 
-def _date_and_number_claims(text: str) -> tuple[Counter, Counter] | None:
+def _date_and_number_claims(text: str, formats: set[str] | None = None) -> tuple[Counter, Counter] | None:
     normalized = ''.join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in text)
     dates = Counter()
     remainder = []
@@ -67,9 +70,15 @@ def _date_and_number_claims(text: str) -> tuple[Counter, Counter] | None:
         remainder.append(normalized[end:match.start()])
         remainder.append(' ')
         end = match.end()
+        if formats is not None:
+            formats.add('iso' if match['iso_year'] is not None else
+                        'ymd_slash' if match['ymd_sep'] == '/' else
+                        'ymd_space' if match['ymd_sep'] == ' ' else 'other')
         try:
             if match['iso_year'] is not None:
                 parsed = date(int(match['iso_year']), int(match['iso_month']), int(match['iso_day']))
+            elif match['ymd_year'] is not None:
+                parsed = date(int(match['ymd_year']), int(match['ymd_month']), int(match['ymd_day']))
             elif match['first_month'] is not None:
                 parsed = date(int(match['first_year']),
                               _MONTH_NUMBER[match['first_month'].casefold()], int(match['first_day']))
@@ -91,8 +100,18 @@ def numeric_provenance(canonical: str, caption: str) -> bool:
     semantic review; an unmatched date cannot replace a recognized one.
     """
     expected = _date_and_number_claims(canonical)
-    actual = _date_and_number_claims(caption)
-    return expected is not None and actual is not None and expected == actual
+    formats: set[str] = set()
+    actual = _date_and_number_claims(caption, formats)
+    matched = expected is not None and actual is not None and expected == actual
+    date_format = next(iter(formats)) if len(formats) == 1 else 'other'
+    if not matched or date_format in {'ymd_slash', 'ymd_space'}:
+        logging.getLogger('procure.demo').info(json.dumps({
+            'event': 'voice_market_numeric_review', 'date_format': date_format,
+            'recognized_date_count': sum(actual[0].values()) if actual is not None else 0,
+            'remaining_number_count': sum(actual[1].values()) if actual is not None else 0,
+            'provenance_match': matched,
+        }, separators=(',', ':')))
+    return matched
 
 
 def english_exact(utterance: str, canonical: str, caption: str) -> bool:

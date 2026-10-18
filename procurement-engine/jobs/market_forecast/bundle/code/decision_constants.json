@@ -1,0 +1,30 @@
+{
+  "schema": "hybrid-daily-decision-simulation.v1",
+  "frozen_on": "2026-10-17",
+  "quantity_metric_tons": 100,
+  "pounds_per_metric_ton": 2204.6226218487757,
+  "duty_rate": 0.02,
+  "shipping_usd_per_metric_ton": 50,
+  "fx_spread_bps": 10,
+  "order_fee_usd_converted_at_issue_fx": 20,
+  "annual_carry_rate": 0.12,
+  "minimum_predicted_benefit_bps_of_issue_purchase": 10,
+  "calendar_days_after_target_arrival": 5,
+  "daily_demand_metric_tons": 10,
+  "lead_time_calendar_days": 2,
+  "stress_opening_cover_calendar_days": 4,
+  "base_opening_safety_stock_calendar_days": 1,
+  "storage_capacity_metric_tons": 1000000,
+  "cash_budget_domestic": 1000000000000,
+  "shortage_penalty_issue_landed_unit_multiplier": 2,
+  "price_basis": "rolling_copper_futures_and_daily_fx_close_proxy",
+  "actions": {
+    "BUY_NOW": 1.0,
+    "SPLIT": 0.5,
+    "WAIT": 0.0
+  },
+  "scenarios": {
+    "ample_cover": "Opening inventory covers pre-target-arrival demand plus one demand day; all actions can meet service if price and capacity inputs are valid.",
+    "service_stress": "Opening inventory is four daily-demand days. Actions can differ in unmet demand; a case with no feasible action is reported, never force-selected."
+  }
+}

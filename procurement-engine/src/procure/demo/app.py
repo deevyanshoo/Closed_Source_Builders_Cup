@@ -86,7 +86,7 @@ class BodyLimit:
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                news_service=None, operator_provider=None, voice_service=None, live_client_factory=None,
-               research_provider=None, session_backend=None, voice_consent_verifier=None, judge_provider=None) -> FastAPI:
+               research_provider=None, session_backend=None, voice_consent_verifier=None, judge_provider=None, voice_caption_verifier=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
@@ -286,12 +286,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         snapshot = {'company_id': value.company_id, 'context_version': value.context_version,
                 'company': get_company(value.company_id), 'news': deepcopy(value.news),
                 'offers': deepcopy(list(value.offers.values())),
-                'plan': deepcopy(active_plan(value)), 'baseline_plan': deepcopy(value.last_plan),
-                'last_plan': deepcopy(value.last_plan),
+                'plan': covered_plan(value), 'baseline_plan': covered_plan(value, value.last_plan) if value.last_plan else None,
+                'last_plan': covered_plan(value, value.last_plan) if value.last_plan else None,
                 'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
                 'watch_items': deepcopy(value.watch_items), 'buyer_draft': deepcopy(value.buyer_draft),
                 'selected_material_id': value.selected_material_id,
                 'simulated_outbox': deepcopy(value.simulated_outbox)}
+        from .market_prediction import market_read_model, influence_for_material
+        market = market_read_model()
+        selected_market_material = value.selected_material_id or snapshot['company']['materials'][0]['material_id']
+        snapshot['prediction_context'] = influence_for_material(snapshot['company'], selected_market_material, market)
         snapshot['carbon_assessment'] = current_carbon_assessment(
             value, active_plan, validate_plan_current)
         snapshot['shipments'] = dispatch_view(value)
@@ -435,6 +439,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
         fields['carbon_assessment'] = snapshot.get('carbon_assessment')
         fields['shipments'] = snapshot.get('shipments')
         fields['completed_research'] = snapshot.get('completed_research', [])
+        fields['prediction_context'] = snapshot.get('prediction_context')
         return hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':'),
                                          default=str).encode()).hexdigest()
 
@@ -553,6 +558,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
 
     def active_plan(value):
         return value.recovery['scenario'] if value.recovery is not None else value.last_plan
+
+    def covered_plan(value, plan=None):
+        """Project current coverage onto a read copy, never the accepted plan."""
+        from .supply_coverage import with_supply_coverage
+        source = active_plan(value) if plan is None else plan
+        if source is None:
+            return None
+        offers = [deepcopy(value.offers[offer_id]) for offer_id in source.get('offer_versions', {})
+                  if offer_id in value.offers]
+        return with_supply_coverage(get_company(value.company_id), source, offers=offers)
 
     def current_offers(value, plan, expected_versions, *, today):
         from .quote_service import blocking_reasons
@@ -685,6 +700,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                    'expected_versions': {offer['offer_id']: offer['version'] for offer in selected}}
         plan = build_plan(selected, request, today=store.now().date())
         plan['plan_id'] = secrets.token_urlsafe(18)
+        plan = covered_plan(value, plan)
         set_buyer(value, draft)
         value.plan_request = deepcopy(request)
         value.last_plan = deepcopy(plan)
@@ -835,8 +851,29 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             # for the canonical session draft so the owned download resolves.
             rfq = deepcopy(rfq_preview)
             rfq['draft_id'] = proposal['proposal_id']
+        bridge_semantics = None
+        if not is_email and rfq.get('bridge') is True:
+            bridge_semantics = {key: deepcopy(item) for key, item in rfq.items()
+                                if key not in {'draft_id', 'created_at'}}
+            current_semantics = {key: item for key, item in (value.rfq or {}).items()
+                                 if key not in {'draft_id', 'created_at'}}
+            existing = next((row for row in value.drafts
+                             if (row.get('bridge_semantics') == bridge_semantics or (
+                                 'bridge_semantics' not in row
+                                 and row.get('draft_id') == (value.rfq or {}).get('draft_id')
+                                 and current_semantics == bridge_semantics))
+                             and current_rfq_artifact(value, row.get('draft_id')) is row
+                             and row.get('body') == rfq['text']
+                             and row.get('recipient_label') == rfq['supplier']), None)
+            if existing is not None:
+                proposal['proposal_id'] = existing['draft_id']
+                parameters['draft_preview'] = deepcopy(existing)
+                value.rfq = {**deepcopy(bridge_semantics), 'draft_id': existing['draft_id'],
+                             'created_at': existing['created_at']}
+                return
         artifact = {'draft_id': proposal['proposal_id'], 'kind': 'email' if is_email else 'rfq',
             'status': 'draft_unsent', 'company_id': value.company_id,
+            'context_version': value.context_version,
             'material_id': parameters['material_id'] if is_email else rfq_preview['material'],
             'recipient_label': parameters['recipient_label'] if is_email else rfq_preview['supplier'],
             'subject': parameters['subject'] if is_email else f"Quotation request for {rfq_preview['material']}",
@@ -845,10 +882,50 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             'plan_id': proposal['plan_id'],
             'offer_versions': deepcopy(proposal['offer_versions'])}
         if not is_email:
+            artifact['selected_offer_id'] = active_plan(value)['selected_offer_id']
+            if bridge_semantics is not None:
+                artifact['bridge_semantics'] = bridge_semantics
             value.rfq = rfq
         value.drafts.append(artifact)
         del value.drafts[:-24]
         parameters['draft_preview'] = deepcopy(artifact)
+
+    def current_rfq_artifact(value, draft_id):
+        plan = active_plan(value)
+        if not isinstance(draft_id, str) or not draft_id:
+            return None
+        artifact = next((row for row in value.drafts if row.get('draft_id') == draft_id
+                         and row.get('kind') == 'rfq' and row.get('status') == 'draft_unsent'), None)
+        if (artifact is None or plan is None or artifact.get('company_id') != value.company_id
+                or plan.get('company_id') != value.company_id
+                or artifact.get('context_version') != value.context_version
+                or artifact.get('material_id') != plan.get('material')
+                or artifact.get('plan_id') != plan.get('plan_id')
+                or artifact.get('offer_versions') != plan.get('offer_versions')
+                or artifact.get('selected_offer_id') != plan.get('selected_offer_id')
+                or not plan.get('selected_offer_id') or not isinstance(artifact.get('body'), str)):
+            return None
+        try:
+            selected = current_offers(value, plan, artifact['offer_versions'], today=store.now().date())
+        except SessionError:
+            return None
+        return artifact if plan['selected_offer_id'] in {offer['offer_id'] for offer in selected} else None
+
+    def visible_drafts(value):
+        return [deepcopy(row) for row in value.drafts if row.get('kind') != 'rfq'
+                or current_rfq_artifact(value, row.get('draft_id')) is row]
+
+    def visible_rfq(value):
+        rfq = value.rfq
+        if not isinstance(rfq, dict):
+            return None
+        artifact = current_rfq_artifact(value, rfq.get('draft_id'))
+        if (artifact is None or rfq.get('text') != artifact['body']
+                or rfq.get('company_id') != artifact['company_id']
+                or rfq.get('plan_id') != artifact['plan_id']
+                or rfq.get('offer_versions') != artifact['offer_versions']):
+            return None
+        return deepcopy(rfq)
 
     @app.post('/api/demo/buyer-draft')
     async def buyer_draft(request: Request):
@@ -878,16 +955,16 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             return {'session_id': value.session_id, 'csrf_token': value.csrf_token,
                     'expires_at': value.expires_at.isoformat(), 'synthetic': True,
                     'persistence': store.persistence, 'offers': deepcopy(list(value.offers.values())),
-                    'provider': provider(), 'plan': deepcopy(active_plan(value)),
+                    'provider': provider(), 'plan': covered_plan(value),
                     'plan_request': deepcopy(value.plan_request), 'recovery': deepcopy(value.recovery),
                     'carbon_assessment': current_carbon_assessment(value, active_plan, validate_plan_current),
                     'dispatch': dispatch_view(value),
-                    'rfq': deepcopy(value.rfq), 'company': get_company(value.company_id),
+                    'rfq': visible_rfq(value), 'company': get_company(value.company_id),
                     'company_id': value.company_id,
                     'buyer_draft': deepcopy(value.buyer_draft),
                     'selected_material_id': value.selected_material_id,
                     'simulated_outbox': deepcopy(value.simulated_outbox),
-                    'drafts': deepcopy(value.drafts),
+                    'drafts': visible_drafts(value),
                     'pending_operator_proposal': current_public_proposal(value),
                     'context_version': value.context_version}
 
@@ -921,6 +998,52 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     @app.get('/api/demo/companies')
     async def companies():
         return {'companies': list_companies()}
+
+    @app.get('/api/demo/v1/market-forecasts')
+    async def market_forecasts(request: Request):
+        from .market_prediction import market_read_model
+        value = session(request)
+        with value.lock:
+            active(value)
+        try:
+            return market_read_model()
+        except (OSError, ValueError, KeyError, TypeError):
+            raise SessionError('market_unavailable', 'Verified market reference is unavailable.', 503)
+
+    @app.post('/api/demo/v1/company-decisions/preview')
+    async def company_decision_preview(request: Request):
+        from .market_prediction import market_read_model
+        from .operations_decision import preview_from_snapshot
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('expected_context_version', 'idempotency_key'), ('material_id', 'overrides'))
+        overrides = data.get('overrides')
+        if overrides == {}:
+            overrides = None
+        with value.lock:
+            context(value, data, explicit=True)
+            material_id = data.get('material_id') or value.selected_material_id or get_company(value.company_id)['materials'][0]['material_id']
+            if not isinstance(material_id, str) or material_id not in {
+                    row['material_id'] for row in get_company(value.company_id)['materials']}:
+                raise SessionError('material_not_found', 'Choose a material from this company.', 404)
+            key, replay = start(value, data, 'company_decision_preview')
+            if replay is not None:
+                if value.idempotency[key].get('state_marker') != snapshot_marker(operator_snapshot(value)):
+                    raise SessionError('stale_context', 'Workspace changed since this preview.', 409)
+                return replay
+            try:
+                snapshot = operator_snapshot(value, include_risks=False)
+                try:
+                    result = preview_from_snapshot(snapshot, material_id, market_read_model(), overrides=overrides)
+                except (ValueError, TypeError, OverflowError):
+                    raise SessionError('invalid_override', 'Use bounded decimal quantities, dates and at most 12 dated receipts.', 422)
+                result['request_idempotency_key'] = key
+                complete(value, key, result)
+                value.idempotency[key]['state_marker'] = snapshot_marker(snapshot)
+                return result
+            except Exception:
+                failed(value, key)
+                raise
 
     @app.get('/api/demo/judge/config')
     async def judge_config(request: Request):
@@ -1496,6 +1619,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                                   provider_call='mocked' if operator_injected else 'real',
                                                   context_cache=context_cache,
                                                   cache_scope=hashlib.sha256(value.session_id.encode()).hexdigest()))
+                    if resolved is not None and resolved.get('kind') == 'internal_read':
+                        outcome['workspace'] = deepcopy(resolved.get('workspace', {}))
             except (OperatorUnavailable, OperatorValidationError) as exc:
                 category = 'provider' if isinstance(exc, OperatorUnavailable) else 'validation'
                 fingerprint = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
@@ -1556,14 +1681,17 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                                  'total_cost': preview['scenario']['total_cost'],
                                                  'reporting_currency': preview['scenario']['reporting_currency']}
                     elif kind == 'rfq':
-                        from .rfq import build_draft
+                        from .rfq import build_draft, build_bridge_draft
                         selected = current_offers(value, plan, plan['offer_versions'],
                                                   today=store.now().date())
                         chosen = next((o for o in selected if o['offer_id'] == plan['selected_offer_id']), None)
                         if chosen is None:
                             raise SessionError('draft_unavailable', 'Selected quote is unavailable.', 409)
-                        rfq_preview = build_draft(deepcopy(plan), deepcopy(chosen),
-                                                  all_offers=deepcopy(selected), created_at=store.now())
+                        rfq_preview = (build_bridge_draft(deepcopy(plan), deepcopy(chosen),
+                                coverage=covered_plan(value)['supply_coverage'], created_at=store.now())
+                            if parameters.get('mode') == 'bridge' else
+                            build_draft(deepcopy(plan), deepcopy(chosen),
+                                        all_offers=deepcopy(selected), created_at=store.now()))
                     elif kind == 'simulate_email':
                         validate_simulated_email(value, parameters)
                     elif kind == 'review_quotes':
@@ -1611,7 +1739,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 if outcome.get('workspace') is not None:
                     result['workspace'] = deepcopy(outcome['workspace'])
                 if proposal is not None and proposal['kind'] in ('rfq', 'simulate_email'):
-                    result['workspace'] = {'drafts': deepcopy(value.drafts)}
+                    result['workspace'] = {'drafts': visible_drafts(value)}
                 complete(value, key, result)
                 remember_turn(value, message, result, channel=channel)
                 value.idempotency[key]['state_marker'] = snapshot_marker(operator_snapshot(value))
@@ -1992,12 +2120,13 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                             result['workspace'] = {'company': deepcopy(snapshot['company']),
                                 'buyer_draft': deepcopy(value.buyer_draft),
                                 'selected_material_id': value.selected_material_id,
+                                'prediction_context': deepcopy(snapshot['prediction_context']),
                                 'drafts': [{key: item[key] for key in
                                             ('draft_id', 'kind', 'status', 'material_id', 'recipient_label', 'subject')}
-                                           for item in value.drafts[-12:]],
+                                           for item in visible_drafts(value)[-12:]],
                                 'news_brief': build_news_brief(
                                     snapshot['company'], value.news, now=store.now()),
-                                'plan': deepcopy(active_plan(value)),
+                                'plan': covered_plan(value),
                                 'risks': deepcopy(snapshot.get('risk_report')),
                                 'offers': [{'offer_id': offer['offer_id'], 'version': offer['version'],
                                             'status': offer['status'], 'fixture_id': offer.get('fixture_id'),
@@ -2042,7 +2171,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         result['status'] = 'completed'
                         result['proposal'] = public_proposal(proposal)
                         result['assistant_text'] = 'Created an unsent RFQ draft. You can review and download it in Drafts.'
-                        result['workspace'] = {'drafts': deepcopy(value.drafts)}
+                        result['workspace'] = {'drafts': visible_drafts(value)}
                         result['read_only'] = False
                         result['action_result'] = {'tool': 'prepare_rfq',
                                                    'summary': 'Created an unsent RFQ draft in Drafts.'}
@@ -2061,7 +2190,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         result['status'] = 'completed'
                         result['proposal'] = public_proposal(proposal)
                         result['assistant_text'] = 'Created a simulated email draft in Drafts. No external message was sent.'
-                        result['workspace'] = {'drafts': deepcopy(value.drafts)}
+                        result['workspace'] = {'drafts': visible_drafts(value)}
                         result['read_only'] = False
                         result['action_result'] = {'tool': 'prepare_simulated_email',
                                                    'summary': 'Created a simulated email draft in Drafts.'}
@@ -2141,6 +2270,57 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise
 
         async def saved_workspace_tools(name, args, context_version, key):
+            if name == '_read_market_if_applicable':
+                from .integration_tools import integration_request, market_read_request
+                from .judge_resolver import resolve_judge_turn
+                from .experience_service import judge_outcome
+                if not isinstance(args, dict) or set(args) != {'message'}:
+                    raise SessionError('invalid_request', 'Provide the settled market question.', 422)
+                message = args['message']
+                if not isinstance(message, str) or not 0 < len(message.strip()) <= 1200:
+                    raise SessionError('invalid_message', 'State the market question.', 422)
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    plan = active_plan(value)
+                    if plan is not None:
+                        validate_plan_current(value, plan)
+                    snapshot = operator_snapshot(value, include_risks=False)
+                    if (not market_read_request(value.company_id, message)
+                            or integration_request(snapshot, message) != 'read_market'):
+                        raise SessionError('invalid_read', 'Ask about this company’s internal market reference.', 422)
+                    resolved = resolve_judge_turn(snapshot, message, now=store.now())
+                    if (resolved is None or resolved['kind'] != 'internal_read'
+                            or not (resolved.get('workspace') or {}).get('prediction')):
+                        raise SessionError('invalid_read', 'Choose an owned company and material for this read.', 422)
+                    outcome = judge_outcome(resolved)
+                    return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': context_version, 'status': outcome['status'],
+                        'assistant_text': outcome['assistant_text'],
+                        'evidence_ids': outcome['evidence_ids'],
+                        'agent_steps': outcome['agent_steps'], 'proposal': None,
+                        'read_only': True, 'workspace': deepcopy(resolved['workspace'])}
+            if name == '_read_current_plan_coverage':
+                # Broker-only: no model declaration, operator fallback, proposal,
+                # persistence or action. Use the same owned snapshot/resolver as chat.
+                from .judge_resolver import resolve_native_coverage
+                shape(args, ('message',))
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    plan = active_plan(value)
+                    if plan is not None:
+                        validate_plan_current(value, plan)
+                    resolved = resolve_native_coverage(operator_snapshot(value, include_risks=False),
+                        args['message'], now=store.now())
+                    if resolved is None:
+                        raise SessionError('invalid_read', 'Please ask a current-plan supply coverage question.', 422)
+                    return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': context_version,
+                        'status': 'completed' if resolved['kind'] == 'internal_answer' else 'needs_clarification',
+                        'assistant_text': resolved['answer'], 'evidence_ids': resolved.get('evidence_refs', []),
+                        'agent_steps': [{'agent': 'workspace', 'model': 'none', 'provider_call': 'none',
+                            'tool': 'judge_read', 'status': 'completed', 'role': 'Grounded local evidence',
+                            'summary': 'Read current owned plan coverage.'}],
+                        'proposal': None, 'read_only': True}
             result = await workspace_tools(name, args, context_version, key)
             with value.lock:
                 store.save(value)
@@ -2152,11 +2332,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                          on_research_progress=on_progress)
 
         from .voice_consent import verify_spoken_consent
+        from .speech_grounding import verify_market_caption
         await run_live_voice(websocket, session=value, store=store,
                              operate_workspace=operate, workspace_tools=saved_workspace_tools,
                              research_tools=research_tools,
                              client_factory=live_client_factory,
-                             verify_spoken_consent=voice_consent_verifier or verify_spoken_consent)
+                             verify_spoken_consent=voice_consent_verifier or verify_spoken_consent,
+                             verify_market_caption=(voice_caption_verifier if voice_caption_verifier is not None
+                                                    else verify_market_caption if live_client_factory is None else None))
 
     async def confirm_research(value, data, *, on_progress=None):
         started_at = monotonic()
@@ -2346,7 +2529,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     if existing is None:
                         value.watch_items.append(deepcopy(result))
                 elif kind == 'recovery':
-                    from .recovery import compare
+                    from .recovery import compare, with_recovery_coverage
                     baseline = value.last_plan
                     if baseline is None or proposal['plan_id'] != baseline.get('plan_id'):
                         raise SessionError('stale_plan', 'Baseline plan changed.', 409)
@@ -2360,6 +2543,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                      today=store.now().date())
                     result['comparison_id'] = secrets.token_urlsafe(18)
                     result['scenario']['plan_id'] = secrets.token_urlsafe(18)
+                    result = with_recovery_coverage(get_company(value.company_id), result, offers=selected)
                     value.recovery = deepcopy(result)
                     value.rfq = None
                 elif kind == 'simulate_email':
@@ -2760,6 +2944,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             plan_data = {key: item for key, item in data.items() if key != 'expected_context_version'}
             result = build_plan(deepcopy(selected), plan_data, today=store.now().date())
             result['plan_id'] = secrets.token_urlsafe(18)
+            result = covered_plan(value, result)
             value.last_plan = deepcopy(result)
             value.plan_request = deepcopy(plan_data)
             value.recovery = None
@@ -2793,10 +2978,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             try:
                 if 'shipment_id' in data:
                     bound_shipment(value, data['shipment_id'], baseline, delays)
-                from .recovery import compare
+                from .recovery import compare, with_recovery_coverage
                 comparison = compare(baseline, original_request, selected, delays, today=store.now().date())
                 comparison['comparison_id'] = secrets.token_urlsafe(18)
                 comparison['scenario']['plan_id'] = secrets.token_urlsafe(18)
+                comparison = with_recovery_coverage(get_company(value.company_id), comparison, offers=selected)
                 result = complete(value, key, comparison)
                 value.recovery = deepcopy(result)
                 value.rfq = None
@@ -2810,7 +2996,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     async def rfq(request: Request):
         value = mutate(request)
         data = await body(request)
-        shape(data, ('plan_id', 'expected_versions', 'reviewed', 'idempotency_key'), ('expected_context_version',))
+        shape(data, ('plan_id', 'expected_versions', 'reviewed', 'idempotency_key'), ('expected_context_version', 'mode'))
         with value.lock:
             context(value, data)
             plan = active_plan(value)
@@ -2819,27 +3005,37 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             selected = current_offers(value, plan, data['expected_versions'], today=store.now().date())
             if data['reviewed'] is not True:
                 raise SessionError('review_required', 'Review the selected plan before drafting.', 422)
+            mode = data.get('mode', 'regular')
+            if mode not in {'regular', 'bridge'}:
+                raise SessionError('invalid_request', 'Choose a regular or bridge RFQ.', 422)
             selected_id = plan.get('selected_offer_id')
-            if selected_id is None or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0':
+            if selected_id is None or (mode == 'regular' and
+                    plan.get('required_purchase', plan.get('required_purchase_kg')) == '0'):
                 raise SessionError('draft_unavailable', 'The current plan has no purchase to request.', 409)
             chosen = next((offer for offer in selected if offer['offer_id'] == selected_id), None)
             if chosen is None:
                 raise SessionError('stale_plan', 'Selected quote is no longer available.', 409)
             key, replay = start(value, data, 'rfq')
             if replay is not None:
-                if value.rfq is None or replay.get('draft_id') != value.rfq.get('draft_id'):
+                artifact = current_rfq_artifact(value, replay.get('draft_id'))
+                if artifact is None or artifact['body'] != replay.get('text'):
                     raise SessionError('stale_plan', 'This RFQ draft has been replaced.', 409)
                 replay.pop('replayed', None)
                 return replay
             try:
-                from .rfq import build_draft
-                draft = build_draft(deepcopy(plan), deepcopy(chosen),
-                                    all_offers=deepcopy(selected), created_at=store.now())
+                from .rfq import build_draft, build_bridge_draft
+                if mode == 'bridge':
+                    coverage = covered_plan(value)['supply_coverage']
+                    draft = build_bridge_draft(deepcopy(plan), deepcopy(chosen),
+                                               coverage=coverage, created_at=store.now())
+                else:
+                    draft = build_draft(deepcopy(plan), deepcopy(chosen),
+                                        all_offers=deepcopy(selected), created_at=store.now())
                 draft['draft_id'] = secrets.token_urlsafe(18)
                 remember_prepared_draft(value, {
                     'proposal_id': draft['draft_id'], 'kind': 'rfq', 'parameters': {},
                     'plan_id': plan['plan_id'], 'offer_versions': plan['offer_versions']}, rfq_preview=draft)
-                result = complete(value, key, draft)
+                result = complete(value, key, deepcopy(value.rfq))
                 value.rfq = deepcopy(result)
                 value.pending_proposal = None
                 return result
@@ -2856,18 +3052,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 raise
             raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404) from None
         with value.lock:
-            draft, plan = value.rfq, active_plan(value)
-            if (draft is None or plan is None or draft.get('draft_id') != draft_id
-                    or draft.get('plan_id') != plan.get('plan_id')):
+            artifact = current_rfq_artifact(value, draft_id)
+            if artifact is None:
                 raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404)
-            try:
-                selected = current_offers(value, plan, draft.get('offer_versions'), today=store.now().date())
-                if (plan.get('selected_offer_id') not in {offer['offer_id'] for offer in selected}
-                        or plan.get('required_purchase', plan.get('required_purchase_kg')) == '0'):
-                    raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404)
-            except SessionError:
-                raise SessionError('draft_not_found', 'RFQ draft is unavailable.', 404) from None
-            return Response(draft['text'], media_type='text/plain',
+            return Response(artifact['body'], media_type='text/plain',
                             headers={'Content-Disposition': 'attachment; filename="synthetic-rfq-draft.txt"'})
 
     @app.get('/api/demo/export')
@@ -2880,14 +3068,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'context_version': value.context_version,
                                  'news': deepcopy(value.news),
                                  'offers': deepcopy(list(value.offers.values())),
-                                 'plan': deepcopy(active_plan(value)),
-                                 'baseline_plan': deepcopy(value.last_plan),
+                                 'plan': covered_plan(value),
+                                 'baseline_plan': covered_plan(value, value.last_plan) if value.last_plan else None,
                                  'plan_request': deepcopy(value.plan_request),
                                  'buyer_draft': deepcopy(value.buyer_draft),
                                  'selected_material_id': value.selected_material_id,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
-                                 'drafts': deepcopy(value.drafts),
-                                 'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq),
+                                 'drafts': visible_drafts(value),
+                                 'recovery': deepcopy(value.recovery), 'rfq': visible_rfq(value),
                                  'carbon': carbon_export(value, active_plan, validate_plan_current)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 

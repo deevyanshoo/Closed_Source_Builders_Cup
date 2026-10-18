@@ -1,0 +1,108 @@
+{
+  "created_at_utc": "2026-10-17T10:50:07.133561+00:00",
+  "dev_end": "2026-08-31",
+  "confirmation_start": "2026-09-01",
+  "confirmation_end": "2026-10-16",
+  "sources": [
+    {
+      "asset": "EURUSD",
+      "symbol": "EURUSD=X",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/EURUSD%3DX?range=5y&interval=1d",
+      "retrieved_at_utc": "2026-10-17T10:50:07.132378+00:00",
+      "rows": 1300,
+      "first_date": "2021-10-18",
+      "last_date": "2026-10-16",
+      "development_rows": 1266,
+      "confirmation_rows": 34,
+      "full_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/EURUSD_full.csv",
+      "development_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/EURUSD_development.csv",
+      "raw_sha256": "fa271457dd3127707cd7f9565b934c66c4c95f409fcba6405d3f566d79330eb5",
+      "full_sha256": "0aaac5c080d71e8efd987c54586fc5bd0ef25e3efd8b4d184df1f438e0d58343",
+      "development_sha256": "d59a5d8741b3d8dbac136bb0dac7b57b5378b3bcd615a71a30a5e82a31b79ac9",
+      "source_class": "Public Yahoo rolling futures/indicative FX daily close; no execution or historical-vintage guarantee",
+      "normalized_date": "Exchange-local date using metadata timezone; only midnight historical bar stamps; latest intraday stub/weekends/null close excluded; no price source stitching",
+      "instrument_metadata": {
+        "currency": "USD",
+        "symbol": "EURUSD=X",
+        "exchangeName": "CCY",
+        "instrumentType": "CURRENCY",
+        "exchangeTimezoneName": "Europe/London"
+      }
+    },
+    {
+      "asset": "GBPUSD",
+      "symbol": "GBPUSD=X",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD%3DX?range=5y&interval=1d",
+      "retrieved_at_utc": "2026-10-17T10:50:07.132302+00:00",
+      "rows": 1300,
+      "first_date": "2021-10-18",
+      "last_date": "2026-10-16",
+      "development_rows": 1266,
+      "confirmation_rows": 34,
+      "full_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/GBPUSD_full.csv",
+      "development_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/GBPUSD_development.csv",
+      "raw_sha256": "0aa5c6f84fdc1c5ee01960ef50deac921ef6eb45edb34e96123756053bcfa4a8",
+      "full_sha256": "49032fa7869afadf8d990be4e9bb7a60a629b0f535f786cef0147c2a48fbae03",
+      "development_sha256": "323d0bc3001474e0189ec17ec96fbf16fe8caef7840ed0e4743e51e38fef31de",
+      "source_class": "Public Yahoo rolling futures/indicative FX daily close; no execution or historical-vintage guarantee",
+      "normalized_date": "Exchange-local date using metadata timezone; only midnight historical bar stamps; latest intraday stub/weekends/null close excluded; no price source stitching",
+      "instrument_metadata": {
+        "currency": "USD",
+        "symbol": "GBPUSD=X",
+        "exchangeName": "CCY",
+        "instrumentType": "CURRENCY",
+        "exchangeTimezoneName": "Europe/London"
+      }
+    },
+    {
+      "asset": "USDJPY",
+      "symbol": "JPY=X",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/JPY%3DX?range=5y&interval=1d",
+      "retrieved_at_utc": "2026-10-17T10:50:07.132323+00:00",
+      "rows": 1300,
+      "first_date": "2021-10-18",
+      "last_date": "2026-10-16",
+      "development_rows": 1266,
+      "confirmation_rows": 34,
+      "full_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/USDJPY_full.csv",
+      "development_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/USDJPY_development.csv",
+      "raw_sha256": "d2840f40483f97e629a66072feb6bb808ffdfba80a034a0aa3871fe6aa08d03d",
+      "full_sha256": "6cfc52c9901649eed022f84094502496ea4c1f3939e7d740a79ffed0c36c2cd8",
+      "development_sha256": "a56d02b5a26da3e0810d8a64036ad26fec040c1ffcbf01cc35c3f2fdc8d6839c",
+      "source_class": "Public Yahoo rolling futures/indicative FX daily close; no execution or historical-vintage guarantee",
+      "normalized_date": "Exchange-local date using metadata timezone; only midnight historical bar stamps; latest intraday stub/weekends/null close excluded; no price source stitching",
+      "instrument_metadata": {
+        "currency": "JPY",
+        "symbol": "JPY=X",
+        "exchangeName": "CCY",
+        "instrumentType": "CURRENCY",
+        "exchangeTimezoneName": "Europe/London"
+      }
+    },
+    {
+      "asset": "COPPER",
+      "symbol": "HG=F",
+      "url": "https://query1.finance.yahoo.com/v8/finance/chart/HG%3DF?range=5y&interval=1d",
+      "retrieved_at_utc": "2026-10-17T10:50:07.132959+00:00",
+      "rows": 1248,
+      "first_date": "2021-10-18",
+      "last_date": "2026-10-16",
+      "development_rows": 1215,
+      "confirmation_rows": 33,
+      "full_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/COPPER_full.csv",
+      "development_path": "/Users/palaksingh/.codex/.chatgpt-projects/g-p-6ac4f909f7f48191a8de382e13431074/output/optimization-prediction-20261017/market_data/COPPER_development.csv",
+      "raw_sha256": "48c17df92b4443e70461447bd651ce608ac99d104eef8d394576ae5181b51467",
+      "full_sha256": "a79d785336b6a408c44718963aa6d51d0e64126585aaaaf94c76495d8d86a9d8",
+      "development_sha256": "737eeaa369a901d4dff4324aabfead9f8a7e1bf31ee7107bd78cb09bfa05f538",
+      "source_class": "Public Yahoo rolling futures/indicative FX daily close; no execution or historical-vintage guarantee",
+      "normalized_date": "Exchange-local date using metadata timezone; only midnight historical bar stamps; latest intraday stub/weekends/null close excluded; no price source stitching",
+      "instrument_metadata": {
+        "currency": "USD",
+        "symbol": "HG=F",
+        "exchangeName": "CMX",
+        "instrumentType": "FUTURE",
+        "exchangeTimezoneName": "America/New_York"
+      }
+    }
+  ]
+}

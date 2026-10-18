@@ -194,7 +194,7 @@ def test_provider_cannot_operate_recovery_from_history_or_partial_asr(fresh_audi
                 await provider.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
         await provider.events.put(event(calls=[NS(name='operate_workspace',
             args={'message': REQUEST}, id='unverified-operation')]))
-        for _ in range(200 if vad_end else 5):
+        for _ in range(400 if not fresh_audio else 200 if vad_end else 5):
             if provider.responses:
                 break
             await asyncio.sleep(.01)

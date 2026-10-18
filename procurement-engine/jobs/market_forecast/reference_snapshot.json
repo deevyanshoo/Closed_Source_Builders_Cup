@@ -1,0 +1,1119 @@
+{
+  "as_of_utc": "2026-10-17T11:11:33Z",
+  "completed_at_utc": "2026-10-17T11:11:33Z",
+  "contract_version": "prediction.v1",
+  "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+  "forecast_count": 18,
+  "forecasts": [
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.55",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:EURUSD:h1",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "EURUSD",
+      "model_artifact_sha256": "5c842a872eda21d74c697098472099c49a3fc3c0b78c2591ff360fa5f9534a87",
+      "model_id": "EURUSD_h1_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.605672789491237",
+      "prob_quote_up_uncalibrated": "0.394327210508763",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.6",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "ABSTAIN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:EURUSD:h3",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "EURUSD",
+      "model_artifact_sha256": "7e84095b7785918f5619a63f60f8e010381458bad5e3cee4a8e3b6c5a40eb6f6",
+      "model_id": "EURUSD_h3_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.547778452030876",
+      "prob_quote_up_uncalibrated": "0.452221547969124",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.65",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "ABSTAIN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:EURUSD:h5",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "EURUSD",
+      "model_artifact_sha256": "fb80113ff708d110bcbe99cb6f42aa74847dfa89c8ab955da570f14dec240aec",
+      "model_id": "EURUSD_h5_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.610730981837267",
+      "prob_quote_up_uncalibrated": "0.389269018162733",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.6",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "ABSTAIN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:GBPUSD:h1",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "GBPUSD",
+      "model_artifact_sha256": "5d18a2968182a034f83a8cac7d84552dee91c7621e0fc6e2f0e370029d37107e",
+      "model_id": "GBPUSD_h1_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.46149540123886",
+      "prob_quote_up_uncalibrated": "0.53850459876114",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "DOWN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:GBPUSD:h3",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "GBPUSD",
+      "model_artifact_sha256": "51a39485f556bad1c78c0464c66f1402eab9da077370ab32e352d397335c468d",
+      "model_id": "GBPUSD_h3_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.40304105999039",
+      "prob_quote_up_uncalibrated": "0.59695894000961",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "DOWN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:GBPUSD:h5",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "GBPUSD",
+      "model_artifact_sha256": "b70a1c509ac369f257ba8e450dc318f4da84bb011c12c164d0db8fb8a73e97c8",
+      "model_id": "GBPUSD_h5_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.447223067096562",
+      "prob_quote_up_uncalibrated": "0.552776932903438",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.65",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "ABSTAIN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:USDJPY:h1",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "USDJPY",
+      "model_artifact_sha256": "47f121ba6b1ba4b6d525ec1bf964311ab6675ea446f972f3c769ca81a21895bb",
+      "model_id": "USDJPY_h1_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.582212639227979",
+      "prob_quote_up_uncalibrated": "0.582212639227979",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.55",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "DOWN",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:USDJPY:h3",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "USDJPY",
+      "model_artifact_sha256": "090ce230fd9259beef73fe3bdb059d24f78a65e91d7972e6f5aee7cda3fee642",
+      "model_id": "USDJPY_h3_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.353311424252223",
+      "prob_quote_up_uncalibrated": "0.353311424252223",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:fx:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_USD_PAYABLE_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:direction-current-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:fx:USDJPY:h5",
+      "forecast_kind": "FX_USD_PAYABLE_DISPLAY_ONLY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "b9b365a5f48558a58f913833de367370485c874d1d4b729b919b05d222aec8a3",
+      "magnitude_context": null,
+      "market_proxy": "FX_DAILY_QUOTE_NOT_EXECUTABLE_BID_ASK",
+      "market_series_id": "USDJPY",
+      "model_artifact_sha256": "d132db764c1b13ca58688bae5296fc1dfb19b72e30630ac60abb7b0fb64975c4",
+      "model_id": "USDJPY_h5_price_only_economic_direction_current",
+      "prob_direction_up_uncalibrated": "0.762617258393203",
+      "prob_quote_up_uncalibrated": "0.762617258393203",
+      "research_basis": {
+        "basis_type": "FX_FIXED_USD_PAYABLE_RESEARCH",
+        "interest_assumption": "NONE",
+        "order_fee_usd": "20",
+        "spread_bps": "10",
+        "transaction_limit": "DAILY_QUOTE_PROXY_NOT_EXECUTABLE_BANK_SETTLEMENT",
+        "usd_payable": "100000"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.55",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:EURUSD:h1",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "c4572904dc2f6f251c8086e1124e43a92b06347e75b5ba5baf70cc545a7fa67c",
+        "model_id": "EURUSD_h1_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.00214046789454191"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "146a17f2d3643c80a89c90ed44b5230e3528a986230c4d6727e5049a1a4a17aa",
+      "model_id": "EURUSD_h1_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.592767758108224",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:EURUSD:h3",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "0b360f13da7717121279087f7f6c1f11aee79fc1d905c749f4eb45be365a5746",
+        "model_id": "EURUSD_h3_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.00563900299578833"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "17895f6156780e30b0351cf6ba1583a2852dda1c48be8148b411dce91f58de51",
+      "model_id": "EURUSD_h3_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.773723649742379",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.6",
+      "cost_currency": "EUR",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:EURUSD:h5",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "EURUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "20cc7ba227128a87bd6d45441498ba4d8c8ecca9cd35759c1271b4f759d74ed8",
+        "model_id": "EURUSD_h5_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.00560031756212704"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "2ea0d8668fa6b36960f1eff4e498ef2b3cb297a2369b6c375ebb92e9f38b5a60",
+      "model_id": "EURUSD_h5_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.771080483559016",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "EURUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.55",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:GBPUSD:h1",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "efbb3a58cf415c6b7d9a36a8653003a65966adc82d7e2fa4a571321880a9ddf4",
+        "model_id": "GBPUSD_h1_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.000833253180918204"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "7fe10ac905f0b722aa9d861249ba92f20b485b907e6185603cd7cc16726e2a80",
+      "model_id": "GBPUSD_h1_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.623744256587577",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:GBPUSD:h3",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "abea46891affd034d2bf6c85df783c30651f65b73020c1337d9face3eca8f16d",
+        "model_id": "GBPUSD_h3_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.00377221665719415"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "2e2c3426b59402f35d9d9e371b41f24c0231c7cbe70014dfaa2d33e011c85e00",
+      "model_id": "GBPUSD_h3_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.602045576459578",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.65",
+      "cost_currency": "GBP",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:GBPUSD:h5",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "GBPUSD",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "3b88f7467ad57d3565c1d93baa8e87b516af486717099d05ef44c32f8da605bc",
+        "model_id": "GBPUSD_h5_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "0.00580736692772813"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "6f2d078b4b58e27e2bc2609d771984dfd4d206a8cc6d256f920c77bcedcfd923",
+      "model_id": "GBPUSD_h5_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.712103477702422",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "GBPUSD",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:USDJPY:h1",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 1,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "70e8d31c4e5dcae9695dd5a0a5a2b015b71bfaff96b75c422d3827866c8cb4a2",
+        "model_id": "USDJPY_h1_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0",
+        "signed_estimated_landed_return": "0"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "8c605690460687b55f61b1d45a659c625ddbe60b9fa119f92a573e25fa11171f",
+      "model_id": "USDJPY_h1_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.543018179081141",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.5",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "DOWN",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:USDJPY:h3",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 3,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "b6e676ed0b57a081f33a3ebf3ad3971b9c15e757a45525fcafe41bc0b8143235",
+        "model_id": "USDJPY_h3_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "-0.00138280575130995"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "cb387b59c077a531030b8367cce74ba3205af337928af5bcb10b90e752f73470",
+      "model_id": "USDJPY_h3_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.333779578457723",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    },
+    {
+      "anchor_market_session_date": "2026-10-16",
+      "as_of_utc": "2026-10-17T11:11:33Z",
+      "confidence_threshold": "0.7",
+      "cost_currency": "JPY",
+      "current_model_label_cutoff_market_session_date": "2026-10-16",
+      "current_model_set_id": "fixture:joint:oct16",
+      "current_outcomes_observed": false,
+      "direction_label": "UP",
+      "direction_target": "DOMESTIC_LANDED_PROXY_COST_UP",
+      "evaluation": null,
+      "evidence_refs": [
+        "fixture:joint-shadow-forecast"
+      ],
+      "feature_spec_sha256": "6ca19debb1ba626194e1f75a200ad18f5710c727bcb9fcc986f6b757dae3eefb",
+      "forecast_id": "fixture:joint:USDJPY:h5",
+      "forecast_kind": "JOINT_COPPER_FX_LANDED_PROXY",
+      "fx_pair": "USDJPY",
+      "generated_at_utc": "2026-10-17T11:11:33Z",
+      "historical_evaluation_id": null,
+      "historical_model_set_id": null,
+      "horizon_observed_rows": 5,
+      "input_snapshot_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+      "magnitude_context": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "model_artifact_sha256": "0701b2c3c7ce89679fe9e1e8c6cac29c6bb8d3239758ba5c0ab7bae8ecfc1d37",
+        "model_id": "USDJPY_h5_price_only_ridge_current",
+        "role": "CONTEXT_ONLY_NOT_DECISION_DRIVER",
+        "shrink_multiplier": "0.5",
+        "signed_estimated_landed_return": "-0.00169711911037654"
+      },
+      "market_proxy": "HG_ROLLING_FUTURES_USD_PER_LB_NOT_CATHODE_OFFER",
+      "market_series_id": "HG_ROLLING_FUTURES",
+      "model_artifact_sha256": "77c13751113be5467a5cbf64d436d24c833f461a2e4a2dfd0340ba192cacbc57",
+      "model_id": "USDJPY_h5_price_only_logistic_current",
+      "prob_direction_up_uncalibrated": "0.717951338490569",
+      "prob_quote_up_uncalibrated": null,
+      "research_basis": {
+        "basis_type": "JOINT_FIXED_LANDED_PROXY",
+        "copper_unit": "USD_PER_POUND_HG_ROLLING_FUTURES_PROXY",
+        "cost_quantity_unit": "METRIC_TON",
+        "duty_rate": "0.02",
+        "fx_spread_bps": "10",
+        "grade_and_transaction_limit": "FIXED_RESEARCH_PROXY_NOT_SUPPLIER_CATHODE_OR_COUNTRY_TARIFF",
+        "shipping_usd_per_metric_ton": "50"
+      },
+      "role": "MARKET_PROXY_CONTEXT_ONLY",
+      "run_id": "fixture:oct16",
+      "source_clocks": [
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "HG_ROLLING_FUTURES",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        },
+        {
+          "available_at_utc": "2026-10-17T11:11:33Z",
+          "exchange_timezone": null,
+          "first_seen_at_utc": "2026-10-17T11:11:33Z",
+          "series_id": "USDJPY",
+          "session_date": "2026-10-16",
+          "source_ref": "fixture:research-row:not-verified-live-clock"
+        }
+      ],
+      "target_market_session_date": null,
+      "target_status": "UNRESOLVED_FUTURE_OBSERVATIONS"
+    }
+  ],
+  "job_image_digest": "fixture:non-deployed",
+  "model_manifest_sha256": "3e084dda2fc0d0feb4314e4c87ac853f16635910b3a25ea750cba7e361e20d89",
+  "run_id": "fixture:oct16",
+  "runtime": {
+    "joblib": "1.6.0",
+    "numpy": "2.4.6",
+    "python": "3.11.15",
+    "scikit_learn": "1.9.1",
+    "scipy": "1.17.1"
+  },
+  "source_manifest_sha256": "5ff7e0202759b6f509bd292549a7ad7085b20ed877ffe17036cd4764ff7d71f4",
+  "status": "COMPLETE"
+}

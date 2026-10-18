@@ -1,1 +1,2 @@
 *.pdf binary
+procurement-engine/jobs/market_forecast/bundle/** -text

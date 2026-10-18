@@ -98,13 +98,98 @@ def test_go_away_opens_fresh_provider_with_current_company_history_only(monkeypa
         assert len(second.received_audio) == 1
         assert first.received_audio == []
         assert handles == [None, None]
-        assert all('Completed current-company question.' in value for value in contexts)
+        assert all('Completed current-company question.' not in value for value in contexts)
+        assert all(json.loads(value)['company_id'] == session.company_id for value in contexts)
         assert all('SECRET_OTHER_COMPANY' not in value for value in contexts)
         assert 'STALE_ONLY_OLD_PROVIDER' not in json.dumps(socket.history)
         assert not any(frame['type'] == 'tool_result' for frame in socket.history)
         assert 'private-provider-handle' not in json.dumps(socket.history)
         await socket.frames.put('{"type":"stop"}')
         await asyncio.wait_for(task, 2)
+    asyncio.run(scenario())
+
+
+def test_go_away_same_event_and_new_provider_unsolicited_output_fail_closed(monkeypatch):
+    class ManualProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses)
+            if function_responses.id == 'fresh-read':
+                await self.events.put(NS(server_content=NS(
+                    output_transcription=NS(text='Fresh inventory answer.'),
+                    model_turn=NS(parts=[NS(inline_data=NS(
+                        data=b'\x01\x00', mime_type='audio/pcm;rate=24000'))]),
+                    turn_complete=True)))
+
+    async def scenario():
+        store, session = setup()
+        first, second = ManualProvider(), ManualProvider()
+        opens, effects = [], []
+        first.events.put_nowait(NS(go_away=NS(time_left='1s'),
+            server_content=NS(output_transcription=NS(text='OLD_ANSWER')),
+            tool_call=NS(function_calls=[NS(name='fill_buyer_form', args={}, id='old-action')])))
+        second.events.put_nowait(NS(server_content=NS(
+            output_transcription=NS(text='UNSOLICITED_ANSWER'),
+            model_turn=NS(parts=[NS(inline_data=NS(
+                data=b'\x02\x00', mime_type='audio/pcm;rate=24000'))]),
+            turn_complete=True),
+            tool_call=NS(function_calls=[NS(name='fill_buyer_form', args={}, id='unsolicited-action')])))
+
+        @asynccontextmanager
+        async def factory(company, *, handle=None, history_context=None):
+            opens.append(handle)
+            yield first if len(opens) == 1 else second
+
+        async def workspace(name, args, version, key):
+            effects.append(name)
+            return {'turn_id': 'fresh', 'company_id': session.company_id,
+                    'context_version': version, 'status': 'completed',
+                    'assistant_text': 'Fresh inventory answer.', 'agent_steps': [],
+                    'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+        monkeypatch.setattr(live_voice, '_vertex_connection', factory)
+        socket = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store, operate_workspace=lambda *_: None,
+            workspace_tools=workspace))
+        await next_type(socket, 'ready')
+        assert (await next_type(socket, 'connection_status'))['state'] == 'reconnecting'
+        assert (await next_type(socket, 'connection_status'))['state'] == 'ready'
+        await asyncio.sleep(.02)
+        assert effects == []
+        assert not any(f['type'] == 'audio' or f.get('direction') == 'output' or
+                       f['type'] == 'tool_result' for f in socket.history)
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        for _ in range(100):
+            if second.received_audio:
+                break
+            await asyncio.sleep(.01)
+        await second.events.put(NS(voice_activity=NS(
+            voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+        await second.events.put(NS(server_content=NS(input_transcription=NS(
+            text='Read current inventory', finished=True))))
+        await second.events.put(NS(voice_activity=NS(
+            voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
+        await second.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='read_workspace', args={}, id='fresh-read')]), server_content=None))
+        assert (await next_type(socket, 'tool_result'))['result']['assistant_text'] == 'Fresh inventory answer.'
+        await next_type(socket, 'audio')
+        await next_type(socket, 'turn_complete')
+        assert effects == ['read_workspace']
+        assert opens == [None, None]
+        assert 'OLD_ANSWER' not in json.dumps(socket.history)
+        assert 'UNSOLICITED_ANSWER' not in json.dumps(socket.history)
+        assert not any(f.get('state') == 'awaiting_consent' for f in socket.history)
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
     asyncio.run(scenario())
 
 
@@ -159,7 +244,7 @@ def test_same_provider_call_id_keeps_idempotency_key_after_uncertain_handoff():
     assert secret.hex() not in call_key(secret, 'call-1')
 
 
-def test_passive_history_context_quotes_only_bounded_current_company_completed_history():
+def test_passive_history_context_preserves_ui_history_but_excludes_dialogue():
     store, session = setup()
     session.chat_history[session.company_id] = [
         {'channel': 'voice', 'speaker': 'input', 'question': 'Old risk question.'},
@@ -169,14 +254,16 @@ def test_passive_history_context_quotes_only_bounded_current_company_completed_h
         {'channel': 'voice', 'speaker': 'input', 'question': 'SECRET_OTHER_COMPANY'}]
     context = live_voice._history_context(session, session.company_id)
     instruction = live_voice._config(history_context=context).system_instruction
-    assert 'Old risk question.' in instruction and 'Old risk answer.' in instruction
+    assert 'Old risk question.' not in instruction and 'Old risk answer.' not in instruction
+    assert json.loads(context)['company_id'] == session.company_id
+    assert session.chat_history[session.company_id][0]['question'] == 'Old risk question.'
     assert 'SECRET_OTHER_COMPANY' not in instruction
-    assert 'quoted' in instruction.lower() and 'no consent' in instruction.lower()
+    assert 'no consent' in instruction.lower()
     assert 'fresh live audio' in instruction.lower()
     assert len(context) < 7000
 
 
-def test_passive_history_context_keeps_last_twelve_and_excludes_raw_turn_data():
+def test_passive_history_context_excludes_all_captions_and_raw_turn_data():
     store, session = setup()
     session.chat_history[session.company_id] = [
         {'channel': 'voice', 'speaker': 'input',
@@ -186,7 +273,7 @@ def test_passive_history_context_keeps_last_twelve_and_excludes_raw_turn_data():
     context = live_voice._history_context(session, session.company_id)
     assert len(context) <= 6000
     assert 'caption-0:' not in context
-    assert 'caption-14:' in context
+    assert 'caption-14:' not in context
     assert 'RAW_PRIVATE_CONTEXT' not in context
 
 
@@ -299,8 +386,9 @@ def test_fresh_renewal_answers_new_inventory_utterance_once(monkeypatch, asr_bef
         ready = await next_type(socket, 'connection_status')
         assert ready['state'] == 'ready'
         assert handles == [None, None]
-        assert all('Prior completed risk question.' in value and 'Prior risk answer.' in value
+        assert all('Prior completed risk question.' not in value and 'Prior risk answer.' not in value
                    for value in contexts)
+        assert all(json.loads(value)['company_id'] == session.company_id for value in contexts)
         for _ in range(5):
             await socket.frames.put(json.dumps({'type': 'audio', 'data': base64.b64encode(
                 b'\x01\x00' * 16_000).decode()}))
@@ -387,6 +475,9 @@ def test_renewed_provider_with_incomplete_fresh_evidence_never_executes(monkeypa
             name='read_workspace', args={}, id='must-not-run')]), server_content=None)
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
         monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .06)
+        if missing_evidence == 'expired_hold':
+            monkeypatch.setattr(live_voice, 'COMMAND_INITIAL_ACTIVITY_SECONDS', .03)
+            monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .03)
         socket = Socket(start(session))
         task = asyncio.create_task(live_voice.run_live_voice(
             socket, session=session, store=store, operate_workspace=lambda *_: None,
@@ -405,6 +496,8 @@ def test_renewed_provider_with_incomplete_fresh_evidence_never_executes(monkeypa
             await second.events.put(asr())
         await second.events.put(start_event)
         if missing_evidence == 'expired_hold':
+            # Expire the post-VAD command/transport phases, not pre-VAD grace.
+            monkeypatch.setattr(live_voice, 'RECOVERY_TRANSPORT_LATENESS_SECONDS', .03)
             await second.events.put(call)
             for _ in range(100):
                 if second.responses:
@@ -554,9 +647,28 @@ def test_explicit_incomplete_fresh_utterance_stays_latched_until_completed_or_re
             assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
             assert len(effects) == 1
             assert len([response for response in second.responses if response.id == 'held-read']) == 1
-            # The initial fresh-utterance gate is not rearmed on later captions.
+            # Late incomplete ASR cannot borrow the completed command. Preserve
+            # the successful renewed read above, then require a new VAD request.
             await second.events.put(asr(finished=False))
-            await second.events.put(call('later-read'))
+            await second.events.put(call('stale-later-read'))
+            for _ in range(100):
+                if any(r.id == 'stale-later-read' for r in second.responses):
+                    break
+                await asyncio.sleep(.01)
+            assert next(r for r in second.responses if r.id == 'stale-later-read').response['status'] == 'unavailable'
+            assert len(effects) == 1
+            await socket.frames.put('{"type":"audio","data":"AQACAAEAAwA="}')
+            expected_audio = 3 if completion == 'new_start' else 2
+            for _ in range(100):
+                if len(second.received_audio) == expected_audio:
+                    break
+                await asyncio.sleep(.01)
+            start_offset = '0.0005s' if completion == 'new_start' else '0.00025s'
+            end_offset = '0.00075s' if completion == 'new_start' else '0.0005s'
+            await second.events.put(activity('ACTIVITY_START', start_offset))
+            await second.events.put(asr(finished=True))
+            await second.events.put(activity('ACTIVITY_END', end_offset))
+            await second.events.put(call('fresh-later-read'))
             assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
             assert len(effects) == 2
         await socket.frames.put('{"type":"stop"}')
@@ -630,6 +742,11 @@ def test_tool_saturation_is_temporary_and_thirteenth_later_executes(monkeypatch)
         async def send_realtime_input(self, **kwargs):
             if kwargs.get('audio'):
                 self.count += 1
+                await self.events.put(NS(voice_activity=NS(voice_activity_type='ACTIVITY_START',
+                    audio_offset=f'{(self.count - 1) * .000125:.6f}s')))
+                await self.events.put(NS(server_content=NS(input_transcription=NS(text='Read inventory', finished=True))))
+                await self.events.put(NS(voice_activity=NS(voice_activity_type='ACTIVITY_END',
+                    audio_offset=f'{self.count * .000125:.6f}s')))
                 await self.events.put(NS(tool_call=NS(function_calls=[NS(
                     name='read_workspace', args={}, id=f'call-{self.count}')]),
                     server_content=None))
@@ -639,7 +756,9 @@ def test_tool_saturation_is_temporary_and_thirteenth_later_executes(monkeypatch)
 
     async def scenario():
         tick = [1_000.0]
-        monkeypatch.setattr(live_voice, 'monotonic', lambda: tick[0])
+        from time import monotonic
+        monkeypatch.setattr(live_voice, 'monotonic', lambda: monotonic() + tick[0])
+        monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .001)
         store, session = setup()
         provider = ManyToolProvider()
         socket = Socket(start(session))
@@ -834,6 +953,10 @@ def test_held_fresh_call_never_runs_without_finished_utterance(monkeypatch, endi
 
         monkeypatch.setattr(live_voice, '_vertex_connection', factory)
         monkeypatch.setattr(live_voice, 'FRESH_CALL_GRACE_SECONDS', .12, raising=False)
+        if ending == 'timeout':
+            monkeypatch.setattr(live_voice, 'COMMAND_INITIAL_ACTIVITY_SECONDS', .03)
+            monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .03)
+            monkeypatch.setattr(live_voice, 'RECOVERY_TRANSPORT_LATENESS_SECONDS', .03)
         socket = Socket(start(session))
         task = asyncio.create_task(live_voice.run_live_voice(
             socket, session=session, store=store, operate_workspace=lambda *_: None,
@@ -908,7 +1031,8 @@ def test_provider_setup_timeout_releases_slot_without_browser_close(monkeypatch)
 
 
 def test_cue_and_provider_audio_share_rolling_output_budget(monkeypatch, tmp_path):
-    from test_demo_voice_cues import claimed_research, cue_file
+    from test_demo_voice_cues import cue_file
+    from test_demo_voice_research_consent import QUERY, prepare, scenario as research_scenario, send_pcm
     monkeypatch.setattr(live_voice, 'VOICE_CUE_FILE', cue_file(tmp_path))
     monkeypatch.setattr(live_voice, 'CUE_DELAY_SECONDS', .01)
     monkeypatch.setattr(live_voice, 'CUE_CHUNK_BYTES', 800)
@@ -922,7 +1046,18 @@ def test_cue_and_provider_audio_share_rolling_output_budget(monkeypatch, tmp_pat
             entered.set()
             await asyncio.Event().wait()
 
-        _, session, socket, provider, _, task = await claimed_research(research)
+        _, session, socket, provider, _, task = await research_scenario(research=research)
+        # A provider prompt needs an actual fresh question before it can be heard.
+        await send_pcm(socket, provider)
+        await provider.activity('ACTIVITY_START', '0s')
+        await provider.spoken('input', QUERY)
+        await provider.activity('ACTIVITY_END', '1s')
+        await prepare(socket, provider)
+        await provider.spoken('output', f'I can search for: {QUERY} Say confirm research to start.', complete=True)
+        await socket.next('turn_complete')
+        await send_pcm(socket, provider)
+        await provider.spoken('input', 'confirm research', finished=True)
+        assert (await socket.next('research_progress'))['phase'] == 'checking_consent'
         await asyncio.wait_for(entered.wait(), 2)
         await socket.next('audio')
         await socket.next('turn_complete')

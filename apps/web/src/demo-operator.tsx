@@ -5,7 +5,7 @@ import type { DemoSession, NewsView, OfferView, OperatorApplied, OperatorHistory
 import { LiveVoice } from './demo-live-voice';
 import type { LiveVoiceHandle } from './demo-live-voice';
 import { ActivityIndicator } from './demo-activity';
-import { displaySupplierMentions, supplierDisplayName } from './demo-display';
+import { displayRfqDraftBody, displaySupplierMentions, supplierDisplayName } from './demo-display';
 import { ResearchOutcome, validatedResearchResult } from './demo-research';
 import { MarkdownAnswer } from './demo-markdown';
 import { currentProposalDraft, currentSavedRfq, currentSessionProposal, isCurrentSavedDraft } from './demo-operator-contract';
@@ -682,7 +682,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
       <div className="demo-proposal-essential"><span className="demo-kicker">RFQ saved</span><h3>Unsent RFQ draft</h3>
         <div className="demo-draft-summary"><p><strong>To:</strong> {displaySupplierMentions(savedRfq.draft.recipient_label, supplierNames)}</p><p><strong>Subject:</strong> {savedRfq.draft.subject}</p></div>
       </div>
-      <details className="demo-draft-preview"><summary>Full RFQ preview</summary><pre>{displaySupplierMentions(savedRfq.draft.body, supplierNames)}</pre></details>
+      <details className="demo-draft-preview"><summary>Full RFQ preview</summary><pre>{displayRfqDraftBody(savedRfq.draft.body, supplierNames)}</pre></details>
       <div className="demo-proposal-actions"><a className="demo-link" href={`/api/demo/rfq/${encodeURIComponent(savedRfq.draft.draft_id)}/download`}>Download RFQ</a><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></div>
     </div>
   ) : null;
@@ -708,7 +708,7 @@ export function OperatorPanel({ scope, csrf, dirty, blocked = false, closeSignal
         const original = offers.find(offer => offer.offer_id === row.offer_id);
         return <div key={row.offer_id} className="demo-table-wrap"><h5>{row.source_filename} · {row.offer_id} · Expected version {row.expected_version}</h5><p>Original quote version: {original?.version ?? 'Unavailable'} · Sample document: {row.fixture_id}</p><table><thead><tr><th>Field</th><th>Current original field</th><th>Suggested document value</th></tr></thead><tbody>{Object.entries(row.review_values).map(([field, value]) => <tr key={field}><td>{field}</td><td>Original: {originalQuoteField(original, field)}</td><td>Reviewer value: {detail(value)}</td></tr>)}</tbody></table></div>;
       })}</details>}
-      {preparedPreview && <details key={proposalPreviewKey(scope, proposal)} className="demo-draft-preview" onToggle={event => { if (event.currentTarget.open) setOpenedPreviewKey(proposalPreviewKey(scope, proposal)); }}><summary>Full draft preview</summary><pre>{displaySupplierMentions(preparedPreview.body, supplierNames)}</pre><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></details>}
+      {preparedPreview && <details key={proposalPreviewKey(scope, proposal)} className="demo-draft-preview" onToggle={event => { if (event.currentTarget.open) setOpenedPreviewKey(proposalPreviewKey(scope, proposal)); }}><summary>Full draft preview</summary><pre>{proposal.kind === 'rfq' ? displayRfqDraftBody(preparedPreview.body, supplierNames) : displaySupplierMentions(preparedPreview.body, supplierNames)}</pre><button type="button" className="demo-link" onClick={() => { if (voiceOpen) closeVoice(false); onNavigate?.('drafts'); }}>View draft in workspace</button></details>}
       <div className="demo-proposal-confirm">
         <label><input type="checkbox" checked={state.reviewed && previewReady} disabled={dirty || blocked || !!busy || !reviewCurrent || !previewReady} onChange={event => dispatch({ type: 'review', value: event.target.checked })} />{proposal.kind === 'research' ? 'I reviewed the public query and want to search the web.' : 'I reviewed the exact arguments and want to apply this change to the current session.'}</label>
         <div className="demo-proposal-actions"><button type="button" className="demo-button" disabled={!mayApply} onClick={apply}>{proposal.kind === 'research' ? 'Research web' : proposal.kind === 'simulate_email' ? 'Record simulated sent message' : 'Apply reviewed proposal'}</button><button type="button" className="demo-link" disabled={!!busy} onClick={cancel}>Cancel proposal</button></div>

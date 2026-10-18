@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 import type { CompanyProfile, RiskReport } from './demo-api';
 import { CompanyHub, filterWorkspaceCompanies, WorkspaceHeader, WorkspaceNavigation, WorkspaceOverview } from './zoorq-workspace';
 
@@ -29,6 +30,24 @@ describe('ZOORQ workspace shell', () => {
     expect(html).toContain('>Procure</span>');
     expect(html).not.toContain('®');
     expect(html).not.toContain('▥');
+  });
+
+  it('reserves the desktop company slot only while the first session loads', () => {
+    const loading = renderToStaticMarkup(<WorkspaceNavigation view="overview" reserveCompanyIdentity onView={() => {}} />);
+    const ready = renderToStaticMarkup(<WorkspaceNavigation company={company} view="overview" onView={() => {}} />);
+    const switching = renderToStaticMarkup(<WorkspaceNavigation company={company} view="overview" reserveCompanyIdentity disabled onView={() => {}} />);
+    const hub = renderToStaticMarkup(<WorkspaceNavigation view="hub" onView={() => {}} />);
+    expect(loading).toContain('zoorq-nav-company is-placeholder');
+    expect(loading).toContain('aria-hidden="true"');
+    expect(loading).not.toContain('Solara Cables');
+    expect(loading).not.toContain('zoorq-all-companies" disabled=""');
+    expect(ready).toContain('zoorq-nav-company');
+    expect(ready).not.toContain('is-placeholder');
+    expect(switching).toContain('Solara Cables');
+    expect(switching).not.toContain('is-placeholder');
+    expect(hub).not.toContain('is-placeholder');
+    const css = readFileSync(new URL('./zoorq-workspace.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.zoorq-nav-company\{[^}]*min-height:/);
   });
 
   it('provides distinct Talk and Type actions in the compact header', () => {

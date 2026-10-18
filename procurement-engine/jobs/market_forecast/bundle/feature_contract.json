@@ -1,0 +1,39 @@
+{
+  "anchor_date": "2026-10-16",
+  "future_outcomes": "All current target dates, target prices, realized returns and savings are null/unobserved.",
+  "fx_target": "Rise in domestic cost of USD payable; EURUSD and GBPUSD raw quote score equals 1 minus economic-cost-up score, USDJPY raw quote score equals economic-cost-up.",
+  "horizons_observed_rows": [
+    1,
+    3,
+    5
+  ],
+  "issuance": "After both exchange-local Copper and FX daily closes for the same anchor date are known; next-session planning proxy, not executable prices.",
+  "joint_target": "Domestic landed copper unit cost; price-only exact-date same-anchor Copper plus FX features; 9 classifier and 9 Ridge size artifacts.",
+  "landed_basis": {
+    "basis_version": "hybrid-daily-decision-simulation.v1",
+    "compatibility": "Replay parity verifies this frozen research basis only. Real company duty, freight, cathode premium, execution FX, inventory and supplier terms require separate validation. Ridge output is domestic landed-unit return, not raw Copper or FX return.",
+    "constants_relative_path": "code/decision_constants.json",
+    "constants_sha256": "cdae6e5857beb139abf00569cb005dd198c8ede4b5c656a5690734a437c11690",
+    "copper_instrument": "HG=F rolling futures proxy quoted USD per pound; no spot cathode premium",
+    "duty_rate": 0.02,
+    "formula_code_relative_path": "code/decision_evaluation.py",
+    "formula_code_sha256": "3c9d32587828fb0ba72f2a81d58905beea67ee6007974b33ea58705dda71e431",
+    "fx_spread_bps": 10,
+    "pounds_per_metric_ton": 2204.622621848776,
+    "price_basis": "rolling_copper_futures_and_daily_fx_close_proxy",
+    "shipping_usd_per_metric_ton": 50
+  },
+  "magnitude": "Ridge raw return multiplied by frozen per-cell shrink; contextual scenario estimate, not a target price guarantee.",
+  "news": "No news features, Jev outputs, keys, or customer data are in this selected bundle.",
+  "permission": "Reference inference only. FX display does not authorize payment deferral; model outputs do not authorize purchasing.",
+  "price_source": "Public Yahoo five-year daily futures/indicative FX CSVs, no historical vintage or executable-price proof.",
+  "schema": "portable-model-feature-contract.v1",
+  "scores": "All scores uncalibrated; RBF SVC uses sigmoid(decision_function) as an uncalibrated score.",
+  "status": "REFERENCE_REPLAY_ONLY_NOT_PRODUCT_INTEGRATION",
+  "timezones": {
+    "COPPER": "America/New_York",
+    "EURUSD": "Europe/London",
+    "GBPUSD": "Europe/London",
+    "USDJPY": "Europe/London"
+  }
+}

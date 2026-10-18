@@ -170,22 +170,20 @@ export function ZoorqEcosystem() {
       };
       const intersection = new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; sync(); }, { threshold: 0 });
       const resizer = new ResizeObserver(resize);
-      host.addEventListener('pointermove', pointerMove);
-      host.addEventListener('pointerleave', pointerLeave);
-      document.addEventListener('visibilitychange', sync);
-      reducedMotion.addEventListener('change', sync);
-      intersection.observe(host);
-      resizer.observe(host);
-      resize();
-
+      let listening = false;
+      let released = false;
       release = () => {
+        if (released) return;
+        released = true;
         cancelAnimationFrame(frame);
-        host.removeEventListener('pointermove', pointerMove);
-        host.removeEventListener('pointerleave', pointerLeave);
-        document.removeEventListener('visibilitychange', sync);
-        reducedMotion.removeEventListener('change', sync);
-        intersection.disconnect();
-        resizer.disconnect();
+        if (listening) {
+          host.removeEventListener('pointermove', pointerMove);
+          host.removeEventListener('pointerleave', pointerLeave);
+          document.removeEventListener('visibilitychange', sync);
+          reducedMotion.removeEventListener('change', sync);
+          intersection.disconnect();
+          resizer.disconnect();
+        }
         host.classList.remove('zoorq-ecosystem-ready');
         [ringGeometry, bypassGeometry, tailGeometry].forEach(geometry => geometry.dispose());
         sculpture.traverse(object => { if (object instanceof THREE.Mesh && object.geometry !== ringGeometry && object.geometry !== bypassGeometry && object.geometry !== tailGeometry) object.geometry.dispose(); });
@@ -194,10 +192,27 @@ export function ZoorqEcosystem() {
         renderer.forceContextLoss();
         renderer.domElement.remove();
       };
-      if (disposed) release();
+      // Yield to the browser, then prepare shaders before the first WebGL draw.
+      await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+      if (disposed) return;
+      const bounds = host.getBoundingClientRect();
+      renderer.setSize(Math.max(1, bounds.width), Math.max(1, bounds.height), false);
+      camera.aspect = Math.max(1, bounds.width) / Math.max(1, bounds.height);
+      camera.position.z = bounds.width < 460 ? 5.15 : 5.5;
+      camera.updateProjectionMatrix();
+      await renderer.compileAsync(scene, camera);
+      if (disposed) return;
+      listening = true;
+      host.addEventListener('pointermove', pointerMove);
+      host.addEventListener('pointerleave', pointerLeave);
+      document.addEventListener('visibilitychange', sync);
+      reducedMotion.addEventListener('change', sync);
+      intersection.observe(host);
+      resizer.observe(host);
+      resize();
     };
 
-    mount().catch(() => { /* Static route remains visible when WebGL is unavailable. */ });
+    mount().catch(() => { release?.(); /* Static route remains visible when WebGL is unavailable. */ });
     return () => { disposed = true; release?.(); };
   }, [resolvedTheme]);
 

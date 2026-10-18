@@ -38,6 +38,179 @@ def rfq_body(plan, key="draft-one", **changes):
             "reviewed": True, "idempotency_key": key, **changes}
 
 
+def test_bridge_rfq_is_unsent_canonical_and_does_not_change_plan(demo):
+    client, headers, _, _, plan = demo
+    body = rfq_body(plan, mode='bridge')
+    response = client.post('/api/demo/rfq', headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert draft['status'] == 'draft_unsent' and draft['bridge'] is True
+    coverage = client.get('/api/demo/session').json()['plan']['supply_coverage']
+    assert coverage['status'] == 'gap'
+    assert draft['quantity'] == coverage['bridge_quantity']
+    assert draft['need_by'] == coverage['bridge_needed_by']
+    assert 'price and capacity' in draft['text'].lower()
+    assert client.get(f"/api/demo/rfq/{draft['draft_id']}/download").text == draft['text']
+    state = client.get('/api/demo/session').json()
+    assert state['plan']['plan_id'] == plan['plan_id']
+    assert state['plan']['required_purchase'] == plan['required_purchase']
+    assert state['drafts'][-1]['body'] == draft['text']
+    assert client.post('/api/demo/rfq', headers=headers, json=body).json() == draft
+
+
+def test_older_regular_and_new_bridge_ledger_drafts_download_exact_bodies(demo):
+    client, headers, _, _, plan = demo
+    regular_request = rfq_body(plan, 'regular-before-bridge')
+    regular = client.post('/api/demo/rfq', headers=headers, json=regular_request).json()
+    bridge_request = rfq_body(plan, 'bridge-after-regular', mode='bridge')
+    bridge = client.post('/api/demo/rfq', headers=headers, json=bridge_request).json()
+    state = client.get('/api/demo/session').json()
+    assert state['rfq']['draft_id'] == bridge['draft_id']
+    for draft in (regular, bridge):
+        entry = next(row for row in state['drafts'] if row['draft_id'] == draft['draft_id'])
+        downloaded = client.get(f"/api/demo/rfq/{draft['draft_id']}/download")
+        assert downloaded.status_code == 200
+        assert downloaded.content == entry['body'].encode('utf-8') == draft['text'].encode('utf-8')
+        assert 'synthetic-rfq-draft.txt' in downloaded.headers['content-disposition']
+    assert client.post('/api/demo/rfq', headers=headers, json=bridge_request).json() == bridge
+    assert client.post('/api/demo/rfq', headers=headers, json=regular_request).json() == regular
+    assert client.get('/api/demo/rfq/not-a-real-draft/download').status_code == 404
+    with TestClient(client.app, base_url='https://demo.test') as foreign:
+        foreign.get('/api/demo/session')
+        assert foreign.get(f"/api/demo/rfq/{regular['draft_id']}/download").status_code == 404
+        assert foreign.get(f"/api/demo/rfq/{bridge['draft_id']}/download").status_code == 404
+    other_company = next(row['company_id'] for row in client.get('/api/demo/companies').json()['companies']
+                         if row['company_id'] != plan['company_id'])
+    context_version = state['context_version']
+    changed = client.post('/api/demo/company', headers=headers, json={
+        'company_id': other_company, 'expected_context_version': context_version,
+        'idempotency_key': 'switch-after-rfq'})
+    assert changed.status_code == 200
+    assert client.get(f"/api/demo/rfq/{regular['draft_id']}/download").status_code == 404
+    assert client.get(f"/api/demo/rfq/{bridge['draft_id']}/download").status_code == 404
+
+
+@pytest.mark.parametrize('missing_field', ['context_version', 'selected_offer_id'])
+def test_restored_legacy_rfq_without_ownership_fields_is_hidden(missing_field, demo):
+    from procure.demo.session_persistence import MemorySessionPersistence
+    client, headers, _, _, plan = demo
+    rfq = client.post('/api/demo/rfq', headers=headers, json=rfq_body(plan)).json()
+    session_id = client.get('/api/demo/session').json()['session_id']
+    value = client.app.state.sessions.get(session_id)
+    entry = next(row for row in value.drafts if row['draft_id'] == rfq['draft_id'])
+    entry.pop(missing_field)
+    backend = MemorySessionPersistence()
+    original_store = client.app.state.sessions
+    original_store.backend = backend
+    original_store.save(value)
+    fresh_app = create_app(clock=original_store.clock, session_backend=backend)
+    with TestClient(fresh_app, base_url='https://demo.test') as cold:
+        cold.cookies.update(client.cookies)
+        for endpoint in ('/api/demo/session', '/api/demo/export'):
+            response = cold.get(endpoint).json()
+            assert response['rfq'] is None
+            assert not any(row['draft_id'] == rfq['draft_id'] for row in response['drafts'])
+        assert cold.get(f"/api/demo/rfq/{rfq['draft_id']}/download").status_code == 404
+        assert any(row.get('body') == rfq['text'] for row in fresh_app.state.sessions.get(session_id).drafts)
+
+
+def test_rfq_projection_hides_stale_version_expiration_and_foreign_ledger_rows(demo):
+    client, headers, offers, _, plan = demo
+    regular = client.post('/api/demo/rfq', headers=headers, json=rfq_body(plan, 'regular')).json()
+    bridge = client.post('/api/demo/rfq', headers=headers, json=rfq_body(plan, 'bridge', mode='bridge')).json()
+    value = client.app.state.sessions.get(client.get('/api/demo/session').json()['session_id'])
+    foreign = {**value.drafts[0], 'draft_id': 'foreign-rfq', 'company_id': 'loomworks', 'body': 'FOREIGN BODY'}
+    value.drafts.append(foreign)
+    value.drafts.append({**foreign, 'draft_id': regular['draft_id']})
+    state = client.get('/api/demo/session').json()
+    assert {row['draft_id'] for row in state['drafts']} == {regular['draft_id'], bridge['draft_id']}
+    assert len(state['drafts']) == 2
+    assert state['rfq']['draft_id'] == bridge['draft_id']
+    assert 'FOREIGN BODY' not in str(state)
+    assert 'FOREIGN BODY' not in client.get('/api/demo/export').text
+    selected = value.offers[plan['selected_offer_id']]
+    selected['version'] += 1
+    for endpoint in ('/api/demo/session', '/api/demo/export'):
+        response = client.get(endpoint).json()
+        assert response['rfq'] is None and response['drafts'] == []
+    for draft in (regular, bridge):
+        assert client.get(f"/api/demo/rfq/{draft['draft_id']}/download").status_code == 404
+    selected['version'] -= 1
+    selected['fields']['valid_until']['value'] = '2026-10-13'
+    assert client.get('/api/demo/session').json()['drafts'] == []
+    assert client.get('/api/demo/export').json()['rfq'] is None
+
+
+def test_native_workspace_does_not_expose_retired_rfq_body_or_metadata(demo, monkeypatch):
+    import procure.demo.live_voice as live
+    async def read(socket, *, session, workspace_tools, **kwargs):
+        await socket.accept()
+        await socket.receive_json()
+        await socket.send_json(await workspace_tools('read_workspace', {}, session.context_version, 'read-rfq'))
+        await socket.close()
+    monkeypatch.setattr(live, 'run_live_voice', read)
+    client, headers, _, request, plan = demo
+    rfq = client.post('/api/demo/rfq', headers=headers, json=rfq_body(plan)).json()
+    assert client.post('/api/demo/plan', headers=headers, json=request).status_code == 200
+    with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                  headers={'Origin': 'https://demo.test'}) as socket:
+        socket.send_json({'message': 'Read workspace'})
+        result = socket.receive_json()
+    assert result['workspace']['drafts'] == []
+    assert rfq['draft_id'] not in str(result)
+    assert rfq['text'] not in str(result)
+
+
+def test_company_revisit_keeps_old_rfq_history_but_not_current_access(demo):
+    client, headers, _, _, plan = demo
+    rfq = client.post('/api/demo/rfq', headers=headers, json=rfq_body(plan)).json()
+    value = client.app.state.sessions.get(client.get('/api/demo/session').json()['session_id'])
+    other = client.post('/api/demo/company', headers=headers, json={
+        'company_id': 'loomworks', 'expected_context_version': value.context_version,
+        'idempotency_key': 'switch-to-b'})
+    assert other.status_code == 200
+    back = client.post('/api/demo/company', headers=headers, json={
+        'company_id': 'solara-cables', 'expected_context_version': other.json()['context_version'],
+        'idempotency_key': 'switch-back-to-a'})
+    assert back.status_code == 200
+    state = client.get('/api/demo/session').json()
+    assert state['rfq'] is None and state['drafts'] == []
+    exported = client.get('/api/demo/export').json()
+    assert exported['rfq'] is None and exported['drafts'] == []
+    assert client.get(f"/api/demo/rfq/{rfq['draft_id']}/download").status_code == 404
+    assert any(row['draft_id'] == rfq['draft_id'] for row in value.drafts)
+
+
+def test_unselected_plan_gap_cannot_create_bridge_draft(demo):
+    client, headers, _, request, _ = demo
+    response = client.post('/api/demo/plan', headers=headers,
+                           json={**request, 'budget': '80000'})
+    assert response.status_code == 200
+    plan = response.json()
+    assert plan['selected_offer_id'] is None
+    assert plan['supply_coverage']['status'] == 'gap'
+    before = client.get('/api/demo/session').json()
+    result = client.post('/api/demo/rfq', headers=headers,
+                         json=rfq_body(plan, 'unselected-bridge', mode='bridge'))
+    assert result.status_code == 409
+    after = client.get('/api/demo/session').json()
+    assert after['drafts'] == before['drafts'] and after['rfq'] is None
+
+
+def test_bridge_rfq_rejects_stale_plan_and_zero_gap(demo):
+    client, headers, _, request, plan = demo
+    stale = client.post('/api/demo/rfq', headers=headers,
+                        json=rfq_body(plan, 'bridge-stale', mode='bridge', plan_id='other-plan'))
+    assert stale.status_code == 409
+    covered = client.post('/api/demo/plan', headers=headers,
+                          json={**request, 'current_stock_kg': '10000'})
+    assert covered.status_code == 200
+    denied = client.post('/api/demo/rfq', headers=headers,
+                         json=rfq_body(covered.json(), 'bridge-zero', mode='bridge'))
+    assert denied.status_code == 409
+    assert client.get('/api/demo/session').json()['rfq'] is None
+
+
 def test_reviewed_rfq_from_delayed_active_plan_preserves_quote_and_assumption_boundaries(demo):
     client, headers, offers, request, baseline = demo
     europa, swift = offers["eu-copper"]["offer_id"], offers["express-copper"]["offer_id"]
@@ -121,9 +294,31 @@ def test_rfq_replay_cannot_restore_stale_draft_and_download_checks_ownership(dem
     assert client.post("/api/demo/rfq", headers=headers, json=body).status_code == 409
     assert client.get(f"/api/demo/rfq/{draft['draft_id']}/download").status_code == 404
     assert client.get("/api/demo/session").json()["rfq"] is None
+    assert not any(row['draft_id'] == draft['draft_id'] for row in client.get('/api/demo/session').json()['drafts'])
     assert client.get("/api/demo/export").json()["rfq"] is None
     assert client.post("/api/demo/reset", headers=headers, json={}).status_code == 200
     assert client.get(f"/api/demo/rfq/{draft['draft_id']}/download").status_code == 404
+
+
+def test_discrete_bridge_request_rounds_only_orderable_quantity(demo):
+    from procure.demo.rfq import build_bridge_draft
+    client, _, offers, _, plan = demo
+    chosen = next(offer for offer in offers.values() if offer['offer_id'] == plan['selected_offer_id'])
+    units_plan = {**plan, 'quantity_unit': 'pieces'}
+    coverage = {'status': 'gap', 'plan_id': plan['plan_id'], 'company_id': plan['company_id'],
+                'material_id': plan['material'], 'quantity_unit': 'pieces', 'missing_inputs': [],
+                'bridge_quantity': '2.25', 'uncovered_quantity': '2.25',
+                'bridge_needed_by': '2026-10-20', 'selected_arrival_date': '2026-10-24',
+                'stock': '4', 'inventory_as_of': '2026-10-14', 'consumption_per_day': '0.75',
+                'consumption_as_of': '2026-10-14'}
+    draft = build_bridge_draft(units_plan, chosen, coverage=coverage,
+                               created_at=datetime(2026, 10, 14, tzinfo=timezone.utc))
+    assert draft['quantity'] == '3'
+    assert draft['arithmetic_bridge_quantity'] == '2.25'
+    assert 'Requested bridge quantity: 3 pieces' in draft['text']
+    assert 'Calculated bridge quantity: 2.25 pieces' in draft['text']
+    assert '10.50 USD' not in draft['text']
+    assert draft['total_cost'] is None
 
 
 def test_failed_recovery_keeps_prior_draft_and_valid_comparison(demo):

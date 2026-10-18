@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -254,6 +255,43 @@ def read_turn(socket):
     raise AssertionError('No bounded turn completion')
 
 
+def read_silent_denial(socket, provider):
+    """A missing or unfinished ASR has a tool result, but no spoken turn."""
+    async def receive_with_deadline(seconds):
+        with anyio.move_on_after(seconds) as scope:
+            message = await socket._send_rx.receive()
+        if scope.cancel_called:
+            return None
+        socket._raise_on_close(message)
+        return json.loads(message['text'])
+
+    frames = []
+    deadline = time.monotonic() + 5
+    for _ in range(16):
+        frame = socket.portal.call(receive_with_deadline, max(.001, deadline - time.monotonic()))
+        assert frame is not None, f'No denied tool result before deadline: {frames}'
+        frames.append(frame)
+        assert frame['type'] != 'error', frame
+        if frame['type'] == 'tool_result':
+            break
+    else:
+        pytest.fail(f'No denied tool result within 16 frames: {frames}')
+
+    async def wait_for_callback():
+        with anyio.fail_after(2):
+            while not provider.responses:
+                await asyncio.sleep(.01)
+
+    socket.portal.call(wait_for_callback)
+    # Give the provider's queued reply a bounded chance to reach the browser.
+    for _ in range(8):
+        frame = socket.portal.call(receive_with_deadline, .15)
+        if frame is None:
+            break
+        frames.append(frame)
+    return frames
+
+
 def start_voice(socket, session):
     socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
                       'expected_context_version': session['context_version']})
@@ -450,10 +488,24 @@ def test_actual_operator_cannot_retain_recovery_from_paraphrased_tool_args(spoke
         with open_voice(client, session) as socket:
             start_voice(socket, session)
             socket.send_json({'type': 'audio', 'data': PCM})
-            frames = read_turn(socket)
+            frames = (read_silent_denial(socket, provider) if spoken is None or finished is False
+                      else read_turn(socket))
+            if spoken is None or finished is False:
+                assert len(provider.responses) == 1
+                assert provider.responses[0].id == 'real-call-1'
+                denied = provider.responses[0].response
+                assert denied['status'] == 'needs_clarification'
+                assert denied.get('proposal') is None
+                assert denied.get('action_applied') is not True
+                assert not any(frame['type'] in {'audio', 'turn_complete'} or
+                               frame.get('direction') == 'output' for frame in frames)
+                assert not model.calls
+                assert value.operator_turns == 0
             assert value.pending_proposal is None
             assert not any((frame.get('result', {}).get('proposal') or {}).get('kind') == 'recovery'
                            for frame in frames)
+            assert not any(frame.get('result', {}).get('action_applied')
+                           for frame in frames if frame['type'] == 'tool_result')
             assert value.recovery is None
             assert all((row.get('result', {}).get('proposal') or {}).get('kind') != 'recovery'
                        for row in value.idempotency.values())

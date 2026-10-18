@@ -127,6 +127,9 @@ def resolve_local_turn(snapshot, message, *, now):
     if not isinstance(snapshot.get('context_version'),int):
         return None  # Legacy pure-reader snapshots have no session context.
     resolved = resolve_judge_turn(snapshot, message, now=now)
+    from .judge_resolver import _BRIDGE_REQUEST, _BRIDGE_AMBIGUOUS_REQUEST
+    if resolved and (_BRIDGE_REQUEST.search(message) or _BRIDGE_AMBIGUOUS_REQUEST.search(message)):
+        return resolved
     if _explicit_recovery_request(message):
         if resolved and resolved.get('missing_inputs') == ['company']:
             return resolved
@@ -150,9 +153,11 @@ def resolve_local_turn(snapshot, message, *, now):
                             'delay_days_by_offer': request['delay_days_by_offer']},
                         'answer': 'Review the recovery comparison for the selected current shipment. No plan has changed.'}
         return resolved
-    # The resolver decides hypothetical intent; only preview/input outcomes need
-    # an original-baseline view. Factual reads keep the active recovery state.
-    if resolved and resolved['kind'] in {'read_only_preview','needs_input','unavailable'}:
+    # Only hypothetical previews may consult the original baseline. A factual
+    # unknown in the active recovery must keep its active plan and missing fact.
+    if resolved and (resolved['kind'] == 'read_only_preview' or
+            (resolved['kind'] in {'needs_input', 'unavailable'} and
+             (_PREVIEW_ONLY.search(message) or re.match(r'^\s*if\b', message, re.I)))):
         resolved = resolve_judge_turn(baseline_snapshot(snapshot), message, now=now)
     # Explicit operational requests belong to the existing validated action path.
     if resolved and resolved.get('missing_inputs') == ['company']:
@@ -187,7 +192,8 @@ def has_local_evidence(resolved, snapshot):
 def judge_outcome(resolved):
     kind = resolved['kind']
     research = resolved.get('follow_up_research') or resolved.get('research_parameters')
-    candidate = ({'kind': 'recovery', 'parameters': deepcopy(resolved['recovery_parameters'])}
+    candidate = ({'kind': 'rfq', 'parameters': {'mode': 'bridge'}} if kind == 'bridge_rfq_request' else
+                 {'kind': 'recovery', 'parameters': deepcopy(resolved['recovery_parameters'])}
                  if kind == 'recovery_proposal' else
                  {'kind': 'research', 'parameters': deepcopy(research)} if research else None)
     tool = next((name for name in ('read_shipments','read_carbon') if any(name in ref for ref in resolved.get('evidence_refs',[]))), 'judge_read')

@@ -55,6 +55,43 @@ describe('judge entry', () => {
     expect(loading).not.toContain('<dl');
   });
 
+  it('reserves one first-visit facts region in loading, ready, and unavailable states without expanding restored visits', () => {
+    const states = ['loading', 'ready', 'unavailable'] as const;
+    for (const status of states) {
+      const html = renderToStaticMarkup(<ZoorqJudgeEntry company={company} session={null} visit="first" prepared={{ status, facts: status === 'ready' ? [{ label: 'Profile stock cover', value: '6 days', basis: 'Synthetic profile' }] : [] }} companyCount={10} {...actions} />);
+      expect((html.match(/zoorq-judge-entry-facts-shell/g) ?? []).length).toBe(1);
+      expect(html).not.toContain('is-continuing');
+      if (status === 'loading') expect(html).toContain('aria-hidden="true"');
+    }
+    const restored = renderToStaticMarkup(<ZoorqJudgeEntry company={other} session={session} visit="restored" prepared={{ status: 'unavailable', facts: [] }} companyCount={10} {...actions} />);
+    expect(restored).toContain('is-continuing');
+    expect(restored).not.toContain('zoorq-judge-entry-facts-shell');
+    const css = readFileSync(new URL('./zoorq-judge-entry.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.zoorq-judge-entry-facts-shell\{[^}]*min-height:/);
+    expect(css).toMatch(/@media\(max-width:760px\)\{[^\n]*\.zoorq-judge-entry-facts-shell\{[^}]*min-height:/);
+  });
+
+  it('reserves two mobile status lines across first-visit states without changing the status claim or restored layout', () => {
+    const statuses = {
+      loading: 'Preparing the scenario…',
+      ready: 'Prepared scenario · ready to explore',
+      unavailable: 'Prepared scenario unavailable; you can still explore this company.',
+    } as const;
+    for (const [status, label] of Object.entries(statuses) as [keyof typeof statuses, string][]) {
+      const html = renderToStaticMarkup(<ZoorqJudgeEntry company={company} session={null} visit="first" prepared={{ status, facts: [] }} companyCount={10} {...actions} />);
+      expect(html).toContain(`<div class="zoorq-judge-entry-status" role="status">${label}</div>`);
+      expect((html.match(/class="zoorq-judge-entry-status"/g) ?? []).length).toBe(1);
+    }
+    const loading = renderToStaticMarkup(<ZoorqJudgeEntry company={company} session={null} visit="first" prepared={{ status: 'loading', facts: [] }} companyCount={10} {...actions} />);
+    expect(loading).not.toContain('Prepared scenario unavailable');
+    const restored = renderToStaticMarkup(<ZoorqJudgeEntry company={other} session={session} visit="restored" prepared={{ status: 'ready', facts: [] }} companyCount={10} {...actions} />);
+    expect(restored).not.toContain('zoorq-judge-entry-status');
+    const css = readFileSync(new URL('./zoorq-judge-entry.css', import.meta.url), 'utf8');
+    const mobileStatus = css.match(/@media\(max-width:760px\)\{\.zoorq-judge-entry-status\{min-height:(\d+)px;line-height:([\d.]+)\}/);
+    expect(mobileStatus).not.toBeNull();
+    expect(Number(mobileStatus![1])).toBeGreaterThanOrEqual(2 * 11 * Number(mobileStatus![2]));
+  });
+
   it('defers noncurrent route modules and points canonical metadata at the actual demo route', () => {
     const main = readFileSync(new URL('./main.tsx',import.meta.url),'utf8');
     const page = readFileSync(new URL('../index.html',import.meta.url),'utf8');

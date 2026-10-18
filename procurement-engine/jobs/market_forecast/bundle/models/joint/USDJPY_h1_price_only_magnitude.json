@@ -1,0 +1,40 @@
+{
+  "cell": "USDJPY_h1_price_only",
+  "config": {
+    "alpha": 100.0,
+    "family": "ridge",
+    "window": 126
+  },
+  "family": "ridge",
+  "feature_columns": [
+    "cu_ma_gap_20",
+    "cu_ma_gap_5",
+    "cu_ret_1",
+    "cu_ret_10",
+    "cu_ret_2",
+    "cu_ret_20",
+    "cu_ret_3",
+    "cu_ret_5",
+    "cu_rsi_14",
+    "cu_vol_20",
+    "cu_vol_5",
+    "fx_ma_gap_20",
+    "fx_ma_gap_5",
+    "fx_ret_1",
+    "fx_ret_10",
+    "fx_ret_2",
+    "fx_ret_20",
+    "fx_ret_3",
+    "fx_ret_5",
+    "fx_rsi_14",
+    "fx_vol_20",
+    "fx_vol_5"
+  ],
+  "matured_target_cutoff": "2026-10-16",
+  "prefit_freeze_sha256": "37c6763ce2afbb8235b245c9146fa816948f7e358a930f471ccc8a5f11f477e4",
+  "protocol_sha256": "411b8d8ae4a3feceb3bf7b806fd7515f86dbe723c19dfd093f87166a0ee3cf53",
+  "selection_sha256": "b39ff7e39d6f65e8ced9be405d324c0d67583e2997740686dde14aad527eecc1",
+  "training_last_anchor": "2026-10-15",
+  "training_last_target": "2026-10-16",
+  "training_rows": 126
+}

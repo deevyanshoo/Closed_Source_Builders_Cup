@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, shouldLoadFixtures, workspaceChanged } from './demo-page';
+import { applyDemoResult, canonicalBuyerState, companyScenarios, CorrectionEditor, delayControlsForPlan, delayControlsForRecovery, delayRequest, DemoPage, DraftsWorkspace, fixturesForMaterial, focusAcceptedComparison, initialDemoState, isSessionExpired, JudgeDelayDisclosure, materialInputs, needsBuyerDraftSync, offersForMaterial, PlanResults, restoreOperatorFocus, reviewSuggestionFor, sampleBuyerInputs, selectCompanyWithRecovery, shouldLoadFixtures, workspaceChanged } from './demo-page';
 import { DemoApiError } from './demo-api';
 import type { DemoFixture, DemoSession, FieldResult, OfferView, PlanRequest, PlanView, RecoveryView, RfqView } from './demo-api';
 import { readWorkspaceLocation, workspaceSearch, WorkspaceOverview, showWorkspaceActivity } from './zoorq-workspace';
@@ -19,7 +19,8 @@ const selectedPlan: PlanView = { ...plan, selected_offer_id: 'q1', total_cost: '
 it('shows a clean supplier label in the comparison without changing the selected offer ID or cost', () => {
   const raw = 'Europa Copper SA [SYNTHETIC]';
   const shown = renderToStaticMarkup(<PlanResults plan={{ ...selectedPlan, alternatives: [{ ...selectedPlan.alternatives[0], supplier: raw }] }} offers={[offer(1)]} />);
-  expect(shown).toContain('Europa Copper SA is feasible');
+  expect(shown).toContain('Europa Copper SA selected for this order');
+  expect(shown).toContain('Check supply coverage');
   expect(shown).toContain('86000');
   expect(shown).not.toContain('[SYNTHETIC]');
   expect(selectedPlan.selected_offer_id).toBe('q1');
@@ -63,8 +64,53 @@ it('shows a clean RFQ recipient while preserving the canonical server draft', ()
 });
 const recovery: RecoveryView = { comparison_id: 'c1', synthetic: true, baseline: { ...selectedPlan, plan_id: 'p1', total_cost: '82000' }, scenario: { ...selectedPlan, plan_id: 'p2' }, baseline_request: request, scenario_request: { ...request, delay_days_by_offer: { q1: 20 } }, cost_delta: '4000', selection_changed: true, outcome: 'changed', replayed: false };
 const rfq: RfqView = { draft_id: 'd1', plan_id: 'p2', offer_versions: { q1: 1 }, synthetic: true, status: 'draft_unsent', supplier: 'Swift', material: 'copper', quantity_kg: '1000', need_by: '2026-10-30', reporting_currency: 'USD', total_cost: '86000', created_at: '2026-10-14T10:00:00Z', text: 'Synthetic unsent request for quotation' };
+it('keeps RFQ previews clean in procurement and Drafts while preserving canonical text', () => {
+  const canonical = { ...rfq, text: 'SYNTHETIC TEST DOCUMENT — UNSENT REQUEST FOR QUOTATION DRAFT\nTo: Swift\nTerms remain unsent.' };
+  const loaded = applyDemoResult(initialDemoState, { type: 'session', session: { ...companySession, rfq: canonical }, epoch: 0 });
+  const procurement = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="rfq" />);
+  const drafts = renderToStaticMarkup(<DraftsWorkspace company={company} drafts={[]} rfq={canonical} messages={[]} dirty={false} onDownloadRfq={() => {}} />);
+  for (const html of [procurement, drafts]) {
+    expect(html).toContain('UNSENT REQUEST FOR QUOTATION DRAFT');
+    expect(html).toContain('Terms remain unsent.');
+    expect(html).not.toContain('SYNTHETIC TEST DOCUMENT');
+  }
+  expect(canonical.text).toContain('SYNTHETIC TEST DOCUMENT');
+});
 const company = { company_id: 'solara-cables', name: 'Solara Cables', sector: 'Electrical manufacturing', size: 'Mid-size', synthetic: true as const, as_of: '2026-10-14', description: 'Fictional cables producer.', locations: [{ country: 'India', city: 'Pune' }], reporting_currency: 'USD', materials: [{ material_id: 'copper', name: 'Copper', quantity_unit: 'kg', stock: '2000', consumption_per_day: '100', monthly_requirement: '3000', criticality: 'high', keywords: ['copper'] }], suppliers: [], orders: [{ order_id: 'order-1', material_id: 'copper', quantity: '1000', unit: 'kg', need_by: '2026-11-05', status: 'planned' }], routes: [], currencies: ['USD', 'EUR'], news_keywords: ['copper'], quote_coverage: { materials: ['copper'], fixture_ids: ['quote-a'], note: 'Synthetic copper quote only.' }, buyer_defaults: request };
 const companySession = { ...session, offers: [offer(1, 'saved')], company, context_version: 1, plan: selectedPlan, plan_request: request, rfq };
+it('reserves a closed delay comparison for every first-visit state and keeps restored visits compact', () => {
+  const comparison = { assumed_delay_days: 7, baseline_spend: '82000', scenario_spend: '86000', additional_recovery_cost: '4000', currency: 'USD', outcome: 'changed', read_only: true as const, scenario_plan_id: null };
+  const loading = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="loading" comparison={null} />);
+  const ready = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="ready" comparison={comparison} />);
+  const unavailable = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="unavailable" comparison={null} />);
+  const readyWithoutComparison = renderToStaticMarkup(<JudgeDelayDisclosure visit="first" status="ready" comparison={null} />);
+  const restored = renderToStaticMarkup(<JudgeDelayDisclosure visit="restored" status="ready" comparison={comparison} />);
+  expect(loading).toContain('zoorq-judge-example is-reserved is-loading');
+  expect(loading).toContain('aria-hidden="true"');
+  expect(loading).not.toContain('<summary');
+  expect(loading).not.toContain('82000');
+  expect(ready).toContain('<details class="zoorq-judge-example"');
+  expect(ready).toContain('<summary>Compare an explicit 7-day supplier delay</summary>');
+  expect(ready).not.toContain('is-loading');
+  for (const inert of [unavailable, readyWithoutComparison]) {
+    expect(inert).toContain('zoorq-judge-example is-reserved');
+    expect(inert).toContain('aria-hidden="true"');
+    expect(inert).not.toContain('is-loading');
+    expect(inert).not.toContain('zoorq-judge-example-placeholder');
+    expect(inert).not.toContain('<summary');
+    expect(inert).not.toContain('<button');
+    expect(inert).not.toContain('Compare an explicit');
+  }
+  expect(restored).toBe('');
+});
+it('wires initial session loading to the nav slot while leaving restored company navigation real', () => {
+  const loading = renderToStaticMarkup(<DemoPage initialState={initialDemoState} initialView="overview" />);
+  const restored = renderToStaticMarkup(<DemoPage initialState={applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 })} initialView="overview" />);
+  expect(loading).toContain('zoorq-nav-company is-placeholder');
+  expect(restored).toContain('Solara Cables');
+  expect(restored).not.toContain('zoorq-nav-company is-placeholder');
+  expect(restored).toContain('is-continuing');
+});
 const emptyCompany = { ...company, company_id: 'loomworks', name: 'Loomworks', materials: [{ ...company.materials[0], material_id: 'cotton', name: 'Cotton' }], quote_coverage: { materials: [], fixture_ids: [], note: 'No runnable quote coverage.' }, buyer_defaults: null };
 const naphthaRequest: PlanRequest = { ...request, material: 'naphtha', quantity: '240', current_stock: '40', quantity_unit: 'barrel', budget: '6500', reporting_currency: 'EUR', additional_cost_per_unit: '3' };
 const multiCompany = { ...company, materials: [...company.materials, { ...company.materials[0], material_id: 'naphtha', name: 'Naphtha', quantity_unit: 'barrel', stock: '40' }], quote_coverage: { materials: ['copper', 'naphtha'], fixture_ids: ['quote-a', 'naphtha-a'], note: 'Two runnable materials.', scenarios: [{ material_id: 'copper', fixture_ids: ['quote-a'], buyer_defaults: request }, { material_id: 'naphtha', fixture_ids: ['naphtha-a'], buyer_defaults: naphthaRequest }] }, buyer_defaults: request };
@@ -500,10 +546,11 @@ describe('demo response state', () => {
   });
   it('offers RFQ review for a feasible current plan and explains unavailable review', () => {
     const loaded = applyDemoResult(initialDemoState, { type: 'session', session: companySession, epoch: 0 });
-    const feasible = renderToStaticMarkup(<DemoPage initialState={loaded} initialView="procurement" initialStage="compare" />);
+    const covered = { status: 'covered' } as PlanView['supply_coverage'];
+    const feasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan: { ...selectedPlan, supply_coverage: covered } }} initialView="procurement" initialStage="compare" />);
     expect(feasible).toContain('Review RFQ draft');
-    const infeasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan }} initialView="procurement" initialStage="compare" />);
-    expect(infeasible).toContain('No feasible supplier is selected for an RFQ draft');
+    const infeasible = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, plan: { ...plan, supply_coverage: covered } }} initialView="procurement" initialStage="compare" />);
+    expect(infeasible).toContain('No qualifying supplier is selected for an RFQ draft');
     expect(infeasible).not.toContain('Review RFQ draft');
     const dirty = renderToStaticMarkup(<DemoPage initialState={{ ...loaded, dirty: true }} initialView="procurement" initialStage="compare" />);
     expect(dirty).toContain('Run a new comparison before reviewing an RFQ draft');
@@ -688,7 +735,8 @@ describe('demo response state', () => {
   it('shows stock-covered demand as zero purchase rather than an infeasible comparison', () => {
     const result = { ...plan, required_purchase_kg: '0', total_cost: '0', explanation: 'Opening stock covers the stated need; no purchase is required.' };
     const html = renderToStaticMarkup(<PlanResults plan={result} offers={[offer(1)]} />);
-    expect(html).toContain('Stock covers this need');
+    expect(html).toContain('No purchase required for this order');
+    expect(html).toContain('Check supply coverage');
     expect(html).toContain('0 USD');
     expect(html).not.toContain('No feasible quote');
   });

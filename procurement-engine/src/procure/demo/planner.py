@@ -13,6 +13,8 @@ from procure.offers import normalize as nz
 from .errors import DemoError
 from .quote_service import synthetic_rate
 from .quote_service import company_for_offer
+from .company import get_company
+from .supply_coverage import assess_supply_coverage, with_supply_coverage
 
 _DECIMAL = re.compile(r"^(0|[1-9][0-9]*)(\.[0-9]+)?$")
 _DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -269,4 +271,25 @@ def build_plan(offers: list[dict], request: dict, *, today: date) -> dict:
     if unit == 'kg':
         result.update(quantity_kg=result['quantity'], current_stock_kg=result['current_stock'],
                       required_purchase_kg=result['required_purchase'])
-    return result
+    company = get_company(company_id)
+    initial_coverage = assess_supply_coverage(company, result, offers=offers)
+    covered_ids = {row['offer_id'] for row in initial_coverage['alternatives']
+                   if row['continuous_supply_covered'] is True}
+    covered_feasible = [row for row in feasible if row['offer_id'] in covered_ids]
+    if covered_feasible:
+        selected = min(covered_feasible, key=lambda row: (Decimal(row['total_cost']), row['offer_id']))
+        result['selected_offer_id'] = selected['offer_id']
+        result['total_cost'] = selected['total_cost']
+        result['explanation'] = (f"{selected['supplier']} is the lowest-cost deadline-feasible single-offer "
+                                 "option that also covers continuous supply under the stated assumptions.")
+    enriched = with_supply_coverage(company, result, offers=offers)
+    coverage = enriched['supply_coverage']
+    if coverage['status'] == 'gap':
+        if selected:
+            enriched['explanation'] = (f"{selected['supplier']} meets the order deadline and quote constraints, "
+                                       "but the dated consumption projection has a supply gap.")
+        else:
+            enriched['explanation'] = "No purchase was selected; the dated consumption projection has a supply gap."
+    elif coverage['status'] == 'unknown':
+        enriched['explanation'] = "Order comparison is available, but continuous supply could not be verified."
+    return enriched

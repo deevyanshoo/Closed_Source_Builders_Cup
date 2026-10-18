@@ -1,5 +1,6 @@
 """The hosted Live route uses the durable public-research consent claim."""
 import asyncio
+import base64
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -37,6 +38,12 @@ class LiveProvider:
             return
         self.audio_count += 1
         if self.audio_count == 1:
+            await self.events.put(NS(tool_call=None, server_content=None,
+                voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+            await self.events.put(NS(tool_call=None, server_content=NS(
+                input_transcription=NS(text=QUESTION, finished=True))))
+            await self.events.put(NS(tool_call=None, server_content=None,
+                voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='1s')))
             await self.events.put(NS(tool_call=NS(function_calls=[NS(
                 name='prepare_research', args={'message': QUESTION}, id='prepare')]),
                 server_content=None))
@@ -117,14 +124,14 @@ def test_spoken_consent_claims_once_and_returns_authoritative_research_result():
         with client.websocket_connect(URL, headers=ORIGIN) as socket:
             socket.send_json(start(session))
             assert next_event(socket, 'ready')['context_version'] == 1
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             prepared = next_event(socket, 'tool_result')['result']
             assert prepared['proposal']['kind'] == 'research'
             assert research.calls == []
             assert next_event(socket, 'turn_complete')['type'] == 'turn_complete'
             assert live.prompted_query == prepared['proposal']['parameters']['query']
 
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             applied = next_event(socket, 'tool_result')['result']
             assert set(applied) == {'turn_id', 'company_id', 'context_version', 'status',
                                     'assistant_text', 'agent_steps', 'evidence_ids',
@@ -173,7 +180,7 @@ def test_replaced_proposal_cannot_be_confirmed_by_old_spoken_prompt():
         with client.websocket_connect(URL, headers=ORIGIN) as socket:
             socket.send_json(start(session))
             next_event(socket, 'ready')
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             old = next_event(socket, 'tool_result')['result']['proposal']
             next_event(socket, 'turn_complete')
             replacement = client.post('/api/demo/operator', headers=auth, json={
@@ -181,7 +188,7 @@ def test_replaced_proposal_cannot_be_confirmed_by_old_spoken_prompt():
                 'idempotency_key': 'new-public-request'})
             assert replacement.status_code == 200, replacement.text
             assert replacement.json()['proposal']['proposal_id'] != old['proposal_id']
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             denied = next_event(socket, 'tool_result')['result']
             assert denied['status'] == 'needs_clarification'
             assert research.calls == []
@@ -196,7 +203,7 @@ def test_company_switch_closes_voice_before_old_research_can_run():
         with client.websocket_connect(URL, headers=ORIGIN) as socket:
             socket.send_json(start(session))
             next_event(socket, 'ready')
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             assert next_event(socket, 'tool_result')['result']['proposal']['kind'] == 'research'
             next_event(socket, 'turn_complete')
             switched = client.post('/api/demo/company', headers=auth, json={
@@ -215,10 +222,10 @@ def test_cached_confirmation_replay_cannot_restore_older_buyer_form():
         with client.websocket_connect(URL, headers=ORIGIN) as socket:
             socket.send_json(start(session))
             next_event(socket, 'ready')
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             next_event(socket, 'tool_result')
             next_event(socket, 'turn_complete')
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             applied = next_event(socket, 'tool_result')['result']
             assert applied['read_only'] is False
 
@@ -233,7 +240,7 @@ def test_cached_confirmation_replay_cannot_restore_older_buyer_form():
             assert saved.status_code == 200, saved.text
             assert saved.json()['buyer_draft']['material'] == 'polymer'
 
-            socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+            socket.send_json({'type': 'audio', 'data': base64.b64encode(b'\x01\x00' * 16_000).decode()})
             assert live.wait_responses(3, timeout=2)
             replay = live.responses[2]
             assert replay.id == 'consent' and replay.response['read_only'] is True

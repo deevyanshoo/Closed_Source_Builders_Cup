@@ -58,7 +58,8 @@ def test_recovery_pairs_original_and_delayed_plan_with_exact_decimal_delta(demo)
     assert response.status_code == 200, response.text
     recovery = response.json()
     assert set(recovery) == {"comparison_id", "synthetic", "baseline", "scenario", "baseline_request",
-                             "scenario_request", "cost_delta", "selection_changed", "outcome", "replayed"}
+                             "scenario_request", "cost_delta", "selection_changed", "outcome", "replayed",
+                             "baseline_supply_coverage", "scenario_supply_coverage"}
     assert recovery["synthetic"] is True and recovery["replayed"] is False
     assert recovery["baseline"] == baseline and recovery["baseline_request"] == request
     assert recovery["scenario_request"] == {**request, "delay_days_by_offer": {europa: 20}}
@@ -66,6 +67,9 @@ def test_recovery_pairs_original_and_delayed_plan_with_exact_decimal_delta(demo)
     assert recovery["scenario"]["total_cost"] == "86000"
     assert recovery["cost_delta"] == "4000"
     assert recovery["selection_changed"] is True and recovery["outcome"] == "changed"
+    assert recovery['baseline_supply_coverage']['status'] == 'gap'
+    assert recovery['scenario_supply_coverage']['status'] == 'gap'
+    assert recovery['scenario_supply_coverage']['uncovered_quantity'] == '2666.62'
     assert {a["offer_id"]: a for a in recovery["scenario"]["alternatives"]}[europa]["arrival_date"] == "2026-11-13"
     session = client.get("/api/demo/session").json()
     assert session["plan"] == recovery["scenario"] and session["plan_request"] == request

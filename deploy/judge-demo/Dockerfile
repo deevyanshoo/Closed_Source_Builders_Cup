@@ -6,6 +6,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN useradd --uid 10001 --create-home demo
 COPY procurement-engine/src /app/src
 COPY procurement-engine/config /app/config
+RUN test -s /app/config/market_reference_snapshot_v1.json && \
+    test -s /app/config/market_reference_manifest_v1.json && \
+    test -s /app/config/market_reference_registry_v1.json && \
+    test -s /app/config/market_reference_sources_v1.json
 COPY procurement-engine/demo_fixtures /app/demo_fixtures
 COPY apps/web/dist /app/web
 ENV PROCURE_CONFIG_DIR=/app/config PROCURE_DATA_DIR=/tmp/closed-source-demo DEMO_WEB_DIR=/app/web

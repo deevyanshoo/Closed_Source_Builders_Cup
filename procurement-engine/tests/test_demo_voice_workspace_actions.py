@@ -42,6 +42,10 @@ async def scenario(verifier):
         client_factory=lambda: connection(provider), verify_spoken_consent=verifier,
         research_tools=lambda *_: None))
     await socket.next('ready')
+    await send_pcm(socket, provider)
+    await provider.activity('ACTIVITY_START', '0.100s')
+    await provider.spoken('input', 'Watch copper', finished=True)
+    await provider.activity('ACTIVITY_END', '0.600s')
     await provider.call('operate_workspace', {'message': 'Watch copper'}, 'prepare-watch')
     assert (await socket.next('tool_result'))['result']['status'] == 'proposal'
     response = await asyncio.wait_for(provider.responses.get(), 2)
@@ -70,8 +74,8 @@ def test_native_action_applies_once_after_full_audio_and_independent_confirmatio
         await send_pcm(socket, provider)
         await provider.spoken('input', 'confirm action', finished=None)
         await socket.next('transcript', 'input')
-        await provider.activity('ACTIVITY_START', '0.100s')
-        await provider.activity('ACTIVITY_END', '0.600s')
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.activity('ACTIVITY_END', '1.600s')
         await provider.call('confirm_workspace_action', {'proposal_id': 'watch-1'}, 'apply-watch')
         assert (await socket.next('tool_result'))['result']['status'] == 'completed'
         assert [name for name, _ in calls] == ['operate_workspace', 'confirm_workspace_action']
@@ -93,8 +97,8 @@ def test_native_action_denies_partial_readback_wrong_id_and_changed_proposal():
         await send_pcm(socket, provider)
         await provider.spoken('input', 'confirm action', finished=None)
         await socket.next('transcript', 'input')
-        await provider.activity('ACTIVITY_START', '0.100s')
-        await provider.activity('ACTIVITY_END', '0.600s')
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.activity('ACTIVITY_END', '1.600s')
         if case == 'changed':
             session.pending_proposal['proposal_id'] = 'new-watch'
         if case == 'expired':
@@ -118,8 +122,8 @@ def test_native_action_denies_negated_audio_even_when_verifier_says_confirm():
         await send_pcm(socket, provider)
         await provider.spoken('input', 'No, do not confirm action', finished=None)
         await socket.next('transcript', 'input')
-        await provider.activity('ACTIVITY_START', '0.100s')
-        await provider.activity('ACTIVITY_END', '0.600s')
+        await provider.activity('ACTIVITY_START', '1.100s')
+        await provider.activity('ACTIVITY_END', '1.600s')
         await provider.call('confirm_workspace_action', {'proposal_id': 'watch-1'}, 'negated')
         assert (await socket.next('tool_result'))['result']['status'] == 'needs_clarification'
         assert len(calls) == 1

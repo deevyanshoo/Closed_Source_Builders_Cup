@@ -1,5 +1,6 @@
 """A single bounded visit can operate every company without resetting its state."""
 from datetime import datetime, timezone
+from copy import deepcopy
 from fastapi.testclient import TestClient
 from procure.demo import quote_service
 from procure.demo.app import create_app
@@ -22,8 +23,9 @@ def test_one_visit_can_extract_review_plan_recover_and_draft_for_all_ten(monkeyp
     monkeypatch.delenv('OFFLINE',raising=False)
     with TestClient(create_app(clock=lambda:NOW,operator_provider=Provider(intent='inspect',action='none',evidence=(),material=None)),base_url='https://demo.test') as client:
         session=client.get('/api/demo/session').json()
+        session_id=session['session_id']
         headers={'Origin':'https://demo.test','X-CSRF-Token':session['csrf_token']}
-        context=1; sequence=0; first_plan=None
+        context=1; sequence=0; first_plan=None; first_rfq=None
         def post(path, data, *, key=True):
             nonlocal sequence
             sequence+=1
@@ -51,6 +53,9 @@ def test_one_visit_can_extract_review_plan_recover_and_draft_for_all_ten(monkeyp
             assert recovered['selection_changed']
             draft=post('/rfq',{'plan_id':recovered['scenario']['plan_id'],'expected_versions':versions,'reviewed':True})
             assert draft['company_id']==profile['company_id'] and draft['status']=='draft_unsent'
+            if profile['company_id']=='solara-cables':
+                owned=client.app.state.sessions.get(session_id).drafts
+                first_rfq=deepcopy(next(row for row in owned if row.get('draft_id')==draft['draft_id']))
             # Ten distinct operator turns also fit one visit, without applying actions.
             result=post('/operator',{'message':'Inspect company inventory'})
             assert result['status']=='completed' and result['company_id']==profile['company_id']
@@ -58,4 +63,9 @@ def test_one_visit_can_extract_review_plan_recover_and_draft_for_all_ten(monkeyp
         assert len(calls)==30 and len(set(calls))==30
         restored=post('/company',{'company_id':'solara-cables'})
         assert restored['plan']['plan_id']==first_plan
-        assert restored['rfq']['status']=='draft_unsent'
+        assert restored['rfq'] is None
+        assert all(row['draft_id']!=first_rfq['draft_id'] for row in restored['drafts'])
+        assert client.get(f"/api/demo/rfq/{first_rfq['draft_id']}/download").status_code==404
+        stored=client.app.state.sessions.get(session_id)
+        retained=[row for row in stored.drafts if row.get('draft_id')==first_rfq['draft_id']]
+        assert retained==[first_rfq]

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, ROUND_CEILING
 
 from procure.offers import lifecycle as lc
 
@@ -31,6 +32,61 @@ def _price_text(field: dict) -> str:
     if not isinstance(money, dict) or not isinstance(money.get("amount"), str):
         return "unavailable (unsupported original document price)"
     return f"{money['amount']} {money.get('currency', 'Unknown')} per {value.get('per_unit', 'unknown unit')}"
+
+
+def build_bridge_draft(plan: dict, offer: dict, *, coverage: dict, created_at: datetime) -> dict:
+    """Request fresh bridge terms from the selected supplier without borrowing quote terms."""
+    selected = plan.get('selected_offer_id')
+    if (offer.get('offer_id') != selected or company_for_offer(offer) != plan.get('company_id')
+            or offer.get('version') != (plan.get('offer_versions') or {}).get(selected)):
+        raise DemoError('stale_plan', 'The selected reviewed quote no longer matches this plan.', 409)
+    if (coverage.get('status') != 'gap' or coverage.get('plan_id') != plan.get('plan_id')
+            or coverage.get('company_id') != plan.get('company_id')
+            or coverage.get('material_id') != plan.get('material')
+            or coverage.get('quantity_unit') != plan.get('quantity_unit')
+            or coverage.get('missing_inputs')):
+        raise DemoError('draft_unavailable', 'A current positive supply gap is required for a bridge RFQ.', 409)
+    try:
+        arithmetic = Decimal(coverage['bridge_quantity'])
+    except (TypeError, ValueError, KeyError):
+        raise DemoError('draft_unavailable', 'Bridge quantity is unavailable.', 409) from None
+    due = coverage.get('bridge_needed_by')
+    if not arithmetic.is_finite() or arithmetic <= 0 or not isinstance(due, str) or not due:
+        raise DemoError('draft_unavailable', 'A positive bridge quantity and date are required.', 409)
+    unit = plan['quantity_unit']
+    discrete = unit not in {'kg', 'g', 'tonne', 't', 'lb', 'litre', 'liter', 'l', 'm', 'metre', 'meter'}
+    quantity = arithmetic.to_integral_value(rounding=ROUND_CEILING) if discrete else arithmetic
+    amount = format(quantity, 'f')
+    supplier = _term(_field(offer, 'supplier_name'))
+    if supplier.startswith('Unknown'):
+        raise DemoError('draft_unavailable', 'Selected supplier name is unavailable.', 409)
+    body = '\n'.join([
+        'SYNTHETIC TEST DOCUMENT — UNSENT BRIDGE REQUEST FOR QUOTATION DRAFT',
+        'No order commitment. This text has not been sent to a supplier.',
+        f'Supplier: {supplier}',
+        f'Buyer company: {plan["company_id"]}',
+        f'Material: {plan["material"]}',
+        f'Requested bridge quantity: {amount} {unit}',
+        f'Calculated uncovered quantity: {coverage["uncovered_quantity"]} {unit}',
+        f'Calculated bridge quantity: {coverage["bridge_quantity"]} {unit}',
+        f'Earlier delivery needed by: {due}',
+        f'Current selected arrival: {coverage.get("selected_arrival_date") or "unavailable"}',
+        f'Planning basis: stock {coverage["stock"]} {unit} as of {coverage["inventory_as_of"]}; '
+        f'daily consumption {coverage["consumption_per_day"]} {unit} as of {coverage["consumption_as_of"]}.',
+        'Please confirm fresh price and capacity, delivery date, payment and transport terms for this separate bridge request.',
+        'The accepted quote does not confirm this earlier quantity, date, price or capacity.',
+        'The existing accepted plan quantity and selected quote remain unchanged.',
+        '',
+    ])
+    result = {'plan_id': plan['plan_id'], 'offer_versions': dict(plan['offer_versions']),
+        'synthetic': True, 'status': 'draft_unsent', 'bridge': True, 'supplier': supplier,
+        'company_id': plan['company_id'], 'material': plan['material'], 'quantity': amount,
+        'quantity_unit': unit, 'need_by': due, 'arithmetic_bridge_quantity': coverage['bridge_quantity'],
+        'reporting_currency': plan['reporting_currency'], 'total_cost': None,
+        'created_at': created_at.isoformat(), 'text': body}
+    if unit == 'kg':
+        result['quantity_kg'] = amount
+    return result
 
 
 def build_draft(plan: dict, offer: dict, *, all_offers: list[dict], created_at: datetime) -> dict:

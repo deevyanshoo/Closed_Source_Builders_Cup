@@ -1,0 +1,5 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'procurement-engine/jobs/market_forecast/Dockerfile', '-t', 'asia-south1-docker.pkg.dev/closed-source-builder-261007/closed-source-demo/zoorq-market-forecast:reference-20261016', '.']
+images:
+  - asia-south1-docker.pkg.dev/closed-source-builder-261007/closed-source-demo/zoorq-market-forecast:reference-20261016

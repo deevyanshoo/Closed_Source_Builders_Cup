@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
@@ -18,6 +19,135 @@ def snapshot(company_id='solara-cables'):
             'plan': None, 'shipments': {'shipments': []}, 'carbon_assessment': None}
 
 
+def bridge_snapshot():
+    state = snapshot()
+    state['plan'] = {'plan_id': 'reviewed-plan', 'company_id': state['company_id'],
+                     'material': state['selected_material_id'], 'selected_offer_id': 'offer-1',
+                     'supply_coverage': {'status': 'gap', 'bridge_needed_by': '2026-10-20',
+                                         'bridge_quantity': '1333.30', 'evidence_ids': []}}
+    return state
+
+
+@pytest.mark.parametrize('message,missing', (
+    ('Draft a bridge RFQ for polymer earlier delivery.', 'material'),
+    ('Draft a bridge RFQ for Cable insulation polymer earlier delivery.', 'material'),
+    ('Draft a bridge RFQ for copper and polymer earlier delivery.', 'material'),
+    ('Draft a bridge RFQ for copper and polymer using the current material.', 'material'),
+    ('Draft a bridge RFQ for all materials for earlier delivery.', 'material'),
+    ('Draft a bridge RFQ for both materials for earlier delivery.', 'material'),
+    ('Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan plan-0123456789abcdef. Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.', 'current_selected_plan'),
+    ('Draft a bridge RFQ for earlier delivery using plan ID stale.', 'current_selected_plan'),
+    ('Draft a bridge RFQ for earlier delivery using plan "old-plan".', 'current_selected_plan'),
+    ('Draft a bridge RFQ for earlier delivery using plan reviewed-plan and plan old-plan.', 'current_selected_plan'),
+))
+def test_bridge_binding_rejects_explicit_mismatch_without_mutation(message, missing):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    result = resolve_judge_turn(state, message, now=NOW)
+    assert result['kind'] == 'needs_input'
+    assert result['missing_inputs'] == [missing]
+    assert not result.get('follow_up_research')
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
+    'Draft a bridge RFQ for Copper cathode earlier delivery using plan reviewed-plan.',
+    'Draft a bridge RFQ for earlier delivery using plan ID reviewed-plan.',
+    'Draft a bridge RFQ for earlier delivery using the current plan.',
+    'Draft a bridge RFQ for earlier delivery using the current plan to cover the gap.',
+    'Draft a bridge RFQ for earlier delivery using the current plan for production.',
+    'Draft a bridge RFQ for earlier delivery using the current plan and save it unsent.',
+    'Draft a bridge RFQ for earlier delivery using the current plan without sending it.',
+))
+def test_bridge_binding_accepts_current_plan_and_ordinary_plan_prose(message):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    assert resolve_judge_turn(state, message, now=NOW)['kind'] == 'bridge_rfq_request'
+    assert state == before
+
+
+def test_bridge_binding_checks_all_letter_reviewed_plan_nonce():
+    old_id = 'ABCDEFGHIJKLMNOPQRSTUVWX'
+    current_id = 'ZYXWVUTSRQPONMLKJIHGFEDC'
+    state = bridge_snapshot()
+    state['plan']['plan_id'] = current_id
+    before = deepcopy(state)
+    cta = ('Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap '
+           'in current reviewed plan {plan_id}. Ask the selected supplier for new capacity, '
+           'price and terms. Save the draft; do not send it.')
+    stale = resolve_judge_turn(state, cta.format(plan_id=old_id), now=NOW)
+    assert stale['kind'] == 'needs_input'
+    assert stale['missing_inputs'] == ['current_selected_plan']
+    assert resolve_judge_turn(state, cta.format(plan_id=current_id), now=NOW)['kind'] == 'bridge_rfq_request'
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
+    'Prepare an unsent earlier-delivery or bridge RFQ for the production supply gap in current reviewed plan reviewed-plan. Ask the selected supplier for new capacity, price and terms. Save the draft; do not send it.',
+    'Prepare an earlier delivery RFQ for the supply gap using our current plan. Save the draft without sending it.',
+    'Do not send a bridge RFQ; prepare an unsent bridge RFQ draft for the current supply gap.',
+    'Do not send the draft; prepare an unsent bridge RFQ for the current supply gap.',
+    'Do not send the bridge RFQ, prepare an unsent bridge RFQ draft for the current supply gap.',
+    'Could you please prepare an unsent bridge RFQ for the current supply gap?',
+))
+def test_bridge_draft_command_remains_actionable_when_only_sending_is_prohibited(message):
+    assert resolve_judge_turn(bridge_snapshot(), message, now=NOW)['kind'] == 'bridge_rfq_request'
+
+
+@pytest.mark.parametrize('message', (
+    'Prepare an earlier delivery. Request a quotation for the supply gap using our current plan. Save the draft without sending it.',
+    'Request a quotation for the supply gap using our current plan. Save the draft without sending it.',
+    'Please request a quotation for the production supply gap using our current plan.',
+    'Draft an RFQ for the supply gap in the current plan.',
+))
+def test_supply_gap_quotation_command_in_one_clause_requests_unsent_bridge(message):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    result = resolve_judge_turn(state, message, now=NOW)
+    assert result['kind'] == 'bridge_rfq_request'
+    assert result['baseline_plan_id'] == 'reviewed-plan'
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
+    'Prepare an earlier delivery. A quotation for the supply gap using our current plan.',
+    'How do I request a quotation for the supply gap?',
+    'The supplier said, "Request a quotation for the supply gap using our current plan."',
+    'What if we request a quotation for the supply gap?',
+    'Do not request a quotation for the supply gap.',
+    'Request a quotation for the supply gap, but do not save the draft.',
+    'Request a quotation for the supply gap only if we approve the cost.',
+    'Request a quotation for the supply gap after approval.',
+    'Request an RFP for the supply gap using our current plan.',
+    'Request a quotation for the supply gap using plan ID stale.',
+    'Request a quotation for polymer supply gap using our current plan.',
+    'Request a quotation for GridSpring Batteries supply gap using our current plan.',
+))
+def test_supply_gap_phrase_does_not_bypass_bridge_draft_guards(message):
+    state = bridge_snapshot()
+    before = deepcopy(state)
+    result = resolve_judge_turn(state, message, now=NOW)
+    assert result is None or result['kind'] != 'bridge_rfq_request'
+    assert state == before
+
+
+@pytest.mark.parametrize('message', (
+    'Do not draft a bridge RFQ for earlier delivery.',
+    'Do not prepare an earlier delivery RFQ; do not send it.',
+    'Prepare a bridge RFQ for earlier delivery, but do not create the draft.',
+    'Prepare a bridge RFQ for earlier delivery without creating a bridge RFQ.',
+    'Do not send or draft a bridge RFQ for earlier delivery.',
+    'Explain how to prepare a bridge RFQ for earlier delivery.',
+    'How do I prepare a bridge RFQ for earlier delivery?',
+    'Can you explain how to prepare a bridge RFQ for earlier delivery?',
+    'Could we prepare a bridge RFQ for earlier delivery?',
+    'What if we prepare a bridge RFQ for earlier delivery?',
+))
+def test_negated_or_discussed_bridge_draft_does_not_request_an_action(message):
+    result = resolve_judge_turn(bridge_snapshot(), message, now=NOW)
+    assert result is None or result['kind'] != 'bridge_rfq_request'
+
+
 def test_internal_stock_survives_public_news_gap_and_offline_provider():
     state = snapshot()
     result = resolve_judge_turn(state, 'What is our stock and the latest Suez news?', now=NOW)
@@ -31,6 +161,69 @@ def test_internal_stock_survives_public_news_gap_and_offline_provider():
 
 def test_unknown_question_defers_to_grounded_model():
     assert resolve_judge_turn(snapshot(), 'Can you explain the tradeoffs?', now=NOW) is None
+
+
+def test_selected_arrival_question_uses_active_coverage_before_profile_stock():
+    state = snapshot()
+    state['plan'] = {'plan_id': 'p1', 'company_id': state['company_id'],
+                     'material': state['selected_material_id'], 'offer_versions': {'o1': 2},
+                     'supply_coverage': {'status': 'gap', 'order_deadline_met': True,
+                         'continuous_supply_covered': False, 'stock': '2000',
+                         'quantity_unit': 'kg', 'inventory_as_of': '2026-10-14',
+                         'consumption_per_day': '333.333', 'consumption_as_of': '2026-10-14',
+                         'stock_depletion_date': '2026-10-20',
+                         'selected_arrival_date': '2026-10-24', 'uncovered_days': '4',
+                         'uncovered_quantity': '1333.332', 'bridge_quantity': '1333.332',
+                         'bridge_needed_by': '2026-10-20', 'missing_inputs': [],
+                         'evidence_ids': ['document:o1']}}
+    result = resolve_judge_turn(state, 'Will our stock run out before the selected arrival?', now=NOW)
+    assert result['kind'] == 'internal_answer'
+    assert '2026-10-20' in result['answer'] and '2026-10-24' in result['answer']
+    assert 'about 1,333.33 kg' in result['answer']
+    assert 'profile-only' not in result['answer'].lower()
+    assert result.get('follow_up_research') is None
+
+
+def test_coverage_voice_display_rounds_repeating_and_tiny_positive_values():
+    state = snapshot()
+    state['plan'] = {'plan_id': 'p1', 'company_id': state['company_id'],
+                     'material': 'copper', 'selected_offer_id': 'o1',
+                     'supply_coverage': {'status': 'gap', 'order_deadline_met': True,
+                         'quantity_unit': 'kg', 'stock': '2000', 'inventory_as_of': '2026-10-14',
+                         'consumption_per_day': '333.333333333333333333', 'consumption_as_of': '2026-10-14',
+                         'stock_depletion_date': '2026-10-20', 'selected_arrival_date': '2026-10-24',
+                         'uncovered_days': '4.000000000000000001',
+                         'uncovered_quantity': '1333.333333333333333333',
+                         'bridge_quantity': '1333.333333333333333333',
+                         'bridge_needed_by': '2026-10-20', 'evidence_ids': []}}
+    answer = resolve_judge_turn(state, 'Will stock run out before arrival?', now=NOW)['answer']
+    assert 'about 4 days' in answer
+    assert 'about 1,333.33 kg' in answer
+    assert '333.33 kg' in answer
+    assert '333333333' not in answer
+    state['plan']['supply_coverage']['uncovered_quantity'] = '0.00000001'
+    state['plan']['supply_coverage']['bridge_quantity'] = '0.00000001'
+    tiny = resolve_judge_turn(state, 'Will stock run out before arrival?', now=NOW)['answer']
+    assert '<0.01 kg' in tiny
+    assert 'gap is about 4 days / 0 kg' not in tiny
+
+
+def test_unselected_plan_reports_gap_without_supplier_bridge_action():
+    state = snapshot()
+    state['plan'] = {'plan_id': 'p1', 'company_id': state['company_id'],
+                     'material': state['selected_material_id'], 'selected_offer_id': None,
+                     'supply_coverage': {'status': 'gap', 'order_deadline_met': False,
+                         'stock': '2000', 'quantity_unit': 'kg', 'inventory_as_of': '2026-10-14',
+                         'consumption_per_day': '333.333', 'consumption_as_of': '2026-10-14',
+                         'stock_depletion_date': '2026-10-20', 'selected_arrival_date': None,
+                         'uncovered_days': '4', 'uncovered_quantity': '1333.332',
+                         'bridge_quantity': '1333.332', 'bridge_needed_by': '2026-10-20'}}
+    answer = resolve_judge_turn(state, 'Will our stock run out before an arrival?', now=NOW)
+    assert answer['kind'] == 'internal_answer'
+    assert 'projected supply gap' in answer['answer'].lower()
+    assert 'bridge rfq' not in answer['answer'].lower()
+    action = resolve_judge_turn(state, 'Draft a bridge RFQ for earlier delivery.', now=NOW)
+    assert action['kind'] == 'needs_input'
 
 
 def test_generic_port_preview_requires_material_location_and_duration():

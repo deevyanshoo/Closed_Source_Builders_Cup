@@ -1,4 +1,5 @@
 """Native live tools and shipment actions use the same current server evidence."""
+import base64
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ from procure.demo.app import create_app
 from test_demo_live_voice import Provider
 from test_demo_live_voice_rfq import plan_for_copper
 
+INPUT_PCM = b'\x01\x00\x02\x00' * 2000  # 0.25 s of 16 kHz PCM16.
+
 
 class NamedProvider(Provider):
     def __init__(self):
@@ -19,28 +22,65 @@ class NamedProvider(Provider):
 
     async def send_realtime_input(self, **kwargs):
         if kwargs.get('audio') and self.next_call is not None:
+            self.received_audio.append(kwargs['audio'])
+            assert kwargs['audio'].data == INPUT_PCM
             name, args, call_id = self.next_call
-            if name == 'operate_workspace':
-                await self.events.put(NS(server_content=None, voice_activity=NS(
-                    voice_activity_type='ACTIVITY_START', audio_offset='0.000s')))
-                await self.events.put(NS(server_content=NS(input_transcription=NS(
-                    text=args['message'], finished=True))))
-                await self.events.put(NS(server_content=None, voice_activity=NS(
-                    voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
+            spoken = self.spoken_request
+            assert spoken, f'No fresh spoken request for {name}'
+            await self.events.put(NS(server_content=None, voice_activity=NS(
+                voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+            await self.events.put(NS(server_content=NS(input_transcription=NS(
+                text=spoken, finished=True))))
+            await self.events.put(NS(server_content=None, voice_activity=NS(
+                voice_activity_type='ACTIVITY_END', audio_offset='0.25s')))
             await self.events.put(NS(tool_call=NS(function_calls=[NS(
                 name=name, args=args, id=call_id)]), server_content=None))
 
     async def send_tool_response(self, *, function_responses):
         self.tool_response = function_responses
         response = function_responses.response
-        await self.events.put(NS(server_content=NS(
+        await self.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(inline_data=NS(
+            data=b'\1\0' * 10, mime_type='audio/pcm;rate=24000'))]),
             output_transcription=NS(text=response.get('required_spoken_response', response.get('assistant_text', ''))),
-            model_turn=NS(parts=[NS(inline_data=NS(data=b'\1\0' * 10,
-                mime_type='audio/pcm;rate=24000'))]), turn_complete=True)))
+            turn_complete=True)))
 
 
-def voice_tool(client, provider, name, args, call_id):
+def voice_tool(client, provider, name, args, call_id, *, spoken_request=None):
+    if spoken_request is None:
+        # Compatibility for older read fixtures. Action fixtures in this file
+        # provide the spoken turn explicitly; legacy action IDs get fixed test
+        # utterances rather than taking authority from a model tool argument.
+        read_questions = {
+            'read_carbon': 'What is our current carbon assessment?',
+            'read_shipments': 'What are our current shipments?',
+        }
+        if name in read_questions:
+            spoken_request = read_questions[name]
+        elif name == 'read_risks':
+            spoken_request = args.get('message') or 'What are our current risks?'
+        elif name == 'estimate_carbon':
+            spoken_request = {
+                'carbon-question': 'Calculate carbon for our current copper purchase',
+                'carbon-freight': 'road 125 km',
+                'carbon-clarify': 'Assess our carbon footprint',
+                'carbon-no-plan': 'road 100 km',
+            }[call_id]
+        elif name == 'operate_workspace' and (call_id.startswith('recovery-') or call_id == 'unselected-review-base'):
+            shipment = next(row for row in client.get('/api/demo/dispatch').json()['shipments']
+                            if row['recovery_available'])
+            spoken_request = f"Prepare recovery for shipment {shipment['shipment_id']} delayed by 7 days"
+        elif name == 'operate_workspace' and call_id.startswith('native-external-'):
+            spoken_request = args['message']
+        elif name == 'operate_workspace' and call_id in {
+            'atlas-broad-operator', 'atlas-risk-native', 'actual-risk-speech-operate_workspace',
+        } or name == 'operate_workspace' and call_id.startswith('actual-native-'):
+            spoken_request = args['message']
+        else:
+            raise AssertionError(f'Explicit spoken_request required for {name}: {call_id}')
     session = client.get('/api/demo/session').json()
+    # Each call opens a new socket and therefore a fresh provider stream.
+    Provider.__init__(provider)
+    provider.spoken_request = spoken_request
     provider.next_call = (name, args, call_id)
     provider.last_frames = []
     with client.websocket_connect('wss://demo.test/api/demo/voice/live',
@@ -49,7 +89,7 @@ def voice_tool(client, provider, name, args, call_id):
                           'expected_context_version': session['context_version']})
         while socket.receive_json()['type'] != 'ready':
             pass
-        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        socket.send_json({'type': 'audio', 'data': base64.b64encode(INPUT_PCM).decode('ascii')})
         while True:
             event = socket.receive_json()
             provider.last_frames.append(event['type'])
@@ -83,7 +123,7 @@ def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_pro
                            value.drafts, value.simulated_outbox))
         question = 'What if our current copper cathode supplier is delayed by 7 days?'
         preview, model = voice_tool(client, provider, 'preview_supplier_delay',
-                                    {'message': question}, 'supplier-what-if')
+                                    {'message': question}, 'supplier-what-if', spoken_request=question)
         assert preview['status'] == 'completed' and preview['read_only'] is True, preview['assistant_text']
         assert preview['proposal'] is None and 'session' not in preview and 'action_result' not in preview
         assert preview['workspace']['judge_preview']['baseline_plan_id'] == plan['plan_id']
@@ -93,7 +133,7 @@ def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_pro
                           value.drafts, value.simulated_outbox)
         rejected, _ = voice_tool(client, provider, 'preview_supplier_delay',
             {'message': 'Prepare recovery for the current copper cathode supplier delayed by 7 days.'},
-            'not-a-preview')
+            'not-a-preview', spoken_request=question)
         assert rejected['status'] == 'needs_clarification' and rejected['proposal'] is None
         assert before == (value.last_plan, value.recovery, value.rfq, value.pending_proposal,
                           value.drafts, value.simulated_outbox)
@@ -101,7 +141,7 @@ def test_native_supplier_what_if_uses_pure_preview_and_explicit_action_still_pro
                         if row['recovery_available'])
         prepared, _ = voice_tool(client, provider, 'operate_workspace',
             {'message': f"Prepare recovery for shipment {shipment['shipment_id']} delayed by 7 days"},
-            'explicit-recovery')
+            'explicit-recovery', spoken_request=f"Prepare recovery for shipment {shipment['shipment_id']} delayed by 7 days")
         assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
         assert value.recovery is None
 
@@ -121,7 +161,7 @@ def test_native_operate_workspace_exact_spoken_recovery_prepares_without_applyin
         before = deepcopy((value.last_plan, value.recovery, value.rfq, value.drafts))
         result, _ = voice_tool(client, provider, 'operate_workspace', {
             'message': 'Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.'
-        }, 'spoken-seven-day-recovery')
+        }, 'spoken-seven-day-recovery', spoken_request='Prepare a recovery scenario for a seven day delay of our current copper cathode supplier.')
         assert result['status'] == 'proposal', result
         assert result['proposal']['kind'] == 'recovery'
         assert result['proposal']['parameters']['delay_days_by_offer'] == {plan['selected_offer_id']: 7}
@@ -144,7 +184,7 @@ def test_native_operate_workspace_ambiguous_duration_does_not_prepare(duration):
         before = deepcopy((value.last_plan, value.recovery, value.rfq, value.drafts))
         result, model = voice_tool(client, provider, 'operate_workspace', {
             'message': f'Prepare a recovery scenario for a {duration} delay of our current copper cathode supplier.'
-        }, f'ambiguous-recovery-{duration}')
+        }, f'ambiguous-recovery-{duration}', spoken_request=f'Prepare a recovery scenario for a {duration} delay of our current copper cathode supplier.')
         assert result['status'] == 'needs_clarification', result
         assert result['proposal'] is None
         assert model['required_spoken_response'] == result['assistant_text']
@@ -163,7 +203,7 @@ def test_native_carbon_calculation_uses_same_saved_result_as_text():
         plan = plan_for_copper(client, {'Origin': 'https://demo.test',
                                        'X-CSRF-Token': session['csrf_token']})
         result, model = voice_tool(client, provider, 'estimate_carbon',
-            {'message': 'Calculate carbon for our current copper purchase'}, 'carbon-native')
+            {'message': 'Calculate carbon for our current copper purchase'}, 'carbon-native', spoken_request='Calculate carbon for our current copper purchase')
         assert result['status'] == 'completed'
         assert result['action_result']['tool'] == 'estimate_carbon'
         assert result['session']['carbon_assessment']['result']['plan_id'] == plan['plan_id']
@@ -182,7 +222,7 @@ def test_native_routes_read_uses_owned_profile_without_distance():
                      live_client_factory=factory)
     with TestClient(app, base_url='https://demo.test') as client:
         result, model = voice_tool(client, provider, 'read_routes',
-            {'message': 'What are our current routes?'}, 'routes-native')
+            {'message': 'What are our current routes?'}, 'routes-native', spoken_request='What are our current routes?')
         assert result['read_only'] is True
         assert result['workspace']['routes']
         assert 'distance' in result['assistant_text']
@@ -198,7 +238,7 @@ def test_native_carbon_missing_material_asks_with_real_live_audio():
                      live_client_factory=factory)
     with TestClient(app, base_url='https://demo.test') as client:
         result, model = voice_tool(client, provider, 'estimate_carbon',
-            {'message': 'Assess our carbon footprint'}, 'carbon-select')
+            {'message': 'Assess our carbon footprint'}, 'carbon-select', spoken_request='Assess our carbon footprint')
         assert result['status'] == 'needs_clarification'
         assert result['session']['company_id'] == 'solara-cables'
         assert 'material' in model['required_spoken_response'].lower()
@@ -215,7 +255,7 @@ def test_native_navigation_accepts_operations_views():
     with TestClient(app, base_url='https://demo.test') as client:
         for view in ('overview', 'inventory', 'routes', 'shipments'):
             result, _ = voice_tool(client, provider, 'navigate_workspace',
-                                   {'view': view}, f'nav-{view}')
+                                   {'view': view}, f'nav-{view}', spoken_request=f"Open the {view} view.")
             assert result['action_result']['view'] == view
             assert result['session']['company_id'] == 'solara-cables'
 
@@ -240,7 +280,7 @@ def test_native_supplier_preview_uses_original_baseline_after_accepted_recovery(
         before = deepcopy(value.recovery)
         result, _ = voice_tool(client, provider, 'preview_supplier_delay',
             {'message': 'What if our current copper cathode supplier is delayed by 7 days?'},
-            'baseline-preview')
+            'baseline-preview', spoken_request='What if our current copper cathode supplier is delayed by 7 days?')
         assert result['status'] == 'completed' and result['proposal'] is None, result
         assert result['workspace']['judge_preview']['baseline_plan_id'] == plan['plan_id']
         assert result['workspace']['judge_preview']['scenario_plan_id'] is None
@@ -266,7 +306,7 @@ def test_native_reads_and_preparation_share_current_evidence():
                               for row in plan['alternatives']}})
         assert estimate.status_code == 200, estimate.text
         saved = client.get('/api/demo/carbon/assessment').json()['assessment']['result']
-        carbon, model = voice_tool(client, provider, 'read_carbon', {}, 'carbon-1')
+        carbon, model = voice_tool(client, provider, 'read_carbon', {}, 'carbon-1', spoken_request='What is our current carbon assessment?')
         assert carbon['status'] == 'completed' and carbon['workspace'] == {'carbon': saved}
         assert '31720' in carbon['assistant_text']
         selected_carbon = next(row for row in saved['suppliers']
@@ -279,7 +319,7 @@ def test_native_reads_and_preparation_share_current_evidence():
         assert session['csrf_token'] not in str(model) and session['session_id'] not in str(model)
 
         view = client.get('/api/demo/dispatch').json()
-        shipments, model = voice_tool(client, provider, 'read_shipments', {}, 'shipments-1')
+        shipments, model = voice_tool(client, provider, 'read_shipments', {}, 'shipments-1', spoken_request='What are our current shipments?')
         assert shipments['status'] == 'completed' and shipments['workspace'] == {'shipments': view}
         linked_rows = [row for row in view['shipments']
                        if row.get('plan_id') == plan['plan_id']]
@@ -290,18 +330,18 @@ def test_native_reads_and_preparation_share_current_evidence():
 
         invalid, _ = voice_tool(client, provider, 'operate_workspace',
             {'message': 'Prepare recovery for shipment foreign-shipment delayed by 20 days'},
-            'foreign-1')
+            'foreign-1', spoken_request='Prepare recovery for shipment foreign-shipment delayed by 20 days')
         assert invalid['status'] in {'needs_clarification', 'unavailable'} and invalid['proposal'] is None
         assert client.get('/api/demo/session').json()['recovery'] is None
 
         prepared, model = voice_tool(client, provider, 'operate_workspace',
             {'message': f"Prepare recovery for shipment {row['shipment_id']} delayed by 20 days"},
-            'prepare-1')
+            'prepare-1', spoken_request=f"Prepare recovery for shipment {row['shipment_id']} delayed by 20 days")
         assert prepared['status'] == 'proposal' and prepared['proposal']['kind'] == 'recovery'
         assert prepared['proposal']['parameters']['shipment_id'] == row['shipment_id']
         assert model['proposal'] == prepared['proposal']
         assert client.get('/api/demo/session').json()['recovery'] is None
-        reread, _ = voice_tool(client, provider, 'read_shipments', {}, 'shipments-2')
+        reread, _ = voice_tool(client, provider, 'read_shipments', {}, 'shipments-2', spoken_request='What are our current shipments?')
         assert reread['status'] == 'completed' and reread['proposal'] is None
         assert app.state.sessions.get(session['session_id']).pending_proposal['proposal_id'] == prepared['proposal']['proposal_id']
         confirm = {'proposal_id': prepared['proposal']['proposal_id'], 'reviewed': True,

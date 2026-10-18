@@ -29,6 +29,7 @@ from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
 from .carbon_api import carbon_export, current_carbon_assessment, register_carbon_routes
 from .dispatch_view import build_dispatch_view, resolve_recovery_shipment
+from .price_outlook import price_outlook_router
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -2908,6 +2909,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     @app.get('/dispatch')
     async def legacy_dispatch():
         return RedirectResponse('/demo?view=inventory&supply=shipments', status_code=307)
+
+    app.include_router(price_outlook_router(session=session, now=store.now))
 
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()

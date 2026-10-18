@@ -17,7 +17,7 @@ config = destination / 'procurement-engine/config'
 config.mkdir(parents=True)
 for name in ['materials.yaml', 'assumptions.yaml', 'iso3166_alpha2.csv', 'carbon_factors_v1.json',
              'route_display_v1.json', 'judge_suez_2021_v1.json', 'judge_hindi_case_v1.json',
-             'locations_v1.json', 'news_sources_v1.json']:
+             'locations_v1.json', 'news_sources_v1.json', 'prediction_results_v1.json']:
     shutil.copy2(repo / 'procurement-engine/config' / name, config / name)
 deploy = destination / 'deploy/judge-demo'
 deploy.mkdir(parents=True)

@@ -1,0 +1,56 @@
+{
+  "schema_version": "forecast-scorecard.v1",
+  "stage": "offline_metric_infrastructure_only",
+  "input_sha256": "42c582be9ffc762b15182e320d23a9eebf5520bfdd41c76a09b526d50b199745",
+  "input_bytes": 5657592,
+  "config_sha256": "a1016bee87c7a79263923e717c20f6c14f2b8f3797d4eb1fc7dfd0dd82573c7e",
+  "module_sha256": "897f3bd129d0ac0f6110176ee672e8260e594794e6a948db1e7abf76f8a4f15b",
+  "cli_sha256": "36821531b7546e05d73814eb4d0fb7432f6f0db14fe0fd57dea0eb2bcc038346",
+  "metadata": {
+    "snapshot": "config/prediction_history_v1.json",
+    "snapshot_sha256": "e04ddfe16c68d97a6f951bf7eddccd6d732769d39709a0ff12bfada63ef3b6b9",
+    "built_on": "2026-10-16",
+    "config": {
+      "models": [
+        "naive",
+        "ets",
+        "gbm",
+        "ridge"
+      ],
+      "windows": [
+        36,
+        60
+      ],
+      "horizons": [
+        1,
+        3,
+        6
+      ],
+      "test_months": 24,
+      "validation_months": 24,
+      "scale_grid": [
+        0.8,
+        0.9,
+        1.0,
+        1.1,
+        1.2,
+        1.35,
+        1.5
+      ],
+      "n_paths": 1000,
+      "gbm_refit_every": 6,
+      "min_improvement_vs_naive": 0.02,
+      "bootstrap_replicates": 1000,
+      "bootstrap_seed": 0,
+      "as_of_month": "2026-10"
+    },
+    "availability_policy": "month_m_available_at_end_of_m_plus_1; retrospective latest-vintage proxy; not PIT"
+  },
+  "metadata_is_caller_supplied": true,
+  "config": {
+    "bootstrap_replicates": 1000,
+    "seed": 0,
+    "block_length": 6
+  },
+  "row_count": 13248
+}

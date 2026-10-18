@@ -28,6 +28,8 @@ import { acceptScopedResult, currentCarbonAssessment, currentCarbonResult, curre
 import type { TaherScope } from './demo-taher-workspace';
 import './demo-taher-workspace.css';
 import { PriceOutlookPanel } from './demo-price-outlook';
+import { SchemesPanel } from './demo-schemes';
+import type { SchemeResult } from './demo-schemes';
 import './demo-theme.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -383,6 +385,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 
 export function DemoPage({ initialState = initialDemoState, initialCompanies = [], initialView, initialStage }: { initialState?: DemoState; initialCompanies?: CompanyProfile[]; initialView?: WorkspaceView; initialStage?: ProcurementStage }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
+  const [schemes, setSchemes] = useState<SchemeResult | null>(null);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [fixtureLoading, setFixtureLoading] = useState(false);
   const [fixtureError, setFixtureError] = useState('');
@@ -954,6 +957,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && (!state.plan || state.dirty) && <section className="demo-planning demo-alert"><h2>Run the cost comparison first</h2><p>Emissions use the current plan and accepted quote versions. Changed buyer inputs need a new comparison.</p><button type="button" className="demo-link" onClick={() => setComparisonTab('cost')}>Open cost comparison</button></section>}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && carbonInputsEdited && <p className="demo-assumption" role="status">Emissions inputs were edited. The saved assessment is hidden until you estimate again; re-enter any assumptions after leaving this tab.</p>}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && state.plan && state.session && taherScope && <ScopedCarbonPanel key={`${taherScope.sessionId}:${taherScope.companyId}:${taherScope.contextVersion}:${taherScope.planId}:${taherScope.epoch}`} plan={state.plan} csrf={state.session.csrf_token} scope={taherScope} dirty={state.dirty} result={currentCarbon} onResult={saveCarbonResult} onInputsChange={noteCarbonInputsChanged} />}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'emissions' && state.session && company && <SchemesPanel key={`${company.company_id}:${state.session.context_version}`} csrf={state.session.csrf_token} contextVersion={state.session.context_version} companyName={company.name} result={schemes?.company_id === company.company_id ? schemes : null} onResult={setSchemes} />}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && <section id="demo-procurement" className="demo-planning"><div className="demo-heading"><div><span className="demo-kicker">03 / Compare</span><h2>What can arrive in time?</h2></div><span className="demo-session">Single-supplier options · deterministic comparison</span></div>
       <p className="demo-muted">Choose accepted quotes. Enter the quantity, date, budget and any extra cost you want included. This is a single-order sourcing comparison; it checks each supplier independently.</p>
       <div className="demo-accepted"><strong>Accepted quotes</strong>{accepted.length ? accepted.map(o => <label key={o.offer_id}><input type="checkbox" checked={selected.includes(o.offer_id)} onChange={e => { invalidate(); setSelected(ids => e.target.checked ? [...ids, o.offer_id] : ids.filter(id => id !== o.offer_id)); }} />{quoteDisplayName(o, fixtures)}<small>v{o.version}</small></label>) : <p>Accept at least one reviewed quote to run a comparison.</p>}</div>

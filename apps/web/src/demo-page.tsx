@@ -30,6 +30,8 @@ import './demo-taher-workspace.css';
 import { PriceOutlookPanel } from './demo-price-outlook';
 import { currentSchemes, SchemesPanel } from './demo-schemes';
 import type { SchemeResult } from './demo-schemes';
+import { CountryPricingPanel } from './demo-country-pricing';
+import type { CountryPricing } from './demo-country-pricing';
 import './demo-theme.css';
 
 export type DemoState = { epoch: number; session: DemoSession | null; offers: OfferView[]; plan: PlanView | null; planRequest: PlanRequest | null; recovery: RecoveryView | null; rfq: RfqView | null; news: NewsView | null; reviewed: boolean; dirty: boolean; focusedId: string | null };
@@ -386,6 +388,7 @@ export function DraftsWorkspace({ company, drafts, rfq, messages, dirty, onDownl
 export function DemoPage({ initialState = initialDemoState, initialCompanies = [], initialView, initialStage }: { initialState?: DemoState; initialCompanies?: CompanyProfile[]; initialView?: WorkspaceView; initialStage?: ProcurementStage }) {
   const [state, dispatch] = useReducer(applyDemoResult, initialState);
   const [schemes, setSchemes] = useState<SchemeResult | null>(null);
+  const [pricing, setPricing] = useState<CountryPricing | null>(null);
   const [fixtures, setFixtures] = useState<DemoFixture[]>([]);
   const [fixtureLoading, setFixtureLoading] = useState(false);
   const [fixtureError, setFixtureError] = useState('');
@@ -967,6 +970,7 @@ export function DemoPage({ initialState = initialDemoState, initialCompanies = [
         <p className="demo-assumption">Extra cost is your per-{inputs.quantity_unit} assumption; total cost includes it but does not prove full freight or tariffs. Dated FX rates, when needed, are recorded in the comparison and JSON export. Budget and price are decimal amounts in the reporting currency. Quantities use the selected material unit; no unit conversions are inferred.</p>{company && inputs.material && !coveredMaterial && <p className="demo-alert">{inputs.material} has no matching runnable quote coverage for {company.name}. {company.quote_coverage.note}</p>}<button className="demo-button" disabled={!state.session || !chosen.length || !coveredMaterial || !!busy}>{busy === 'plan' ? 'Comparing…' : 'Run comparison'}</button></form>
     </section>}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && state.session && company && selectedMaterialId && <PriceOutlookPanel scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version ?? 1 }} materialId={selectedMaterialId} />}
+    {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && state.session && company && <CountryPricingPanel key={`${company.company_id}:${state.session.context_version}`} scope={{ sessionId: state.session.session_id, companyId: company.company_id, contextVersion: state.session.context_version ?? 1 }} view={pricing} onLoad={setPricing} />}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && state.plan && !state.recovery && <><PlanResults plan={state.plan} offers={state.offers} fixtures={fixtures} carbon={currentCarbon} headingRef={resultHeadingRef} /><RfqNextStep plan={state.plan} dirty={state.dirty} onReview={() => navigate('procurement', 'rfq')} /></>}
     {view === 'procurement' && stage === 'compare' && comparisonTab === 'cost' && baseline && <section className="demo-planning demo-delay"><div className="demo-heading"><div><span className="demo-kicker">Test a supplier delay</span><h2>What if a quote arrives late?</h2></div><span className="demo-session">Hypothetical · no confirmed shipment event</span></div>
       <p className="demo-muted">Keep the original buyer inputs and accepted quote versions. Add or update a supplier delay; each comparison retains the other active supplier delays.</p>

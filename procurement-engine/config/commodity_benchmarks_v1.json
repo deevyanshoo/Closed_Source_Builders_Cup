@@ -1,0 +1,146 @@
+{
+  "snapshot_version": "commodity-benchmarks-v1",
+  "synthetic": false,
+  "source": {
+    "publisher": "World Bank",
+    "title": "Commodity Price Data (The Pink Sheet), monthly prices in nominal US dollars",
+    "page_url": "https://www.worldbank.org/en/research/commodity-markets",
+    "file_url": "https://thedocs.worldbank.org/en/doc/74e8be41ceb20fa0da750cda2f6b9e4e-0050012026/related/CMO-Historical-Data-Monthly.xlsx",
+    "file_sha256": "ea1c350827878ea3bbe30e3cda16a13fd3bd5b409b8458940dc94a36b5a33154",
+    "source_updated": "2026-10-02",
+    "retrieved_at": "2026-10-08T16:31:57+00:00",
+    "licence": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "licence_url": "https://datacatalog.worldbank.org/public-licenses#cc-by",
+    "attribution": "Source: World Bank Commodity Price Data (The Pink Sheet). Values copied unmodified; currency conversions are computed at view time.",
+    "checked_on": "2026-10-15"
+  },
+  "stale_after_days": 75,
+  "benchmarks": {
+    "copper": {
+      "series": "Copper",
+      "source_unit_label": "($/mt)",
+      "currency": "USD",
+      "per_unit": "tonne",
+      "note": "Benchmark is LME grade A copper cathode; rod and cathode quotes carry their own premiums.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "13543"
+        },
+        {
+          "month": "2026-08",
+          "value": "14326"
+        },
+        {
+          "month": "2026-09",
+          "value": "14474"
+        }
+      ]
+    },
+    "aluminium": {
+      "series": "Aluminum",
+      "source_unit_label": "($/mt)",
+      "currency": "USD",
+      "per_unit": "tonne",
+      "note": "Benchmark is primary aluminium ingot; conductor products carry processing premiums.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "3161"
+        },
+        {
+          "month": "2026-08",
+          "value": "3251"
+        },
+        {
+          "month": "2026-09",
+          "value": "3283"
+        }
+      ]
+    },
+    "wheat": {
+      "series": "Wheat, US HRW",
+      "source_unit_label": "($/mt)",
+      "currency": "USD",
+      "per_unit": "tonne",
+      "note": "Benchmark is US hard red winter wheat; other origins and grades differ.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "310"
+        },
+        {
+          "month": "2026-08",
+          "value": "330"
+        },
+        {
+          "month": "2026-09",
+          "value": "347"
+        }
+      ]
+    },
+    "sugar": {
+      "series": "Sugar, world",
+      "source_unit_label": "($/kg)",
+      "currency": "USD",
+      "per_unit": "kg",
+      "note": "Benchmark is the world raw sugar price; refined sugar trades at a premium.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "0.34"
+        },
+        {
+          "month": "2026-08",
+          "value": "0.38"
+        },
+        {
+          "month": "2026-09",
+          "value": "0.41"
+        }
+      ]
+    },
+    "cotton": {
+      "series": "Cotton, A Index",
+      "source_unit_label": "($/kg)",
+      "currency": "USD",
+      "per_unit": "kg",
+      "note": "Benchmark is the Cotton A Index for fibre; a bale weight is needed to compare per bale.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "1.96"
+        },
+        {
+          "month": "2026-08",
+          "value": "2.11"
+        },
+        {
+          "month": "2026-09",
+          "value": "2.1"
+        }
+      ]
+    },
+    "oil": {
+      "series": "Sunflower oil",
+      "source_unit_label": "($/mt)",
+      "currency": "USD",
+      "per_unit": "tonne",
+      "note": "Benchmark is per metric tonne; quotes per litre need a stated density to compare.",
+      "observations": [
+        {
+          "month": "2026-07",
+          "value": "1497"
+        },
+        {
+          "month": "2026-08",
+          "value": "1484"
+        },
+        {
+          "month": "2026-09",
+          "value": "1390"
+        }
+      ]
+    }
+  }
+}

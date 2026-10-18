@@ -108,3 +108,87 @@ Events that cannot become a date change are excluded with a reason: `no_arrival_
 - No route, UI, persistence, provider or calendar integration.
 - No claim that any synthetic record reflects real carrier or port data.
 - A hold without a stated ETA is exposure, not a delay.
+
+## Voice read tools (proposed for #81, not built)
+
+Two read-only tools for questions about shipments. The offer tools (`get_offer_summary`, `list_valid_offers`) are in
+`procurement-engine/src/procure/offers/CONTRACT_PROPOSAL.md` section 10. They share the declaration style, the
+trusted host context and the outcome envelope described there. Nothing here is built; adapters wait for your review.
+
+### Shared rules for all four tools
+
+- **Arguments:** the model supplies only the arguments. `workspace_id`, `principal_id`, `session_id`, `turn_id` and the data cutoff `as_of` come from the host, as in `TrustedRecoveryContext`.
+- **Outcome envelope:** `{tool_name, read_only: true, ownership: {session_id, turn_id}, status, reason?, missing_fields?, result?}`.
+- **Status:** one of `answered`, `not_found`, `clarification_required`, `rejected` or `unavailable`.
+- **Every result carries:**
+  - `synthetic`
+  - the `as_of` cutoff, with `age_seconds` and `stale` (older than one day, the rule `/dispatch` uses)
+  - Decimal quantities with their unit
+  - evidence ids or locators
+- **Exposure is never confirmation.** Hazard, weather and news items are always returned with `status: "exposure"`, and the result states `confirms_delay: false`. A tool result can never say a delay is confirmed, never changes an expected arrival, and never calls anything safe.
+- **No document or news text reaches the model.** Results carry codes, ids, timestamps, values and hashes, never notice summaries, article titles or body text.
+- **Same limits as `compare_receipt_recovery`:** a 128 KiB call, a depth of 16 and 256 items per array.
+
+### `get_shipment_status`
+
+Arguments: `{"shipment_id": string}`. The string is 1 to 64 characters of `[A-Za-z0-9_-]`, and no other keys are allowed.
+
+Result, built from the shipment read models (`GET /dispatch/shipments/{id}` and the list row) at the host cutoff:
+
+```text
+{
+  shipment_id, synthetic: bool, as_of: instant, age_seconds: int, stale: bool
+  status: delivered | on_hold | delayed | at_risk | on_time | unknown, signals: string[]
+  expected_arrival: {at: instant, basis: eta | actual_arrival, event_id} | null
+  baseline_arrival_at: instant | null, on_hold: bool
+  delivered_quantity: {<component_id>: {amount: decimal, unit}}
+  last_event: {event_id, event_type, occurred_at, observed_at} | null
+  lead_time: {status, working_days: int | null, calendar_days, weekend_days, holidays: [{date, name}],
+              reason | null, synthetic, source: {provider_id, kind}}
+  confirmed_route_evidence: [{evidence_id, kind, operating_status, facility_code, valid_until, source_provider_id}]
+}
+```
+
+`confirmed_route_evidence` lists only the dated operating notices that the existing status rules already treat as
+confirmed. Hazards and news never appear here.
+
+### `get_shipment_exposure`
+
+Arguments: `{"shipment_id": string}`.
+
+Result, built from route evidence (`exposure` and `expired` buckets), hazards (`GET /dispatch/hazards`) and the news
+snapshots (#63), for the shipment's `location_keys`:
+
+```text
+{
+  shipment_id, synthetic: bool, as_of: instant, location_keys: string[], confirms_delay: false
+  hazards: [{status: "exposure", provider_id, location_code, state, reason | null, freshness: fresh | stale,
+             usable: bool, retrieved_at, valid_until, values: [{rule_id, value: decimal, unit, threshold: decimal, met}],
+             evidence_ids: string[]}]
+  route_exposure: [{status: "exposure", evidence_id, kind, facility_code | null, lane: {origin, destination} | null}]
+  news: [{status: "exposure", item_id, provider_id, published_at, location_keys, matched_terms: string[],
+          content_sha256}]
+  unsupported_locations: [{code, reason: not_in_registry}]
+}
+```
+
+- **Hazard states:** `state` keeps the hazard read model's values unchanged. They are `exposure_found`, `no_exposure_found`, `insufficient_data`, `offline`, `provider_failure`, `rate_limited`, `malformed_payload` and `not_fetched`. A state of `no_exposure_found` is returned as is and is never reworded as safe.
+- **News terms:** `matched_terms` come from our configuration (`news_sources_v1.json`), not from the article.
+
+### Planned offline tests (with the adapters, after review)
+
+For each tool:
+- an unknown shipment (`not_found`)
+- a stale cutoff
+- a shipment with no baseline (`unknown`)
+- a hold without an ETA
+- an unsupported location
+- each hazard state
+- a check that no result has `status: "confirmed"` outside `confirmed_route_evidence`, changes `expected_arrival`, or contains notice or article text
+
+### Questions for you (#81)
+
+1. **Registry:** should each tool be a separate fixed Python module, or one bridge with a fixed table of four read tools next to `compare_receipt_recovery`?
+2. **Confirmation:** read tools change nothing. Can a validated text proposal for one of them run without the explicit browser confirmation that comparisons need, or should every proposal be confirmed?
+3. **Cutoff:** should `as_of` come from the host clock, the saved context, or the fixture cutoff for the synthetic demo?
+4. **Offer store binding:** after #83, should the offer tools read through the signed workspace quote transport, or through a host-supplied read-only view?

@@ -1,6 +1,7 @@
 """Native risk read speech must keep the server's owned conditional answer intact."""
 
 import asyncio
+import json
 from copy import deepcopy
 from types import SimpleNamespace as NS
 
@@ -43,7 +44,7 @@ def owned_risk_result(session):
             'limitations': ['Review before changing a plan.']}}}
 
 
-async def native_result(name, mutate=lambda result, session: None):
+async def native_result(name, mutate=lambda result, session: None, *, question=QUESTION):
     store, session = setup()
     class RiskProvider(Provider):
         async def send_realtime_input(self, **kwargs):
@@ -76,10 +77,10 @@ async def native_result(name, mutate=lambda result, session: None):
     await provider.events.put(NS(tool_call=None, server_content=None,
         voice_activity=NS(voice_activity_type='ACTIVITY_START', audio_offset='0s')))
     await provider.events.put(NS(tool_call=None, server_content=NS(
-        input_transcription=NS(text=QUESTION, finished=True))))
+        input_transcription=NS(text=question, finished=True))))
     await provider.events.put(NS(tool_call=None, server_content=None,
         voice_activity=NS(voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
-    arguments = {'message': QUESTION} if name in {'read_risks', 'operate_workspace'} else {}
+    arguments = {'message': question} if name in {'read_risks', 'operate_workspace'} else {}
     await provider.events.put(NS(tool_call=NS(function_calls=[NS(
         name=name, args=arguments, id='owned-risk-call')]),
         server_content=None))
@@ -90,9 +91,13 @@ async def native_result(name, mutate=lambda result, session: None):
     await asyncio.wait_for(task, 2)
     assert delivered == original
     assert result == original
-    assert calls == [((name, arguments, session.context_version)
-                      if name != 'operate_workspace' else
-                      ('operate_workspace', QUESTION, session.context_version))]
+    if name == 'read_workspace' and question == QUESTION:
+        assert calls == [('read_risks', {'scope': 'current', 'message': question},
+                          session.context_version)]
+    elif name == 'operate_workspace':
+        assert calls == [('operate_workspace', question, session.context_version)]
+    else:
+        assert calls == [(name, arguments, session.context_version)]
     return original, model
 
 
@@ -141,8 +146,14 @@ def test_noncurrent_or_nonread_risk_result_is_not_authoritative(change):
 
 
 def test_unrelated_workspace_read_does_not_gain_risk_spoken_contract():
-    _, model = asyncio.run(native_result('read_workspace'))
+    _, model = asyncio.run(native_result('read_workspace', question='Read our current company profile.'))
     assert 'required_spoken_response' not in model
+
+
+def test_explicit_current_risk_misroute_uses_owned_risk_spoken_contract():
+    result, model = asyncio.run(native_result('read_workspace'))
+    assert model['required_spoken_response'] == result['assistant_text']
+    assert 'conditional' in model['instruction']
 
 
 def test_extra_completed_deterministic_step_keeps_owned_risk_contract():
@@ -171,7 +182,9 @@ def test_large_owned_projection_keeps_spoken_brief_after_existing_compaction():
 
     result, model = asyncio.run(native_result('read_risks', large))
     assert model['required_spoken_response'] == result['assistant_text']
-    assert 'workspace' not in model
+    assert model['workspace']['risks']['companies'] == result['workspace']['risks']['companies']
+    assert 'extra' not in model['workspace']['risks']
+    assert len(json.dumps(model, ensure_ascii=True)) <= 64_000
 
 
 @pytest.mark.parametrize('name', ['read_risks', 'operate_workspace'])

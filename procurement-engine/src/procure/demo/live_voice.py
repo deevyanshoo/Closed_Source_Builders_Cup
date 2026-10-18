@@ -36,6 +36,7 @@ from .experience_service import _explicit_recovery_request, resolve_voice_recove
 from .judge_resolver import (_BRIDGE_COMMAND, _BRIDGE_REQUEST, _BRIDGE_AMBIGUOUS_REQUEST,
                              _DRAFT_NEGATION, _DRAFT_DEFERRED, _HYPOTHETICAL, is_coverage_read)
 from .integration_tools import market_read_request
+from .risk_read import is_current_risk_question
 from .speech_grounding import english_exact, numeric_provenance, TIMEOUT_SECONDS as CAPTION_REVIEW_TIMEOUT
 
 
@@ -135,6 +136,114 @@ def _broad_inventory_read(message: str) -> bool:
         and re.search(r'\b(?:sourcing|source|suppliers?)\b', message, re.I)
         and re.search(r'\b(?:all materials|across all|overview|position|summary|analy[sz]e)\b', message, re.I)
         and not re.search(r'\b(?:risks?|alerts?|headlines?|news)\b', message, re.I))
+
+
+def _compact_model_result(name: str, model_result: dict) -> dict:
+    """Drop irrelevant bulk before owned read facts; never truncate facts to fit.
+
+    Projection copies only inventory/risk read fields, retaining every material
+    and conditional alert. An unrepresentable result fails closed rather than
+    silently becoming a successful read with empty evidence.
+    """
+    if len(json.dumps(model_result, ensure_ascii=True)) <= 64_000:
+        return model_result
+    result = deepcopy(model_result)
+    workspace = result.pop('workspace', None)
+    if isinstance(workspace, dict):
+        if name in {'read_workspace', 'analyze_inventory', 'read_risks'}:
+            def pick(value, fields):
+                if not isinstance(value, dict):
+                    raise _Invalid()
+                return {key: value[key] for key in fields if key in value}
+
+            compact = pick(workspace, ('selected_material_id', 'buyer_draft', 'plan',
+                'prediction_context', 'prediction'))
+            company = workspace.get('company')
+            if isinstance(company, dict):
+                compact['company'] = pick(company, ('company_id', 'name', 'sector', 'as_of',
+                    'synthetic', 'reporting_currency', 'currencies'))
+                for field, fields in (
+                    ('materials', ('material_id', 'name', 'quantity_unit', 'stock',
+                        'consumption_per_day', 'monthly_requirement', 'criticality')),
+                    ('suppliers', ('supplier_id', 'name', 'country', 'materials',
+                        'lead_time_days', 'settlement_currency')),
+                    ('orders', ('order_id', 'material_id', 'quantity', 'unit', 'need_by', 'status'))):
+                    if isinstance(company.get(field), list):
+                        compact['company'][field] = [pick(row, fields) for row in company[field]]
+            risks = workspace.get('risks')
+            if isinstance(risks, dict):
+                def risk_read(value):
+                    projected = pick(value, ('company_id', 'company_name', 'checked_at',
+                        'sector', 'coverage', 'counts', 'data_gaps', 'limitations'))
+                    if isinstance(value.get('alerts'), list):
+                        projected['alerts'] = []
+                        for alert in value['alerts']:
+                            row = pick(alert, ('alert_id', 'company_id', 'category', 'severity',
+                                'title', 'summary', 'impact', 'material_ids', 'provenance',
+                                'confidence', 'metrics'))
+                            for field, fields in (
+                                ('evidence', ('kind', 'ref_id', 'label', 'detail', 'observed_at', 'url')),
+                                ('recovery_actions', ('action_id', 'label', 'message', 'requires_review'))):
+                                if isinstance(alert.get(field), list):
+                                    row[field] = [pick(item, fields) for item in alert[field]]
+                            projected['alerts'].append(row)
+                    return projected
+
+                compact['risks'] = risk_read(risks)
+                if isinstance(risks.get('companies'), list):
+                    compact['risks']['companies'] = [risk_read(row) for row in risks['companies']]
+            news = workspace.get('news_brief')
+            if isinstance(news, dict):
+                brief = pick(news, ('availability', 'company_id', 'company_name', 'sector',
+                    'checked_at', 'cache_state', 'data_gaps', 'caution'))
+                collection = news.get('collection')
+                if isinstance(collection, dict):
+                    brief['collection'] = pick(collection, ('status', 'mode', 'attempted_at',
+                        'news_success_at', 'fx_success_at'))
+                source_fields = ('source_id', 'name', 'state', 'last_checked_at')
+                if isinstance(news.get('sources'), list):
+                    brief['sources'] = [pick(row, source_fields) for row in news['sources']]
+                exposure_fields = ('kind', 'matched_materials', 'matched_routes',
+                    'matched_currencies', 'assessment', 'reason', 'next_action')
+                headline_fields = ('item_id', 'title', 'url', 'publisher', 'provider',
+                    'source_id', 'topic', 'published_at', 'retrieved_at', 'first_seen_at',
+                    'source_reliability', 'reliability_reason', 'implication_confidence',
+                    'relevance_strength')
+
+                def news_item(item):
+                    row = pick(item, headline_fields)
+                    if isinstance(item.get('exposure'), dict):
+                        row['exposure'] = pick(item['exposure'], exposure_fields)
+                    return row
+
+                if isinstance(news.get('headlines'), list):
+                    brief['headlines'] = [news_item(row) for row in news['headlines']]
+                watch = news.get('global_watch')
+                if isinstance(watch, dict):
+                    projected_watch = pick(watch, ('status', 'attempted_at', 'success_at'))
+                    if isinstance(watch.get('sources'), list):
+                        projected_watch['sources'] = [pick(row, source_fields)
+                            for row in watch['sources']]
+                    if isinstance(watch.get('events'), list):
+                        projected_watch['events'] = [news_item(row) for row in watch['events']]
+                    brief['global_watch'] = projected_watch
+                compact['news_brief'] = brief
+            result['workspace'] = compact
+            analytics = result.get('analytics')
+            if isinstance(analytics, dict) and isinstance(analytics.get('materials_by_cover'), list):
+                # The full rows remain in materials, in original scope. Only the
+                # redundant ranking copy is reduced to its identifiers and cover.
+                analytics['materials_by_cover'] = [pick(row, ('material_id', 'stock_cover_days'))
+                    for row in analytics['materials_by_cover']]
+        elif isinstance(workspace.get('news_brief'), dict):
+            result['workspace'] = {'news_brief': workspace['news_brief']}
+    if (name not in {'read_workspace', 'analyze_inventory', 'read_risks'}
+            and len(json.dumps(result, ensure_ascii=True)) > 64_000):
+        # Preserve the pre-existing bound for other tool families.
+        result.pop('analytics', None)
+    if len(json.dumps(result, ensure_ascii=True)) > 64_000:
+        raise _Invalid()
+    return result
 
 
 def _owned_risk_speech(result: dict, session) -> bool:
@@ -1122,6 +1231,8 @@ async def run_live_voice(
                 recovery_review_aborted = False
                 recovery_drain_deadline = None
                 market_speech_pending = False
+                market_owned_generation = None
+                market_rejected_generation = None
                 market_caption_task = None
                 market_caption_checks = 0
                 market_caption_complete = False
@@ -1157,6 +1268,7 @@ async def run_live_voice(
                         'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
 
                 async def deny_semantic_call(call, binding):
+                    nonlocal cached_output_blocked, market_rejected_generation
                     denied = {**recovery_denied(),
                         'status': 'needs_clarification' if first else 'unavailable',
                         'tool_succeeded': False, 'action_applied': False,
@@ -1166,6 +1278,11 @@ async def run_live_voice(
                         await send_frame({'type': 'tool_result', 'result': denied})
                     await provider.send_tool_response(function_responses=types.FunctionResponse(
                         name=call.name, id=call.id, response=denied))
+                    if first and market_read_request(session.company_id, recovery_spoken):
+                        market_rejected_generation = recovery_generation
+                        # The server owns this refusal. The provider's later
+                        # caption/PCM may not stand in for an owned forecast.
+                        await send_frame({'type': 'turn_complete'})
 
                 def block_ungrounded_recovery(result, previous, key):
                     """The app may have prepared a model candidate; revoke it before delivery."""
@@ -1764,7 +1881,12 @@ async def run_live_voice(
                             recovery_review_aborted = False
                             recovery_drain_deadline = None
                         elif activity is not None and kind.endswith('ACTIVITY_START'):
+                            speech_input_seen = False
+                            early_output.clear()
+                            early_output_bytes = 0
                             clarification_speech_pending = False
+                            if market_rejected_generation == recovery_generation:
+                                suppress_failed_speech = False
                             recovery_late_generation_abandoned |= recovery_transport_deadline is not None
                             recovery_generation += 1
                             rfq_input_closed = False
@@ -2142,6 +2264,10 @@ async def run_live_voice(
                             coverage_route = (name in {'read_workspace', 'operate_workspace'}
                                 and workspace_tools is not None and settled_rfq_input
                                 and is_coverage_read(recovery_spoken))
+                            risk_candidate = (name in {'read_workspace', 'analyze_inventory'}
+                                and workspace_tools is not None
+                                and is_current_risk_question(recovery_spoken, session.company_id))
+                            risk_route = risk_candidate and settled_rfq_input
                             rfq_route = (_fresh_rfq_route(recovery_spoken)
                                 if name == 'prepare_rfq' and settled_rfq_input else None)
                             bridge_operate = name == 'operate_workspace' and any(
@@ -2152,8 +2278,10 @@ async def run_live_voice(
                                      or _BRIDGE_AMBIGUOUS_REQUEST.search(recovery_spoken)))
                             routed_name = (rfq_route or name) if name == 'prepare_rfq' else (
                                 'operate_workspace' if recovery_route else name)
+                            if risk_route:
+                                routed_name = 'read_risks'
                             binding = json.dumps([name, args], sort_keys=True)
-                            semantic_call = name in {'read_workspace', 'operate_workspace', 'prepare_rfq'} or market_candidate or cached_market_call
+                            semantic_call = name in {'read_workspace', 'operate_workspace', 'prepare_rfq'} or market_candidate or cached_market_call or risk_candidate
                             prior = tool_results.get(call_id)
                             if semantic_call and prior is not None:
                                 if prior[0] != binding:
@@ -2370,6 +2498,9 @@ async def run_live_voice(
                                 if market_route:
                                     result = await workspace_tools('_read_market_if_applicable',
                                         {'message': recovery_spoken}, context_version, key)
+                                elif risk_route:
+                                    result = await workspace_tools('read_risks',
+                                        {'scope': 'current', 'message': recovery_spoken}, context_version, key)
                                 elif name == 'confirm_research' and repeated:
                                     cached = tool_results[call_id][2]
                                     result = {k: v for k, v in cached.items()
@@ -2508,6 +2639,12 @@ async def run_live_voice(
                                 cached_output_blocked = False
                                 cache_tool(call_id, binding, key, result)
                             await send_frame({'type': 'tool_result', 'result': result})
+                            if market_route:
+                                if result['status'] == 'completed':
+                                    market_owned_generation = recovery_generation
+                                else:
+                                    market_rejected_generation = recovery_generation
+                                    await send_frame({'type': 'turn_complete'})
                             if market_route and result['status'] == 'completed':
                                 market_speech_pending = True
                                 market_caption_checks = 0
@@ -2614,27 +2751,7 @@ async def run_live_voice(
                                         + research_gate['query'] + '. Say confirm research to start.')
                                 model_result.update(tool_succeeded=False, action_applied=False,
                                     required_spoken_response=required_response)
-                            if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
-                                workspace = model_result.pop('workspace', None)
-                                if isinstance(workspace, dict):
-                                    compact = {}
-                                    if isinstance(workspace.get('news_brief'), dict):
-                                        compact['news_brief'] = workspace['news_brief']
-                                    if name == 'read_workspace':
-                                        selected = workspace.get('selected_material_id')
-                                        compact['selected_material_id'] = (selected if isinstance(selected, str)
-                                            and len(selected) <= 128 else None)
-                                        buyer = workspace.get('buyer_draft')
-                                        compact['buyer_draft'] = ({field: buyer[field] for field in BUYER_FIELDS}
-                                            if isinstance(buyer, dict) and all(
-                                                isinstance(buyer.get(field), str) and len(buyer[field]) <= 128
-                                                for field in BUYER_FIELDS) else None)
-                                    if compact:
-                                        model_result['workspace'] = compact
-                            if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
-                                model_result.pop('analytics', None)
-                            if len(json.dumps(model_result, ensure_ascii=True)) > 64_000:
-                                raise _Invalid()
+                            model_result = _compact_model_result(routed_name, model_result)
                             brief = (model_result.get('workspace') or {}).get('news_brief') or {}
                             logging.getLogger('procure.demo').info(json.dumps({
                                 'event': 'voice_tool_result', 'tool': name,
@@ -2653,6 +2770,15 @@ async def run_live_voice(
                         # VAD/end may precede ASR, or ASR may share an output packet.
                         # Hold bounded early output only after valid current VAD;
                         # output before that evidence is discarded, never replayed.
+                        market_input = (recovery_vad_started and
+                            market_read_request(session.company_id, recovery_spoken))
+                        hold_market_output = (market_rejected_generation == recovery_generation
+                            or market_input and market_owned_generation != recovery_generation)
+                        if market_input:
+                            # Output buffered before ASR/tool grounding cannot
+                            # become the answer to this forecast generation.
+                            early_output.clear()
+                            early_output_bytes = 0
                         if not speech_input_seen:
                             if interrupted_frame or activity is not None and (
                                     not activity_valid or kind.endswith('ACTIVITY_START')):
@@ -2675,7 +2801,7 @@ async def run_live_voice(
                                         turn_complete=bool(getattr(content, 'turn_complete', False)))))
                                     content = SimpleNamespace(input_transcription=getattr(
                                         content, 'input_transcription', None))
-                            elif (not speech_input_seen and not interrupted_frame
+                            elif (not speech_input_seen and not market_input and not interrupted_frame
                                     and not recovery_asr_incomplete and not suppress_failed_speech
                                     and not cached_output_blocked
                                     and recovery_vad_started and input_bytes > round_audio_start
@@ -2744,7 +2870,7 @@ async def run_live_voice(
                             transcription = getattr(content, field, None)
                             value = getattr(transcription, 'text', None)
                             if isinstance(value, str) and value and not interrupted_frame and (speaker == 'input' or not suppress_failed_speech):
-                                if speaker == 'output' and (hold_recovery_output or hold_clarification_output or cached_output_blocked or not speech_input_seen):
+                                if speaker == 'output' and (hold_market_output or hold_recovery_output or hold_clarification_output or cached_output_blocked or not speech_input_seen):
                                     continue
                                 if speaker == 'output' and recovery_speech_pending:
                                     if market_speech_pending:
@@ -2772,7 +2898,7 @@ async def run_live_voice(
                                 produced_output_bytes += len(audio)
                                 if not produced_budget.allow(len(audio)):
                                     raise _Invalid()
-                            if suppress_failed_speech or interrupted_frame or hold_recovery_output or hold_clarification_output or cached_output_blocked or not speech_input_seen:
+                            if suppress_failed_speech or interrupted_frame or hold_market_output or hold_recovery_output or hold_clarification_output or cached_output_blocked or not speech_input_seen:
                                 continue
                             if research_gate is not None and not research_gate['armed']:
                                 research_gate['prompt_audio'] = True
@@ -2787,6 +2913,10 @@ async def run_live_voice(
                             await send_frame({'type': 'audio', 'sample_rate_hertz': 24000,
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
+                            if hold_market_output:
+                                # A pre-tool preface is neither the owned answer
+                                # nor completion of the current microphone read.
+                                continue
                             if market_speech_pending:
                                 market_caption_complete = True
                             if not recovery_held_calls:

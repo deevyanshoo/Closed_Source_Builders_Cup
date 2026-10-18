@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from datetime import date
 import json
 import os
 import re
@@ -31,21 +32,67 @@ _INSTRUCTION = (
     'contradictory or unverifiable meaning as false. This review cannot grant any action.'
 )
 
+_MONTH_NAMES = (
+    ('january', 'janeiro', 'जनवरी'),
+    ('february', 'fevereiro', 'फ़रवरी', 'फरवरी'),
+    ('march', 'março', 'मार्च'),
+    ('april', 'abril', 'अप्रैल'),
+    ('may', 'maio', 'मई'),
+    ('june', 'junho', 'जून'),
+    ('july', 'julho', 'जुलाई'),
+    ('august', 'agosto', 'अगस्त'),
+    ('september', 'setembro', 'सितंबर', 'सितम्बर'),
+    ('october', 'outubro', 'अक्टूबर', 'अक्तूबर'),
+    ('november', 'novembro', 'नवंबर', 'नवम्बर'),
+    ('december', 'dezembro', 'दिसंबर', 'दिसम्बर'),
+)
+_MONTH_NUMBER = {name: number for number, names in enumerate(_MONTH_NAMES, 1) for name in names}
+_MONTH_PATTERN = '|'.join(re.escape(name) for name in sorted(_MONTH_NUMBER, key=len, reverse=True))
+_DATE_PATTERN = re.compile(
+    rf'(?<!\d)(?:'
+    rf'(?P<iso_year>\d{{4}})-(?P<iso_month>\d{{2}})-(?P<iso_day>\d{{2}})'
+    rf'|(?P<first_month>{_MONTH_PATTERN})\s*(?P<first_day>\d{{1,2}})'
+    rf'(?:st|nd|rd|th)?\s*,?\s*(?P<first_year>\d{{4}})'
+    rf'|(?P<last_day>\d{{1,2}})(?:st|nd|rd|th)?\s*(?:de\s*)?'
+    rf'(?P<last_month>{_MONTH_PATTERN})\s*,?\s*(?:de\s*)?(?P<last_year>\d{{4}})'
+    rf')(?!\d)', re.IGNORECASE)
+
+
+def _date_and_number_claims(text: str) -> tuple[Counter, Counter] | None:
+    normalized = ''.join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in text)
+    dates = Counter()
+    remainder = []
+    end = 0
+    for match in _DATE_PATTERN.finditer(normalized):
+        remainder.append(normalized[end:match.start()])
+        remainder.append(' ')
+        end = match.end()
+        try:
+            if match['iso_year'] is not None:
+                parsed = date(int(match['iso_year']), int(match['iso_month']), int(match['iso_day']))
+            elif match['first_month'] is not None:
+                parsed = date(int(match['first_year']),
+                              _MONTH_NUMBER[match['first_month'].casefold()], int(match['first_day']))
+            else:
+                parsed = date(int(match['last_year']),
+                              _MONTH_NUMBER[match['last_month'].casefold()], int(match['last_day']))
+        except ValueError:
+            return None
+        dates[parsed.isoformat()] += 1
+    remainder.append(normalized[end:])
+    numbers = Counter(re.findall(r'\d+(?:[.,]\d+)*', ''.join(remainder)))
+    return dates, numbers
+
 
 def numeric_provenance(canonical: str, caption: str) -> bool:
-    """Require the same numeric literals and ISO dates, including Unicode digits.
+    """Bind every recognized date by value and every other numeric literal exactly.
 
-    Deliberately conservative about localized separators/dates; semantic review
-    cannot waive changed or extra numbers. Spelled-out quantities are also
-    checked by the semantic reviewer.
+    Ambiguous numeric date formats and spelled-out quantities still require
+    semantic review; an unmatched date cannot replace a recognized one.
     """
-    def digits(text):
-        return ''.join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in text)
-    def numbers(text):
-        return Counter(re.findall(r'\d+(?:[.,]\d+)*', digits(text)))
-    return (numbers(canonical) == numbers(caption)
-            and Counter(re.findall(r'\d{4}-\d{2}-\d{2}', digits(canonical)))
-            == Counter(re.findall(r'\d{4}-\d{2}-\d{2}', digits(caption))))
+    expected = _date_and_number_claims(canonical)
+    actual = _date_and_number_claims(caption)
+    return expected is not None and actual is not None and expected == actual
 
 
 def english_exact(utterance: str, canonical: str, caption: str) -> bool:

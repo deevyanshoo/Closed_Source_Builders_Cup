@@ -53,6 +53,86 @@ def test_number_and_date_provenance_cannot_be_waived():
     assert not grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', '16-10-2026'))
 
 
+@pytest.mark.parametrize('written_date', [
+    'October 16, 2026', 'October16,2026', '16 October 2026',
+    '16 de outubro de 2026', '16deoutubrode2026',
+    '16 अक्टूबर 2026', '16अक्टूबर2026', '१६ अक्टूबर २०२६',
+])
+def test_written_caption_date_has_same_provenance_as_iso(written_date):
+    assert grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', written_date))
+
+
+@pytest.mark.parametrize('written_date', [
+    'October 17, 2026', 'November 16, 2026',
+    '16 de setembro de 2026', '16 नवंबर 2026',
+    '32 October 2026', '16-10-2026',
+])
+def test_changed_invalid_or_ambiguous_caption_date_rejects(written_date):
+    assert not grounding.numeric_provenance(CANONICAL, HINDI.replace('2026-10-16', written_date))
+
+
+def test_all_dates_and_date_multiplicity_are_bound():
+    canonical = 'From 2026-10-16 through 2026-11-16, with 16 units.'
+    assert grounding.numeric_provenance(canonical,
+        'From October 16, 2026 through 16 de novembro de 2026, with 16 units.')
+    assert not grounding.numeric_provenance(canonical,
+        'From October 16, 2026 through October 16, 2026, with 16 units.')
+    assert not grounding.numeric_provenance(canonical,
+        'From October 16, 2026 through 16 de novembro de 2026, with 16 units on 17 October 2026.')
+    assert not grounding.numeric_provenance('On 2026-10-16 and 2026-10-16, 16 units.',
+        'On October 16, 2026, 16 units.')
+
+
+def test_date_equivalence_does_not_waive_other_numeric_claims():
+    canonical = 'On 2026-10-16 the amount is 500.50 USD; no order was made.'
+    assert grounding.numeric_provenance(canonical,
+        'Em 16 de outubro de 2026 o valor é 500.50 USD; nenhuma encomenda foi feita.')
+    assert not grounding.numeric_provenance(canonical,
+        'Em 16 de outubro de 2026 o valor é 500.51 USD; nenhuma encomenda foi feita.')
+    assert not grounding.numeric_provenance(canonical,
+        'Em 16 de outubro de 2026 o valor é 500.50 USD e 20 USD extra.')
+    assert grounding.numeric_provenance(canonical,
+        '१६ अक्टूबर २०२६ को राशि ५००.५० USD है और कोई आदेश नहीं दिया गया।')
+
+
+def test_written_date_can_reach_semantic_verifier_but_missing_no_action_qualifier_rejects():
+    calls = []
+    async def generate_content(**kwargs):
+        calls.append(kwargs)
+        return response(json.dumps({**dict.fromkeys(grounding._FIELDS, True),
+            'qualifications_preserved': False}))
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    caption = 'संदर्भ 16 अक्टूबर 2026। लागतें स्थिर हैं।'
+    assert grounding.numeric_provenance(CANONICAL, caption)
+    assert not asyncio.run(grounding.verify_market_caption(
+        'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+    assert len(calls) == 1
+
+
+def test_written_date_passes_only_with_positive_semantic_verdict():
+    calls = []
+    async def generate_content(**kwargs):
+        calls.append(kwargs)
+        return response(json.dumps(dict.fromkeys(grounding._FIELDS, True)))
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    caption = HINDI.replace('2026-10-16', '16 अक्टूबर 2026')
+    assert asyncio.run(grounding.verify_market_caption(
+        'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('failed_field', grounding._FIELDS)
+def test_written_date_still_requires_every_semantic_verdict(failed_field):
+    flags = dict.fromkeys(grounding._FIELDS, True)
+    flags[failed_field] = False
+    async def generate_content(**kwargs):
+        return response(json.dumps(flags))
+    client = NS(aio=NS(models=NS(generate_content=generate_content)))
+    caption = HINDI.replace('2026-10-16', '16 अक्टूबर 2026')
+    assert not asyncio.run(grounding.verify_market_caption(
+        'कृपया पूर्वानुमान हिंदी में बताइए', CANONICAL, caption, client=client))
+
+
 def test_english_fastpath_does_not_override_current_language_request():
     assert grounding.english_exact('What do our models say?', CANONICAL, CANONICAL)
     for utterance in ('What do our models say? Answer in Hindi.', 'कृपया बताइए',

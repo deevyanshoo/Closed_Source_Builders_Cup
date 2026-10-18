@@ -239,6 +239,7 @@ describe('ZOORQ workspace routes', () => {
   });
   it('restores only a destination and stage from the URL', () => {
     expect(readWorkspaceLocation('?view=procurement&stage=compare&company=other')).toEqual({ view: 'procurement', stage: 'compare' });
+    expect(readWorkspaceLocation('?view=predictions')).toEqual({ view: 'predictions', stage: 'add' });
     expect(readWorkspaceLocation('?view=invalid&stage=invalid')).toEqual({ view: 'overview', stage: 'add' });
     expect(workspaceSearch('?company=other&source=demo', 'news', 'add')).toBe('?source=demo&view=news');
   });

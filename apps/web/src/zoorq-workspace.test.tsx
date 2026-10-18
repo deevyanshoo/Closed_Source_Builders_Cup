@@ -19,9 +19,9 @@ describe('ZOORQ workspace shell', () => {
     expect(renderToStaticMarkup(<CompanyHub companies={[]} busy={false} onOpen={() => {}} />)).toContain('No companies');
   });
 
-  it('renders five reachable destinations, current state, and disables navigation during switching', () => {
+  it('renders six reachable destinations, current state, and disables navigation during switching', () => {
     const html = renderToStaticMarkup(<WorkspaceNavigation company={company} view="news" disabled onView={() => {}} />);
-    expect((html.match(/class="zoorq-nav-link /g) ?? []).length).toBe(5);
+    expect((html.match(/class="zoorq-nav-link /g) ?? []).length).toBe(6);
     expect(html).toContain('aria-current="page"');
     expect(html).toContain('News');
     expect((html.match(/disabled=""/g) ?? []).length).toBeGreaterThanOrEqual(6);
@@ -35,6 +35,7 @@ describe('ZOORQ workspace shell', () => {
   it('reserves the desktop company slot only while the first session loads', () => {
     const loading = renderToStaticMarkup(<WorkspaceNavigation view="overview" reserveCompanyIdentity onView={() => {}} />);
     const ready = renderToStaticMarkup(<WorkspaceNavigation company={company} view="overview" onView={() => {}} />);
+    expect(ready).toContain('aria-label="Predictions"');
     const switching = renderToStaticMarkup(<WorkspaceNavigation company={company} view="overview" reserveCompanyIdentity disabled onView={() => {}} />);
     const hub = renderToStaticMarkup(<WorkspaceNavigation view="hub" onView={() => {}} />);
     expect(loading).toContain('zoorq-nav-company is-placeholder');
@@ -76,6 +77,7 @@ describe('ZOORQ workspace shell', () => {
 
   it('compares stock cover with the lead for the same material and labels the estimate', () => {
     const html = renderToStaticMarkup(<WorkspaceOverview company={company} news={null} quoteCount={0} onView={() => {}} />);
+    expect(html).toContain('Market predictions');
     expect(html).toContain('6 days of stock cover');
     expect(html).toContain('10 days');
     expect(html).toContain('approximately 4 days');

@@ -145,12 +145,34 @@ def _compact_model_result(name: str, model_result: dict) -> dict:
     and conditional alert. An unrepresentable result fails closed rather than
     silently becoming a successful read with empty evidence.
     """
-    if len(json.dumps(model_result, ensure_ascii=True)) <= 64_000:
-        return model_result
+    read_names = {'read_workspace', 'analyze_inventory', 'read_risks'}
     result = deepcopy(model_result)
+    if name in read_names:
+        owned_workspace = result.get('workspace')
+        if isinstance(owned_workspace, dict):
+            selected = owned_workspace.get('selected_material_id')
+            if selected is not None and (not isinstance(selected, str) or len(selected) > 128):
+                owned_workspace.pop('selected_material_id', None)
+            buyer = owned_workspace.get('buyer_draft')
+            if isinstance(buyer, dict):
+                if all(field in buyer and isinstance(buyer[field], str)
+                        and len(buyer[field]) <= 128 for field in BUYER_FIELDS):
+                    owned_workspace['buyer_draft'] = {field: buyer[field] for field in BUYER_FIELDS}
+                else:
+                    owned_workspace.pop('buyer_draft', None)
+            elif buyer is not None:
+                owned_workspace.pop('buyer_draft', None)
+        analytics = result.pop('analytics', None)
+        if isinstance(analytics, dict):
+            analytics = {key: analytics[key] for key in ('source', 'as_of', 'company_id',
+                'materials', 'materials_by_cover', 'current_plan') if key in analytics}
+            if analytics:
+                result['analytics'] = analytics
+    if len(json.dumps(result, ensure_ascii=True)) <= 64_000:
+        return result
     workspace = result.pop('workspace', None)
     if isinstance(workspace, dict):
-        if name in {'read_workspace', 'analyze_inventory', 'read_risks'}:
+        if name in read_names:
             def pick(value, fields):
                 if not isinstance(value, dict):
                     raise _Invalid()
@@ -160,7 +182,7 @@ def _compact_model_result(name: str, model_result: dict) -> dict:
                 'prediction_context', 'prediction'))
             company = workspace.get('company')
             if isinstance(company, dict):
-                compact['company'] = pick(company, ('company_id', 'name', 'sector', 'as_of',
+                owned_company = pick(company, ('company_id', 'name', 'sector', 'as_of',
                     'synthetic', 'reporting_currency', 'currencies'))
                 for field, fields in (
                     ('materials', ('material_id', 'name', 'quantity_unit', 'stock',
@@ -169,7 +191,9 @@ def _compact_model_result(name: str, model_result: dict) -> dict:
                         'lead_time_days', 'settlement_currency')),
                     ('orders', ('order_id', 'material_id', 'quantity', 'unit', 'need_by', 'status'))):
                     if isinstance(company.get(field), list):
-                        compact['company'][field] = [pick(row, fields) for row in company[field]]
+                        owned_company[field] = [pick(row, fields) for row in company[field]]
+                if owned_company:
+                    compact['company'] = owned_company
             risks = workspace.get('risks')
             if isinstance(risks, dict):
                 def risk_read(value):
@@ -229,14 +253,17 @@ def _compact_model_result(name: str, model_result: dict) -> dict:
                     brief['global_watch'] = projected_watch
                 compact['news_brief'] = brief
             result['workspace'] = compact
-            analytics = result.get('analytics')
-            if isinstance(analytics, dict) and isinstance(analytics.get('materials_by_cover'), list):
-                # The full rows remain in materials, in original scope. Only the
-                # redundant ranking copy is reduced to its identifiers and cover.
-                analytics['materials_by_cover'] = [pick(row, ('material_id', 'stock_cover_days'))
-                    for row in analytics['materials_by_cover']]
         elif isinstance(workspace.get('news_brief'), dict):
             result['workspace'] = {'news_brief': workspace['news_brief']}
+    if name in read_names:
+        analytics = result.get('analytics')
+        if isinstance(analytics, dict):
+            if isinstance(analytics.get('materials_by_cover'), list):
+                # The full rows remain in materials, in original scope. Only the
+                # redundant ranking copy is reduced to its identifiers and cover.
+                analytics['materials_by_cover'] = [
+                    {key: row[key] for key in ('material_id', 'stock_cover_days') if key in row}
+                    for row in analytics['materials_by_cover'] if isinstance(row, dict)]
     if (name not in {'read_workspace', 'analyze_inventory', 'read_risks'}
             and len(json.dumps(result, ensure_ascii=True)) > 64_000):
         # Preserve the pre-existing bound for other tool families.

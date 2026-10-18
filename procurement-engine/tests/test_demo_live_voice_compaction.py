@@ -7,6 +7,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from procure.demo import live_voice
+from procure.demo.agent_tools import BUYER_FIELDS
 from procure.demo.company import list_companies
 from test_demo_live_voice_clarification import (
     workspace, ask, tool_result, assert_audio, receive_turn, PCM,
@@ -137,6 +138,63 @@ def test_compaction_fails_if_essential_news_title_cannot_fit():
     result['workspace']['news_brief']['headlines'][0]['title'] = 'Current sourced headline ' * 5000
     with pytest.raises(live_voice._Invalid):
         live_voice._compact_model_result('read_workspace', result)
+
+
+@pytest.mark.parametrize('padding', ['', 'x' * 80_000])
+def test_compaction_keeps_owned_selection_and_analytics_without_unknown_private_fields(padding):
+    buyer = {field: f'owned-{field}' for field in BUYER_FIELDS}
+    material = {'material_id': 'toluene', 'name': 'Toluene', 'unit': 'tonne',
+        'stock': '20', 'consumption_per_day': '2', 'monthly_requirement': '60',
+        'stock_cover_days': '10', 'shortest_supplier_lead_days': 12,
+        'suppliers': [{'supplier_id': 'supplier-1', 'name': 'Owned supplier',
+            'lead_time_days': 12, 'settlement_currency': 'AED'}],
+        'stock_cover_at_or_below_lead': True, 'synthetic': True}
+    plan = {'plan_id': 'owned-plan', 'required_purchase': '100',
+        'alternatives': [{'offer_id': 'offer-1', 'quantity': '100',
+            'feasible': True, 'reasons': []}]}
+    result = {'turn_id': 'owned-read', 'company_id': 'owned', 'context_version': 1,
+        'status': 'completed', 'assistant_text': 'Current workspace facts are ready.',
+        'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True,
+        'workspace': {**({'company': {'secret': 'PRIVATE_COMPANY', 'large_profile': padding}}
+            if padding else {}),
+            'selected_material_id': 'toluene',
+            'buyer_draft': {**buyer, 'secret': 'PRIVATE_BUYER'},
+            'news_brief': {'availability': 'unavailable'}},
+        'analytics': {'source': 'fictional_company_profile', 'as_of': '2026-10-14',
+            'company_id': 'owned', 'materials': [material], 'current_plan': plan,
+            'unknown': 'PRIVATE_ANALYTICS' + padding}}
+    compact = live_voice._compact_model_result('read_workspace', result)
+    assert compact['workspace'] == {'selected_material_id': 'toluene',
+        'buyer_draft': buyer, 'news_brief': {'availability': 'unavailable'}}
+    assert compact['analytics'] == {key: result['analytics'][key] for key in
+        ('source', 'as_of', 'company_id', 'materials', 'current_plan')}
+    assert compact['analytics']['materials'] == [material]
+    assert compact['analytics']['current_plan'] == plan
+    assert 'PRIVATE_' not in json.dumps(compact)
+    assert len(json.dumps(compact, ensure_ascii=True)) <= 64_000
+
+
+def test_small_read_preserves_owned_quotes_drafts_and_outbox_after_private_field_scrub():
+    buyer = {field: f'owned-{field}' for field in BUYER_FIELDS}
+    offers = [{'offer_id': 'quote-1', 'pricing': '120.50', 'status': 'saved'}]
+    drafts = [{'draft_id': 'draft-1', 'kind': 'rfq', 'status': 'ready'}]
+    outbox = [{'message_id': 'message-1', 'status': 'simulated'}]
+    result = {'turn_id': 'read-1', 'company_id': 'owned', 'context_version': 1,
+        'status': 'completed', 'assistant_text': 'Current workspace facts are ready.',
+        'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True,
+        'workspace': {'company': {'company_id': 'owned', 'name': 'Owned company'},
+            'offers': offers, 'drafts': drafts, 'simulated_outbox': outbox,
+            'buyer_draft': {**buyer, 'secret': 'PRIVATE_BUYER'},
+            'selected_material_id': 'toluene',
+            'news_brief': {'availability': 'available'}},
+        'analytics': {'source': 'fictional_company_profile', 'materials': [
+            {'material_id': 'toluene', 'stock_cover_days': '10'}],
+            'unknown': 'PRIVATE_ANALYTICS'}}
+    compact = live_voice._compact_model_result('read_workspace', result)
+    assert compact['workspace'] == {**result['workspace'], 'buyer_draft': buyer}
+    assert compact['analytics'] == {'source': 'fictional_company_profile',
+        'materials': result['analytics']['materials']}
+    assert 'PRIVATE_' not in json.dumps(compact)
 
 
 @pytest.mark.parametrize('company_id', COMPANIES)

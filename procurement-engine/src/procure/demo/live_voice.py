@@ -385,7 +385,8 @@ INSTRUCTION = (
     "acknowledgment before using a tool. Skip filler for quick reads. When the "
     "tool returns, lead with the verified answer or next step in a few sentences. "
     "If a correction is needed, say it plainly and continue without repeating "
-    "the acknowledgment. Never imply a pending tool has succeeded."
+    "the acknowledgment. Never imply a pending tool has succeeded. "
+    "Use read_price_outlook, read_carbon_schemes and read_country_pricing for price outlook, carbon scheme or green finance, and country benchmark price questions."
 )
 
 
@@ -671,6 +672,9 @@ def _config(company=None, *, history_context=''):
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
         ('read_carbon', 'Read current saved material and entered-freight estimates with cited calculator sources; a missing combined total can still have component estimates.', {}, []),
+        ('read_price_outlook', 'Read the dated price and FX outlook: backtest verdict, P10 to P90 range, horizon, data month and source. Omit material_id for all mapped materials and currencies.', {'material_id': text}, []),
+        ('read_carbon_schemes', 'Read carbon schemes and green finance programmes for the current company with official sources; a benefit figure appears only from inputs the user entered.', {}, []),
+        ('read_country_pricing', 'Read public commodity benchmarks for current company materials in its currencies, with data month, stale flags and materials without a benchmark.', {}, []),
         ('read_routes', 'Read current company declared profile routes and named via points. Modes and distances are not inferred.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
         ('estimate_carbon', 'Calculate and save current owned-plan emissions now, or continue a pending freight answer. Pass the user exact words; never invent offer IDs or distance.',
@@ -725,7 +729,8 @@ def _config(company=None, *, history_context=''):
         parameters_json_schema={'type': 'object', 'additionalProperties': False,
                                 'properties': properties, 'required': required},
         behavior=(types.Behavior.BLOCKING if name in {
-            'read_carbon', 'read_shipments', 'preview_supplier_delay', 'estimate_carbon'} else None))
+            'read_carbon', 'read_shipments', 'preview_supplier_delay', 'estimate_carbon',
+            'read_price_outlook', 'read_carbon_schemes', 'read_country_pricing'} else None))
         for name, description, properties, required in specs]
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
@@ -1865,7 +1870,8 @@ async def run_live_voice(
                                      'read_risks', 'read_news', 'read_carbon', 'read_routes', 'estimate_carbon', 'read_shipments',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
-                                     'navigate_workspace'}
+                                     'navigate_workspace', 'read_price_outlook', 'read_carbon_schemes',
+                                     'read_country_pricing'}
                             if name not in known:
                                 raise _Invalid()
                             call_id = getattr(call, 'id', None)
@@ -1877,6 +1883,10 @@ async def run_live_voice(
                             if name == 'prepare_rfq' and args:
                                 raise _Invalid()
                             if name in ('read_carbon', 'read_shipments') and args:
+                                raise _Invalid()
+                            if name in ('read_carbon_schemes', 'read_country_pricing') and args:
+                                raise _Invalid()
+                            if name == 'read_price_outlook' and not set(args) <= {'material_id'}:
                                 raise _Invalid()
                             if name in {'operate_workspace', 'preview_supplier_delay', 'estimate_carbon', 'read_routes'} and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or

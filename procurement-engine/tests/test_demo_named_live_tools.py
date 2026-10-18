@@ -43,7 +43,8 @@ def test_named_tools_declared_with_bounded_arguments():
             'review_sample_quotes','compare_suppliers','prepare_rfq','prepare_simulated_email',
             'navigate_workspace','operate_workspace','read_risks','read_news',
             'read_carbon','read_routes','estimate_carbon','read_shipments','preview_supplier_delay',
-            'prepare_research','confirm_research','confirm_workspace_action','read_research'}==names
+            'prepare_research','confirm_research','confirm_workspace_action','read_research',
+            'read_price_outlook','read_carbon_schemes','read_country_pricing'}==names
     assert not any(('confirm' in name or 'approve' in name) and name not in
                    {'confirm_research', 'confirm_workspace_action'}
                    for name in names)

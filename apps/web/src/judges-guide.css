@@ -1,0 +1,29 @@
+.judges-guide-root { --guide-ink:#142033; --guide-muted:#526174; --guide-paper:#fff; --guide-soft:#f4f7fc; --guide-line:#dce3ec; --guide-blue:#2159d6; font-family:Geist,Arial,sans-serif; }
+:root[data-zoorq-theme="dark"] .judges-guide-root { --guide-ink:#edf3fc; --guide-muted:#b9c8dc; --guide-paper:#172338; --guide-soft:#202f49; --guide-line:#41536d; --guide-blue:#92b7ff; }
+.judges-guide-trigger { position:fixed; right:max(18px,env(safe-area-inset-right)); bottom:max(18px,env(safe-area-inset-bottom)); z-index:100; min-height:44px; padding:10px 17px; border:1px solid #fff6; border-radius:999px; background:#2159d6; box-shadow:0 10px 26px #14203330; color:#fff; font:700 13px/1.2 Geist,Arial,sans-serif; cursor:pointer; }
+.judges-guide-trigger:hover { background:#1649b9; }
+.judges-guide-root :is(button):focus-visible { outline:3px solid #89afff; outline-offset:3px; }
+.judges-guide-dialog { box-sizing:border-box; width:min(760px,calc(100vw - 24px)); max-width:760px; max-height:90vh; max-height:90dvh; margin:auto; padding:0; border:1px solid var(--guide-line); border-radius:18px; background:var(--guide-paper); color:var(--guide-ink); box-shadow:0 28px 80px #07152d66; overflow-y:auto; overscroll-behavior:contain; font-family:Geist,Arial,sans-serif; }
+.judges-guide-dialog::backdrop { background:rgba(9,20,42,.68); backdrop-filter:blur(3px); }
+.judges-guide-fallback-backdrop { position:fixed; inset:0; z-index:200; background:rgba(9,20,42,.68); }
+.judges-guide-dialog[open] { z-index:201; }
+.judges-guide-content { padding:clamp(24px,5vw,44px); }
+.judges-guide-kicker { margin:0 0 10px; color:var(--guide-blue); font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+.judges-guide-content h1 { margin:0; max-width:18ch; color:var(--guide-ink); font-size:clamp(31px,5vw,48px); font-weight:700; letter-spacing:-.055em; line-height:1.05; }
+.judges-guide-content h1 span { font-size:.52em; font-weight:550; letter-spacing:-.025em; }
+.judges-guide-tagline { margin:12px 0 27px; color:var(--guide-blue); font-size:clamp(17px,2.4vw,21px); font-weight:650; }
+.judges-guide-content section { margin:0 0 24px; }
+.judges-guide-content h2 { margin:0 0 12px; color:var(--guide-ink); font-size:17px; font-weight:720; letter-spacing:-.025em; }
+.judges-guide-content p,.judges-guide-content li { color:var(--guide-ink); font-size:14px; line-height:1.58; }
+.judges-guide-steps { margin:0; padding-left:22px; }
+.judges-guide-steps li { padding-left:4px; margin:0 0 10px; }
+.judges-guide-steps li::marker { color:var(--guide-blue); font-weight:800; }
+.judges-guide-prompts { padding:19px 22px; border:1px solid var(--guide-line); border-left:4px solid var(--guide-blue); border-radius:10px; background:var(--guide-soft); }
+.judges-guide-prompts ul { margin:0; padding-left:19px; }
+.judges-guide-prompts li { margin:5px 0; overflow-wrap:anywhere; }
+.judges-guide-content section > p { margin:0; }
+.judges-guide-credits { margin:0 0 20px; padding-top:14px; border-top:1px solid var(--guide-line); color:var(--guide-muted) !important; font-size:12px !important; }
+.judges-guide-actions { display:flex; justify-content:flex-end; }
+.judges-guide-primary { min-height:46px; padding:11px 22px; border:0; border-radius:8px; background:#2159d6; color:#fff; font:700 14px/1.2 Geist,Arial,sans-serif; cursor:pointer; }
+.judges-guide-primary:hover { background:#1649b9; }
+@media (max-width:600px) { .judges-guide-dialog { width:calc(100vw - 16px); max-height:90dvh; border-radius:13px; } .judges-guide-content { padding:23px 20px; } .judges-guide-prompts { padding:15px 16px; } .judges-guide-trigger { right:12px; bottom:max(12px,env(safe-area-inset-bottom)); } }

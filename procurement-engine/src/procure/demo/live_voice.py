@@ -997,6 +997,36 @@ class _Renew(Exception):
     """A provider transport is being replaced inside one accepted browser socket."""
 
 
+_RENEWAL_SOURCES = frozenset({
+    'go_away', 'provider_receive_end', 'caption_handoff',
+    'from_browser', 'from_provider', 'watch_context', 'read_provider',
+    'bridge_task_end', 'handshake_connect', 'bridge_outer',
+})
+
+
+def _log_natural_renewal(source: str, event_count: int, exc: Exception | None = None) -> None:
+    """Log only fixed transport labels and scalar provider codes."""
+    if source not in _RENEWAL_SOURCES or type(event_count) is not int or not 1 <= event_count <= 4:
+        return
+    diagnostic = {'event': 'voice_natural_renewal', 'source': source,
+                  'event_count': event_count}
+    if exc is not None:
+        name = type(exc).__name__
+        diagnostic['exception_type'] = (name if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]{0,63}', name)
+                                        else 'OtherError')
+        try:
+            received = getattr(exc, 'rcvd', None)
+            close_code = getattr(received, 'code', None) if received is not None else None
+            code = getattr(exc, 'code', None) if close_code is None else None
+        except Exception:
+            close_code = code = None
+        if type(close_code) is int:
+            diagnostic['close_code'] = close_code
+        elif type(code) is int:
+            diagnostic['status_code' if name == 'APIError' else 'close_code'] = code
+    logging.getLogger('procure.demo').info(json.dumps(diagnostic, separators=(',', ':')))
+
+
 async def run_live_voice(
     websocket, *, session, store,
     operate_workspace: Callable[[str, int, str], Awaitable[dict]],
@@ -1162,6 +1192,7 @@ async def run_live_voice(
                         received_any = True
                         await provider_events.put(event)
                     if not received_any:
+                        _log_natural_renewal('provider_receive_end', renewal_budget.total)
                         raise _Renew()
 
             async def from_browser():
@@ -1675,6 +1706,7 @@ async def run_live_voice(
                             event = SimpleNamespace(server_content=SimpleNamespace(turn_complete=True))
                         browser_interrupt = event == ('browser_interrupt',)
                         if getattr(event, 'go_away', None) is not None:
+                            _log_natural_renewal('go_away', renewal_budget.total)
                             raise _Renew()
                         if consent_task is not None and consent_task.done() and consent_task.cancelled():
                             consent_task = None
@@ -2077,6 +2109,7 @@ async def run_live_voice(
                             recovery_speech_deadline = None
                             recovery_output_text = ''
                             recovery_output_audio.clear()
+                            _log_natural_renewal('caption_handoff', renewal_budget.total)
                             raise _Renew()
                         if (recovery_drain_deadline is not None and monotonic() >= recovery_drain_deadline):
                             recovery_drain_deadline = None
@@ -3120,8 +3153,10 @@ async def run_live_voice(
                     await asyncio.sleep(0.5)
                     _current(session, store, context_version)
 
-            tasks = {asyncio.create_task(from_browser()), asyncio.create_task(from_provider()),
-                     asyncio.create_task(watch_context()), asyncio.create_task(read_provider())}
+            task_sources = {asyncio.create_task(coro()): name for name, coro in (
+                ('from_browser', from_browser), ('from_provider', from_provider),
+                ('watch_context', watch_context), ('read_provider', read_provider))}
+            tasks = set(task_sources)
             try:
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
@@ -3129,8 +3164,12 @@ async def run_live_voice(
                         task.result()
                     except (_End, _Stale, _Invalid, WebSocketDisconnect):
                         raise
+                    except _Renew:
+                        raise
                     except Exception as exc:
+                        _log_natural_renewal(task_sources[task], renewal_budget.total, exc)
                         raise _Renew() from exc
+                _log_natural_renewal('bridge_task_end', renewal_budget.total)
                 raise _Renew()
             finally:
                 cancel_cues()
@@ -3158,10 +3197,13 @@ async def run_live_voice(
                                if client_factory is None else '')
             factory = (client_factory() if client_factory is not None else
                        _vertex_connection(company, history_context=history_context))
+            opened = False
             try:
                 async def open_and_bridge():
+                    nonlocal opened
                     async with asyncio.timeout(PROVIDER_SETUP_TIMEOUT_SECONDS) as setup_timeout:
                         async with factory as provider:
+                            opened = True
                             setup_timeout.reschedule(None)
                             guard.cancel()
                             await asyncio.gather(guard, return_exceptions=True)
@@ -3182,11 +3224,15 @@ async def run_live_voice(
                 raise
             except _Renew:
                 pass
-            except TimeoutError:
+            except TimeoutError as exc:
+                _log_natural_renewal('handshake_connect' if not opened else 'bridge_outer',
+                                     renewal_budget.total, exc)
                 raise
-            except Exception:
+            except Exception as exc:
                 # The rolling renewal budget bounds a hot failure loop without
                 # imposing a lifetime limit on a healthy conversation.
+                _log_natural_renewal('handshake_connect' if not opened else 'bridge_outer',
+                                     renewal_budget.total, exc)
                 pass
             first = not provider_ready
     except _End:

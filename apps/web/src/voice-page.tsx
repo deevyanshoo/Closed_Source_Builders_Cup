@@ -14,13 +14,20 @@ const date = (value: string) => value.replace('T', ' ').replace('Z', ' UTC').rep
 const text = (value: string) => value.replaceAll('_', ' ');
 const busy = new Set(['checking', 'closing', 'creating', 'created', 'starting', 'pending']);
 
+// The only text proposal source the gateway can be configured with is the offline rule-based one (#96). If a model
+// source is ever wired, this label must come from the response instead.
+const OFFLINE_LABEL = 'Offline rule-based proposal, not Gemini';
+const OFFLINE_HINT = "Offline rule-based proposals understand, for example: 'receipt r-C arrives 2 hours late; O-A in P2, O-B in P2, O-U in P1'. Every order needs a period.";
+
 export function VoiceProposalPanel({ view, onConfirm }: { view: VoiceView; onConfirm: () => void }) {
   if (view.kind !== 'proposed' || !view.proposal) {
-    return view.message === 'Text proposal unavailable. Use the typed comparison form.' ? <p role="alert">{view.message}</p> : null;
+    return view.message === 'Text proposal unavailable. Use the typed comparison form.' ? <div role="alert"><p>{view.message}</p>
+      <p className="field-hint">{OFFLINE_HINT}</p></div> : null;
   }
   const changes = view.proposal.call.arguments.arrival_replacements;
   const assignments = view.proposal.call.arguments.assignments;
   return <section className="notice" aria-label="Unverified text interpretation">
+    <p className="eyebrow">{OFFLINE_LABEL}</p>
     <h2>Unverified interpretation</h2>
     <p>This is a proposed reading of your text for a saved context. Review every input below. No comparison has run.</p>
     <h3>Changed receipt arrivals</h3>

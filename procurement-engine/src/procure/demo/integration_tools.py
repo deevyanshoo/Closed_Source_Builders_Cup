@@ -31,8 +31,10 @@ def navigation_request(message: str) -> str | None:
     return match.group(1).lower() if match else None
 
 
-def integration_request(snapshot: dict, message: str) -> str | None:
-    """Recognize narrow fact reads or an explicit reviewable shipment delay."""
+def market_read_request(company_id: str, message: str) -> bool:
+    """Recognize an owned, internal forecast read without authorizing effects."""
+    if not isinstance(company_id, str) or not isinstance(message, str):
+        return False
     text = message.casefold()
     # A user forbidding public search is still asking for an internal read.
     # Remove only the explicit prohibition before checking for positive search
@@ -40,13 +42,28 @@ def integration_request(snapshot: dict, message: str) -> str | None:
     intent_text = re.sub(
         r"\b(?:do\s+not|don't|never|without)\s+(?:search(?:ing)?|brows(?:e|ing))\s+"
         r"(?:the\s+)?(?:internet|web)\b", '', text)
+    # Remove only factual negation; a later affirmative order must still reject.
+    intent_text = re.sub(r"\bno\s+order\s+(?:was|has\s+been)\s+made\b", '', intent_text)
     # Internal market reference and existing operations facts answer these
     # reads. A question about timing does not authorize a purchase.
-    if (re.search(r'\b(?:forecast|prediction|market|buy\s+(?:now|versus\s+wait)|wait\s+or\s+buy|what\s+if\b.{0,40}\bprice)\b', text)
+    return bool(re.search(r'\b(?:forecast|prediction|market|buy\s+(?:now|versus\s+wait)|wait\s+or\s+buy|what\s+if\b.{0,40}\bprice)\b', text)
             and re.search(r'\b(?:our|my|current|this|workspace)\b', text)
-            and not re.search(r'\b(?:send|place|submit|approve|execute|purchase\s+now|search|browse|internet|news|headlines?|latest)\b', intent_text)
-            and not any(c['company_id'] != snapshot['company_id'] and c['name'].casefold() in text
-                        for c in list_companies())):
+            and not re.search(r'\b(?:send|place|submit|approve|execute|apply|change|set|save|draft|prepare|purchase|order|exchange|convert|cancel|amend|edit|create|record|book|open|public|article|mutate|delete|update|search|browse|internet|news|headlines?|latest)\b', intent_text)
+            and not re.search(r'(?:^|[.!?;]\s*|\b(?:please|then|and)\s+)buy\b', intent_text)
+            and not (re.search(r'\bbuy\b', text)
+                     and not re.search(r'\b(?:should|could|would|whether|when|what|if)\b|\bbuy\s+now\s+or\s+wait\b', text))
+            and not any(c['company_id'] != company_id
+                        and (c['name'].casefold() in text or c['company_id'].casefold() in text)
+                        for c in list_companies()))
+
+
+def integration_request(snapshot: dict, message: str) -> str | None:
+    """Recognize narrow fact reads or an explicit reviewable shipment delay."""
+    text = message.casefold()
+    intent_text = re.sub(
+        r"\b(?:do\s+not|don't|never|without)\s+(?:search(?:ing)?|brows(?:e|ing))\s+"
+        r"(?:the\s+)?(?:internet|web)\b", '', text)
+    if market_read_request(snapshot['company_id'], message):
         return 'read_market'
     if is_workspace_news_question(message) or _EXTERNAL_TOPIC.search(intent_text):
         return None

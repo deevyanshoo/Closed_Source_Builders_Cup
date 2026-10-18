@@ -35,6 +35,8 @@ from .live_continuity import RollingBudget, ReplayGuard, call_key
 from .experience_service import _explicit_recovery_request, resolve_voice_recovery
 from .judge_resolver import (_BRIDGE_COMMAND, _BRIDGE_REQUEST, _BRIDGE_AMBIGUOUS_REQUEST,
                              _DRAFT_NEGATION, _DRAFT_DEFERRED, _HYPOTHETICAL, is_coverage_read)
+from .integration_tools import market_read_request
+from .speech_grounding import english_exact, numeric_provenance, TIMEOUT_SECONDS as CAPTION_REVIEW_TIMEOUT
 
 
 MODEL = 'gemini-3.8-live'
@@ -56,6 +58,7 @@ RECOVERY_CAPTION_SETTLE_SECONDS = .25
 RECOVERY_INPUT_WAIT_SECONDS = 1.0
 RECOVERY_TRANSPORT_LATENESS_SECONDS = 30.0
 RECOVERY_SPEECH_WAIT_SECONDS = 60.0
+MAX_MARKET_CAPTION_REVIEWS = 2
 RECOVERY_DRAIN_WAIT_SECONDS = 3.0
 RECOVERY_REVIEW_AUDIO_BYTES = 60 * 48_000
 # ScriptProcessor callbacks and network delivery batch otherwise normal PCM.
@@ -862,6 +865,7 @@ async def run_live_voice(
     client_factory=None,
     workspace_tools: Callable[[str, dict, int, str], Awaitable[dict]] | None = None,
     verify_spoken_consent: Callable[[bytes], Awaitable[str | None]] | None = None,
+    verify_market_caption: Callable[[str, str, str], Awaitable[bool]] | None = None,
     research_tools: Callable[[dict, int, str, Callable[[str], Awaitable[None]]], Awaitable[dict]] | None = None,
 ) -> None:
     """Accept a pre-Origin/cookie-checked socket and bridge one logical conversation.
@@ -1117,6 +1121,10 @@ async def run_live_voice(
                 recovery_review_dispatched = False
                 recovery_review_aborted = False
                 recovery_drain_deadline = None
+                market_speech_pending = False
+                market_caption_task = None
+                market_caption_checks = 0
+                market_caption_complete = False
 
                 def clarification_diagnostic(reason):
                     diagnostic = {'reason': reason,
@@ -1489,6 +1497,24 @@ async def run_live_voice(
                     async for event in received():
                         _current(session, store, context_version)
                         clarification_response_event = False
+                        market_caption_verdict = None
+                        if isinstance(event, tuple) and event[0] == 'market_caption_done':
+                            _, owner, generation, texts, verdict = event
+                            if owner is not market_caption_task:
+                                continue
+                            # Retire our completed task even if its text snapshot
+                            # became stale. Otherwise no later completion can recheck.
+                            market_caption_task = None
+                            if (generation != recovery_generation or not market_speech_pending
+                                    or not recovery_speech_pending or not market_caption_complete):
+                                continue
+                            if texts == (recovery_spoken, recovery_required_speech, recovery_output_text):
+                                market_caption_verdict = verdict is True
+                            elif market_caption_checks >= MAX_MARKET_CAPTION_REVIEWS:
+                                market_caption_verdict = False
+                            # A stale approval is never used. A completed updated
+                            # caption can get one recheck under the original deadline.
+                            event = SimpleNamespace(server_content=SimpleNamespace(turn_complete=True))
                         browser_interrupt = event == ('browser_interrupt',)
                         if getattr(event, 'go_away', None) is not None:
                             raise _Renew()
@@ -1726,6 +1752,10 @@ async def run_live_voice(
                             recovery_settled = False
                             recovery_held_calls.clear()
                             recovery_speech_pending = False
+                            market_speech_pending = False
+                            if market_caption_task is not None:
+                                market_caption_task.cancel()
+                                market_caption_task = None
                             recovery_speech_deadline = None
                             recovery_output_text = ''
                             recovery_output_audio.clear()
@@ -1758,6 +1788,10 @@ async def run_live_voice(
                             semantic_waiting_start = False
                             semantic_wait_expired = False
                             recovery_speech_pending = False
+                            market_speech_pending = False
+                            if market_caption_task is not None:
+                                market_caption_task.cancel()
+                                market_caption_task = None
                             recovery_speech_deadline = None
                             recovery_required_speech = ''
                             recovery_output_text = ''
@@ -1864,6 +1898,10 @@ async def run_live_voice(
                                 await provider.send_tool_response(function_responses=types.FunctionResponse(
                                     name=held.name, id=held.id, response=denied))
                             recovery_speech_pending = False
+                            market_speech_pending = False
+                            if market_caption_task is not None:
+                                market_caption_task.cancel()
+                                market_caption_task = None
                             recovery_speech_deadline = None
                             recovery_output_text = ''
                             recovery_output_audio.clear()
@@ -1872,6 +1910,10 @@ async def run_live_voice(
                             recovery_drain_deadline = None
                             recovery_review_aborted = True
                             recovery_speech_pending = False
+                            market_speech_pending = False
+                            if market_caption_task is not None:
+                                market_caption_task.cancel()
+                                market_caption_task = None
                             recovery_speech_deadline = None
                             research_gate = None
                             await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
@@ -1881,6 +1923,10 @@ async def run_live_voice(
                                 clarification_output_blocked = True
                             recovery_speech_deadline = None
                             recovery_speech_pending = False
+                            market_speech_pending = False
+                            if market_caption_task is not None:
+                                market_caption_task.cancel()
+                                market_caption_task = None
                             recovery_review_aborted = True
                             recovery_drain_deadline = None
                             research_gate = None
@@ -2049,11 +2095,21 @@ async def run_live_voice(
                             args = getattr(call, 'args', None)
                             if not isinstance(args, dict) or len(json.dumps(args)) > 8000:
                                 raise _Invalid()
-                            if name == 'prepare_rfq' and args:
+                            market_candidate = (workspace_tools is not None and recovery_vad_started
+                                and recovery_vad_ended and not recovery_asr_incomplete
+                                and not recovery_late_generation_abandoned and not rfq_input_closed
+                                and 0 < len(recovery_spoken) <= 1200
+                                and market_read_request(session.company_id, recovery_spoken))
+                            market_route = (market_candidate and fresh_input_ready
+                                and recovery_settled and rfq_caption_settled)
+                            cached_market_call = call_id in semantic_responses and isinstance(
+                                (tool_results.get(call_id) or (None, None, None))[2], dict) and isinstance(
+                                (tool_results[call_id][2].get('workspace') or {}).get('prediction'), dict)
+                            if name == 'prepare_rfq' and args and not (market_candidate or cached_market_call):
                                 raise _Invalid()
-                            if name in ('read_carbon', 'read_shipments') and args:
+                            if name in ('read_carbon', 'read_shipments') and args and not (market_candidate or cached_market_call):
                                 raise _Invalid()
-                            if name in {'operate_workspace', 'preview_supplier_delay', 'estimate_carbon', 'read_routes'} and (set(args) != {'message'} or
+                            if not (market_candidate or cached_market_call) and name in {'operate_workspace', 'preview_supplier_delay', 'estimate_carbon', 'read_routes'} and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
                                 raise _Invalid()
@@ -2063,15 +2119,15 @@ async def run_live_voice(
                                  0 < len(args['message'].strip()) <= 1200 and
                                  isinstance(args.get('scope', 'current'), str) and
                                  args.get('scope', 'current') in {'current', 'all'}))
-                            if name == 'prepare_research' and (set(args) != {'message'} or
+                            if not (market_candidate or cached_market_call) and name == 'prepare_research' and (set(args) != {'message'} or
                                     not isinstance(args['message'], str) or
                                     not 0 < len(args['message'].strip()) <= 1200):
                                 raise _Invalid()
-                            if name in {'confirm_research', 'confirm_workspace_action'} and (set(args) != {'proposal_id'} or
+                            if not (market_candidate or cached_market_call) and name in {'confirm_research', 'confirm_workspace_action'} and (set(args) != {'proposal_id'} or
                                     not isinstance(args['proposal_id'], str) or
                                     not 0 < len(args['proposal_id']) <= 128):
                                 raise _Invalid()
-                            if name == 'read_research' and (set(args) not in (set(), {'research_id'}) or
+                            if not (market_candidate or cached_market_call) and name == 'read_research' and (set(args) not in (set(), {'research_id'}) or
                                     ('research_id' in args and
                                      (not isinstance(args['research_id'], str) or
                                       not 0 < len(args['research_id']) <= 128))):
@@ -2097,7 +2153,7 @@ async def run_live_voice(
                             routed_name = (rfq_route or name) if name == 'prepare_rfq' else (
                                 'operate_workspace' if recovery_route else name)
                             binding = json.dumps([name, args], sort_keys=True)
-                            semantic_call = name in {'read_workspace', 'operate_workspace', 'prepare_rfq'}
+                            semantic_call = name in {'read_workspace', 'operate_workspace', 'prepare_rfq'} or market_candidate or cached_market_call
                             prior = tool_results.get(call_id)
                             if semantic_call and prior is not None:
                                 if prior[0] != binding:
@@ -2119,6 +2175,8 @@ async def run_live_voice(
                                             # Replaying a result grants neither a new
                                             # speech review nor permission to claim effects.
                                             cached_output_blocked = True
+                                    if cached_market_call:
+                                        cached_output_blocked = True
                                     await send_frame({'type': 'tool_result', 'result': cached})
                                     await provider.send_tool_response(function_responses=types.FunctionResponse(
                                         name=name, id=call_id, response=semantic_responses[call_id]))
@@ -2191,11 +2249,11 @@ async def run_live_voice(
                                 if binding != pending_confirm[1]:
                                     raise _Invalid()
                                 continue
-                            if (research_tools is None and name == 'confirm_research' and research_gate is not None
+                            if (not market_route and research_tools is None and name == 'confirm_research' and research_gate is not None
                                     and research_gate['voice_clip'] is not None
                                     and not research_gate['finalized']):
                                 await finalize_voice_clip()
-                            if (research_tools is None and name == 'confirm_research' and call is not released_confirm
+                            if (not market_route and research_tools is None and name == 'confirm_research' and call is not released_confirm
                                     and research_gate is not None
                                     and research_gate['armed'] and not research_gate['finalized']
                                     and (bool(research_gate['input_spoken'])
@@ -2218,7 +2276,7 @@ async def run_live_voice(
                                     name=name, id=call_id, response=unavailable))
                                 continue
                             new_call_counted = False
-                            if name == 'confirm_research' and research_tools is not None:
+                            if not market_route and name == 'confirm_research' and research_tools is not None:
                                 repeated = call_id in tool_results
                                 if repeated:
                                     prior_binding, key, result = tool_results[call_id]
@@ -2262,7 +2320,7 @@ async def run_live_voice(
                                     waiting_research_calls.append((call, binding, key))
                                     continue
                                 # Existing no-consent response below remains authoritative.
-                            if (name == 'confirm_workspace_action' and research_gate is not None
+                            if (not market_route and name == 'confirm_workspace_action' and research_gate is not None
                                     and research_gate.get('gate_kind') == 'workspace_action'
                                     and research_gate['armed'] and consent_task is not None
                                     and args['proposal_id'] == research_gate['proposal_id']):
@@ -2285,7 +2343,7 @@ async def run_live_voice(
                                     tool_calls += 1
                                 key = call_key(socket_secret,
                                     f'rfq-{recovery_generation}' if name == 'prepare_rfq' and rfq_route else call_id)
-                            allowed_research = (name == 'confirm_research' and research_gate is not None
+                            allowed_research = (not market_route and name == 'confirm_research' and research_gate is not None
                                 and research_gate.get('gate_kind') != 'workspace_action'
                                 and not research_gate['consumed'] and research_gate['armed']
                                 and research_gate['finalized'] and research_gate['confirmed']
@@ -2295,7 +2353,7 @@ async def run_live_voice(
                             if name == 'confirm_research' and allowed_research and not repeated:
                                 # Consume before awaiting the durable, idempotent claim.
                                 research_gate['consumed'] = True
-                            allowed_action = (name == 'confirm_workspace_action' and research_gate is not None
+                            allowed_action = (not market_route and name == 'confirm_workspace_action' and research_gate is not None
                                 and research_gate.get('gate_kind') == 'workspace_action'
                                 and not research_gate['consumed'] and research_gate['armed']
                                 and research_gate['finalized'] and research_gate['confirmed']
@@ -2309,7 +2367,10 @@ async def run_live_voice(
                                 prior_recovery_proposal = deepcopy(session.pending_proposal)
                             had_consent_gate = research_gate is not None
                             try:
-                                if name == 'confirm_research' and repeated:
+                                if market_route:
+                                    result = await workspace_tools('_read_market_if_applicable',
+                                        {'message': recovery_spoken}, context_version, key)
+                                elif name == 'confirm_research' and repeated:
                                     cached = tool_results[call_id][2]
                                     result = {k: v for k, v in cached.items()
                                               if k not in {'session', 'action_result'}}
@@ -2427,7 +2488,9 @@ async def run_live_voice(
                             if not recovery_route:
                                 result = block_ungrounded_recovery(result, prior_recovery_proposal, key)
                             result = present_turn(result, supplier_names)
-                            if routed_name in {'prepare_research','operate_workspace'}:
+                            if market_route:
+                                research_gate = None
+                            elif routed_name in {'prepare_research','operate_workspace'}:
                                 if not (recovery_route and research_gate is not None and
                                         research_gate['proposal_id'] == (result.get('proposal') or {}).get('proposal_id')):
                                     research_gate = _research_gate(session, store, context_version, result)
@@ -2445,6 +2508,17 @@ async def run_live_voice(
                                 cached_output_blocked = False
                                 cache_tool(call_id, binding, key, result)
                             await send_frame({'type': 'tool_result', 'result': result})
+                            if market_route and result['status'] == 'completed':
+                                market_speech_pending = True
+                                market_caption_checks = 0
+                                market_caption_complete = False
+                                recovery_speech_pending = True
+                                recovery_review_dispatched = True
+                                recovery_speech_deadline = monotonic() + RECOVERY_SPEECH_WAIT_SECONDS
+                                recovery_required_speech = result['assistant_text']
+                                recovery_output_text = ''
+                                recovery_output_audio.clear()
+                                clarification_response_event = True
                             suppress_failed_speech = not recovery_route and not (
                                 name == 'confirm_workspace_action' and recovery_speech_pending) and (result['status'] == 'unavailable'
                                 or result['status'] == 'needs_clarification' and name != 'estimate_carbon'
@@ -2491,6 +2565,9 @@ async def run_live_voice(
                             # The browser needs its authoritative session. The model never
                             # receives session identifiers, CSRF tokens or document payloads.
                             model_result = {key: value for key, value in result.items() if key != 'session'}
+                            if market_route:
+                                model_result.update(required_spoken_response=result['assistant_text'],
+                                    instruction='Speak this owned internal forecast answer in full in the language of the current utterance. Do not claim an order, exchange, external search, or validated forecasting edge.')
                             if coverage_route:
                                 # Preserve the decision, inclusive horizon and
                                 # qualifications as well as the grounded numbers.
@@ -2670,6 +2747,8 @@ async def run_live_voice(
                                 if speaker == 'output' and (hold_recovery_output or hold_clarification_output or cached_output_blocked or not speech_input_seen):
                                     continue
                                 if speaker == 'output' and recovery_speech_pending:
+                                    if market_speech_pending:
+                                        market_caption_complete = False
                                     recovery_output_text = _append_transcription(recovery_output_text, value)[-3000:]
                                 else:
                                     await send_frame({'type': 'transcript', 'direction': speaker,
@@ -2708,6 +2787,8 @@ async def run_live_voice(
                             await send_frame({'type': 'audio', 'sample_rate_hertz': 24000,
                                                        'data': base64.b64encode(audio).decode('ascii')})
                         if getattr(content, 'turn_complete', False):
+                            if market_speech_pending:
+                                market_caption_complete = True
                             if not recovery_held_calls:
                                 rfq_input_closed = True
                             provider_output_active = False
@@ -2734,12 +2815,46 @@ async def run_live_voice(
                             if hold_clarification_output:
                                 continue
                             if recovery_speech_pending:
+                                if (market_speech_pending and market_caption_task is not None
+                                        and market_caption_verdict is None):
+                                    continue
+                                if (market_speech_pending and recovery_output_audio and recovery_output_text
+                                        and market_caption_verdict is None
+                                        and market_caption_checks < MAX_MARKET_CAPTION_REVIEWS
+                                        and not english_exact(recovery_spoken, recovery_required_speech, recovery_output_text)):
+                                    if market_caption_task is None:
+                                        market_caption_checks += 1
+                                        async def review_caption(texts, generation, deadline):
+                                            accepted = False
+                                            if verify_market_caption is not None and numeric_provenance(texts[1], texts[2]):
+                                                try:
+                                                    accepted = await asyncio.wait_for(verify_market_caption(*texts),
+                                                        timeout=max(0, min(CAPTION_REVIEW_TIMEOUT,
+                                                            deadline - monotonic())))
+                                                except Exception:
+                                                    accepted = False
+                                            await provider_events.put(('market_caption_done', asyncio.current_task(),
+                                                generation, texts, accepted is True))
+                                        market_caption_task = asyncio.create_task(review_caption(
+                                            (recovery_spoken, recovery_required_speech, recovery_output_text),
+                                            recovery_generation, recovery_speech_deadline))
+                                        background_tasks.add(market_caption_task)
+                                        market_caption_task.add_done_callback(background_tasks.discard)
+                                    continue
                                 compact = lambda text: re.sub(r'\W+', '', text.casefold())
                                 reviewed = (bool(recovery_output_audio and
                                     _local_clarification_spoken(recovery_required_speech, recovery_output_text))
                                     if clarification_speech_pending else
                                     _spoken_prompt(research_gate) if research_gate is not None else
-                                    bool(recovery_output_audio and compact(recovery_required_speech) in compact(recovery_output_text)))
+                                    bool(recovery_output_audio and
+                                         ((market_caption_verdict is True or english_exact(
+                                              recovery_spoken, recovery_required_speech, recovery_output_text))
+                                          if market_speech_pending else
+                                          compact(recovery_required_speech) in compact(recovery_output_text))))
+                                market_speech_pending = False
+                                if market_caption_task is not None:
+                                    market_caption_task.cancel()
+                                    market_caption_task = None
                                 recovery_speech_pending = False
                                 recovery_speech_deadline = None
                                 diagnostic = None

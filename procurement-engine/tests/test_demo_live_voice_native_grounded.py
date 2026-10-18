@@ -15,6 +15,8 @@ MISSING_DOCUMENT = ('Prepare an early delivery for the supply gap using our curr
                     'Save the draft without sending it.')
 CANONICAL = 'Should I prepare the unsent bridge RFQ now? No draft has been saved.'
 PARAPHRASE = 'Would you like me to prepare an unsent bridge RFQ now? No draft has been saved.'
+FORECAST = ('What do the prediction models say for our business? Explain what applies '
+            'to our company and what information is missing. Do not search the internet.')
 
 
 def protected(client):
@@ -42,6 +44,95 @@ def terra(client):
         'offer_ids': list(value.offers), 'expected_versions': plan['offer_versions']}
     value.selected_material_id = None
     return value
+
+
+@pytest.mark.parametrize('tool', ['read_workspace', 'read_risks',
+                                  'operate_workspace', 'fill_buyer_form',
+                                  'confirm_workspace_action', 'confirm_research'])
+def test_fresh_forecast_uses_full_owned_broker_read_for_any_known_tool(workspace, tool):
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = tool, (FORECAST,)
+    provider.model_message = 'Change the buyer form and search the public web.'
+    before = protected(client)
+    session = client.get('/api/demo/session').json()
+    typed = client.post('/api/demo/operator', headers={'Origin': 'https://demo.test',
+        'X-CSRF-Token': session['csrf_token']}, json={'message': FORECAST,
+        'expected_context_version': session['context_version'],
+        'idempotency_key': f'typed-forecast-{tool}'})
+    assert typed.status_code == 200, typed.text
+    expected = typed.json()
+    frames = ask(client)
+    result = tool_result(frames)
+    assert result['status'] == 'completed' and result['read_only'] is True
+    assert result['proposal'] is None and result.get('action_result') is None
+    assert result['workspace']['prediction'] == expected['workspace']['prediction']
+    assert result['assistant_text'] == expected['assistant_text']
+    assert provider.tool_response.name == tool
+    assert provider.tool_response.response['required_spoken_response'] == expected['assistant_text']
+    assert_audio(frames)
+    assert protected(client) == before and operator.calls == []
+    assert provider.executed_messages == []
+
+
+@pytest.mark.parametrize('case', ['unfinished', 'late_foreign', 'no_vad'])
+def test_forecast_requires_current_settled_asr_before_broker(workspace, monkeypatch, case):
+    from procure.demo import live_voice
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+    provider.model_message = FORECAST
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .03)
+    monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .07)
+    if case == 'no_vad':
+        provider.input_script = [event(text=FORECAST)]
+    else:
+        provider.input_script = [event(activity=('ACTIVITY_START', '0s')),
+            event(text=FORECAST, finished=case != 'unfinished'),
+            event(activity=('ACTIVITY_END', '0.000125s'))]
+        if case == 'late_foreign':
+            provider.input_script += [.01, event(text=' For TerraPack.')]
+    before = protected(client)
+    frames = ask(client)
+    assert not any('prediction' in (f.get('result') or {}).get('workspace', {})
+                   for f in frames if f['type'] == 'tool_result')
+    assert protected(client) == before and operator.calls == []
+    assert provider.executed_messages == []
+
+
+def test_forecast_false_action_caption_never_releases_audio(workspace):
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'operate_workspace', (FORECAST,)
+    provider.reply = 'contradictory'
+    before = protected(client)
+    frames = ask(client)
+    assert tool_result(frames)['workspace']['prediction']
+    assert frames[-1]['type'] == 'error'
+    assert frames[-1]['code'] == 'voice_review_incomplete'
+    assert not any(f['type'] == 'audio' or f.get('direction') == 'output' for f in frames)
+    assert protected(client) == before and operator.calls == []
+
+
+def test_market_call_replay_reuses_result_without_second_spoken_claim(workspace):
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'fill_buyer_form', (FORECAST,)
+    before = protected(client)
+    session = client.get('/api/demo/session').json()
+    with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+                                  headers={'origin': 'https://demo.test'}) as socket:
+        socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+                          'expected_context_version': session['context_version']})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        first = receive_turn(socket)
+        expected = tool_result(first)
+        assert_audio(first)
+        provider.events.put_nowait(event(call=NS(
+            name='fill_buyer_form', args={}, id='operate-1')))
+        replay = receive_turn(socket)
+        assert tool_result(replay) == expected
+        assert not any(frame['type'] == 'audio' or frame.get('direction') == 'output'
+                       for frame in replay)
+        socket.send_json({'type': 'stop'})
+    assert protected(client) == before and operator.calls == []
 
 
 @pytest.mark.parametrize('tool', ['read_workspace', 'operate_workspace'])
@@ -332,3 +423,196 @@ def test_required_speech_preserves_complete_coverage_decision(workspace, tool, c
     assert protected(client) == before and operator.calls == []
     assert provider.executed_messages == []
     assert_audio(frames)
+
+
+# Fake caption reviewer acceptance exercises the release gate only, not real Gemini/language acceptance.
+@pytest.mark.parametrize('language,caption', [
+    ('Hindi', 'वर्तमान दिनांकित आपूर्ति मार्ग में 2026-10-20 से स्टॉक की कमी रहती है; प्रतिबद्ध होने से पहले फिर से योजना बनाएं। Solara Cables तांबा: बाजार संदर्भ 2026-10-16 का है और उसका प्रभाव केवल संदर्भ है। स्वीकृत कोटेशन लागतें स्थिर रहती हैं। कोई ऑर्डर या मुद्रा विनिमय नहीं हुआ।'),
+    ('Portuguese', 'O caminho de fornecimento atual e datado deixa uma falta de estoque a partir de 2026-10-20; refaça o planejamento antes de se comprometer. Solara Cables cobre: a referência de mercado é de 2026-10-16 e sua influência é apenas contexto. Os custos das cotações aceitas permanecem fixos. Nenhum pedido ou câmbio foi realizado.'),
+])
+def test_market_translated_caption_releases_only_after_fake_review(workspace, monkeypatch, language, caption):
+    from procure.demo import live_voice
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST + f' Answer in {language}.',)
+    calls = []
+    async def verify(utterance, canonical, actual):
+        calls.append((utterance, canonical, actual))
+        return True
+    original_run = live_voice.run_live_voice
+    async def inject(*args, **kwargs):
+        kwargs['verify_market_caption'] = verify
+        return await original_run(*args, **kwargs)
+    monkeypatch.setattr(live_voice, 'run_live_voice', inject)
+    async def respond(*, function_responses):
+        provider.tool_response = function_responses
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+        await provider.events.put(NS(server_content=NS(turn_complete=True,
+            output_transcription=NS(text=caption))))
+    provider.send_tool_response = respond
+    before = protected(client)
+    frames = ask(client)
+    assert_audio(frames)
+    assert calls == [(provider.chunks[0], tool_result(frames)['assistant_text'], caption)]
+    assert protected(client) == before and operator.calls == []
+
+
+@pytest.mark.parametrize('case', ['contradictory', 'missing_qualification', 'additional_number',
+    'unavailable', 'wrong_language', 'english_for_hindi', 'timeout'])
+def test_market_caption_negative_reviews_never_release_audio(workspace, monkeypatch, case):
+    import asyncio
+    from procure.demo import live_voice
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST + (' Answer in Hindi.' if case == 'english_for_hindi' else ''),)
+    monkeypatch.setattr(live_voice, 'CAPTION_REVIEW_TIMEOUT', .01)
+    called = []
+    async def verify(*texts):
+        called.append(texts)
+        if case == 'timeout':
+            await asyncio.sleep(1)
+        if case == 'unavailable':
+            raise RuntimeError('unavailable')
+        return case == 'additional_number'  # Even an approving reviewer cannot waive extra digits.
+    original_run = live_voice.run_live_voice
+    async def inject(*args, **kwargs):
+        kwargs['verify_market_caption'] = verify
+        return await original_run(*args, **kwargs)
+    monkeypatch.setattr(live_voice, 'run_live_voice', inject)
+    async def respond(*, function_responses):
+        provider.tool_response = function_responses
+        canonical = function_responses.response['required_spoken_response']
+        text = {'contradictory': canonical + ' I placed the order.',
+            'missing_qualification': canonical.replace('and its influence is context only.', '').replace('Accepted quote costs stay fixed.', ''),
+            'additional_number': canonical + ' Savings are 500.',
+            'wrong_language': 'Nenhum pedido foi realizado. Referências 2026-10-20 e 2026-10-16.',
+            'english_for_hindi': canonical}.get(case, canonical + ' Unverified paraphrase.')
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+        await provider.events.put(NS(server_content=NS(turn_complete=True,
+            output_transcription=NS(text=text))))
+    provider.send_tool_response = respond
+    before = protected(client)
+    frames = ask(client)
+    assert frames[-1]['code'] == 'voice_review_incomplete'
+    assert not any(f['type'] == 'audio' or f.get('direction') == 'output' for f in frames)
+    assert bool(called) is (case != 'additional_number')
+    assert protected(client) == before and operator.calls == []
+
+
+@pytest.mark.parametrize('cancel', ['interrupted', 'timeout', 'new_vad', 'review_inflight'])
+def test_cancelled_market_review_does_not_taint_next_ordinary_read(workspace, monkeypatch, cancel):
+    from procure.demo import live_voice
+    client, provider, operator = workspace
+    monkeypatch.setattr(live_voice, 'RECOVERY_SPEECH_WAIT_SECONDS', .04)
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+    provider.reply = 'interrupted' if cancel == 'interrupted' else 'silent'
+    before = protected(client)
+    session = client.get('/api/demo/session').json()
+    original = provider.send_tool_response
+    import asyncio
+    from threading import Event
+    reviewing, cancelled = Event(), Event()
+    if cancel == 'review_inflight':
+        monkeypatch.setattr(live_voice, 'RECOVERY_SPEECH_WAIT_SECONDS', 2)
+        async def verify(*_):
+            reviewing.set()
+            try:
+                await asyncio.sleep(1)
+                return True
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+        original_run = live_voice.run_live_voice
+        async def inject(*args, **kwargs):
+            kwargs['verify_market_caption'] = verify
+            return await original_run(*args, **kwargs)
+        monkeypatch.setattr(live_voice, 'run_live_voice', inject)
+    async def respond(*, function_responses):
+        if provider.chunks == (FORECAST,):
+            if cancel == 'review_inflight':
+                text = 'Market answer: ' + function_responses.response['required_spoken_response']
+                await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+                    inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+                await provider.events.put(NS(server_content=NS(turn_complete=True,
+                    output_transcription=NS(text=text))))
+                return
+            return await original(function_responses=function_responses)
+        provider.tool_response = function_responses
+        # Ordinary coverage uses the existing grounded containment review.
+        text = 'Current workspace: ' + function_responses.response['required_spoken_response']
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+        await provider.events.put(NS(server_content=NS(turn_complete=True,
+            output_transcription=NS(text=text))))
+    provider.send_tool_response = respond
+    with client.websocket_connect('wss://demo.test/api/demo/voice/live',
+            headers={'origin': 'https://demo.test'}) as socket:
+        socket.send_json({'type': 'start', 'csrf_token': session['csrf_token'],
+            'expected_context_version': session['context_version']})
+        assert socket.receive_json()['type'] == 'ready'
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        first = receive_turn(socket, stop_at_result=cancel in {'new_vad', 'review_inflight'})
+        if cancel == 'review_inflight':
+            assert reviewing.wait(2)
+        if cancel == 'timeout':
+            assert first[-1]['code'] == 'voice_review_incomplete'
+        provider.tool_name, provider.chunks, provider.reply = 'read_workspace', (READ,), 'grounded'
+        provider.input_script = [event(activity=('ACTIVITY_START', '0.000125s')),
+            event(text=READ), event(activity=('ACTIVITY_END', '0.00025s'))]
+        socket.send_json({'type': 'audio', 'data': 'AQACAA=='})
+        assert_audio(receive_turn(socket))
+        if cancel == 'review_inflight':
+            assert cancelled.wait(2)
+        socket.send_json({'type': 'stop'})
+    assert protected(client) == before and operator.calls == []
+
+
+@pytest.mark.parametrize('change', ['faithful', 'additional_claim', 'additional_number', 'continuous'])
+def test_market_caption_changed_during_review_rechecks_bounded_current_caption(workspace, monkeypatch, change):
+    """A delayed stale approval cannot release PCM or strand its done task."""
+    import asyncio
+    from procure.demo import live_voice
+    client, provider, operator = workspace
+    monkeypatch.setattr(live_voice, 'RECOVERY_SPEECH_WAIT_SECONDS', .25)
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+    calls, initial = [], []
+    suffix = {'faithful': ' No business action was taken.',
+        'additional_claim': ' I sent the order.', 'additional_number': ' Savings are 999.',
+        'continuous': ' No business action was taken.'}[change]
+    async def verify(utterance, canonical, caption):
+        calls.append(caption)
+        if len(calls) == 1 or change == 'continuous':
+            # Feed the next completed caption while this exact task is held.
+            await provider.events.put(NS(server_content=NS(
+                output_transcription=NS(text=suffix if len(calls) == 1 else ' Accepted quote costs remain fixed.'),
+                turn_complete=True)))
+            await asyncio.sleep(.02)
+        return change != 'additional_claim' or len(calls) == 1
+    original_run = live_voice.run_live_voice
+    async def inject(*args, **kwargs):
+        kwargs['verify_market_caption'] = verify
+        return await original_run(*args, **kwargs)
+    monkeypatch.setattr(live_voice, 'run_live_voice', inject)
+    async def respond(*, function_responses):
+        provider.tool_response = function_responses
+        initial.append('Market answer: ' + function_responses.response['required_spoken_response'])
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+        await provider.events.put(NS(server_content=NS(
+            output_transcription=NS(text=initial[0]), turn_complete=True)))
+    provider.send_tool_response = respond
+    before = protected(client)
+    frames = ask(client)
+    if change == 'faithful':
+        assert_audio(frames)
+        assert calls == [initial[0], initial[0] + suffix]
+        assert [f['text'] for f in frames if f.get('direction') == 'output'] == [initial[0] + suffix]
+    else:
+        assert frames[-1]['code'] == 'voice_review_incomplete'
+        assert not any(f['type'] == 'audio' or f.get('direction') == 'output' for f in frames)
+        assert len(calls) == (1 if change == 'additional_number' else 2)
+        if change == 'continuous':
+            assert 'unavailable' not in frames[-1]['message']  # Exhaustion rejects before the original deadline.
+    assert protected(client) == before and operator.calls == []
+    assert provider.executed_messages == []
+    assert not any(f.get('state') == 'awaiting_consent' for f in frames)

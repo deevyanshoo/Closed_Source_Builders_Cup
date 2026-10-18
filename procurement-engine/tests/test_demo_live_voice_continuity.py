@@ -109,6 +109,90 @@ def test_go_away_opens_fresh_provider_with_current_company_history_only(monkeypa
     asyncio.run(scenario())
 
 
+def test_go_away_same_event_and_new_provider_unsolicited_output_fail_closed(monkeypatch):
+    class ManualProvider(Provider):
+        def __init__(self):
+            super().__init__()
+            self.responses = []
+
+        async def send_realtime_input(self, **kwargs):
+            if audio := kwargs.get('audio'):
+                self.received_audio.append(audio)
+
+        async def send_tool_response(self, *, function_responses):
+            self.responses.append(function_responses)
+            if function_responses.id == 'fresh-read':
+                await self.events.put(NS(server_content=NS(
+                    output_transcription=NS(text='Fresh inventory answer.'),
+                    model_turn=NS(parts=[NS(inline_data=NS(
+                        data=b'\x01\x00', mime_type='audio/pcm;rate=24000'))]),
+                    turn_complete=True)))
+
+    async def scenario():
+        store, session = setup()
+        first, second = ManualProvider(), ManualProvider()
+        opens, effects = [], []
+        first.events.put_nowait(NS(go_away=NS(time_left='1s'),
+            server_content=NS(output_transcription=NS(text='OLD_ANSWER')),
+            tool_call=NS(function_calls=[NS(name='fill_buyer_form', args={}, id='old-action')])))
+        second.events.put_nowait(NS(server_content=NS(
+            output_transcription=NS(text='UNSOLICITED_ANSWER'),
+            model_turn=NS(parts=[NS(inline_data=NS(
+                data=b'\x02\x00', mime_type='audio/pcm;rate=24000'))]),
+            turn_complete=True),
+            tool_call=NS(function_calls=[NS(name='fill_buyer_form', args={}, id='unsolicited-action')])))
+
+        @asynccontextmanager
+        async def factory(company, *, handle=None, history_context=None):
+            opens.append(handle)
+            yield first if len(opens) == 1 else second
+
+        async def workspace(name, args, version, key):
+            effects.append(name)
+            return {'turn_id': 'fresh', 'company_id': session.company_id,
+                    'context_version': version, 'status': 'completed',
+                    'assistant_text': 'Fresh inventory answer.', 'agent_steps': [],
+                    'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+        monkeypatch.setattr(live_voice, '_vertex_connection', factory)
+        socket = Socket(start(session))
+        task = asyncio.create_task(live_voice.run_live_voice(
+            socket, session=session, store=store, operate_workspace=lambda *_: None,
+            workspace_tools=workspace))
+        await next_type(socket, 'ready')
+        assert (await next_type(socket, 'connection_status'))['state'] == 'reconnecting'
+        assert (await next_type(socket, 'connection_status'))['state'] == 'ready'
+        await asyncio.sleep(.02)
+        assert effects == []
+        assert not any(f['type'] == 'audio' or f.get('direction') == 'output' or
+                       f['type'] == 'tool_result' for f in socket.history)
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        for _ in range(100):
+            if second.received_audio:
+                break
+            await asyncio.sleep(.01)
+        await second.events.put(NS(voice_activity=NS(
+            voice_activity_type='ACTIVITY_START', audio_offset='0s')))
+        await second.events.put(NS(server_content=NS(input_transcription=NS(
+            text='Read current inventory', finished=True))))
+        await second.events.put(NS(voice_activity=NS(
+            voice_activity_type='ACTIVITY_END', audio_offset='0.000125s')))
+        await second.events.put(NS(tool_call=NS(function_calls=[NS(
+            name='read_workspace', args={}, id='fresh-read')]), server_content=None))
+        assert (await next_type(socket, 'tool_result'))['result']['assistant_text'] == 'Fresh inventory answer.'
+        await next_type(socket, 'audio')
+        await next_type(socket, 'turn_complete')
+        assert effects == ['read_workspace']
+        assert opens == [None, None]
+        assert 'OLD_ANSWER' not in json.dumps(socket.history)
+        assert 'UNSOLICITED_ANSWER' not in json.dumps(socket.history)
+        assert not any(f.get('state') == 'awaiting_consent' for f in socket.history)
+        await socket.frames.put('{"type":"stop"}')
+        await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
 def test_rolling_tool_budget_recovers_after_window():
     tick = [0.0]
     budget = live_voice.RollingBudget(12, 180, lambda: tick[0])

@@ -86,7 +86,7 @@ class BodyLimit:
 
 def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                news_service=None, operator_provider=None, voice_service=None, live_client_factory=None,
-               research_provider=None, session_backend=None, voice_consent_verifier=None, judge_provider=None) -> FastAPI:
+               research_provider=None, session_backend=None, voice_consent_verifier=None, judge_provider=None, voice_caption_verifier=None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     store = SessionStore(clock=clock, persistence_backend=session_backend)
     app.state.sessions = store
@@ -2270,6 +2270,35 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                     raise
 
         async def saved_workspace_tools(name, args, context_version, key):
+            if name == '_read_market_if_applicable':
+                from .integration_tools import integration_request, market_read_request
+                from .judge_resolver import resolve_judge_turn
+                from .experience_service import judge_outcome
+                if not isinstance(args, dict) or set(args) != {'message'}:
+                    raise SessionError('invalid_request', 'Provide the settled market question.', 422)
+                message = args['message']
+                if not isinstance(message, str) or not 0 < len(message.strip()) <= 1200:
+                    raise SessionError('invalid_message', 'State the market question.', 422)
+                with value.lock:
+                    context(value, {'expected_context_version': context_version}, explicit=True)
+                    plan = active_plan(value)
+                    if plan is not None:
+                        validate_plan_current(value, plan)
+                    snapshot = operator_snapshot(value, include_risks=False)
+                    if (not market_read_request(value.company_id, message)
+                            or integration_request(snapshot, message) != 'read_market'):
+                        raise SessionError('invalid_read', 'Ask about this company’s internal market reference.', 422)
+                    resolved = resolve_judge_turn(snapshot, message, now=store.now())
+                    if (resolved is None or resolved['kind'] != 'internal_read'
+                            or not (resolved.get('workspace') or {}).get('prediction')):
+                        raise SessionError('invalid_read', 'Choose an owned company and material for this read.', 422)
+                    outcome = judge_outcome(resolved)
+                    return {'turn_id': secrets.token_urlsafe(18), 'company_id': value.company_id,
+                        'context_version': context_version, 'status': outcome['status'],
+                        'assistant_text': outcome['assistant_text'],
+                        'evidence_ids': outcome['evidence_ids'],
+                        'agent_steps': outcome['agent_steps'], 'proposal': None,
+                        'read_only': True, 'workspace': deepcopy(resolved['workspace'])}
             if name == '_read_current_plan_coverage':
                 # Broker-only: no model declaration, operator fallback, proposal,
                 # persistence or action. Use the same owned snapshot/resolver as chat.
@@ -2303,11 +2332,14 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                          on_research_progress=on_progress)
 
         from .voice_consent import verify_spoken_consent
+        from .speech_grounding import verify_market_caption
         await run_live_voice(websocket, session=value, store=store,
                              operate_workspace=operate, workspace_tools=saved_workspace_tools,
                              research_tools=research_tools,
                              client_factory=live_client_factory,
-                             verify_spoken_consent=voice_consent_verifier or verify_spoken_consent)
+                             verify_spoken_consent=voice_consent_verifier or verify_spoken_consent,
+                             verify_market_caption=(voice_caption_verifier if voice_caption_verifier is not None
+                                                    else verify_market_caption if live_client_factory is None else None))
 
     async def confirm_research(value, data, *, on_progress=None):
         started_at = monotonic()

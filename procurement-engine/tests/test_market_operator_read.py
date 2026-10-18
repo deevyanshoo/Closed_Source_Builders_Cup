@@ -1,6 +1,7 @@
 from procure.demo.company import get_company
-from procure.demo.integration_tools import integration_request, integration_read
+from procure.demo.integration_tools import integration_request, integration_read, market_read_request
 from procure.demo.market_prediction import market_read_model, influence_for_material
+import pytest
 from fastapi.testclient import TestClient
 from procure.demo.app import create_app
 from test_demo_live_voice_clarification import workspace, ask, tool_result
@@ -32,6 +33,19 @@ def test_explicit_no_search_market_question_stays_internal_but_positive_search_d
                 'company': company, 'selected_material_id': 'copper', 'plan': None}
     assert integration_request(snapshot, NO_PUBLIC_SEARCH) == 'read_market'
     assert integration_request(snapshot, NO_PUBLIC_SEARCH.replace('Do not search', 'Search')) is None
+
+
+def test_market_broker_predicate_matches_typed_read_and_rejects_non_read_intents():
+    company_id = 'solara-cables'
+    assert market_read_request(company_id, NO_PUBLIC_SEARCH) is True
+    for message in (
+        NO_PUBLIC_SEARCH.replace('Do not search', 'Search'),
+        'What do the prediction models say for Harvest Foods?',
+        'What do the prediction models say for harvest-foods and our company?',
+        'Purchase our copper now based on the market forecast.',
+        'What is our current inventory cover?',
+    ):
+        assert market_read_request(company_id, message) is False
 
 
 def test_typed_operator_reads_market_without_public_search_or_model_call():
@@ -80,15 +94,17 @@ def test_typed_no_search_market_query_and_positive_public_request_keep_distinct_
     assert public.json()['proposal']['kind'] == 'research'
 
 
-def test_native_read_workspace_projects_same_market_context_as_typed_market_read(workspace):
+@pytest.mark.parametrize('tool_name', [
+    'read_workspace', 'read_risks', 'operate_workspace', 'prepare_rfq'])
+def test_native_any_model_tool_projects_same_full_market_preview_as_typed_read(workspace, tool_name):
     client, provider, operator = workspace
-    provider.tool_name = 'read_workspace'
+    provider.tool_name = tool_name
     provider.chunks = (NO_PUBLIC_SEARCH,)
+    before = client.get('/api/demo/session').json()
     spoken = tool_result(ask(client))
     assert spoken['status'] == 'completed' and spoken['read_only']
-    context = spoken['workspace']['prediction_context']
-    assert context['material_id'] == 'copper'
-    assert context['status'] == 'CONTEXT_ONLY'
+    assert spoken['proposal'] is None and spoken.get('action_result') is None
+    assert spoken['agent_steps'][0]['tool'] == 'judge_read'
     session = client.get('/api/demo/session').json()
     typed = client.post('/api/demo/operator', headers={'Origin': 'https://demo.test',
         'X-CSRF-Token': session['csrf_token']}, json={'message': NO_PUBLIC_SEARCH,
@@ -96,8 +112,12 @@ def test_native_read_workspace_projects_same_market_context_as_typed_market_read
         'idempotency_key': 'typed-voice-market-parity'})
     assert typed.status_code == 200, typed.text
     prediction = typed.json()['workspace']['prediction']
-    assert context['market_run_hash'] == prediction['market_run_hash']
-    assert context == prediction['market_influence']
+    assert spoken['assistant_text'] == typed.json()['assistant_text']
+    assert spoken['workspace']['prediction'] == prediction
+    assert spoken['evidence_ids'] == [f"market:{prediction['market_run_hash']}"]
+    after = client.get('/api/demo/session').json()
+    assert after['context_version'] == before['context_version']
+    assert after['simulated_outbox'] == before['simulated_outbox']
     assert operator.calls == []
 
 
@@ -118,3 +138,13 @@ def test_native_and_typed_market_question_share_internal_read(workspace):
     assert typed.json()['assistant_text'] == spoken['assistant_text']
     assert typed.json()['workspace']['prediction'] == spoken['workspace']['prediction']
     assert operator.calls == []
+
+
+@pytest.mark.parametrize('suffix', ['Please order 100 kg of copper.', 'Open a public article about copper.',
+    'Please buy 100 kg of copper.', 'Exchange our currency now.'])
+def test_market_read_rejects_mixed_positive_action_and_public_read(suffix):
+    assert not market_read_request('solara-cables', 'What do our prediction models say? ' + suffix)
+
+
+def test_market_read_preserves_factual_order_negation():
+    assert market_read_request('solara-cables', 'What do our prediction models say? No order was made.')

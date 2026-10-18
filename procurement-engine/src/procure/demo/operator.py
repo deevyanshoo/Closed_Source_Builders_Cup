@@ -769,6 +769,10 @@ def run_turn(snapshot: dict, message: str, provider, *, model: str, provider_cal
                                  'summary': 'Prepared a public research query for human consent.'}],
                 'evidence_ids': [], 'candidate': candidate, 'proposal_kind': 'research',
                 'parameters': deepcopy(research), 'utility': None}
+    from .taher_tools import taher_operator_outcome
+    taher = taher_operator_outcome(snapshot, message)
+    if taher is not None:
+        return taher
     from .integration_tools import integration_outcome
     integrated = integration_outcome(snapshot, message)
     if integrated is not None:

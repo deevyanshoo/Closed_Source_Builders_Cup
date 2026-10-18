@@ -8,6 +8,9 @@ from fastapi import Request
 
 from procure.carbon import CarbonInputError, compare_plan, load_registry
 from procure.carbon.assessment import build_assessment, current_assessment
+from procure.carbon.schemes import SchemeInputError, find_schemes, load_schemes
+
+from .company import get_company
 
 from .sessions import SessionError
 
@@ -51,6 +54,14 @@ def carbon_export(value, active_plan, validate_plan_current=None) -> dict | None
     return None if record is None else deepcopy(record['result'])
 
 
+def schemes_export(value) -> dict | None:
+    """The stored scheme list only for the same company and context version (never after A to B to A)."""
+    stored = getattr(value, 'carbon_schemes', None)
+    if not stored or (stored.get('company_id'), stored.get('context_version')) != (value.company_id, value.context_version):
+        return None
+    return deepcopy(stored['result'])
+
+
 def register_carbon_routes(app, *, session, mutate, body, shape, context, active_plan,
                            validate_plan_current=None, now=None):
     loaded = {}
@@ -64,6 +75,14 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
             except (OSError, ValueError, KeyError):
                 raise SessionError('carbon_unavailable', 'Carbon factors are unavailable in this deployment.', 503) from None
         return loaded['value']
+
+    def schemes():
+        if 'schemes' not in loaded:
+            try:
+                loaded['schemes'] = load_schemes()
+            except (OSError, ValueError, KeyError):
+                raise SessionError('carbon_unavailable', 'Carbon schemes are unavailable in this deployment.', 503) from None
+        return loaded['schemes']
 
     @app.get('/api/demo/carbon/factors')
     async def carbon_factors(request: Request):
@@ -93,4 +112,20 @@ def register_carbon_routes(app, *, session, mutate, body, shape, context, active
                                       mass_by_offer=data.get('mass_by_offer'), registry=registry(),
                                       now=clock())
             value.pending_carbon = None
+            return result
+
+    @app.post('/api/demo/carbon/schemes')
+    async def carbon_schemes(request: Request):
+        value = mutate(request)
+        data = await body(request)
+        shape(data, ('inputs_by_scheme',), ('expected_context_version',))
+        with value.lock:
+            context(value, data)
+            try:
+                result = find_schemes(schemes(), get_company(value.company_id), data['inputs_by_scheme'])
+            except SchemeInputError as error:
+                raise SessionError('invalid_scheme_input', str(error), 422) from None
+            result['context_version'] = value.context_version
+            value.carbon_schemes = {'company_id': value.company_id, 'context_version': value.context_version,
+                                    'result': deepcopy(result)}
             return result

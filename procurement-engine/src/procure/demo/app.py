@@ -27,8 +27,11 @@ from starlette.staticfiles import StaticFiles
 from .sessions import SessionError, SessionStore
 from .errors import DemoError
 from .company import DEFAULT_COMPANY_ID, get_company, list_companies
-from .carbon_api import carbon_export, current_carbon_assessment, register_carbon_routes
+from .carbon_api import carbon_export, current_carbon_assessment, register_carbon_routes, schemes_export
 from .dispatch_view import build_dispatch_view, resolve_recovery_shipment
+from .price_outlook import price_outlook_router
+from .taher_tools import TAHER_TOOLS, taher_tool_read, taher_tool_request
+from .country_pricing import register_country_pricing_routes
 from .news_brief import build_news_brief, is_workspace_news_question
 from .diagnostics import DependencyReadiness, news_freshness, request_outcome
 
@@ -294,6 +297,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                 'simulated_outbox': deepcopy(value.simulated_outbox)}
         snapshot['carbon_assessment'] = current_carbon_assessment(
             value, active_plan, validate_plan_current)
+        snapshot['carbon_schemes'] = schemes_export(value)
         snapshot['shipments'] = dispatch_view(value)
         from .experience_service import completed_research
         snapshot['completed_research'] = completed_research(value)
@@ -1443,6 +1447,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
             # session and concurrency limits, without reserving AI capacity.
             from .integration_tools import integration_request, navigation_request
             prepared = (prepared or current_risk or integration_request(snapshot, message) is not None
+                        or taher_tool_request(message) is not None
                         or navigation_request(message) is not None
                         or _broad_inventory_scope(snapshot, message) is not None)
             adapter = operator_adapter()
@@ -1854,7 +1859,7 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                        'load_sample_quotes', 'review_sample_quotes', 'compare_suppliers',
                        'prepare_rfq', 'prepare_simulated_email', 'navigate_workspace',
                        'read_carbon', 'read_routes', 'read_shipments', 'preview_supplier_delay',
-                       'estimate_carbon',
+                       'estimate_carbon', *TAHER_TOOLS,
                        'prepare_shipment_recovery'}
             if name not in mapping or not isinstance(args, dict):
                 raise SessionError('invalid_utility', 'Unsupported voice workspace tool.', 422)
@@ -1936,6 +1941,11 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                         payload = integration_read(operator_snapshot(value), name,
                                                    args['message'] if name == 'read_routes' else '')
                         result.update(payload)
+                    elif name in TAHER_TOOLS:
+                        try:
+                            result.update(taher_tool_read(value, name, args, now=store.now()))
+                        except ValueError as error:
+                            raise SessionError('invalid_utility', str(error), 422) from None
                     elif name == 'prepare_shipment_recovery':
                         shape(args, ('shipment_id', 'delay_days'))
                         days = args['delay_days']
@@ -2888,7 +2898,8 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
                                  'simulated_outbox': deepcopy(value.simulated_outbox),
                                  'drafts': deepcopy(value.drafts),
                                  'recovery': deepcopy(value.recovery), 'rfq': deepcopy(value.rfq),
-                                 'carbon': carbon_export(value, active_plan, validate_plan_current)},
+                                 'carbon': carbon_export(value, active_plan, validate_plan_current),
+                                 'carbon_schemes': schemes_export(value)},
                                 headers={'Content-Disposition': 'attachment; filename="synthetic-demo-report.json"'})
 
     @app.post('/api/demo/reset')
@@ -2908,6 +2919,10 @@ def create_app(*, web_dir: Path | None = None, secure_cookies=True, clock=None,
     @app.get('/dispatch')
     async def legacy_dispatch():
         return RedirectResponse('/demo?view=inventory&supply=shipments', status_code=307)
+
+    app.include_router(price_outlook_router(session=session, now=store.now))
+
+    register_country_pricing_routes(app, session=session, now=store.now)
 
     if web_dir is not None:
         web_dir = Path(web_dir).resolve()

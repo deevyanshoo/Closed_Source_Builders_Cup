@@ -5,7 +5,8 @@ from types import SimpleNamespace as NS
 import pytest
 
 from test_demo_live_voice_clarification import (
-    workspace, ask, protected as public_protected, tool_result, assert_audio, receive_turn, PCM, CLARIFICATION,
+    workspace, ask, protected as public_protected, tool_result, assert_audio, receive_turn,
+    ClarificationProvider, PCM, CLARIFICATION,
 )
 from test_demo_live_voice_supply_coverage import event
 from test_demo_supply_coverage import prepared
@@ -98,6 +99,197 @@ def test_forecast_requires_current_settled_asr_before_broker(workspace, monkeypa
     assert provider.executed_messages == []
 
 
+def test_unfinished_fresh_forecast_denies_with_terminal_without_broker_or_pcm(monkeypatch):
+    import asyncio
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, connection, next_type
+    monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .03)
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .01)
+    store, session = setup()
+    provider = ClarificationProvider((FORECAST,))
+    provider.tool_name = 'read_risks'
+    provider.input_script = [event(activity=('ACTIVITY_START', '0s')),
+        event(text=FORECAST, finished=False), event(activity=('ACTIVITY_END', '0.000125s'))]
+
+    async def scenario():
+        socket = Socket(start(session))
+        broker_calls = []
+
+        async def workspace_tool(name, args, version, key):
+            broker_calls.append(name)
+            raise AssertionError('Unfinished ASR cannot reach the broker')
+
+        async def operate(*args):
+            raise AssertionError('Unfinished ASR cannot execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            denied = await next_type(socket, 'tool_result')
+            assert denied['result']['status'] in {'needs_clarification', 'unavailable'}
+            assert not denied['result'].get('workspace', {}).get('prediction')
+            await next_type(socket, 'turn_complete')
+            assert broker_calls == []
+            assert not any(frame['type'] == 'audio' or frame.get('direction') == 'output'
+                for frame in socket.history)
+        finally:
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
+def test_forecast_empty_tool_completion_waits_for_owned_caption_and_pcm(workspace):
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+    before = protected(client)
+
+    async def respond(*, function_responses):
+        provider.tool_response = function_responses
+        await provider.events.put(event(complete=True))
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]),
+            turn_complete=False)))
+        await provider.events.put(NS(server_content=NS(
+            output_transcription=NS(text=function_responses.response['required_spoken_response']),
+            turn_complete=True)))
+
+    provider.send_tool_response = respond
+    frames = ask(client)
+    assert tool_result(frames)['workspace']['prediction']
+    assert_audio(frames)
+    assert sum(frame['type'] == 'turn_complete' for frame in frames) == 1
+    assert protected(client) == before and operator.calls == []
+
+
+def test_forecast_repeated_empty_completions_expire_at_original_deadline(monkeypatch):
+    import asyncio
+    from time import monotonic
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, connection, next_type
+    monkeypatch.setattr(live_voice, 'RECOVERY_SPEECH_WAIT_SECONDS', .05)
+    monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .001)
+    store, session = setup()
+
+    class EmptyCompletionProvider(ClarificationProvider):
+        def __init__(self):
+            super().__init__((FORECAST,))
+            self.tool_name = 'read_risks'
+            self.empty_count = 0
+            self.emitter = None
+
+        async def send_tool_response(self, *, function_responses):
+            self.tool_response = function_responses
+
+            async def emit_empties():
+                for _ in range(5):
+                    self.empty_count += 1
+                    await self.events.put(event(complete=True))
+                    await asyncio.sleep(.03)
+
+            self.emitter = asyncio.create_task(emit_empties())
+
+    async def scenario():
+        socket, provider = Socket(start(session)), EmptyCompletionProvider()
+        broker_calls = []
+
+        async def workspace_tool(name, args, version, key):
+            broker_calls.append(name)
+            return {'turn_id': 'owned-forecast', 'company_id': session.company_id,
+                'context_version': version, 'status': 'completed',
+                'assistant_text': 'Owned forecast answer.', 'agent_steps': [],
+                'evidence_ids': [], 'proposal': None, 'read_only': True,
+                'workspace': {'prediction': {'status': 'MISSING_OPERATIONS_INPUT'}}}
+
+        async def operate(*args):
+            raise AssertionError('Forecast read cannot execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
+            started = monotonic()
+            error = await next_type(socket, 'error')
+            assert error['code'] == 'voice_review_incomplete'
+            assert error['review']['reason'] == 'deadline'
+            assert monotonic() - started < .14
+            assert provider.empty_count < 5
+            assert broker_calls == ['_read_market_if_applicable']
+            assert not any(frame['type'] == 'audio' or frame.get('direction') == 'output'
+                for frame in socket.history)
+        finally:
+            if provider.emitter is not None:
+                provider.emitter.cancel()
+                await asyncio.gather(provider.emitter, return_exceptions=True)
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('tool', ['operate_workspace', 'read_workspace', 'analyze_inventory',
+    'preview_supplier_delay', 'prepare_research', 'confirm_research',
+    'confirm_workspace_action', 'read_research', 'read_risks', 'read_news',
+    'read_carbon', 'read_routes', 'estimate_carbon', 'read_shipments',
+    'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
+    'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
+    'navigate_workspace'])
+def test_fresh_forecast_overrides_malformed_args_for_every_known_tool(tool):
+    import asyncio
+    from procure.demo import live_voice
+    from test_demo_live_voice import Provider, Socket, setup, start, connection, next_type
+    store, session = setup()
+
+    class WrongArgsProvider(Provider):
+        async def send_realtime_input(self, **kwargs):
+            if not kwargs.get('audio'):
+                return
+            await self.events.put(event(activity=('ACTIVITY_START', '0s')))
+            await self.events.put(event(text=FORECAST))
+            await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
+            await self.events.put(event(call=NS(name=tool, args={'wrong': 'x'}, id='wrong-args')))
+
+        async def send_tool_response(self, *, function_responses):
+            self.tool_response = function_responses
+
+    async def scenario():
+        provider, socket = WrongArgsProvider(), Socket(start(session))
+        calls = []
+
+        async def workspace_tool(name, args, version, key):
+            calls.append((name, args))
+            return {'turn_id': 'bounded-denial', 'company_id': session.company_id,
+                'context_version': version, 'status': 'needs_clarification',
+                'assistant_text': 'Current forecast data is incomplete.',
+                'agent_steps': [], 'evidence_ids': [], 'proposal': None, 'read_only': True}
+
+        async def operate(*args):
+            raise AssertionError('Malformed provider arguments cannot execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            denied = await next_type(socket, 'tool_result')
+            assert denied['result']['status'] == 'needs_clarification'
+            await next_type(socket, 'turn_complete')
+            assert calls == [('_read_market_if_applicable', {'message': FORECAST})]
+            assert not any(frame['type'] == 'audio' for frame in socket.history)
+        finally:
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
 def test_forecast_false_action_caption_never_releases_audio(workspace):
     client, provider, operator = workspace
     provider.tool_name, provider.chunks = 'operate_workspace', (FORECAST,)
@@ -107,6 +299,8 @@ def test_forecast_false_action_caption_never_releases_audio(workspace):
     assert tool_result(frames)['workspace']['prediction']
     assert frames[-1]['type'] == 'error'
     assert frames[-1]['code'] == 'voice_review_incomplete'
+    assert frames[-1]['review']['reason'] == 'semantic_mismatch'
+    assert set(frames[-1]['review']) == {'reason', 'audio_chunks', 'audio_bytes', 'caption_chars'}
     assert not any(f['type'] == 'audio' or f.get('direction') == 'output' for f in frames)
     assert protected(client) == before and operator.calls == []
 

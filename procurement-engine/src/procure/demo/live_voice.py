@@ -1273,6 +1273,15 @@ async def run_live_voice(
                         'event': 'voice_local_clarification_review', **diagnostic}, separators=(',', ':')))
                     return diagnostic
 
+                def market_diagnostic(reason):
+                    diagnostic = {'reason': reason,
+                        'audio_chunks': min(len(recovery_output_audio), MAX_FRAMES),
+                        'audio_bytes': min(sum(map(len, recovery_output_audio)), RECOVERY_REVIEW_AUDIO_BYTES),
+                        'caption_chars': min(len(recovery_output_text), 3000)}
+                    logging.getLogger('procure.demo').info(json.dumps({
+                        'event': 'voice_market_review', **diagnostic}, separators=(',', ':')))
+                    return diagnostic
+
                 async def request_recovery_review():
                     nonlocal recovery_review_dispatched, recovery_drain_deadline
                     if (recovery_review_dispatched or recovery_review_aborted or
@@ -2070,6 +2079,9 @@ async def run_live_voice(
                         if (recovery_speech_deadline is not None and monotonic() >= recovery_speech_deadline):
                             if clarification_speech_pending:
                                 clarification_output_blocked = True
+                            market_timed_out = market_speech_pending
+                            market_timeout_review = (market_diagnostic('deadline')
+                                if market_timed_out else None)
                             recovery_speech_deadline = None
                             recovery_speech_pending = False
                             market_speech_pending = False
@@ -2080,7 +2092,8 @@ async def run_live_voice(
                             recovery_drain_deadline = None
                             research_gate = None
                             await send_frame({'type': 'error', 'code': 'voice_review_incomplete',
-                                **({'review': clarification_diagnostic('timeout')} if clarification_speech_pending else {}),
+                                **({'review': clarification_diagnostic('timeout')} if clarification_speech_pending else
+                                   {'review': market_timeout_review} if market_timeout_review is not None else {}),
                                 'message': ('The clarification is on screen, but its spoken response was unavailable. Please ask again.'
                                     if clarification_speech_pending else
                                     'The recovery result is on screen, but its spoken review was unavailable. Review it on screen before approving.')})
@@ -2245,12 +2258,13 @@ async def run_live_voice(
                             if not isinstance(args, dict) or len(json.dumps(args)) > 8000:
                                 raise _Invalid()
                             market_candidate = (workspace_tools is not None and recovery_vad_started
-                                and recovery_vad_ended and not recovery_asr_incomplete
+                                and recovery_vad_ended
                                 and not recovery_late_generation_abandoned and not rfq_input_closed
                                 and 0 < len(recovery_spoken) <= 1200
                                 and market_read_request(session.company_id, recovery_spoken))
                             market_route = (market_candidate and fresh_input_ready
-                                and recovery_settled and rfq_caption_settled)
+                                and recovery_settled and rfq_caption_settled
+                                and not recovery_asr_incomplete)
                             cached_market_call = call_id in semantic_responses and isinstance(
                                 (tool_results.get(call_id) or (None, None, None))[2], dict) and isinstance(
                                 (tool_results[call_id][2].get('workspace') or {}).get('prediction'), dict)
@@ -2297,7 +2311,7 @@ async def run_live_voice(
                             risk_route = risk_candidate and settled_rfq_input
                             rfq_route = (_fresh_rfq_route(recovery_spoken)
                                 if name == 'prepare_rfq' and settled_rfq_input else None)
-                            bridge_operate = name == 'operate_workspace' and any(
+                            bridge_operate = not (market_candidate or cached_market_call) and name == 'operate_workspace' and any(
                                 _BRIDGE_REQUEST.search(words) or _BRIDGE_AMBIGUOUS_REQUEST.search(words)
                                 for words in (args['message'], recovery_spoken if not rfq_input_closed else ''))
                             fresh_bridge_operate = (bridge_operate and settled_rfq_input
@@ -2961,13 +2975,14 @@ async def run_live_voice(
                                 continue
                             if hold_recovery_output:
                                 continue
-                            if (clarification_speech_pending and not recovery_output_audio
+                            if ((clarification_speech_pending or market_speech_pending) and not recovery_output_audio
                                     and not recovery_output_text):
                                 # Tool dispatch and completion can share a packet.
                                 # Empty output is not a completed speech review.
                                 # Keep the original deadline; repeated empties do
                                 # not create a retry, new turn or consent gate.
-                                clarification_diagnostic('empty_completion_deferred')
+                                if clarification_speech_pending:
+                                    clarification_diagnostic('empty_completion_deferred')
                                 continue
                             if hold_clarification_output:
                                 continue
@@ -3008,6 +3023,7 @@ async def run_live_voice(
                                               recovery_spoken, recovery_required_speech, recovery_output_text))
                                           if market_speech_pending else
                                           compact(recovery_required_speech) in compact(recovery_output_text))))
+                                market_review_pending = market_speech_pending
                                 market_speech_pending = False
                                 if market_caption_task is not None:
                                     market_caption_task.cancel()
@@ -3019,6 +3035,12 @@ async def run_live_voice(
                                     diagnostic = clarification_diagnostic('released' if reviewed else
                                         'missing_audio' if not recovery_output_audio else
                                         'missing_caption' if not recovery_output_text else 'caption_mismatch')
+                                elif market_review_pending and not reviewed:
+                                    diagnostic = market_diagnostic('missing_audio' if not recovery_output_audio else
+                                        'missing_caption' if not recovery_output_text else
+                                        'numeric_mismatch' if not numeric_provenance(
+                                            recovery_required_speech, recovery_output_text) else
+                                        'semantic_mismatch')
                                 if not reviewed:
                                     if clarification_speech_pending:
                                         clarification_output_blocked = True

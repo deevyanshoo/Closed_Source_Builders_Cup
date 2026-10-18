@@ -1,35 +1,69 @@
-# ZOORQ — A product by ClosedSource
+# ZOORQ
 
-Understand which supplier delays and world events could affect your next purchase, then prepare a recovery plan in the same company workspace. ZOORQ connects procurement, inventory, news, routes and emissions with a text and voice operator.
+**A procurement decision workspace for manufacturers.** ZOORQ connects company inventory, supplier quotes, shipment evidence, public news and route context so a buyer can see what a disruption means and prepare a reviewed response.
 
-**[Open the hosted demo](https://zoorq-963802031195.asia-south1.run.app/demo)** — no signup required. Start in the filled Solara Cables workspace or choose from ten company profiles.
+**[Try the hosted demo](https://zoorq-963802031195.asia-south1.run.app/demo)** · [Explore dated market predictions](https://zoorq-963802031195.asia-south1.run.app/demo?view=predictions) · [Open issues](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues)
 
-Gemini interprets questions and news; deterministic tools calculate inventory, sourcing, recovery and emissions. Vertex AI provides the model runtime, Cloud Run hosts the app, Firestore persists workspaces and chats, GCS stores hourly news snapshots, and Google Maps displays supported route corridors.
+Start with **Solara Cables**, then switch among ten fictional company workspaces covering 52 synthetic material scenarios. The sample company, transactions, stock and supplier records are illustrative; public news and market reference data carry their own source dates.
 
-The project starts from Taher Afsar's procurement prototype. Its history is preserved at tag `baseline-2026-10-06` (commit `223f99b7efa3164843eed1c46530ed83c5412ba3`). New modules build on that work.
+## The decision loop
 
-## Team plan
+1. **See the exposure.** Inspect material stock cover, orders, supplier quotes, shipments and dated news in the current company context.
+2. **Compare options.** Review quote comparisons, inventory-aware purchase plans, delay recovery and supported route corridors. A planned order date alone does not prove that a stock gap is covered before delivery.
+3. **Ask the Operator.** Type a question or use native Gemini Live voice. Company-owned read tools provide inventory and sourcing facts; new external research needs explicit query consent. Action proposals require review.
+4. **Prepare the next step.** Save an RFQ draft and inspect its exact contents. RFQs remain **UNSENT**; the demo does not contact suppliers or place orders.
 
-- [Daily work plan and domain ownership](docs/Work_Plan.md)
-- [Product design and acceptance gates](docs/Product_Design.md)
-- [Voice architecture research](docs/Voice_Architecture.md)
-- [Local typed synthetic scenario workspace](docs/Voice_Local_Browser.md)
-- [Public API integration priorities](docs/API_Integration_Guide.md)
-- [Implementation tickets](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues)
-- [Existing engine setup and reference interface](procurement-engine/README.md)
+The workspace also shows covered emissions estimates and dated commodity/FX prediction references. Missing emission factors stay missing; forecasts include uncertainty and have **no validated business decision edge**. They are reference context, not live price feeds or buy/wait advice. Google Maps displays supported route corridors, which can be schematic; it is not live shipment tracking.
 
-Divyanshu leads platform, markets, planning, voice engineering, operational propagation and cloud integration. Taher leads quote intelligence, shipment ingestion and dispatch workflows, and route evidence. Both own complete features, tests, interfaces and cross-review.
+## Built on Google Cloud
 
-## Current status
+```mermaid
+flowchart LR
+  Browser[React / TypeScript workspace] --> App[Python demo service on Cloud Run]
+  Browser --> Maps[Google Maps corridor display]
+  App --> Tools[Deterministic procurement and recovery tools]
+  App --> AI[Gemini through Vertex AI]
+  App --> Store[Firestore session and workspace state]
+  App --> News[GCS dated news snapshots]
+  News <-- Refresh[Scheduled snapshot collection]
+```
 
-The hosted product uses the React/TypeScript workspace and Python numerical/Google AI service. All ten company profiles have reviewed quote, procurement-plan, delay-recovery and unsent RFQ workflows. The operator can read connected company data, calculate scenarios and prepare work; external research requires reviewed consent, and consequential changes retain their action review.
+The hosted judge experience is built from [`apps/web`](apps/web) and [`procurement-engine`](procurement-engine). The repository also preserves the original Python procurement prototype and a Go gateway under [`services/gateway`](services/gateway); those components are not all part of the hosted release. Cloud Build packages the reviewed web and Python service for Cloud Run. Firestore persists anonymous workspaces; GCS stores bounded public-news snapshots. The Operator uses Gemini for language and consented research while owned tools perform numeric and stateful work.
 
-See the [release QA report](docs/ZOORQ_QA_REPAIR_20261017.md) for exact revisions, tested paths and remaining acceptance limits, and the [deployment/operator guide](deploy/judge-demo/README.md) for runtime boundaries. The Go gateway and broader production, trade and maintenance roadmap are separate from the hosted release; roadmap items are not implementation claims.
+## Try it in five minutes
 
-Company operations and quote inputs are illustrative demo records. Public news is dated, route displays include schematic itineraries, and emissions depend on available factor coverage. RFQs are unsent; email actions only record a simulation and do not contact suppliers.
+1. Open the [hosted demo](https://zoorq-963802031195.asia-south1.run.app/demo) and select Solara Cables.
+2. Ask the Operator what its copper stock cover means for the next receipt. Review the dated inventory and supplier inputs.
+3. Compare the purchase plan with the delivery timing. The illustrative October 14 snapshot has about six days of copper cover and a shortest listed lead of about ten days; the reviewed recovery flow exposes the intervening gap.
+4. Review a bridge RFQ draft. It stays unsent until an actual external procurement workflow exists.
+5. Switch company to see how context, materials and answers change; open [market predictions](https://zoorq-963802031195.asia-south1.run.app/demo?view=predictions) for dated reference ranges.
 
-Use explicit source dates and distinguish observations, forecasts and synthetic operational examples. Do not claim customer savings, global source completeness, supplier transactions or regulatory certification from generated scenarios.
+The demo is a decision-support prototype. News headlines indicate possible exposure, not confirmed shipment delays. Route lines do not establish carrier events or supplier availability. Carbon figures are estimates where cited factors exist. The typed and controlled-audio paths have automated QA; physical microphone and human listening acceptance remain separate checks. A [Portuguese forecast voice grounding issue](https://github.com/deevyanshoo/Closed_Source_Builders_Cup/issues/138) remains open.
 
-## Contributing
+## Develop locally
 
-Start from the latest `main`, create a feature branch, and follow [CONTRIBUTING.md](CONTRIBUTING.md). Keep shared contracts and migrations under one integration owner; use pull requests for feature changes. Do not overwrite another contributor's branch or force-push shared history.
+Requires Python 3.10+ and Node.js compatible with the Vite project. The hosted service needs Google Cloud configuration; the legacy prototype has a keyless local path.
+
+```bash
+# Web checks
+cd apps/web
+npm ci
+npm run typecheck
+npm test
+npm run build
+
+# Python checks (from the repository root)
+cd ../../procurement-engine
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m pytest
+```
+
+For the original standalone prototype, see [`procurement-engine/README.md`](procurement-engine/README.md). For the hosted package and runtime boundaries, see [`deploy/judge-demo/README.md`](deploy/judge-demo/README.md). Keep provider credentials in runtime configuration; the repo's synthetic fixtures do not require real buyer or supplier data.
+
+## Project status and roadmap
+
+The hosted demo supports the decision loop above. Work in progress includes export-market ranking, broader carbon-source coverage, operator answers for carbon, dispatch polish and forecast validation. Longer-range proposals cover a buyer/seller marketplace, exporter workspace, production-aware maintenance, live shipment tracking, cross-border dispatch, bulk-order intelligence and ERP integrations. Track these as issues; they are not shipped capabilities.
+
+ZOORQ builds on Taher Afsar's procurement prototype (tag `baseline-2026-10-06`). See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution workflow.

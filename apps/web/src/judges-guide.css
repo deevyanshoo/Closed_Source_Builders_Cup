@@ -27,3 +27,6 @@
 .judges-guide-primary { min-height:46px; padding:11px 22px; border:0; border-radius:8px; background:#2159d6; color:#fff; font:700 14px/1.2 Geist,Arial,sans-serif; cursor:pointer; }
 .judges-guide-primary:hover { background:#1649b9; }
 @media (max-width:600px) { .judges-guide-dialog { width:calc(100vw - 16px); max-height:90dvh; border-radius:13px; } .judges-guide-content { padding:23px 20px; } .judges-guide-prompts { padding:15px 16px; } .judges-guide-trigger { right:12px; bottom:max(12px,env(safe-area-inset-bottom)); } }
+
+.judges-guide-features { margin:0; padding-left:20px; }
+.judges-guide-features li { margin:0 0 9px; overflow-wrap:anywhere; }

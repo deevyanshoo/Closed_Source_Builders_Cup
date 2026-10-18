@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import './judges-guide.css';
 
-export const GUIDE_SESSION_KEY = 'zoorq-judge-guide-2026-10-18-v1';
+export const GUIDE_SESSION_KEY = 'zoorq-judge-guide-2026-10-18-v2';
 
 type GuideStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
@@ -85,7 +85,7 @@ export function JudgesGuide() {
             <ol className="judges-guide-steps">
               <li>Open <strong>Solara Cables</strong> to start with a populated procurement workspace, or explore any of the 10 companies.</li>
               <li>Open <strong>News</strong> for company-relevant stories, sources, dates and business implications. Switch to <strong>Global Watch</strong> for wider trade, route and geopolitical signals. Public news refreshes hourly.</li>
-              <li>Select <strong>Talk to ZOORQ</strong>. Speak naturally in your preferred language—the Gemini Live operator is multilingual and uses your current company’s workspace. Use <strong>Type to ZOORQ</strong> if your microphone is unavailable.</li>
+              <li>Select <strong>Talk to ZOORQ</strong>. Try your mother tongue—the Gemini Live operator is multilingual and uses your current company’s workspace. Try English, Hindi, Punjabi, Haryanvi, Portuguese or Spanish. Use <strong>Type to ZOORQ</strong> if your microphone is unavailable.</li>
             </ol>
           </section>
 
@@ -101,8 +101,21 @@ export function JudgesGuide() {
           </section>
 
           <section aria-labelledby="judges-guide-further">
-            <h2 id="judges-guide-further">Explore further</h2>
-            <p>Inventory &amp; supply shows stock cover and routes; Procurement compares quotes; Drafts holds saved RFQs and emails. Drafts are unsent. Review proposed actions before applying them. External internet research asks for your consent.</p>
+            <h2 id="judges-guide-further">Explore ZOORQ, feature by feature</h2>
+            <ul className="judges-guide-features">
+              <li><strong>Live News:</strong> Public sources are collected hourly and mapped to your company’s materials, industry and routes, with source links and dates.</li>
+              <li><strong>Global Watch:</strong> Connect geopolitical events, trade disruptions and chokepoints to potential business exposure.</li>
+              <li><strong>Multilingual voice &amp; chat:</strong> Ask, analyse and prepare actions naturally—try your mother tongue.</li>
+              <li><strong>Quote intelligence:</strong> Gemini reads supplier documents and extracts terms with source evidence for your review.</li>
+              <li><strong>Inventory intelligence:</strong> See stock cover, delivery timing and the material gap that could interrupt production.</li>
+              <li><strong>Sourcing comparisons:</strong> Compare reviewed supplier quotes, costs and arrival dates against your purchasing needs.</li>
+              <li><strong>Delay recovery &amp; what-if:</strong> Test a supplier delay and inspect its cost and supply impact before applying a change.</li>
+              <li><strong>Maps &amp; route simulation:</strong> Explore supported sea and land supply corridors on Google Maps.</li>
+              <li><strong>Cost–carbon comparison:</strong> Weigh sourcing cost alongside supported emissions estimates and their assumptions.</li>
+              <li><strong>Commodity &amp; FX predictions:</strong> Explore dated forecast ranges and uncertainty as context for smarter raw-material purchasing and FX timing.</li>
+              <li><strong>RFQ &amp; email drafts:</strong> Prepare reviewable, saved, unsent drafts; external internet research asks for your consent.</li>
+              <li><strong>10 company workspaces:</strong> Explore 52 material scenarios across different manufacturing sectors.</li>
+            </ul>
           </section>
 
           <p className="judges-guide-credits"><strong>Powered by Gemini on Vertex AI, Gemini Live, Cloud Run, Firestore and Google Maps.</strong></p>

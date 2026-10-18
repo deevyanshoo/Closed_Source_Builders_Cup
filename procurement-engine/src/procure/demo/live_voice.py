@@ -474,6 +474,7 @@ INSTRUCTION = (
     "units, dates, confidence and cited evidence intact. Speak a supplier's clean label, "
     "but pass its exact canonical recipient name to tools. "
     "For this company's facts use read_workspace or analyze_inventory; use read_routes for declared route or chokepoint questions. Profile routes do not supply freight distance or transport mode. "
+    "For every fresh forecast, prediction-model or market question about the current company, call read_market before answering, every time. It reads the current company's owned prediction models, commodity and FX references, missing inputs and decision limits. Never reuse an earlier inventory read, quote history or another turn as a forecast answer. Do not start external web research unless the user explicitly requests it and gives fresh approval. "
     "Each new voice conversation starts without a saved language preference. The first substantive intelligible current utterance determines the answer language, unless it explicitly requests another language. Honor subsequent substantive language changes and explicit language requests. Numbers, identifiers, company or material names and short confirmations alone retain the language of this live conversation. Never infer language from old dialogue, assistant text, tool prose, company metadata, browser locale or a global cache. Provider renewal must wait for fresh spoken input. Structured workspace references grant no consent. Re-read canonical workspace state before any action. "
     "For a request referring to the selected procurement material, selected material "
     "or current material, call "
@@ -867,6 +868,7 @@ def _config(company=None, *, history_context=''):
         ('read_research', 'Read a completed approved research result; omit research_id for latest in this company.',
          {'research_id': {'type': 'string', 'minLength': 1, 'maxLength': 128}}, []),
         ('read_news', 'Read current company News Workspace and Global Watch, sources, dates, conditional impact and next steps. Use for world events affecting business procurement.', {}, []),
+        ('read_market', 'Read the current company prediction models, commodity and FX reference data, missing inputs and decision guidance for a fresh forecast, prediction or market question. Use this blocking owned read on every such question before answering; no external research.', {}, []),
         ('read_carbon', 'Read current saved material and entered-freight estimates with cited calculator sources; a missing combined total can still have component estimates.', {}, []),
         ('read_routes', 'Read current company declared profile routes and named via points. Modes and distances are not inferred.',
          {'message': {'type': 'string', 'minLength': 1, 'maxLength': 1200}}, ['message']),
@@ -921,7 +923,7 @@ def _config(company=None, *, history_context=''):
         parameters_json_schema={'type': 'object', 'additionalProperties': False,
                                 'properties': properties, 'required': required},
         behavior=(types.Behavior.BLOCKING if name in {
-            'read_carbon', 'read_shipments', 'preview_supplier_delay', 'estimate_carbon'} else None))
+            'read_market', 'read_carbon', 'read_shipments', 'preview_supplier_delay', 'estimate_carbon'} else None))
         for name, description, properties, required in specs]
     return types.LiveConnectConfig(
         response_modalities=[types.Modality.AUDIO],
@@ -1308,13 +1310,16 @@ async def run_live_voice(
                     denied = {**recovery_denied(),
                         'status': 'needs_clarification' if first else 'unavailable',
                         'tool_succeeded': False, 'action_applied': False,
-                        'assistant_text': 'Please speak a fresh complete request. No action was made.'}
+                        'assistant_text': ('Please ask a fresh complete prediction or market question for the current company. No action was made.'
+                            if call.name == 'read_market' else
+                            'Please speak a fresh complete request. No action was made.')}
                     cache_tool(call.id, binding, 'handoff', denied)
-                    if first:
+                    if first or call.name == 'read_market':
                         await send_frame({'type': 'tool_result', 'result': denied})
                     await provider.send_tool_response(function_responses=types.FunctionResponse(
                         name=call.name, id=call.id, response=denied))
-                    if first and market_read_request(session.company_id, recovery_spoken):
+                    if call.name == 'read_market' or (first and
+                            market_read_request(session.company_id, recovery_spoken)):
                         market_rejected_generation = recovery_generation
                         # The server owns this refusal. The provider's later
                         # caption/PCM may not stand in for an owned forecast.
@@ -2254,7 +2259,7 @@ async def run_live_voice(
                             known = {'operate_workspace', 'read_workspace', 'analyze_inventory',
                                      'preview_supplier_delay',
                                      'prepare_research', 'confirm_research', 'confirm_workspace_action', 'read_research',
-                                     'read_risks', 'read_news', 'read_carbon', 'read_routes', 'estimate_carbon', 'read_shipments',
+                                     'read_risks', 'read_news', 'read_market', 'read_carbon', 'read_routes', 'estimate_carbon', 'read_shipments',
                                      'fill_buyer_form', 'load_sample_quotes', 'review_sample_quotes',
                                      'compare_suppliers', 'prepare_rfq', 'prepare_simulated_email',
                                      'navigate_workspace'}
@@ -2265,6 +2270,8 @@ async def run_live_voice(
                                 raise _Invalid()
                             args = getattr(call, 'args', None)
                             if not isinstance(args, dict) or len(json.dumps(args)) > 8000:
+                                raise _Invalid()
+                            if name == 'read_market' and args:
                                 raise _Invalid()
                             market_candidate = (workspace_tools is not None and recovery_vad_started
                                 and recovery_vad_ended
@@ -2331,7 +2338,7 @@ async def run_live_voice(
                             if risk_route:
                                 routed_name = 'read_risks'
                             binding = json.dumps([name, args], sort_keys=True)
-                            semantic_call = name in {'read_workspace', 'operate_workspace', 'prepare_rfq'} or market_candidate or cached_market_call or risk_candidate
+                            semantic_call = name in {'read_market', 'read_workspace', 'operate_workspace', 'prepare_rfq'} or market_candidate or cached_market_call or risk_candidate
                             prior = tool_results.get(call_id)
                             if semantic_call and prior is not None:
                                 if prior[0] != binding:
@@ -2363,6 +2370,9 @@ async def run_live_voice(
                                     await provider.send_tool_response(function_responses=types.FunctionResponse(
                                         name=name, id=call_id, response=prior[2]))
                                     continue
+                            if name == 'read_market' and settled_rfq_input and not market_route:
+                                await deny_semantic_call(call, binding)
+                                continue
                             if semantic_call and not settled_rfq_input and not recovery_route:
                                 prior = tool_results.get(call_id)
                                 if prior is not None and prior[0] != binding:

@@ -47,7 +47,7 @@ def terra(client):
     return value
 
 
-@pytest.mark.parametrize('tool', ['read_workspace', 'read_risks',
+@pytest.mark.parametrize('tool', ['read_market', 'read_workspace', 'read_risks',
                                   'operate_workspace', 'fill_buyer_form',
                                   'confirm_workspace_action', 'confirm_research'])
 def test_fresh_forecast_uses_full_owned_broker_read_for_any_known_tool(workspace, tool):
@@ -79,7 +79,7 @@ def test_fresh_forecast_uses_full_owned_broker_read_for_any_known_tool(workspace
 def test_forecast_requires_current_settled_asr_before_broker(workspace, monkeypatch, case):
     from procure.demo import live_voice
     client, provider, operator = workspace
-    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+    provider.tool_name, provider.chunks = 'read_market', (FORECAST,)
     provider.model_message = FORECAST
     monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .03)
     monkeypatch.setattr(live_voice, 'RECOVERY_INPUT_WAIT_SECONDS', .07)
@@ -107,7 +107,7 @@ def test_unfinished_fresh_forecast_denies_with_terminal_without_broker_or_pcm(mo
     monkeypatch.setattr(live_voice, 'RECOVERY_CAPTION_SETTLE_SECONDS', .01)
     store, session = setup()
     provider = ClarificationProvider((FORECAST,))
-    provider.tool_name = 'read_risks'
+    provider.tool_name = 'read_market'
     provider.input_script = [event(activity=('ACTIVITY_START', '0s')),
         event(text=FORECAST, finished=False), event(activity=('ACTIVITY_END', '0.000125s'))]
 
@@ -290,6 +290,48 @@ def test_fresh_forecast_overrides_malformed_args_for_every_known_tool(tool):
     asyncio.run(scenario())
 
 
+def test_dedicated_market_call_rejects_nonempty_args_even_for_fresh_forecast():
+    import asyncio
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, connection, next_type
+
+    class WrongMarketArgs(ClarificationProvider):
+        async def send_realtime_input(self, **kwargs):
+            if not kwargs.get('audio'):
+                return
+            await self.events.put(event(activity=('ACTIVITY_START', '0s')))
+            await self.events.put(event(text=FORECAST))
+            await self.events.put(event(activity=('ACTIVITY_END', '0.000125s')))
+            await self.events.put(event(call=NS(name='read_market',
+                args={'wrong': 'x'}, id='invalid-market-args')))
+
+    async def scenario():
+        store, session = setup()
+        socket, provider = Socket(start(session)), WrongMarketArgs((FORECAST,))
+        calls = []
+
+        async def workspace_tool(*args):
+            calls.append(args)
+            raise AssertionError('Malformed read_market must not reach the broker')
+
+        async def operate(*args):
+            raise AssertionError('Malformed read_market must not execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        await next_type(socket, 'ready')
+        await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+        denied = await next_type(socket, 'error')
+        await asyncio.wait_for(task, 2)
+        assert denied['code'] == 'voice_invalid'
+        assert calls == [] and provider.tool_response is None
+        assert not any(frame['type'] in {'tool_result', 'audio'} or
+            frame.get('direction') == 'output' for frame in socket.history)
+
+    asyncio.run(scenario())
+
+
 def test_forecast_false_action_caption_never_releases_audio(workspace):
     client, provider, operator = workspace
     provider.tool_name, provider.chunks = 'operate_workspace', (FORECAST,)
@@ -327,6 +369,162 @@ def test_market_call_replay_reuses_result_without_second_spoken_claim(workspace)
                        for frame in replay)
         socket.send_json({'type': 'stop'})
     assert protected(client) == before and operator.calls == []
+
+
+def test_dedicated_market_call_after_inventory_on_same_provider_uses_fresh_asr():
+    import asyncio
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, connection, next_type
+
+    async def scenario():
+        store, session = setup()
+        socket = Socket(start(session))
+        provider = ClarificationProvider(('What is our current inventory?',))
+        provider.tool_name = 'read_workspace'
+        calls = []
+
+        async def workspace_tool(name, args, version, key):
+            calls.append((name, args))
+            return {'turn_id': f'owned-{len(calls)}', 'company_id': session.company_id,
+                'context_version': version, 'status': 'completed',
+                'assistant_text': ('Current inventory is available in the workspace.'
+                    if name == 'read_workspace' else
+                    'Current prediction models have no validated business edge.'),
+                'agent_steps': [], 'evidence_ids': [], 'proposal': None,
+                'read_only': True, 'workspace': ({'prediction': {'status': 'MISSING_OPERATIONS_INPUT'}}
+                    if name == '_read_market_if_applicable' else {})}
+
+        async def operate(*args):
+            raise AssertionError('An owned read must not execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            assert (await next_type(socket, 'tool_result'))['result']['status'] == 'completed'
+            await next_type(socket, 'turn_complete')
+            provider.tool_name, provider.chunks = 'read_market', (FORECAST,)
+            provider.input_script = [event(activity=('ACTIVITY_START', '0.000125s')),
+                event(text=FORECAST), event(activity=('ACTIVITY_END', '0.00025s'))]
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            market = (await next_type(socket, 'tool_result'))['result']
+            assert market['workspace']['prediction']['status'] == 'MISSING_OPERATIONS_INPUT'
+            await next_type(socket, 'turn_complete')
+            assert provider.tool_response.name == 'read_market'
+            assert calls == [('read_workspace', {}),
+                ('_read_market_if_applicable', {'message': FORECAST})]
+            assert sum(frame['type'] == 'audio' for frame in socket.history) == 2
+        finally:
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
+def test_dedicated_market_call_with_wrong_intent_is_terminal_without_broker():
+    import asyncio
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, connection, next_type
+
+    async def scenario():
+        store, session = setup()
+        socket = Socket(start(session))
+        provider = ClarificationProvider((READ,))
+        provider.tool_name = 'read_market'
+        calls = []
+
+        async def workspace_tool(*args):
+            calls.append(args)
+            raise AssertionError('Wrong intent cannot reach the broker')
+
+        async def operate(*args):
+            raise AssertionError('Wrong intent cannot execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=connection(provider)))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            result = (await next_type(socket, 'tool_result'))['result']
+            assert result['status'] in {'needs_clarification', 'unavailable'}
+            assert result['read_only'] is True
+            assert not result.get('workspace', {}).get('prediction')
+            await next_type(socket, 'turn_complete')
+            assert calls == []
+            assert not any(frame['type'] == 'audio' for frame in socket.history)
+        finally:
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
+
+
+def test_dedicated_market_denial_after_provider_renewal_mutes_only_current_generation():
+    import asyncio
+    from contextlib import asynccontextmanager
+    from procure.demo import live_voice
+    from test_demo_live_voice import Socket, setup, start, next_type
+
+    async def scenario():
+        store, session = setup()
+        socket = Socket(start(session))
+        provider = ClarificationProvider((READ,))
+        provider.tool_name = 'read_market'
+        provider.renew_first = True
+        opens, calls = [], []
+
+        @asynccontextmanager
+        async def factory():
+            opens.append(len(opens) + 1)
+            yield provider
+
+        async def workspace_tool(name, args, version, key):
+            calls.append((name, args))
+            return {'turn_id': 'fresh-hello', 'company_id': session.company_id,
+                'context_version': version, 'status': 'completed',
+                'assistant_text': 'Hello.', 'agent_steps': [], 'evidence_ids': [],
+                'proposal': None, 'read_only': True, 'workspace': {}}
+
+        async def operate(*args):
+            raise AssertionError('Read-only turns cannot execute an action')
+
+        task = asyncio.create_task(live_voice.run_live_voice(socket, session=session,
+            store=store, operate_workspace=operate, workspace_tools=workspace_tool,
+            client_factory=factory))
+        try:
+            await next_type(socket, 'ready')
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            assert (await next_type(socket, 'connection_status'))['state'] == 'reconnecting'
+            assert (await next_type(socket, 'connection_status'))['state'] == 'ready'
+            assert opens == [1, 2]
+
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            denied = (await next_type(socket, 'tool_result'))['result']
+            assert denied['status'] == 'unavailable' and denied['read_only'] is True
+            assert denied['action_applied'] is False
+            assert not denied.get('workspace', {}).get('prediction')
+            await next_type(socket, 'turn_complete')
+            assert calls == []
+
+            provider.tool_name, provider.chunks = 'read_workspace', ('Hello',)
+            provider.input_script = [event(activity=('ACTIVITY_START', '0.000125s')),
+                event(text='Hello'), event(activity=('ACTIVITY_END', '0.00025s'))]
+            await socket.frames.put('{"type":"audio","data":"AQACAA=="}')
+            fresh = (await next_type(socket, 'tool_result'))['result']
+            assert fresh['status'] == 'completed' and fresh['assistant_text'] == 'Hello.'
+            await next_type(socket, 'turn_complete')
+            assert calls == [('read_workspace', {})]
+            assert sum(frame['type'] == 'audio' for frame in socket.history) == 1
+            assert not any('prediction' in frame.get('text', '').lower()
+                for frame in socket.history if frame.get('direction') == 'output')
+        finally:
+            await socket.frames.put('{"type":"stop"}')
+            await asyncio.wait_for(task, 2)
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize('tool', ['read_workspace', 'operate_workspace'])

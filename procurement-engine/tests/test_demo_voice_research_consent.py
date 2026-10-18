@@ -761,6 +761,9 @@ def test_finishedless_clip_before_prompt_or_reset_offset_after_audio_end_cannot_
             await provider.activity('ACTIVITY_END', '0.600s')
         await provider.spoken('output', f'Search for: {QUERY} Say confirm research to start.', complete=True)
         await socket.next('turn_complete')
+        assert any(frame['type'] == 'audio' for frame in socket.history)
+        assert any(frame['type'] == 'transcript' and frame.get('direction') == 'output'
+                   and 'confirm research' in frame['text'] for frame in socket.history)
         if not before_prompt:
             await send_pcm(socket, provider)
         await provider.spoken('input', 'confirmed', finished=None)

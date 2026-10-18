@@ -1917,9 +1917,18 @@ async def run_live_voice(
                             recovery_review_aborted = False
                             recovery_drain_deadline = None
                         elif activity is not None and kind.endswith('ACTIVITY_START'):
-                            speech_input_seen = False
-                            early_output.clear()
-                            early_output_bytes = 0
+                            # Public research has a continuing prompt/consent
+                            # exchange. Delayed or later VAD starts must not
+                            # mute that current, unconsumed exchange.
+                            preserve_research_delivery = (speech_input_seen
+                                and research_gate is not None
+                                and research_gate.get('gate_kind') != 'workspace_action'
+                                and not research_gate['consumed']
+                                and _research_current(session, store, context_version, research_gate))
+                            if not preserve_research_delivery:
+                                speech_input_seen = False
+                                early_output.clear()
+                                early_output_bytes = 0
                             clarification_speech_pending = False
                             if market_rejected_generation == recovery_generation:
                                 suppress_failed_speech = False

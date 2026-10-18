@@ -502,9 +502,9 @@ def test_sdk_config_contains_one_bounded_workspace_tool_and_transcriptions():
     assert config.output_audio_transcription is not None
     assert config.speech_config.voice_config.prebuilt_voice_config.voice_name == 'Charon'
     assert len(config.tools) == 1
-    assert len(config.tools[0].function_declarations) == 21
+    assert len(config.tools[0].function_declarations) == 22
     assert config.tools[0].function_declarations[0].name == 'operate_workspace'
-    assert {'estimate_carbon', 'read_routes', 'confirm_workspace_action'} <= {
+    assert {'estimate_carbon', 'read_routes', 'read_market', 'confirm_workspace_action'} <= {
         declaration.name for declaration in config.tools[0].function_declarations}
 
 

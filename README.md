@@ -6,6 +6,8 @@
 
 Start with **Solara Cables**, then switch among ten fictional company workspaces covering 52 synthetic material scenarios. The sample company, transactions, stock and supplier records are illustrative; public news and market reference data carry their own source dates.
 
+> **Judges: [Start with the 2-minute ZOORQ handbook](docs/JUDGES_GUIDE.md)** — explore live news, Global Watch and the multilingual voice operator.
+
 ## The decision loop
 
 1. **See the exposure.** Inspect material stock cover, orders, supplier quotes, shipments and dated news in the current company context.

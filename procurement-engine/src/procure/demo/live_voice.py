@@ -2762,9 +2762,6 @@ async def run_live_voice(
                             # The browser needs its authoritative session. The model never
                             # receives session identifiers, CSRF tokens or document payloads.
                             model_result = {key: value for key, value in result.items() if key != 'session'}
-                            if market_route:
-                                model_result.update(required_spoken_response=result['assistant_text'],
-                                    instruction='Speak this owned internal forecast answer in full in the language of the current utterance. Do not claim an order, exchange, external search, or validated forecasting edge.')
                             if coverage_route:
                                 # Preserve the decision, inclusive horizon and
                                 # qualifications as well as the grounded numbers.
@@ -2812,6 +2809,18 @@ async def run_live_voice(
                                 model_result.update(tool_succeeded=False, action_applied=False,
                                     required_spoken_response=required_response)
                             model_result = _compact_model_result(routed_name, model_result)
+                            if market_route:
+                                # The browser keeps the full owned read. Give the
+                                # speech model only the canonical answer and turn
+                                # identity, never competing workspace dates.
+                                model_result = {key: result[key] for key in
+                                    ('turn_id', 'company_id', 'context_version', 'status', 'read_only')}
+                                model_result.update(required_spoken_response=result['assistant_text'],
+                                    instruction=('Use required_spoken_response as the sole spoken content. '
+                                        'For English, read it verbatim. Translate faithfully only when the '
+                                        'current utterance explicitly requests translation or uses another language. '
+                                        'Preserve exact dates, numbers, uncertainty, and no-action statements. '
+                                        'Do not substitute metadata or history or add facts.'))
                             brief = (model_result.get('workspace') or {}).get('news_brief') or {}
                             logging.getLogger('procure.demo').info(json.dumps({
                                 'event': 'voice_tool_result', 'tool': name,

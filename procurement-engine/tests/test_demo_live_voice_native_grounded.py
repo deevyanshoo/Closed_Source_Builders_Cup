@@ -66,10 +66,19 @@ def test_fresh_forecast_uses_full_owned_broker_read_for_any_known_tool(workspace
     result = tool_result(frames)
     assert result['status'] == 'completed' and result['read_only'] is True
     assert result['proposal'] is None and result.get('action_result') is None
-    assert result['workspace']['prediction'] == expected['workspace']['prediction']
+    assert result['workspace'] == expected['workspace']
     assert result['assistant_text'] == expected['assistant_text']
     assert provider.tool_response.name == tool
-    assert provider.tool_response.response['required_spoken_response'] == expected['assistant_text']
+    speech = provider.tool_response.response
+    assert speech['required_spoken_response'] == expected['assistant_text']
+    assert {key: speech[key] for key in ('status', 'read_only', 'company_id',
+                                        'context_version', 'turn_id')} == {
+        key: result[key] for key in ('status', 'read_only', 'company_id',
+                                    'context_version', 'turn_id')}
+    assert set(speech) == {'status', 'read_only', 'company_id', 'context_version',
+                           'turn_id', 'required_spoken_response', 'instruction'}
+    assert 'verbatim' in speech['instruction'] and 'exact date' in speech['instruction']
+    assert 'translate' in speech['instruction'].lower() and 'metadata' in speech['instruction']
     assert_audio(frames)
     assert protected(client) == before and operator.calls == []
     assert provider.executed_messages == []
@@ -888,6 +897,30 @@ def test_market_caption_negative_reviews_never_release_audio(workspace, monkeypa
     assert frames[-1]['code'] == 'voice_review_incomplete'
     assert not any(f['type'] == 'audio' or f.get('direction') == 'output' for f in frames)
     assert bool(called) is (case != 'additional_number')
+    assert protected(client) == before and operator.calls == []
+
+
+def test_market_caption_with_wrong_reference_date_remains_denied(workspace):
+    client, provider, operator = workspace
+    provider.tool_name, provider.chunks = 'read_risks', (FORECAST,)
+
+    async def respond(*, function_responses):
+        provider.tool_response = function_responses
+        canonical = function_responses.response['required_spoken_response']
+        assert '2026-10-16' in canonical
+        await provider.events.put(NS(server_content=NS(model_turn=NS(parts=[NS(
+            inline_data=NS(data=PCM, mime_type='audio/pcm;rate=24000'))]))))
+        await provider.events.put(NS(server_content=NS(turn_complete=True,
+            output_transcription=NS(text=canonical.replace('2026-10-16', '2026-10-17')))))
+
+    provider.send_tool_response = respond
+    before = protected(client)
+    frames = ask(client)
+    assert tool_result(frames)['workspace']['prediction']
+    assert frames[-1]['code'] == 'voice_review_incomplete'
+    assert frames[-1]['review']['reason'] == 'numeric_mismatch'
+    assert not any(frame['type'] == 'audio' or frame.get('direction') == 'output'
+                   for frame in frames)
     assert protected(client) == before and operator.calls == []
 
 

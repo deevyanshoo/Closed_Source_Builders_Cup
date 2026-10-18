@@ -25,7 +25,7 @@ flowchart LR
   App --> AI[Gemini through Vertex AI]
   App --> Store[Firestore session and workspace state]
   App --> News[GCS dated news snapshots]
-  News <-- Refresh[Scheduled snapshot collection]
+  Refresh[Scheduled snapshot collection] --> News
 ```
 
 The hosted judge experience is built from [`apps/web`](apps/web) and [`procurement-engine`](procurement-engine). The repository also preserves the original Python procurement prototype and a Go gateway under [`services/gateway`](services/gateway); those components are not all part of the hosted release. Cloud Build packages the reviewed web and Python service for Cloud Run. Firestore persists anonymous workspaces; GCS stores bounded public-news snapshots. The Operator uses Gemini for language and consented research while owned tools perform numeric and stateful work.
